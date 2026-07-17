@@ -136,7 +136,6 @@ _AUDIT_CSV_PATH = "audit/random100_audit_seed20260715.csv"
 _AUDIT_MARKDOWN_PATH = "audit/random100_audit_seed20260715.md"
 _RELEASE_AUDIT_PATHS = {_AUDIT_JSON_PATH, _AUDIT_CSV_PATH, _AUDIT_MARKDOWN_PATH}
 _EXPECTED_AUDIT_SEED = 20260715
-_EXPECTED_RELEASE_VERSION = "11.1.0"
 _EXPECTED_PROJECT_LICENSE = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 _EXPECTED_LICENSE_SHA256 = "a7106a6f8ee245b6e8b0482b8eab8c874a8a40819c8718c92180e0ef3dad596c"
 _EXPECTED_UPDATE_MANIFEST_URL = (
@@ -180,7 +179,7 @@ _AUDIT_TYPE_NAMES = {
     "type3": "3️⃣ 可持续高增长",
     "type4": "4️⃣ 长坡厚雪",
     "type5": "5️⃣ 强周期底部",
-    "type6": "6️⃣ VC属性",
+    "type6": "6️⃣ 高风险早期/困境型",
     "type7": "7️⃣ 优质股权型",
 }
 
@@ -2633,8 +2632,27 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                             errors.append("pyproject.toml is unreadable")
                     if project_table.get("name") != "ds-dcf":
                         errors.append("project name is not ds-dcf")
-                    if project_table.get("version") != _EXPECTED_RELEASE_VERSION:
-                        errors.append(f"project version is not {_EXPECTED_RELEASE_VERSION}")
+                    version_name = file_names.get("desktop/version.py")
+                    packaged_version = ""
+                    if version_name is None:
+                        errors.append("desktop/version.py is missing")
+                    else:
+                        try:
+                            version_text = archive.read(version_name).decode("utf-8")
+                        except UnicodeDecodeError:
+                            errors.append("desktop/version.py is unreadable")
+                        else:
+                            match = re.search(
+                                r"^__version__\s*=\s*['\"](\d+\.\d+\.\d+)['\"]\s*$",
+                                version_text,
+                                flags=re.MULTILINE,
+                            )
+                            if match is None:
+                                errors.append("desktop/version.py has no valid semantic version")
+                            else:
+                                packaged_version = match.group(1)
+                    if not packaged_version or project_table.get("version") != packaged_version:
+                        errors.append("project version does not match desktop version")
                     if project_table.get("license") != _EXPECTED_PROJECT_LICENSE or project_table.get(
                         "license-files"
                     ) != ["LICENSE"]:
