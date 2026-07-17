@@ -1,0 +1,9 @@
+-r requirements-test.txt
+build==1.5.0
+ruff==0.15.21
+bandit==1.9.4
+pip-audit==2.10.1
+pip-tools==7.5.3
+setuptools==83.0.0
+wheel==0.47.0
+pyinstaller==6.21.0

@@ -1,0 +1,1216 @@
+from __future__ import annotations
+
+from collections import Counter
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
+import requests
+
+import data.fetcher as fetcher
+
+
+def _indicator_frame(*codes: str) -> pd.DataFrame:
+    rows = []
+    for index, code in enumerate(codes):
+        year = 2024 + (index % 2)
+        row = {
+            "SECURITY_CODE": code,
+            "SECUCODE": f"{code}.{'BJ' if code.startswith(('8', '9')) else 'SZ'}",
+            "REPORT_DATE": f"{year}-12-31",
+            "REPORT_TYPE": "年报",
+            "REPORT_DATE_NAME": f"{year}年报",
+            "REPORT_YEAR": str(year),
+            "NOTICE_DATE": f"{year + 1}-04-30",
+            "SOURCE_REPORT_NAME": "RPT_F10_FINANCE_MAINFINADATA",
+        }
+        row.update(
+            {
+                field: float(position + index)
+                for position, field in enumerate(fetcher.MAIN_FINANCIAL_INDICATOR_METRICS, 1)
+            }
+        )
+        row["TOTAL_SHARE"] = 1_000_000 + index
+        row["STAFF_NUM"] = 100 + index
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def quote_rows(page, count, *, prefix="sh"):
+    return [
+        {
+            "code": f"{page:02d}{index:04d}",
+            "name": f"stock-{page}-{index}",
+            "symbol": f"{prefix}{page:02d}{index:04d}",
+            "trade": "10",
+            "per": "12",
+            "pb": "1.5",
+            "mktcap": "100",
+        }
+        for index in range(count)
+    ]
+
+
+def test_sina_parallel_collection_keeps_every_lower_page_before_short_tail(monkeypatch):
+    calls = Counter()
+    pages = {1: quote_rows(1, 2), 2: quote_rows(2, 2), 3: quote_rows(3, 1)}
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        return pages.get(page, [])
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    rows = fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
+    assert [row["code"] for row in rows] == [
+        "010000",
+        "010001",
+        "020000",
+        "020001",
+        "030000",
+    ]
+    assert calls[2] == 1
+    assert calls[3] == 1
+
+
+def test_sina_transient_empty_page_is_rechecked_not_treated_as_tail(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        if page == 1:
+            return quote_rows(1, 2)
+        if page == 2:
+            return [] if calls[page] == 1 else quote_rows(2, 2)
+        if page == 3:
+            return quote_rows(3, 1)
+        return []
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    rows = fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
+    assert len(rows) == 5
+    assert calls[2] == 2
+
+
+def test_sina_persistent_gap_before_nonempty_page_is_an_error(monkeypatch):
+    def fake_page(page, **_kwargs):
+        if page == 1:
+            return quote_rows(1, 2)
+        if page == 2:
+            return []
+        if page == 3:
+            return quote_rows(3, 1)
+        return []
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    with pytest.raises(fetcher.QuoteFetchError, match="page 2 expected"):
+        fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
+
+
+class FakeResponse:
+    def __init__(self, text, status=200, headers=None):
+        self.text = text
+        self.status_code = status
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+
+class StreamingFakeResponse(FakeResponse):
+    def __init__(self, chunks, *, headers=None, encoding="utf-8"):
+        super().__init__("", headers=headers)
+        self._chunks = chunks
+        self.encoding = encoding
+        self.closed = False
+
+    def iter_content(self, chunk_size):
+        assert chunk_size == fetcher._SINA_RESPONSE_CHUNK_BYTES
+        yield from self._chunks
+
+    def close(self):
+        self.closed = True
+
+
+def _classic_line(symbol: str, source_date: str = "2026-07-15", tick_time: str = "15:00:00") -> str:
+    fields = ["name", *(["0"] * 29), source_date, tick_time]
+    fields[2] = "9"
+    fields[3] = "10"
+    return f'var hq_str_{symbol}="{",".join(fields)}";'
+
+
+def test_sina_page_uses_https_and_retries_http_status(monkeypatch):
+    responses = [FakeResponse("rate limited", 429), FakeResponse("[]", 200)]
+    urls = []
+    request_kwargs = []
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(url, **kwargs):
+        urls.append(url)
+        request_kwargs.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    assert fetcher._sina_page(1, retries=2) == []
+    assert len(urls) == 2
+    assert all(url.startswith("https://") for url in urls)
+    assert all(kwargs.get("stream") is True for kwargs in request_kwargs)
+
+
+def test_sina_retrieval_time_is_not_misrepresented_as_trade_date(monkeypatch):
+    payload = '[{"code":"000001","name":"A","symbol":"sz000001","trade":"10","ticktime":"15:00:00"}]'
+    response = FakeResponse(
+        payload,
+        headers={"Date": "Wed, 15 Jul 2026 04:00:00 GMT"},
+    )
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: response)
+
+    rows = fetcher._sina_page(1, retries=1)
+    frame = fetcher._quotes_frame(rows)
+
+    assert rows[0]["_retrieved_at"] == 1_784_088_000.0
+    assert frame.loc[0, "quote_tick_time"] == "15:00:00"
+    assert frame.loc[0, "source_trade_date"] is None
+    assert frame.loc[0, "retrieved_at"] == rows[0]["_retrieved_at"]
+
+
+def test_classic_sina_batch_preserves_commas_and_requires_exact_metadata(monkeypatch):
+    requested_urls = []
+    request_kwargs = []
+    response = FakeResponse("\n".join((_classic_line("sz000001"), _classic_line("sh600000", tick_time="15:00:01"))))
+
+    def fake_get(url, **kwargs):
+        requested_urls.append(url)
+        request_kwargs.append(kwargs)
+        return response
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    monkeypatch.setattr(fetcher.time, "time", lambda: 123.0)
+    result = fetcher._sina_classic_batch(["sz000001", "sh600000"], retries=1)
+
+    assert result == {
+        "sz000001": ("2026-07-15", "15:00:00", 10.0, 9.0, 123.0),
+        "sh600000": ("2026-07-15", "15:00:01", 10.0, 9.0, 123.0),
+    }
+    assert requested_urls == ["https://hq.sinajs.cn/?list=sz000001,sh600000"]
+    assert "%2C" not in requested_urls[0]
+    assert request_kwargs[0].get("stream") is True
+
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse(_classic_line("sz000001")))
+    with pytest.raises(fetcher.QuoteFetchError, match="omitted source metadata"):
+        fetcher._sina_classic_batch(["sz000001", "sh600000"], retries=1)
+
+
+def test_complete_sina_snapshot_attaches_paired_source_date_and_time(monkeypatch):
+    rows = [
+        {
+            "code": "000001",
+            "name": "A",
+            "symbol": "sz000001",
+            "trade": "10",
+            "settlement": "9",
+            "per": "12",
+            "pb": "1.5",
+            "mktcap": "100",
+            "ticktime": "14:59:00",
+            "_retrieved_at": 123.0,
+        }
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+    monkeypatch.setattr(
+        fetcher,
+        "_sina_trade_metadata",
+        lambda symbols: {"sz000001": ("2026-07-15", "15:00:00", 10.0, 9.0, 124.0)},
+    )
+
+    frame = fetcher._get_sina_quotes_parallel()
+
+    assert frame.loc[0, "source_trade_date"] == "2026-07-15"
+    assert frame.loc[0, "quote_tick_time"] == "15:00:00"
+    assert frame.loc[0, "retrieved_at"] == 124.0
+
+
+def test_complete_sina_snapshot_drops_beijing_before_quote_parsing_and_metadata(monkeypatch):
+    rows = [
+        {
+            "code": "000001",
+            "name": "深市样本",
+            "symbol": "sz000001",
+            "trade": "10",
+            "settlement": "9",
+            "per": "12",
+            "pb": "1.5",
+            "mktcap": "100",
+        },
+        {
+            # Deliberately malformed quote fields prove that a BJ source row is
+            # removed before SH/SZ row-level parsing and metadata enrichment.
+            "code": "920002",
+            "name": "北交遥测",
+            "symbol": "bj920002",
+            "trade": "not-a-number",
+            "settlement": "not-a-number",
+            "per": "not-a-number",
+            "pb": "not-a-number",
+            "mktcap": "not-a-number",
+        },
+    ]
+    requested_symbols = []
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+    monkeypatch.setattr(
+        fetcher,
+        "_sina_trade_metadata",
+        lambda symbols: requested_symbols.extend(symbols) or {"sz000001": ("2026-07-15", "15:00:00", 10.0, 9.0, 124.0)},
+    )
+
+    frame = fetcher._get_sina_quotes_parallel()
+
+    assert frame[["market", "code"]].to_records(index=False).tolist() == [("SZ", "000001")]
+    assert requested_symbols == ["sz000001"]
+
+
+@pytest.mark.parametrize("classic_price", [4.99, 20.01])
+def test_sina_source_attachment_rejects_mismatched_price_generations(monkeypatch, classic_price):
+    frame = fetcher._quotes_frame(
+        [
+            {
+                "code": "000001",
+                "name": "A",
+                "symbol": "sz000001",
+                "trade": "10",
+                "settlement": "9",
+                "per": "12",
+                "pb": "1.5",
+                "mktcap": "100",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "_sina_trade_metadata",
+        lambda _symbols: {
+            "sz000001": ("2026-07-15", "15:00:00", classic_price, 9.0, 124.0),
+        },
+    )
+
+    with pytest.raises(fetcher.QuoteFetchError, match="price generations disagree"):
+        fetcher._attach_sina_source_metadata(frame)
+
+
+def test_zero_trade_quote_keeps_previous_close_but_is_not_marked_trading():
+    rows = [
+        {
+            "code": "000001",
+            "name": "停牌样本",
+            "symbol": "sz000001",
+            "trade": "0",
+            "settlement": "9.5",
+            "ticktime": "09:25:00",
+            "_retrieved_at": 123.0,
+        },
+        {
+            "code": "000002",
+            "name": "无价格样本",
+            "symbol": "sz000002",
+            "trade": "0",
+            "settlement": "0",
+        },
+    ]
+
+    frame = fetcher._quotes_frame(rows)
+
+    assert frame["code"].tolist() == ["000001"]
+    assert frame.loc[0, "price"] == 9.5
+    assert frame.loc[0, "price_source"] == "previous_close"
+    assert frame.loc[0, "quote_status"] == "suspended_or_no_trade"
+
+
+def test_sina_count_is_https_validated_and_retried(monkeypatch):
+    responses = [FakeResponse("unavailable", 503), FakeResponse('"5527"', 200)]
+    urls = []
+    request_kwargs = []
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(url, **kwargs):
+        urls.append(url)
+        request_kwargs.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    assert fetcher._sina_count("hs_a", retries=2) == 5527
+    assert all(url.startswith("https://") for url in urls)
+    assert all(kwargs.get("stream") is True for kwargs in request_kwargs)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["{}", "true", '"-1"', '"not-a-count"', "3.9", '"3.9"', "1e3", '"1e3"', '"05527"'],
+)
+def test_sina_count_rejects_invalid_metadata(monkeypatch, payload):
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse(payload))
+    with pytest.raises(fetcher.QuoteFetchError):
+        fetcher._sina_count("hs_a", retries=1)
+
+
+@pytest.mark.parametrize("entrypoint", ["count", "page", "classic"])
+@pytest.mark.parametrize("mode", ["declared", "streamed"])
+def test_sina_response_body_has_a_hard_byte_limit(monkeypatch, entrypoint, mode):
+    monkeypatch.setattr(fetcher, "_MAX_SINA_RESPONSE_BYTES", 8)
+    if mode == "declared":
+        response = FakeResponse("[]", headers={"Content-Length": "9"})
+    else:
+        response = StreamingFakeResponse([b"[]", b" " * 7])
+    calls = []
+
+    def fake_get(*_args, **kwargs):
+        calls.append(kwargs)
+        return response
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="byte limit"):
+        if entrypoint == "count":
+            fetcher._sina_count("hs_a", retries=3)
+        elif entrypoint == "page":
+            fetcher._sina_page(1, retries=3)
+        else:
+            fetcher._sina_classic_batch(["sz000001"], retries=3)
+
+    assert len(calls) == 1
+    assert calls[0].get("stream") is True
+    if mode == "streamed":
+        assert response.closed
+
+
+def test_sina_page_rejects_non_list_and_missing_schema(monkeypatch):
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+    for text in ('{"error":"blocked"}', '[{"code":"1"}]'):
+        monkeypatch.setattr(fetcher.requests, "get", lambda *_args, _text=text, **_kwargs: FakeResponse(_text))
+        with pytest.raises(fetcher.QuoteFetchError):
+            fetcher._sina_page(1, retries=1)
+
+
+def test_sina_safety_limit_raises_instead_of_silently_truncating(monkeypatch):
+    monkeypatch.setattr(fetcher, "_sina_page", lambda page, **_kwargs: quote_rows(page, 2))
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 8)
+    with pytest.raises(fetcher.QuoteFetchError, match="safety limit"):
+        fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=3)
+
+
+def test_quote_identity_is_market_plus_code():
+    rows = [
+        {"code": "000001", "name": "A", "symbol": "sz000001", "trade": "1"},
+        {"code": "000001", "name": "HK", "symbol": "hk000001", "trade": "2"},
+    ]
+    frame = fetcher._quotes_frame(rows)
+    assert set(zip(frame["market"], frame["code"])) == {("SZ", "000001"), ("HK", "000001")}
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"code": "600001", "name": "错配", "symbol": "sh600000", "trade": "10"},
+        {"code": "1", "name": "非规范", "symbol": "sz000001", "trade": "10"},
+        {"code": "000001", "name": "市场错配", "symbol": "sh000001", "trade": "10"},
+    ],
+)
+def test_quote_rows_bind_canonical_code_to_the_exact_source_symbol(row):
+    with pytest.raises(fetcher.QuoteFetchError, match="canonical|identities disagree"):
+        fetcher._quotes_frame([row])
+
+
+def test_duplicate_identity_across_pages_is_rejected():
+    rows = [
+        {"code": "000001", "name": "A", "symbol": "sz000001", "trade": "1"},
+        {"code": "000001", "name": "A-new", "symbol": "sz000001", "trade": "3"},
+    ]
+    with pytest.raises(fetcher.QuoteFetchError, match="duplicate quote identities"):
+        fetcher._quotes_frame(rows)
+
+
+def test_financial_merge_sorts_all_series_and_never_deletes_valid_annual_report():
+    income = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "1",
+                "TOTAL_OPERATE_INCOME": 200,
+                "PARENT_NETPROFIT": 10,
+                "OPERATE_PROFIT": 20,
+                "REPORT_DATE": "2025-12-31",
+            },
+            {
+                "SECURITY_CODE": "1",
+                "TOTAL_OPERATE_INCOME": 100,
+                "PARENT_NETPROFIT": 8,
+                "OPERATE_PROFIT": 15,
+                "REPORT_DATE": "2024-12-31",
+            },
+        ]
+    )
+    cashflow = pd.DataFrame(
+        [
+            {"SECURITY_CODE": "1", "NETCASH_OPERATE": 50, "REPORT_DATE": "2025-12-31"},
+            {"SECURITY_CODE": "1", "NETCASH_OPERATE": 30, "REPORT_DATE": "2023-12-31"},
+            {"SECURITY_CODE": "1", "NETCASH_OPERATE": 40, "REPORT_DATE": "2024-12-31"},
+        ]
+    )
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "1",
+                "TOTAL_EQUITY": 100,
+                "PARENT_EQUITY": 90,
+                "MINORITY_EQUITY": 10,
+                "SHORT_LOAN": 5,
+                "LONG_TERM_LOAN": 7,
+                "BOND_PAYABLE": 9,
+                "NONCURRENT_LIABILITY_IN_1YEAR": 3,
+                "LEASE_LIABILITY": 2,
+                "SHORT_BOND_PAYABLE": 4,
+                "BORROW_FUND": 6,
+                "LOAN_PBC": 8,
+                "SUBBOND_PAYABLE": 10,
+                "REPORT_DATE": "2025-12-31",
+            },
+            {"SECURITY_CODE": "1", "TOTAL_EQUITY": 80, "REPORT_DATE": "2024-12-31"},
+        ]
+    )
+    q1 = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "1",
+                "PARENT_NETPROFIT": 100,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    merged = fetcher._merge_financials(income, cashflow, balance, q1, pd.DataFrame())
+    company = merged["000001"]
+    assert [row["REPORT_DATE"] for row in company["revenue_history"]] == [
+        "2024-12-31",
+        "2025-12-31",
+    ]
+    assert [row["REPORT_DATE"] for row in company["cashflow"]] == [
+        "2023-12-31",
+        "2024-12-31",
+        "2025-12-31",
+    ]
+    assert [row["REPORT_DATE"] for row in company["balance"]] == [
+        "2024-12-31",
+        "2025-12-31",
+    ]
+    latest = company["balance"][-1]
+    assert latest["PARENT_EQUITY"] == 90
+    assert latest["LONG_LOAN"] == 7
+    assert latest["BONDS_PAYABLE"] == 9
+    assert latest["NONCURRENT_LIAB_1YEAR"] == 3
+    assert latest["LEASE_LIAB"] == 2
+    assert latest["SHORT_BONDS_PAYABLE"] == 4
+    assert latest["BORROW_FUNDS"] == 6
+    assert latest["CENTRAL_BANK_BORROWING"] == 8
+    assert latest["SUBORDINATED_BONDS_PAYABLE"] == 10
+
+
+def test_financial_merge_fills_only_an_officially_proven_zero_revenue(monkeypatch):
+    income = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "600610",
+                "TOTAL_OPERATE_INCOME": None,
+                "PARENT_NETPROFIT": -5.0,
+                "OPERATE_PROFIT": -4.0,
+                "REPORT_DATE": "2018-12-31",
+            }
+        ]
+    )
+    evidence = {
+        ("600610", "2018-12-31"): {
+            "evidence_type": "exchange_filed_explicit_zero",
+            "metric": "TOTAL_OPERATE_INCOME",
+            "value": 0.0,
+            "source_url": "https://static.cninfo.com.cn/finalpage/2019-06-28/1206403533.PDF",
+            "source_sha256": "a" * 64,
+            "source_page": 7,
+        }
+    }
+    monkeypatch.setattr(fetcher, "zero_revenue_evidence", lambda: evidence)
+
+    company = fetcher._merge_financials(income, pd.DataFrame(), pd.DataFrame())["600610"]
+
+    assert company["revenue_history"] == [
+        {
+            "TOTAL_OPERATE_INCOME": 0.0,
+            "TOTAL_OPERATE_INCOME_EVIDENCE": evidence[("600610", "2018-12-31")],
+            "REPORT_DATE": "2018-12-31",
+        }
+    ]
+    assert company["income_history"][0]["TOTAL_OPERATE_INCOME"] == 0.0
+    assert company["income_history"][0]["TOTAL_OPERATE_INCOME_EVIDENCE"]["source_page"] == 7
+
+
+def test_financial_merge_rejects_official_zero_evidence_that_conflicts_with_source(monkeypatch):
+    income = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "600610",
+                "TOTAL_OPERATE_INCOME": 1.0,
+                "PARENT_NETPROFIT": -5.0,
+                "REPORT_DATE": "2018-12-31",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "zero_revenue_evidence",
+        lambda: {("600610", "2018-12-31"): {"value": 0.0}},
+    )
+
+    with pytest.raises(fetcher.DataFetchError, match="conflicts with source value"):
+        fetcher._merge_financials(income, pd.DataFrame(), pd.DataFrame())
+
+
+def test_financial_merge_preserves_five_year_parent_equity_history_for_pb():
+    years = range(2021, 2026)
+    income = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "TOTAL_OPERATE_INCOME": 100 + year,
+                "PARENT_NETPROFIT": 10 + year,
+                "REPORT_DATE": f"{year}-12-31",
+            }
+            for year in years
+        ]
+    )
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "TOTAL_EQUITY": 1_000 + year,
+                "TOTAL_PARENT_EQUITY": 800 + year,
+                "MINORITY_EQUITY": 200,
+                "REPORT_DATE": f"{year}-12-31",
+            }
+            for year in reversed(list(years))
+        ]
+    )
+    merged = fetcher._merge_financials(income, pd.DataFrame(), balance, pd.DataFrame(), pd.DataFrame())
+    history = merged["000001"]["balance"]
+    assert len(history) == 5
+    assert [row["REPORT_DATE"] for row in history] == [f"{year}-12-31" for year in years]
+    assert all(row["PARENT_EQUITY"] is not None for row in history)
+    assert all(row["PARENT_EQUITY"] != row["TOTAL_EQUITY"] for row in history)
+
+
+def test_financial_merge_replaces_mixed_002766_row_with_final_corrected_audit_lineage():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "002766",
+                "REPORT_DATE": "2017-12-31",
+                "TOTAL_ASSETS": 3_376_737_560.89,
+                "TOTAL_LIABILITIES": 1_476_243_100.56,
+                "TOTAL_EQUITY": 1_900_494_460.33,
+                "TOTAL_PARENT_EQUITY": 1_559_788_411.30,
+                "MINORITY_EQUITY": 19_838_702.97,
+            }
+        ]
+    )
+
+    company = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        balance,
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )["002766"]
+
+    row = company["balance"][0]
+    assert row["TOTAL_ASSETS"] == 3_660_176_992.98
+    assert row["TOTAL_LIABILITIES"] == 2_012_750_505.12
+    assert row["PARENT_EQUITY"] == 1_627_587_784.89
+    assert row["TOTAL_PARENT_EQUITY"] == 1_627_587_784.89
+    assert row["TOTAL_EQUITY"] == 1_647_426_487.86
+    assert row["MINORITY_EQUITY"] == 19_838_702.97
+    assert row["MONETARYFUNDS"] == 869_475_074.23
+    assert row["SHORT_LOAN"] == 842_100_774.44
+    assert row["DEBT_ASSET_RATIO"] == pytest.approx(2_012_750_505.12 / 3_660_176_992.98 * 100.0)
+    assert row["REPORTED_PARENT_EQUITY"] == 1_559_788_411.30
+    assert row["REPORTED_BALANCE_SHEET_VALUES"]["TOTAL_ASSETS"] == 3_376_737_560.89
+    assert row["REPORTED_BALANCE_SHEET_VALUES"]["TOTAL_EQUITY"] == 1_900_494_460.33
+    assert row["PARENT_EQUITY_SOURCE"] == "exchange_filed_official_override"
+    assert row["BALANCE_SHEET_EVIDENCE"]["source_sha256"] == (
+        "f142c1de83b2bc9f34ae5eb22a377ade5f2e2e23201a9526ac51eda482d3a8a6"
+    )
+
+
+def test_financial_merge_uses_audited_reverse_acquisition_comparator_for_600228():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "600228",
+                "REPORT_DATE": "2020-12-31",
+                "TOTAL_ASSETS": 1_083_606_330.96,
+                "TOTAL_LIABILITIES": 266_334_531.46,
+                "TOTAL_EQUITY": 817_271_799.50,
+                "TOTAL_PARENT_EQUITY": 817_271_799.50,
+                "MINORITY_EQUITY": 73_099_085.46,
+                "MONETARYFUNDS": 888_088_128.13,
+                "SHORT_LOAN": 10_000_000.0,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        balance,
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )["600228"]["balance"][0]
+
+    assert row["TOTAL_ASSETS"] == 1_065_106_220.71
+    assert row["TOTAL_LIABILITIES"] == 240_127_349.63
+    assert row["TOTAL_EQUITY"] == 824_978_871.08
+    assert row["PARENT_EQUITY"] == 824_978_871.08
+    assert row["MINORITY_EQUITY"] == 0.0
+    assert row["MONETARYFUNDS"] == 888_106_761.83
+    assert row["SHORT_LOAN"] == 0.0
+    assert "反向收购" in row["BALANCE_SHEET_EVIDENCE"]["reporting_basis"]
+    assert row["REPORTED_BALANCE_SHEET_VALUES"]["MINORITY_EQUITY"] == 73_099_085.46
+
+
+def test_financial_merge_does_not_expose_cached_balance_evidence_for_mutation():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "600228",
+                "REPORT_DATE": "2020-12-31",
+                "TOTAL_ASSETS": 1.0,
+                "TOTAL_LIABILITIES": 0.0,
+                "TOTAL_EQUITY": 1.0,
+                "TOTAL_PARENT_EQUITY": 1.0,
+                "MINORITY_EQUITY": 0.0,
+            }
+        ]
+    )
+
+    first = fetcher._merge_financials(pd.DataFrame(), pd.DataFrame(), balance)["600228"]["balance"][0]
+    first["BALANCE_SHEET_EVIDENCE"]["canonical_values"]["TOTAL_ASSETS"] = 1.0
+    first["BALANCE_SHEET_EVIDENCE"]["source_pages"].append(999)
+    second = fetcher._merge_financials(pd.DataFrame(), pd.DataFrame(), balance)["600228"]["balance"][0]
+
+    assert second["BALANCE_SHEET_EVIDENCE"]["canonical_values"]["TOTAL_ASSETS"] == 1_065_106_220.71
+    assert second["BALANCE_SHEET_EVIDENCE"]["source_pages"] == [83, 84, 85]
+
+
+def test_financial_merge_keeps_unreviewed_parent_equity_conflict_quarantined():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "002765",
+                "REPORT_DATE": "2017-12-31",
+                "TOTAL_EQUITY": 1_900_494_460.33,
+                "TOTAL_PARENT_EQUITY": 1_559_788_411.30,
+                "MINORITY_EQUITY": 19_838_702.97,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        balance,
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )["002765"]["balance"][0]
+
+    assert row["PARENT_EQUITY"] is None
+    assert row["REPORTED_PARENT_EQUITY"] == 1_559_788_411.30
+    assert row["PARENT_EQUITY_SOURCE"] == "source_conflict_total_parent_minority"
+    assert "BALANCE_SHEET_EVIDENCE" not in row
+
+
+def test_financial_merge_derives_parent_equity_only_when_exact_components_are_nonconflicting():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "REPORT_DATE": "2025-12-31",
+                "TOTAL_EQUITY": 100.0,
+                "MINORITY_EQUITY": 10.0,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        balance,
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )["000001"]["balance"][0]
+
+    assert row["PARENT_EQUITY"] == 90.0
+    assert row["REPORTED_PARENT_EQUITY"] is None
+    assert row["PARENT_EQUITY_SOURCE"] == "derived_total_equity_minus_minority"
+
+
+def test_financial_merge_preserves_current_and_prior_interim_without_calling_h1_q1():
+    interim_income = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "TOTAL_OPERATE_INCOME": 80,
+                "PARENT_NETPROFIT": 8,
+                "REPORT_DATE": "2025-06-30",
+            },
+            {
+                "SECURITY_CODE": "000001",
+                "TOTAL_OPERATE_INCOME": 100,
+                "PARENT_NETPROFIT": 11,
+                "REPORT_DATE": "2026-06-30",
+            },
+        ]
+    )
+    interim_cashflow = pd.DataFrame(
+        [
+            {"SECURITY_CODE": "000001", "NETCASH_OPERATE": 7, "REPORT_DATE": "2025-06-30"},
+            {"SECURITY_CODE": "000001", "NETCASH_OPERATE": 9, "REPORT_DATE": "2026-06-30"},
+        ]
+    )
+
+    company = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        interim_income,
+        interim_cashflow,
+    )["000001"]
+
+    assert [row["REPORT_DATE"] for row in company["income_interim"]] == [
+        "2025-06-30",
+        "2026-06-30",
+    ]
+    assert [row["REPORT_DATE"] for row in company["cashflow_interim"]] == [
+        "2025-06-30",
+        "2026-06-30",
+    ]
+    assert company["income_q1"] == []
+    assert company["cashflow_q1"] == []
+
+
+def test_financial_merge_derives_provenance_bound_zero_capex_from_detailed_identity():
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                # Real pandas frames represent this upstream blank as NaN.
+                # The merge boundary must normalize it before asking the
+                # detailed statement to prove a zero residual.
+                "CONSTRUCT_LONG_ASSET": float("nan"),
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    detailed = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "REPORT_DATE": "2026-03-31",
+                "CONSTRUCT_LONG_ASSET": None,
+                "TOTAL_INVEST_OUTFLOW": 25.0,
+                "INVEST_PAY_CASH": 10.0,
+                "PAY_OTHER_INVEST": 15.0,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cashflow_interim=interim_cashflow,
+        detailed_cashflow_interim=detailed,
+    )["000001"]["cashflow_interim"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] == 0.0
+    assert row["CAPEX_PROVENANCE"]["evidence_label"] == "derived_calculation"
+    assert row["CAPEX_PROVENANCE"]["derivation_method"] == "detailed_outflow_residual_zero"
+
+
+def test_financial_merge_keeps_unresolved_interim_capex_missing_with_reason():
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "603435",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": None,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    detailed = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "603435",
+                "REPORT_DATE": "2026-03-31",
+                "CONSTRUCT_LONG_ASSET": None,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cashflow_interim=interim_cashflow,
+        detailed_cashflow_interim=detailed,
+    )["603435"]["cashflow_interim"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] is None
+    assert row["CAPEX_PROVENANCE"]["status"] == "missing"
+    assert row["CAPEX_PROVENANCE"]["reason"] == "missing_detailed_component:TOTAL_INVEST_INFLOW"
+
+
+def test_financial_merge_fills_only_exact_official_q1_zero_capex(monkeypatch):
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": None,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    evidence = {
+        "evidence_type": "exchange_filed_statement_zero",
+        "metric": "CONSTRUCT_LONG_ASSET",
+        "value": 0.0,
+        "source_document": "2026年第一季度报告",
+        "source_url": "https://static.cninfo.com.cn/finalpage/2026-04-29/1225223641.PDF",
+        "source_sha256": "a" * 64,
+        "source_page": 11,
+        "source_statement": "本期资本开支和投资活动现金流出小计均为空。",
+    }
+    monkeypatch.setattr(fetcher, "zero_capex_evidence", lambda: {("000001", "2026-03-31"): evidence})
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cashflow_interim=interim_cashflow,
+    )["000001"]["cashflow_interim"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] == 0.0
+    assert row["CAPEX_PROVENANCE"]["evidence_label"] == "fact_official_report_zero"
+    assert row["CAPEX_PROVENANCE"]["source_page"] == 11
+
+
+def test_financial_merge_fills_only_exact_official_annual_zero_capex(monkeypatch):
+    annual_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000670",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": None,
+                "REPORT_DATE": "2019-12-31",
+            }
+        ]
+    )
+    evidence = {
+        "evidence_type": "exchange_filed_statement_zero",
+        "metric": "CONSTRUCT_LONG_ASSET",
+        "value": 0.0,
+        "source_document": "2019年年度报告全文",
+        "source_url": "https://static.cninfo.com.cn/finalpage/2020-04-28/1207638298.PDF",
+        "source_sha256": "a" * 64,
+        "source_page": 75,
+        "source_statement": "合并现金流量表2019年资本开支为空。",
+    }
+    monkeypatch.setattr(fetcher, "zero_capex_evidence", lambda: {("000670", "2019-12-31"): evidence})
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        annual_cashflow,
+        pd.DataFrame(),
+    )["000670"]["cashflow"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] == 0.0
+    assert row["CAPEX_PROVENANCE"]["evidence_label"] == "fact_official_report_zero"
+    assert row["CAPEX_PROVENANCE"]["source_report"] == "CNINFO_EXCHANGE_FILED_ANNUAL_REPORT"
+
+
+def test_financial_merge_rejects_official_zero_capex_conflicting_with_source(monkeypatch):
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": 1.0,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "zero_capex_evidence",
+        lambda: {("000001", "2026-03-31"): {"value": 0.0}},
+    )
+
+    with pytest.raises(fetcher.DataFetchError, match="official zero-capex evidence conflicts"):
+        fetcher._merge_financials(
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            cashflow_interim=interim_cashflow,
+        )
+
+
+def test_financial_merge_rejects_official_annual_zero_capex_conflicting_with_source(monkeypatch):
+    annual_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000670",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": 1.0,
+                "REPORT_DATE": "2019-12-31",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "zero_capex_evidence",
+        lambda: {("000670", "2019-12-31"): {"value": 0.0}},
+    )
+
+    with pytest.raises(fetcher.DataFetchError, match="conflicts with annual source"):
+        fetcher._merge_financials(
+            pd.DataFrame(),
+            annual_cashflow,
+            pd.DataFrame(),
+        )
+
+
+def test_financial_merge_attaches_reported_provenance_to_annual_capex():
+    cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 50.0,
+                "CONSTRUCT_LONG_ASSET": 12.0,
+                "REPORT_DATE": "2025-12-31",
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        cashflow,
+        pd.DataFrame(),
+    )["000001"]["cashflow"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] == 12.0
+    assert row["CAPEX_PROVENANCE"]["evidence_label"] == "fact_source_reported"
+
+
+def test_financial_merge_preserves_sorted_auditable_indicator_history():
+    indicators = _indicator_frame("000001", "000001").iloc[::-1].reset_index(drop=True)
+    company = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        indicators=indicators,
+    )["000001"]
+
+    assert [row["REPORT_DATE"] for row in company["indicators"]] == ["2024-12-31", "2025-12-31"]
+    latest = company["indicators"][-1]
+    assert latest["SOURCE_REPORT_NAME"] == "RPT_F10_FINANCE_MAINFINADATA"
+    assert latest["REPORT_DATE_NAME"] == "2025年报"
+    assert latest["ROIC"] == 3.0
+    assert latest["TOTAL_SHARE"] == 1_000_001
+
+
+def test_financial_merge_rejects_duplicate_indicator_identity():
+    indicators = _indicator_frame("000001")
+    indicators = pd.concat([indicators, indicators], ignore_index=True)
+
+    with pytest.raises(fetcher.DataFetchError, match="duplicate indicator identities"):
+        fetcher._merge_financials(
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            indicators=indicators,
+        )
+
+
+def test_get_financials_filters_indicator_batch_to_requested_shanghai_shenzhen_codes(monkeypatch):
+    indicators = _indicator_frame("000001", "920002", "600000")
+    empty = pd.DataFrame()
+    monkeypatch.setattr(
+        fetcher,
+        "fetch_all_financials_parallel",
+        lambda: (empty.copy(), empty.copy(), empty.copy(), indicators.copy()),
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "fetch_interim_financials_parallel",
+        lambda: (empty.copy(), empty.copy(), empty.copy()),
+    )
+
+    result = fetcher.DataFetcher().get_financials(codes=["000001", "920002"])
+
+    assert set(result) == {"000001"}
+    assert result["000001"]["indicators"][0]["SOURCE_REPORT_NAME"] == "RPT_F10_FINANCE_MAINFINADATA"
+
+
+def test_get_financials_overlaps_independent_annual_and_interim_generations(monkeypatch):
+    from threading import Barrier
+
+    rendezvous = Barrier(2, timeout=5)
+    empty = pd.DataFrame()
+
+    def annual():
+        rendezvous.wait()
+        return empty.copy(), empty.copy(), empty.copy(), empty.copy()
+
+    def interim():
+        rendezvous.wait()
+        return empty.copy(), empty.copy(), empty.copy()
+
+    monkeypatch.setattr(fetcher, "fetch_all_financials_parallel", annual)
+    monkeypatch.setattr(fetcher, "fetch_interim_financials_parallel", interim)
+
+    assert fetcher.DataFetcher().get_financials(codes=["000001"]) == {}
+
+
+def test_get_financials_with_only_beijing_codes_performs_no_financial_request(monkeypatch):
+    calls = []
+    monkeypatch.setattr(fetcher, "fetch_all_financials_parallel", lambda: calls.append(True))
+
+    result = fetcher.DataFetcher().get_financials(codes=["920002", "830001"])
+
+    assert result == {}
+    assert calls == []
+
+
+def test_data_fetcher_construction_has_no_sqlite_write_dependency():
+    facade = fetcher.DataFetcher()
+    assert not hasattr(facade, "cache")
+
+
+def test_stock_list_defaults_to_a_shares_and_hk_codes_cannot_match_a_financials(monkeypatch):
+    a_share = pd.DataFrame([{"code": "000001", "name": "A", "market": "SZ", "price": 1}])
+    hk_share = pd.DataFrame([{"code": "000001", "name": "HK", "market": "HK", "price": 2}])
+    hk_calls = []
+    monkeypatch.setattr(fetcher, "_get_sina_quotes_parallel", lambda: a_share.copy())
+    monkeypatch.setattr(
+        fetcher,
+        "_get_hk_stocks_via_tencent",
+        lambda: hk_calls.append(True) or hk_share.copy(),
+    )
+
+    facade = fetcher.DataFetcher()
+    default_quotes = facade.get_stock_list()
+    assert not hk_calls
+    assert default_quotes["code"].tolist() == ["000001"]
+    assert default_quotes["financial_code"].tolist() == ["000001"]
+
+    mixed = facade.get_stock_list(include_hk=True).set_index("market")
+    assert mixed.loc["HK", "code"] == "HK:000001"
+    assert mixed.loc["HK", "local_code"] == "000001"
+    assert pd.isna(mixed.loc["HK", "financial_code"])
+    assert not bool(mixed.loc["HK", "has_financials"])
+    assert mixed.loc["SZ", "code"] == "000001"
+
+
+def test_stock_list_defensively_removes_beijing_rows_from_an_older_quote_adapter(monkeypatch):
+    rows = pd.DataFrame(
+        [
+            {"code": "000001", "name": "A", "market": "SZ", "price": 1},
+            {"code": "920002", "name": "BJ", "market": "BJ", "price": 2},
+        ]
+    )
+    monkeypatch.setattr(fetcher, "_get_sina_quotes_parallel", lambda: rows.copy())
+
+    result = fetcher.DataFetcher().get_stock_list()
+
+    assert result[["market", "code"]].to_records(index=False).tolist() == [("SZ", "000001")]
+    assert result["financial_code"].tolist() == ["000001"]
+
+
+def test_listing_date_evidence_is_bound_with_explicit_missing_status_and_high_coverage():
+    from data.market_coldness import EASTMONEY_CLIST_ENDPOINT, EASTMONEY_SOURCE
+
+    quotes = pd.DataFrame(
+        [
+            {
+                "code": f"{600000 + index:06d}",
+                "name": f"样本{index}",
+                "market": "SH",
+                "listing_date": None,
+                "listing_date_status": None,
+                "listing_date_source": None,
+                "listing_date_source_url": None,
+                "listing_date_retrieved_at": None,
+            }
+            for index in range(100)
+        ]
+    )
+    records = tuple(
+        SimpleNamespace(
+            code=f"{600000 + index:06d}",
+            listing_date=None if index == 99 else "2000-01-01",
+            missing_reasons={"listing_date": "upstream_placeholder:f26"} if index == 99 else {},
+            source=EASTMONEY_SOURCE,
+            source_url=EASTMONEY_CLIST_ENDPOINT,
+            retrieved_at="2026-07-17T00:00:00+00:00",
+        )
+        for index in range(100)
+    )
+
+    result = fetcher._attach_listing_date_evidence(
+        quotes,
+        SimpleNamespace(available=True, records=records),
+    )
+
+    assert result["listing_date"].notna().sum() == 99
+    assert result.iloc[-1]["listing_date_status"] == "upstream_placeholder:f26"
+    assert result.iloc[-1]["listing_date_source_url"] == EASTMONEY_CLIST_ENDPOINT
+
+
+def test_listing_date_enrichment_fails_closed_below_declared_date_coverage():
+    from data.market_coldness import EASTMONEY_CLIST_ENDPOINT, EASTMONEY_SOURCE
+
+    quotes = pd.DataFrame(
+        [
+            {
+                "code": "600000",
+                "market": "SH",
+                "listing_date": None,
+                "listing_date_status": None,
+                "listing_date_source": None,
+                "listing_date_source_url": None,
+                "listing_date_retrieved_at": None,
+            }
+        ]
+    )
+    record = SimpleNamespace(
+        code="600000",
+        listing_date=None,
+        missing_reasons={"listing_date": "upstream_placeholder:f26"},
+        source=EASTMONEY_SOURCE,
+        source_url=EASTMONEY_CLIST_ENDPOINT,
+        retrieved_at="2026-07-17T00:00:00+00:00",
+    )
+
+    with pytest.raises(fetcher.QuoteFetchError, match="listing-date coverage"):
+        fetcher._attach_listing_date_evidence(
+            quotes,
+            SimpleNamespace(available=True, records=(record,)),
+        )

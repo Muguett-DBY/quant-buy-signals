@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "metric": "CONSTRUCT_LONG_ASSET",
+  "policy": "Only an exact code/report-date exchange-filed annual or Q1 cash-flow statement whose current-period capex cell is visually verified blank may prove zero; comparative-column amounts and other investing outflows never populate capex.",
+  "records": [
+    {
+      "code": "000670",
+      "report_date": "2019-12-31",
+      "value": 0.0,
+      "source_document": "盈方微电子股份有限公司2019年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2020-04-28/1207638298.PDF",
+      "source_sha256": "19af9bc08c8746806bf2df2d53879193a40e8483aeb81585b0195a95e07dafdf",
+      "source_page": 75,
+      "source_statement": "合并现金流量表2019年资本开支为空；7,607,489.54位于2018年列。"
+    },
+    {
+      "code": "000691",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "海南亚太实业发展股份有限公司2018年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-04-27/1206124578.PDF",
+      "source_sha256": "006d402cff88d2144210b78177b469da856c2e86c216e45100faa0531577465e",
+      "source_page": 76,
+      "source_statement": "合并现金流量表2018年资本开支为空；62,443.00位于2017年列。"
+    },
+    {
+      "code": "000953",
+      "report_date": "2019-12-31",
+      "value": 0.0,
+      "source_document": "广西河池化工股份有限公司2019年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2020-04-29/1207661146.PDF",
+      "source_sha256": "3f929c1c3f569854964b96e073c27449952016460a5407d4b6e58e3037abd9be",
+      "source_page": 73,
+      "source_statement": "合并现金流量表2019年资本开支为空；871,803.25位于2018年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "002072",
+      "report_date": "2019-12-31",
+      "value": 0.0,
+      "source_document": "凯瑞德控股股份有限公司2019年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2020-04-30/1207686822.PDF",
+      "source_sha256": "e655f9663a289387efec8f49a9a9552efec265839e9feb90d94398be47368609",
+      "source_page": 96,
+      "source_statement": "合并现金流量表2019年资本开支为空；1,024,371.54位于2018年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "002072",
+      "report_date": "2020-12-31",
+      "value": 0.0,
+      "source_document": "凯瑞德控股股份有限公司2020年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2021-01-30/1209217787.PDF",
+      "source_sha256": "fcf502d8877831dac192a57a0c1af1a031199b8c0f21a3129ac586ca4c9d8136",
+      "source_page": 97,
+      "source_statement": "合并现金流量表2020年及2019年资本开支均为空；投资现金流出来自其他项目。"
+    },
+    {
+      "code": "300270",
+      "report_date": "2020-12-31",
+      "value": 0.0,
+      "source_document": "杭州中威电子股份有限公司2020年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2021-04-27/1209811968.PDF",
+      "source_sha256": "74f54dd2a764e50f37e53e610efd151ac8885786d9519a1207def4f3c39320f0",
+      "source_page": 90,
+      "source_statement": "合并现金流量表2020年资本开支为空；3,925,426.48位于2019年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "600106",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "重庆路桥股份有限公司2018年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-03-30/1205964078.PDF",
+      "source_sha256": "5d6d09e780431715d2b5c969c7d14691ab40ee1cd593a6d55fc758ecbabd6dbd",
+      "source_page": 66,
+      "source_statement": "合并现金流量表2018年资本开支为空；5,661,440.00位于2017年列。"
+    },
+    {
+      "code": "600137",
+      "report_date": "2016-12-31",
+      "value": 0.0,
+      "source_document": "四川浪莎控股股份有限公司2016年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2017-04-25/1203377834.PDF",
+      "source_sha256": "136a0e7002fae3ccbe60a1080f371aa8b02dafa15d932bbdcf0a88c65fbf0376",
+      "source_page": 55,
+      "source_statement": "合并现金流量表2016年资本开支为空；投资现金流出396,000,000.00为投资支付现金。"
+    },
+    {
+      "code": "600191",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "包头华资实业股份有限公司2018年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-04-30/1206167137.PDF",
+      "source_sha256": "ea249296f8c4786cfaebb186e77b85a87ea377a1c89699ddb52f3c2a1b7e47b6",
+      "source_page": 54,
+      "source_statement": "合并现金流量表2018年资本开支为空；873,424.36位于2017年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "600301",
+      "report_date": "2019-12-31",
+      "value": 0.0,
+      "source_document": "南宁化工股份有限公司2019年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2020-03-20/1207386754.PDF",
+      "source_sha256": "a3d4e5c5b17e2f6d04a76010d2a0043e664f30f0fbe9bc4b40755b04f7da6caf",
+      "source_page": 53,
+      "source_statement": "合并现金流量表2019年资本开支为空；326,537.83位于2018年列。"
+    },
+    {
+      "code": "600610",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "2018年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-06-28/1206403533.PDF",
+      "source_sha256": "be8bcff17be1068616a0df419d9bce26d23c18ae22fcc987693d4c63d7abdd5b",
+      "source_page": 74,
+      "source_statement": "合并现金流量表2018年资本开支为空；698,795.14位于2017年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "600725",
+      "report_date": "2017-12-31",
+      "value": 0.0,
+      "source_document": "2017年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2018-03-29/1204535304.PDF",
+      "source_sha256": "bad2c6a3a514e25ce8b1f9f33a183947c272e25a45854b614880517c0e90ed0a",
+      "source_page": 48,
+      "source_statement": "合并现金流量表2017年资本开支为空；85,182,572.00位于2016年列，2017年其他投资现金流出单独列示。"
+    },
+    {
+      "code": "600817",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "2018年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-04-23/1206073519.PDF",
+      "source_sha256": "ba1282e66ea9a8064c7e969a2f43fcd4d444d2bd0f950860f0fac79663b1f105",
+      "source_page": 43,
+      "source_statement": "合并现金流量表2018年资本开支为空；67,043.40位于2017年列。"
+    },
+    {
+      "code": "601005",
+      "report_date": "2017-12-31",
+      "value": 0.0,
+      "source_document": "重庆钢铁股份有限公司2017年年度报告（修订版）",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2018-03-02/1204443738.PDF",
+      "source_sha256": "2aebb79d3057b8370048d5c6b854641f70f3994364f7cfd7d43d7a22a3562996",
+      "source_page": 78,
+      "source_statement": "合并现金流量表2017年资本开支为空；133,229位于2016年列，投资支付现金另行列示。"
+    },
+    {
+      "code": "603991",
+      "report_date": "2022-12-31",
+      "value": 0.0,
+      "source_document": "2022年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2023-04-27/1216616483.PDF",
+      "source_sha256": "4321ec0a65d4d6c87ca2512b325710cdfe757caa6ee8e04efba5a279f045f6aa",
+      "source_page": 92,
+      "source_statement": "合并现金流量表2022年资本开支为空；394,608.64位于2021年列，其他投资现金流出单独列示。"
+    },
+    {
+      "code": "000668",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "荣丰控股集团股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-29/1223381571.PDF",
+      "source_sha256": "2e1b6a4b1c06bfe5179f99620bcf0f296745fab1663883649ae1398c3f72a6e9",
+      "source_page": 11,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；2,500.00位于上期列。"
+    },
+    {
+      "code": "000995",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "甘肃皇台酒业股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-29/1223374359.PDF",
+      "source_sha256": "0c7e6636c89f597a8b1e0aa900bc0622192d4d1f20988e40312d0e418cbf656c",
+      "source_page": 8,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；1,027,984.11位于上期列。"
+    },
+    {
+      "code": "002200",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "云南交投生态科技股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-25/1223270001.PDF",
+      "source_sha256": "5ec4c9b3715cb4875514588dfe9f553ec179aee05070ec81d5c8059d189af679",
+      "source_page": 9,
+      "source_statement": "合并现金流量表本期资本开支为空；136,364.53位于上期发生额列。"
+    },
+    {
+      "code": "300426",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "浙江华智数媒传媒股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-29/1223361664.PDF",
+      "source_sha256": "2d9618ee266b61e18edc387b6f90d9a50f401a63a864a24d76977cbb51bd262f",
+      "source_page": 13,
+      "source_statement": "合并现金流量表本期资本开支为空；116,300.00位于上期发生额列。"
+    },
+    {
+      "code": "300506",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "深圳市名家汇科技股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-28/1223312549.PDF",
+      "source_sha256": "bea4352dd6462642a6df07b8e230d07f610eb1ea339fb4b9bc39dec73e640744",
+      "source_page": 11,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；4,406.19位于上期列。"
+    },
+    {
+      "code": "600503",
+      "report_date": "2026-03-31",
+      "value": 0.0,
+      "source_document": "华丽家族股份有限公司2026年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-04-29/1225223641.PDF",
+      "source_sha256": "3e38803c401d1965a028d3fee831de948c3b36b1edb51b3f4b5a44f041febc2c",
+      "source_page": 11,
+      "source_statement": "合并现金流量表2026年第一季度资本开支及投资活动现金流出小计均为空。"
+    },
+    {
+      "code": "600743",
+      "report_date": "2026-03-31",
+      "value": 0.0,
+      "source_document": "北京华远新航控股股份有限公司2026年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-04-30/1225255319.PDF",
+      "source_sha256": "abed0b21d62d2aece32918d2df93e1bc72ae77ffe09f4cadd6ca14f70cb4dfc9",
+      "source_page": 12,
+      "source_statement": "合并现金流量表2026年第一季度资本开支及投资活动现金流出小计均为空；164,679.00位于2025年第一季度列。"
+    },
+    {
+      "code": "600854",
+      "report_date": "2026-03-31",
+      "value": 0.0,
+      "source_document": "江苏春兰制冷设备股份有限公司2026年第一季度报告",
+      "source_url": "https://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260428/b933ad360f35409ca4a65d8e88b1d056.PDF",
+      "source_sha256": "ca41383bb89314cf5012209a02e78e4bc26e288d9f7f3880ec6302b22ed6bdef",
+      "source_page": 10,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；2,578,495.03位于上年同期列。"
+    },
+    {
+      "code": "600857",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "宁波中百股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-29/1223384073.PDF",
+      "source_sha256": "424afd951a11928cea8f7aae2cb8675bac0c9d4245290f2dfc7a4ef81d716265",
+      "source_page": 11,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；7,999.00位于上期列。"
+    },
+    {
+      "code": "603895",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "上海天永智能装备股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-30/1223423286.PDF",
+      "source_sha256": "40667925814aabbf82fe0530c48a27c14070fde6c0c97dbad5e823fdee514657",
+      "source_page": 11,
+      "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空。"
+    },
+    {
+      "code": "603895",
+      "report_date": "2026-03-31",
+      "value": 0.0,
+      "source_document": "上海天永智能装备股份有限公司2026年第一季度报告",
+      "source_url": "https://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260427/664014a8696a469a93cb04b9643bbb3a.PDF",
+      "source_sha256": "a61cf0a0342dab2115e907c9b5685699b3866e6323c243b95348a6af9285d727",
+      "source_page": 11,
+      "source_statement": "合并现金流量表2026年第一季度及2025年第一季度资本开支和投资活动现金流出小计均为空。"
+    }
+  ]
+}

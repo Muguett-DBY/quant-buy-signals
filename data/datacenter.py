@@ -1,0 +1,1021 @@
+"""Complete, validated Eastmoney Datacenter report downloads.
+
+Every public fetch is all-or-error: a failed metadata request or missing page
+raises :class:`DataFetchError` instead of returning a plausible partial frame.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import requests
+
+from config import CONCURRENCY, REQUEST_TIMEOUT
+from data.capex_evidence import (
+    CAPEX_FIELD,
+    EASTMONEY_DATACENTER_URL,
+    NON_CAPEX_OUTFLOW_FIELDS,
+)
+
+
+DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+DC_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"}
+_ANNUAL_BATCH_DATASETS = 4
+# Eastmoney resets TLS connections when four annual datasets each fan out to
+# five page workers (20 concurrent requests).  Twelve requests preserves most
+# of the speed-up while avoiding the observed connection-reset cliff; the
+# all-or-error batch below also has a one-shot sequential recovery path.
+_DATACENTER_WORKERS = max(1, min(int(CONCURRENCY) // _ANNUAL_BATCH_DATASETS, 3))
+_DATACENTER_BATCH_WORKERS = max(1, min(_ANNUAL_BATCH_DATASETS, int(CONCURRENCY) // _DATACENTER_WORKERS))
+# Annual and interim generations are independent and may overlap, but their
+# nested pools must not recreate the observed 20-request connection-reset
+# cliff.  One process-wide gate caps active Eastmoney streams below that
+# boundary without reducing either generation's completeness checks.
+_DATACENTER_ACTIVE_REQUEST_LIMIT = max(1, min(int(CONCURRENCY), 12))
+_DATACENTER_REQUEST_SLOTS = threading.BoundedSemaphore(_DATACENTER_ACTIVE_REQUEST_LIMIT)
+_MAX_DATACENTER_PAGES = 128
+_MAX_DATACENTER_ROWS = 50_000
+_MAX_DATACENTER_RESPONSE_BYTES = 16 * 1024 * 1024
+_RESPONSE_CHUNK_BYTES = 64 * 1024
+ANNUAL_HISTORY_YEARS = 10
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+RPT_INCOME = "RPT_DMSK_FN_INCOME"
+RPT_CASHFLOW = "RPT_DMSK_FN_CASHFLOW"
+RPT_DETAILED_CASHFLOW = "RPT_F10_FINANCE_GCASHFLOW"
+RPT_BALANCE = "RPT_F10_FINANCE_GBALANCE"
+RPT_BALANCE_BANK = "RPT_F10_FINANCE_BBALANCE"
+RPT_BALANCE_INSURANCE = "RPT_F10_FINANCE_IBALANCE"
+RPT_BALANCE_SECURITIES = "RPT_F10_FINANCE_SBALANCE"
+RPT_MAIN_FINANCIAL_INDICATORS = "RPT_F10_FINANCE_MAINFINADATA"
+
+GENERAL_MAIN_FINANCIAL_INDICATOR_METRICS = (
+    "RDEXPEND",
+    "ROIC",
+    "ROEJQ",
+    "XSMLL",
+    "XSJLL",
+    "TAXRATE",
+    "TOTAL_SHARE",
+    "STAFF_NUM",
+    "KCFJCXSYJLR",
+    "INTEREST_DEBT_RATIO",
+)
+FINANCIAL_SECTOR_INDICATOR_FIELDS: dict[str, tuple[str, ...]] = {
+    "BANK": (
+        "NET_INTEREST_MARGIN",
+        "NET_INTEREST_SPREAD",
+        "NEWCAPITALADER",
+        "FIRST_ADEQUACY_RATIO",
+        "NONPERLOAN",
+        "LOAN_PROVISION_RATIO",
+        "TOTALDEPOSITS",
+        "GROSSLOANS",
+        "LOAN_ADVANCES",
+    ),
+    "INSURANCE": (
+        "SOLVENCY_AR",
+        "NBV_RATE",
+        "NBV_LIFE",
+        "EARNED_PREMIUM",
+        "SURRENDER_RATE_LIFE",
+    ),
+    "SECURITIES": (
+        "CAPITAL_LEVERAGE_RATIO",
+        "CAPITAL_PROVISIONS_SUM",
+        "LIQUIDITY_COVERAGE_RATIO",
+        "NET_CAPITAL_LIABILITIES",
+        "PROPRIETARY_CAPITAL",
+        "RISK_COVERAGE",
+        "NET_FUNDING_RATIO",
+    ),
+}
+MAIN_FINANCIAL_INDICATOR_METRICS = (
+    *GENERAL_MAIN_FINANCIAL_INDICATOR_METRICS,
+    *dict.fromkeys(field for fields in FINANCIAL_SECTOR_INDICATOR_FIELDS.values() for field in fields),
+)
+_MAIN_FINANCIAL_INDICATOR_PROVENANCE = (
+    "SECURITY_CODE",
+    "SECUCODE",
+    "SECURITY_NAME_ABBR",
+    "SECURITY_TYPE_CODE",
+    "REPORT_DATE",
+    "REPORT_TYPE",
+    "REPORT_DATE_NAME",
+    "REPORT_YEAR",
+    "NOTICE_DATE",
+)
+_MAIN_FINANCIAL_INDICATOR_COLUMNS = ",".join((*_MAIN_FINANCIAL_INDICATOR_PROVENANCE, *MAIN_FINANCIAL_INDICATOR_METRICS))
+_A_SHARE_SECURITY_TYPE = "058001001"
+
+_DETAILED_CASHFLOW_METADATA = (
+    "SECURITY_CODE",
+    "SECUCODE",
+    "SECURITY_NAME_ABBR",
+    "SECURITY_TYPE_CODE",
+    "REPORT_DATE",
+    "REPORT_TYPE",
+    "REPORT_DATE_NAME",
+    "NOTICE_DATE",
+    "UPDATE_DATE",
+    "CURRENCY",
+)
+_DETAILED_INVESTMENT_OUTFLOW_COMPONENTS = (*NON_CAPEX_OUTFLOW_FIELDS,)
+_DETAILED_INVESTMENT_FIELDS = (
+    "TOTAL_INVEST_INFLOW",
+    CAPEX_FIELD,
+    *_DETAILED_INVESTMENT_OUTFLOW_COMPONENTS,
+    "TOTAL_INVEST_OUTFLOW",
+    "INVEST_NETCASH_OTHER",
+    "INVEST_NETCASH_BALANCE",
+    "NETCASH_INVEST",
+)
+_DETAILED_CASHFLOW_COLUMNS = ",".join((*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS))
+_INTERIM_REPORT_LABELS = {
+    "03-31": ("一季报", "一季报"),
+    "06-30": ("中报", "中报"),
+    "09-30": ("三季报", "三季报"),
+}
+
+
+class DataFetchError(RuntimeError):
+    """A remote dataset could not be proven complete and valid."""
+
+
+class _DataResourceLimitError(DataFetchError):
+    """A response exceeded a fixed local resource budget and must not be retried."""
+
+
+@dataclass(frozen=True)
+class _PageResult:
+    page: int
+    pages: int
+    data: list[dict[str, Any]]
+    count: int | None = None
+
+
+def _strict_nonnegative_int(value: Any, *, field: str, report_name: str, page: int) -> int:
+    if isinstance(value, bool):
+        raise DataFetchError(f"invalid {field} metadata for {report_name} page {page}")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"0|[1-9]\d*", value.strip()):
+        parsed = int(value.strip())
+    else:
+        raise DataFetchError(f"invalid {field} metadata for {report_name} page {page}")
+    if parsed < 0:
+        raise DataFetchError(f"negative {field} metadata for {report_name} page {page}")
+    return parsed
+
+
+def _bounded_response_json(response: requests.Response) -> Any:
+    """Decode one response without ever accepting more than the byte budget.
+
+    ``stream=True`` keeps Requests from eagerly materialising an unbounded body.
+    Both the declared wire size and the decoded body size are checked because a
+    compressed or chunked response may not have a useful Content-Length header.
+    The small fallback exists for response-like test doubles only; real Requests
+    responses always expose ``iter_content``.
+    """
+    headers = getattr(response, "headers", {}) or {}
+    declared = headers.get("Content-Length") if hasattr(headers, "get") else None
+    if declared not in (None, ""):
+        try:
+            declared_bytes = int(declared)
+        except (TypeError, ValueError) as exc:
+            raise DataFetchError("invalid Content-Length in Eastmoney response") from exc
+        if declared_bytes < 0:
+            raise DataFetchError("negative Content-Length in Eastmoney response")
+        if declared_bytes > _MAX_DATACENTER_RESPONSE_BYTES:
+            raise _DataResourceLimitError(
+                f"Eastmoney response exceeds byte limit: {declared_bytes} > {_MAX_DATACENTER_RESPONSE_BYTES}"
+            )
+
+    iter_content = getattr(response, "iter_content", None)
+    if callable(iter_content):
+        chunks: list[bytes] = []
+        received = 0
+        for chunk in iter_content(chunk_size=_RESPONSE_CHUNK_BYTES):
+            if not chunk:
+                continue
+            if not isinstance(chunk, bytes):
+                raise DataFetchError("Eastmoney response yielded non-byte content")
+            received += len(chunk)
+            if received > _MAX_DATACENTER_RESPONSE_BYTES:
+                raise _DataResourceLimitError(
+                    f"Eastmoney response exceeds byte limit: received more than {_MAX_DATACENTER_RESPONSE_BYTES}"
+                )
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
+            raise DataFetchError("invalid JSON in Eastmoney response") from exc
+
+    content = getattr(response, "content", None)
+    if isinstance(content, (bytes, bytearray)):
+        if len(content) > _MAX_DATACENTER_RESPONSE_BYTES:
+            raise _DataResourceLimitError(
+                f"Eastmoney response exceeds byte limit: {len(content)} > {_MAX_DATACENTER_RESPONSE_BYTES}"
+            )
+        try:
+            return json.loads(bytes(content))
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
+            raise DataFetchError("invalid JSON in Eastmoney response") from exc
+
+    try:
+        payload = response.json()
+    except RecursionError as exc:
+        raise DataFetchError("invalid JSON in Eastmoney response") from exc
+    try:
+        encoded_size = len(
+            json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        )
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise DataFetchError("invalid JSON-compatible Eastmoney response") from exc
+    if encoded_size > _MAX_DATACENTER_RESPONSE_BYTES:
+        raise _DataResourceLimitError(
+            f"Eastmoney response exceeds byte limit: {encoded_size} > {_MAX_DATACENTER_RESPONSE_BYTES}"
+        )
+    return payload
+
+
+def _request_page(
+    report_name: str,
+    columns: str,
+    page: int,
+    page_size: int = 500,
+    sort_col: str = "SECURITY_CODE",
+    sort_order: int = 1,
+    extra_filter: str = "",
+    timeout: int = REQUEST_TIMEOUT,
+    retries: int = 3,
+) -> _PageResult:
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or isinstance(page_size, bool)
+        or not isinstance(page_size, int)
+        or page < 1
+        or page_size < 1
+    ):
+        raise ValueError("page and page_size must be positive integers")
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
+        raise ValueError("retries must be a positive integer")
+    params = {
+        "reportName": report_name,
+        "columns": columns,
+        "pageNumber": page,
+        "pageSize": page_size,
+        "sortTypes": sort_order,
+        "sortColumns": sort_col,
+        "source": "WEB",
+        "client": "PC",
+    }
+    if extra_filter:
+        params["filter"] = extra_filter
+
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            with _DATACENTER_REQUEST_SLOTS:
+                response = requests.get(
+                    DC_URL,
+                    params=params,
+                    headers=DC_HEADERS,
+                    timeout=timeout,
+                    stream=True,
+                )
+                try:
+                    response.raise_for_status()
+                    payload = _bounded_response_json(response)
+                finally:
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
+            if not isinstance(payload, dict) or payload.get("success") is not True:
+                message = payload.get("message") if isinstance(payload, dict) else "non-object response"
+                raise DataFetchError(f"Eastmoney rejected {report_name} page {page}: {message}")
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise DataFetchError(f"missing result metadata for {report_name} page {page}")
+            raw_data = result.get("data")
+            if raw_data is None:
+                raw_data = []
+            if not isinstance(raw_data, list) or any(not isinstance(row, dict) for row in raw_data):
+                raise DataFetchError(f"invalid data schema for {report_name} page {page}")
+            try:
+                raw_pages = result["pages"]
+                raw_count = result["count"]
+            except KeyError as exc:
+                raise DataFetchError(f"missing pagination metadata for {report_name} page {page}") from exc
+            pages = _strict_nonnegative_int(raw_pages, field="page count", report_name=report_name, page=page)
+            count = _strict_nonnegative_int(raw_count, field="row count", report_name=report_name, page=page)
+            if pages < 0 or count < 0 or (raw_data and pages < page):
+                raise DataFetchError(
+                    f"inconsistent pagination for {report_name} page {page}: pages={pages}, count={count}"
+                )
+            if pages > _MAX_DATACENTER_PAGES:
+                raise _DataResourceLimitError(
+                    f"{report_name} page count exceeds limit: {pages} > {_MAX_DATACENTER_PAGES}"
+                )
+            if count > _MAX_DATACENTER_ROWS:
+                raise _DataResourceLimitError(
+                    f"{report_name} row count exceeds limit: {count} > {_MAX_DATACENTER_ROWS}"
+                )
+            expected_pages = 0 if count == 0 else (count + page_size - 1) // page_size
+            if pages != expected_pages:
+                raise DataFetchError(
+                    f"page/count mismatch for {report_name}: pages={pages}, count={count}, page_size={page_size}"
+                )
+            if count == 0:
+                expected_rows = 0
+            elif page > pages:
+                raise DataFetchError(f"requested page {page} exceeds declared page count {pages} for {report_name}")
+            else:
+                expected_rows = min(page_size, count - ((page - 1) * page_size))
+            if len(raw_data) != expected_rows:
+                raise DataFetchError(
+                    f"page row-count mismatch for {report_name} page {page}: "
+                    f"expected {expected_rows}, received {len(raw_data)}"
+                )
+            return _PageResult(page=page, pages=pages, data=raw_data, count=count)
+        except _DataResourceLimitError:
+            raise
+        except (requests.RequestException, ValueError, DataFetchError) as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(0.5 * (attempt + 1))
+    raise DataFetchError(
+        f"failed to fetch {report_name} page {page} after {retries} attempts: {last_error}"
+    ) from last_error
+
+
+def _fetch_page(
+    report_name: str,
+    columns: str,
+    page: int,
+    page_size: int = 500,
+    sort_col: str = "SECURITY_CODE",
+    sort_order: int = 1,
+    extra_filter: str = "",
+    timeout: int = REQUEST_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Compatibility wrapper returning the validated page rows."""
+    return _request_page(
+        report_name,
+        columns,
+        page,
+        page_size,
+        sort_col,
+        sort_order,
+        extra_filter,
+        timeout,
+    ).data
+
+
+def _validate_filtered_report_date(frame: pd.DataFrame, extra_filter: str) -> None:
+    match = re.search(r"REPORT_DATE\s*=\s*['\"](\d{4}-\d{2}-\d{2})['\"]", extra_filter)
+    if not match or frame.empty:
+        return
+    if "REPORT_DATE" not in frame.columns:
+        raise DataFetchError("filtered report response omitted REPORT_DATE")
+    expected = match.group(1)
+    actual = frame["REPORT_DATE"].astype(str).str.slice(0, 10)
+    invalid = actual.ne(expected)
+    if invalid.any():
+        examples = sorted(actual[invalid].dropna().unique().tolist())[:3]
+        raise DataFetchError(f"report date mismatch: expected {expected}, got {examples}")
+
+
+def _fetch_all_pages(
+    report_name: str,
+    columns: str,
+    extra_filter: str = "",
+    page_size: int = 500,
+    max_workers: int = _DATACENTER_WORKERS,
+) -> pd.DataFrame:
+    """Fetch one complete report query using its first response as metadata."""
+    if (
+        isinstance(page_size, bool)
+        or not isinstance(page_size, int)
+        or isinstance(max_workers, bool)
+        or not isinstance(max_workers, int)
+        or page_size < 1
+        or max_workers < 1
+    ):
+        raise ValueError("page_size and max_workers must be positive integers")
+    first = _request_page(
+        report_name,
+        columns,
+        1,
+        page_size,
+        extra_filter=extra_filter,
+    )
+    if first.pages > _MAX_DATACENTER_PAGES:
+        raise _DataResourceLimitError(
+            f"{report_name} page count exceeds limit: {first.pages} > {_MAX_DATACENTER_PAGES}"
+        )
+    if first.count is None:
+        raise DataFetchError(f"{report_name} page 1 omitted total row count")
+    if first.count > _MAX_DATACENTER_ROWS:
+        raise _DataResourceLimitError(f"{report_name} row count exceeds limit: {first.count} > {_MAX_DATACENTER_ROWS}")
+    if first.pages == 0:
+        if first.data or first.count != 0:
+            raise DataFetchError(f"{report_name} returned inconsistent zero-page metadata")
+        return pd.DataFrame()
+    if not first.data:
+        raise DataFetchError(f"{report_name} page 1/{first.pages} is empty")
+
+    pages: dict[int, list[dict[str, Any]]] = {1: first.data}
+    remaining = range(2, first.pages + 1)
+    if first.pages > 1:
+        worker_count = min(max_workers, _DATACENTER_WORKERS, first.pages - 1)
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(
+                    _request_page,
+                    report_name,
+                    columns,
+                    page,
+                    page_size,
+                    "SECURITY_CODE",
+                    1,
+                    extra_filter,
+                ): page
+                for page in remaining
+            }
+            for future in as_completed(futures):
+                page = futures[future]
+                page_result = future.result()
+                if page_result.pages != first.pages:
+                    raise DataFetchError(f"page-count changed during fetch: {first.pages} -> {page_result.pages}")
+                if page_result.count != first.count:
+                    raise DataFetchError(f"row-count changed during fetch: {first.count} -> {page_result.count}")
+                if not page_result.data:
+                    raise DataFetchError(f"{report_name} page {page}/{first.pages} is empty")
+                pages[page] = page_result.data
+
+    missing = sorted(set(range(1, first.pages + 1)) - pages.keys())
+    if missing:
+        raise DataFetchError(f"{report_name} missing pages: {missing}")
+    ordered_rows = [row for page in range(1, first.pages + 1) for row in pages[page]]
+    if len(ordered_rows) != first.count:
+        raise DataFetchError(f"{report_name} expected {first.count} rows but received {len(ordered_rows)}")
+    frame = pd.DataFrame(ordered_rows)
+    if "SECURITY_CODE" not in frame.columns:
+        raise DataFetchError(f"{report_name} response omitted SECURITY_CODE")
+    _validate_filtered_report_date(frame, extra_filter)
+    identity_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame]
+    if len(identity_columns) == 2 and frame.duplicated(identity_columns, keep=False).any():
+        examples = (
+            frame.loc[frame.duplicated(identity_columns, keep=False), identity_columns]
+            .drop_duplicates()
+            .head(5)
+            .to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate report identities across pages: {examples}")
+    sort_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame.columns]
+    if sort_columns:
+        frame = frame.sort_values(sort_columns, kind="stable").reset_index(drop=True)
+    return frame
+
+
+def _shanghai_today() -> date:
+    """Freeze filing cut-offs to the market timezone, not the host machine."""
+    return datetime.now(_SHANGHAI).date()
+
+
+def _latest_completed_annual_year(today: date | None = None) -> int:
+    """Latest year whose statutory A-share annual-report window has closed."""
+    today = today or _shanghai_today()
+    return today.year - 1 if (today.month, today.day) >= (5, 1) else today.year - 2
+
+
+def _latest_available_q1_year(today: date | None = None) -> int:
+    today = today or _shanghai_today()
+    return today.year if (today.month, today.day) >= (5, 1) else today.year - 1
+
+
+def _latest_available_interim_period(today: date | None = None) -> tuple[int, str]:
+    """Return the latest interim period after its statutory filing window."""
+    today = today or _shanghai_today()
+    month_day = (today.month, today.day)
+    if month_day >= (11, 1):
+        return today.year, "09-30"
+    if month_day >= (9, 1):
+        return today.year, "06-30"
+    if month_day >= (5, 1):
+        return today.year, "03-31"
+    return today.year - 1, "09-30"
+
+
+def _required_frames(frames: list[pd.DataFrame], labels: list[str]) -> pd.DataFrame:
+    missing = [label for frame, label in zip(frames, labels) if frame.empty]
+    if missing:
+        raise DataFetchError(f"required report queries returned no rows: {', '.join(missing)}")
+    return (
+        pd.concat(frames, ignore_index=True)
+        .sort_values(["SECURITY_CODE", "REPORT_DATE"], kind="stable")
+        .reset_index(drop=True)
+    )
+
+
+def fetch_income_history(years: list[int] | None = None) -> pd.DataFrame:
+    """Fetch complete annual income history, oldest-to-newest per company."""
+    if years is None:
+        latest = _latest_completed_annual_year()
+        years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
+    if not years:
+        return pd.DataFrame()
+    columns = "SECURITY_CODE,SECURITY_NAME_ABBR,TOTAL_OPERATE_INCOME,OPERATE_PROFIT,PARENT_NETPROFIT,REPORT_DATE"
+    frames = [_fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{year}-12-31')") for year in years]
+    return _required_frames(frames, [str(year) for year in years])
+
+
+def fetch_latest_cashflow(year: int | None = None) -> pd.DataFrame:
+    year = _latest_completed_annual_year() if year is None else int(year)
+    columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
+    frame = _fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{year}-12-31')")
+    if frame.empty:
+        raise DataFetchError(f"cashflow {year} returned no rows")
+    return frame
+
+
+def fetch_cashflow_history(years: list[int] | None = None) -> pd.DataFrame:
+    """Fetch complete annual cash-flow history, oldest-to-newest per company."""
+    if years is None:
+        latest = _latest_completed_annual_year()
+        years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
+    if not years:
+        return pd.DataFrame()
+    columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
+    frames = [_fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{year}-12-31')") for year in years]
+    return _required_frames(frames, [str(year) for year in years])
+
+
+def _validate_main_financial_indicator_history(frame: pd.DataFrame, years: list[int]) -> pd.DataFrame:
+    """Validate and normalize the auditable annual main-financial report."""
+    required = {*_MAIN_FINANCIAL_INDICATOR_PROVENANCE, *MAIN_FINANCIAL_INDICATOR_METRICS}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise DataFetchError(f"{RPT_MAIN_FINANCIAL_INDICATORS} response omitted columns: {missing}")
+
+    result = frame.loc[:, [*_MAIN_FINANCIAL_INDICATOR_PROVENANCE, *MAIN_FINANCIAL_INDICATOR_METRICS]].copy()
+    result["REPORT_DATE"] = result["REPORT_DATE"].astype(str).str.slice(0, 10)
+    expected_dates = {f"{year}-12-31" for year in years}
+    invalid_dates = ~result["REPORT_DATE"].isin(expected_dates)
+    if invalid_dates.any():
+        examples = sorted(result.loc[invalid_dates, "REPORT_DATE"].unique().tolist())[:5]
+        raise DataFetchError(f"annual indicator response contains unexpected report dates: {examples}")
+
+    expected_year = result["REPORT_DATE"].str.slice(0, 4)
+    report_year = result["REPORT_YEAR"].astype(str).str.strip()
+    report_type = result["REPORT_TYPE"].astype(str).str.strip()
+    report_name = result["REPORT_DATE_NAME"].astype(str).str.strip()
+    if report_year.ne(expected_year).any():
+        raise DataFetchError("annual indicator REPORT_YEAR differs from REPORT_DATE")
+    if report_type.ne("年报").any():
+        raise DataFetchError("annual indicator query returned a non-annual REPORT_TYPE")
+    if report_name.ne(expected_year + "年报").any():
+        raise DataFetchError("annual indicator REPORT_DATE_NAME differs from its report period")
+    if result["SECURITY_TYPE_CODE"].astype(str).str.strip().ne(_A_SHARE_SECURITY_TYPE).any():
+        raise DataFetchError("annual indicator query returned a non-A-share security type")
+
+    identity_source = result[["SECURITY_CODE", "SECURITY_NAME_ABBR", "SECUCODE"]]
+    if identity_source.isna().any(axis=None):
+        raise DataFetchError("annual indicator response contains an invalid security identity")
+    codes = result["SECURITY_CODE"].astype(str).str.strip()
+    names = result["SECURITY_NAME_ABBR"].astype(str).str.strip()
+    secucodes = result["SECUCODE"].astype(str).str.strip()
+    secucode_parts = secucodes.str.rsplit(".", n=1, expand=True)
+    if (
+        codes.eq("").any()
+        or names.eq("").any()
+        or secucode_parts.shape[1] != 2
+        or secucode_parts[0].ne(codes).any()
+        or not secucode_parts[1].isin({"SH", "SZ", "BJ"}).all()
+    ):
+        raise DataFetchError("annual indicator response contains an invalid security identity")
+
+    notices = result["NOTICE_DATE"]
+    present_notices = notices.notna() & notices.astype(str).str.strip().ne("")
+    if present_notices.any():
+        parsed_notices = pd.to_datetime(notices[present_notices], errors="coerce")
+        if parsed_notices.isna().any():
+            raise DataFetchError("annual indicator response contains an invalid NOTICE_DATE")
+        result.loc[present_notices, "NOTICE_DATE"] = notices[present_notices].astype(str).str.slice(0, 10)
+
+    for column in MAIN_FINANCIAL_INDICATOR_METRICS:
+        source = result[column]
+        numeric = pd.to_numeric(source, errors="coerce")
+        booleans = source.map(lambda value: isinstance(value, bool))
+        invalid = source.notna() & (numeric.isna() | booleans)
+        finite = numeric.dropna().map(lambda value: math.isfinite(float(value)))
+        if invalid.any() or not finite.all():
+            raise DataFetchError(f"annual indicator {column} contains a non-finite or non-numeric value")
+        result[column] = numeric
+
+    for column in (
+        "RDEXPEND",
+        "TOTAL_SHARE",
+        "STAFF_NUM",
+        "TOTALDEPOSITS",
+        "GROSSLOANS",
+        "LOAN_ADVANCES",
+        "CAPITAL_PROVISIONS_SUM",
+        "EARNED_PREMIUM",
+    ):
+        numeric = result[column].dropna()
+        if (numeric < 0).any():
+            raise DataFetchError(f"annual indicator {column} contains a negative value")
+    for column in ("TOTAL_SHARE", "STAFF_NUM"):
+        numeric = result[column].dropna()
+        if numeric.map(lambda value: not float(value).is_integer()).any():
+            raise DataFetchError(f"annual indicator {column} contains a fractional count")
+    if result[list(MAIN_FINANCIAL_INDICATOR_METRICS)].isna().all(axis=1).any():
+        raise DataFetchError("annual indicator response contains a row without any requested metric")
+
+    duplicate = result.duplicated(["SECURITY_CODE", "REPORT_DATE"], keep=False)
+    if duplicate.any():
+        examples = (
+            result.loc[duplicate, ["SECURITY_CODE", "REPORT_DATE"]].drop_duplicates().head(5).to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate annual indicator identities: {examples}")
+    result["SOURCE_REPORT_NAME"] = RPT_MAIN_FINANCIAL_INDICATORS
+    return result.sort_values(["SECURITY_CODE", "REPORT_DATE"], kind="stable").reset_index(drop=True)
+
+
+def fetch_main_financial_indicator_history(years: list[int] | None = None) -> pd.DataFrame:
+    """Fetch ten complete annual histories from Eastmoney's main-financial report."""
+    if years is None:
+        latest = _latest_completed_annual_year()
+        years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
+    if not years:
+        return pd.DataFrame()
+    if any(isinstance(year, bool) or not isinstance(year, int) for year in years):
+        raise ValueError("indicator years must be integers")
+    if len(set(years)) != len(years):
+        raise ValueError("indicator years must not contain duplicates")
+    frames = [
+        _fetch_all_pages(
+            RPT_MAIN_FINANCIAL_INDICATORS,
+            _MAIN_FINANCIAL_INDICATOR_COLUMNS,
+            f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\")",
+        )
+        for year in years
+    ]
+    frame = _required_frames(frames, [f"main financial indicators {year}" for year in years])
+    return _validate_main_financial_indicator_history(frame, years)
+
+
+_BALANCE_CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
+    "TOTAL_PARENT_EQUITY": (
+        "TOTAL_PARENT_EQUITY",
+        "PARENT_EQUITY",
+        "TOTAL_EQUITY_PARENT",
+        "EQUITY_PARENT",
+    ),
+    "MINORITY_EQUITY": ("MINORITY_EQUITY", "MINORITY_INTEREST"),
+    "LONG_LOAN": ("LONG_LOAN", "LONG_TERM_LOAN"),
+    "BONDS_PAYABLE": ("BONDS_PAYABLE", "BOND_PAYABLE"),
+    "NONCURRENT_LIAB_1YEAR": (
+        "NONCURRENT_LIAB_1YEAR",
+        "NONCURRENT_LIABILITY_IN_1YEAR",
+        "CURRENT_PORTION_NONCURRENT_LIAB",
+    ),
+    "LEASE_LIAB": ("LEASE_LIAB", "LEASE_LIABILITY"),
+    "SHORT_BONDS_PAYABLE": ("SHORT_BONDS_PAYABLE", "SHORT_BOND_PAYABLE"),
+    "BORROW_FUNDS": ("BORROW_FUNDS", "BORROW_FUND"),
+    "CENTRAL_BANK_BORROWING": ("CENTRAL_BANK_BORROWING", "LOAN_PBC"),
+    "SUBORDINATED_BONDS_PAYABLE": (
+        "SUBORDINATED_BONDS_PAYABLE",
+        "SUBBOND_PAYABLE",
+    ),
+}
+
+_BALANCE_COMMON_COLUMNS = (
+    "SECURITY_CODE,SECUCODE,SECURITY_TYPE_CODE,REPORT_DATE,TOTAL_ASSETS,"
+    "TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY,MINORITY_EQUITY"
+)
+_BALANCE_REPORT_COLUMNS = {
+    RPT_BALANCE: (
+        _BALANCE_COMMON_COLUMNS + ",MONETARYFUNDS,SHORT_LOAN,LONG_LOAN,BOND_PAYABLE,"
+        "NONCURRENT_LIAB_1YEAR,LEASE_LIAB,SHORT_BOND_PAYABLE"
+    ),
+    # Bank balance sheets do not expose corporate cash/loan line items.
+    RPT_BALANCE_BANK: (_BALANCE_COMMON_COLUMNS + ",BOND_PAYABLE,LEASE_LIAB,BORROW_FUND,LOAN_PBC,SUBBOND_PAYABLE"),
+    RPT_BALANCE_INSURANCE: (_BALANCE_COMMON_COLUMNS + ",MONETARYFUNDS,SHORT_LOAN,LONG_LOAN,BOND_PAYABLE,LEASE_LIAB"),
+    RPT_BALANCE_SECURITIES: (
+        _BALANCE_COMMON_COLUMNS + ",MONETARYFUNDS,SHORT_LOAN,LONG_LOAN,BOND_PAYABLE,LEASE_LIAB,BORROW_FUND"
+    ),
+}
+
+
+def _add_canonical_balance_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    frame = frame.copy()
+    for canonical, aliases in _BALANCE_CANONICAL_ALIASES.items():
+        present = [alias for alias in aliases if alias in frame.columns]
+        if not present:
+            frame[canonical] = None
+            continue
+        combined = frame[present[0]]
+        for alias in present[1:]:
+            combined = combined.combine_first(frame[alias])
+        frame[canonical] = combined
+    for required in (
+        "TOTAL_ASSETS",
+        "TOTAL_LIABILITIES",
+        "TOTAL_EQUITY",
+        "DEBT_ASSET_RATIO",
+        "MONETARYFUNDS",
+        "SHORT_LOAN",
+    ):
+        if required not in frame.columns:
+            frame[required] = None
+    # The full F10 reports do not expose the summary-table ratio. This is an
+    # exact derivation from the same consolidated totals, not an estimate.
+    assets = pd.to_numeric(frame["TOTAL_ASSETS"], errors="coerce")
+    liabilities = pd.to_numeric(frame["TOTAL_LIABILITIES"], errors="coerce")
+    derived_ratio = (liabilities / assets.where(assets.ne(0))) * 100
+    existing_ratio = pd.to_numeric(frame["DEBT_ASSET_RATIO"], errors="coerce")
+    frame["DEBT_ASSET_RATIO"] = existing_ratio.fillna(derived_ratio)
+    return frame
+
+
+def fetch_balance_history(years: list[int] | None = None) -> pd.DataFrame:
+    """Fetch ten complete annual balance snapshots for every A-share org type.
+
+    Eastmoney separates general companies, banks, insurers and securities
+    firms into four full-balance reports. All four are required for every year;
+    this preserves reported parent equity and never substitutes total equity.
+    """
+    if years is None:
+        latest = _latest_completed_annual_year()
+        years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
+    if not years:
+        return pd.DataFrame()
+    yearly_frames: list[pd.DataFrame] = []
+    for year in years:
+        report_frames: list[pd.DataFrame] = []
+        labels: list[str] = []
+        report_filter = f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"058001001\")"
+        for report_name, columns in _BALANCE_REPORT_COLUMNS.items():
+            report_frames.append(_fetch_all_pages(report_name, columns, report_filter))
+            labels.append(f"{report_name}:{year}")
+        yearly_frames.append(_required_frames(report_frames, labels))
+
+    frame = _required_frames(yearly_frames, [str(year) for year in years])
+    duplicate = frame.duplicated(["SECURITY_CODE", "REPORT_DATE"], keep=False)
+    if duplicate.any():
+        examples = (
+            frame.loc[duplicate, ["SECURITY_CODE", "REPORT_DATE"]].drop_duplicates().head(5).to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate balance rows across report types: {examples}")
+    return _add_canonical_balance_columns(frame)
+
+
+def fetch_latest_balance(year: int | None = None) -> pd.DataFrame:
+    year = _latest_completed_annual_year() if year is None else int(year)
+    return fetch_balance_history([year])
+
+
+def fetch_latest_q1_income(year: int | None = None) -> pd.DataFrame:
+    year = _latest_available_q1_year() if year is None else int(year)
+    columns = "SECURITY_CODE,SECURITY_NAME_ABBR,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,REPORT_DATE"
+    frame = _fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{year}-03-31')")
+    if frame.empty:
+        raise DataFetchError(f"income Q1 {year} returned no rows")
+    return frame
+
+
+def fetch_latest_q1_cashflow(year: int | None = None) -> pd.DataFrame:
+    year = _latest_available_q1_year() if year is None else int(year)
+    columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
+    frame = _fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{year}-03-31')")
+    if frame.empty:
+        raise DataFetchError(f"cashflow Q1 {year} returned no rows")
+    return frame
+
+
+def fetch_interim_income_comparables(
+    period: tuple[int, str] | None = None,
+) -> pd.DataFrame:
+    """Fetch the latest filed interim income period and prior-year comparable."""
+    year, period_end = _latest_available_interim_period() if period is None else period
+    year = int(year)
+    if period_end not in {"03-31", "06-30", "09-30"}:
+        raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    columns = "SECURITY_CODE,SECURITY_NAME_ABBR,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,REPORT_DATE"
+    years = [year - 1, year]
+    frames = [_fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{item}-{period_end}')") for item in years]
+    return _required_frames(frames, [f"income interim {item}-{period_end}" for item in years])
+
+
+def fetch_interim_cashflow_comparables(
+    period: tuple[int, str] | None = None,
+) -> pd.DataFrame:
+    """Fetch the latest filed interim cash-flow period and prior-year comparable."""
+    year, period_end = _latest_available_interim_period() if period is None else period
+    year = int(year)
+    if period_end not in {"03-31", "06-30", "09-30"}:
+        raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
+    years = [year - 1, year]
+    frames = [_fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{item}-{period_end}')") for item in years]
+    return _required_frames(frames, [f"cashflow interim {item}-{period_end}" for item in years])
+
+
+def _validate_detailed_interim_cashflow(
+    frame: pd.DataFrame,
+    expected_dates: list[str],
+) -> pd.DataFrame:
+    """Validate detailed investing-cash evidence without coercing blanks to zero."""
+    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise DataFetchError(f"{RPT_DETAILED_CASHFLOW} response omitted columns: {missing}")
+
+    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS]].copy()
+    result["REPORT_DATE"] = result["REPORT_DATE"].astype(str).str.slice(0, 10)
+    expected_set = set(expected_dates)
+    actual_dates = set(result["REPORT_DATE"].tolist())
+    if not actual_dates.issubset(expected_set):
+        examples = sorted(actual_dates - expected_set)[:5]
+        raise DataFetchError(f"detailed interim cash-flow contains unexpected report dates: {examples}")
+    absent_dates = [report_date for report_date in expected_dates if report_date not in actual_dates]
+    if absent_dates:
+        raise DataFetchError(f"detailed interim cash-flow omitted required report dates: {absent_dates}")
+
+    expected_type = result["REPORT_DATE"].map(lambda report_date: _INTERIM_REPORT_LABELS[report_date[5:]][0])
+    expected_name = result["REPORT_DATE"].str.slice(0, 4) + result["REPORT_DATE"].map(
+        lambda report_date: _INTERIM_REPORT_LABELS[report_date[5:]][1]
+    )
+    if result["REPORT_TYPE"].astype(str).str.strip().ne(expected_type).any():
+        raise DataFetchError("detailed interim cash-flow query returned an incompatible REPORT_TYPE")
+    if result["REPORT_DATE_NAME"].astype(str).str.strip().ne(expected_name).any():
+        raise DataFetchError("detailed interim cash-flow REPORT_DATE_NAME differs from its period")
+    if result["SECURITY_TYPE_CODE"].astype(str).str.strip().ne(_A_SHARE_SECURITY_TYPE).any():
+        raise DataFetchError("detailed interim cash-flow query returned a non-A-share security type")
+    if result["CURRENCY"].astype(str).str.strip().ne("CNY").any():
+        raise DataFetchError("detailed interim cash-flow query returned a non-CNY statement")
+
+    identity_source = result[["SECURITY_CODE", "SECURITY_NAME_ABBR", "SECUCODE"]]
+    if identity_source.isna().any(axis=None):
+        raise DataFetchError("detailed interim cash-flow contains an invalid security identity")
+    codes = result["SECURITY_CODE"].astype(str).str.strip()
+    names = result["SECURITY_NAME_ABBR"].astype(str).str.strip()
+    secucodes = result["SECUCODE"].astype(str).str.strip()
+    secucode_parts = secucodes.str.rsplit(".", n=1, expand=True)
+    if (
+        codes.eq("").any()
+        or names.eq("").any()
+        or secucode_parts.shape[1] != 2
+        or secucode_parts[0].ne(codes).any()
+        or not secucode_parts[1].isin({"SH", "SZ", "BJ"}).all()
+    ):
+        raise DataFetchError("detailed interim cash-flow contains an invalid security identity")
+
+    for column in ("NOTICE_DATE", "UPDATE_DATE"):
+        source = result[column]
+        present = source.notna() & source.astype(str).str.strip().ne("")
+        if present.any():
+            parsed = pd.to_datetime(source[present], errors="coerce")
+            if parsed.isna().any():
+                raise DataFetchError(f"detailed interim cash-flow contains an invalid {column}")
+            result.loc[present, column] = source[present].astype(str).str.slice(0, 10)
+
+    for column in _DETAILED_INVESTMENT_FIELDS:
+        source = result[column]
+        numeric = pd.to_numeric(source, errors="coerce")
+        booleans = source.map(lambda value: isinstance(value, bool))
+        invalid = source.notna() & (numeric.isna() | booleans)
+        finite = numeric.dropna().map(lambda value: math.isfinite(float(value)))
+        if invalid.any() or not finite.all():
+            raise DataFetchError(f"detailed interim cash-flow {column} contains a non-finite value")
+        result[column] = numeric
+
+    duplicate = result.duplicated(["SECURITY_CODE", "REPORT_DATE"], keep=False)
+    if duplicate.any():
+        examples = (
+            result.loc[duplicate, ["SECURITY_CODE", "REPORT_DATE"]].drop_duplicates().head(5).to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate detailed interim cash-flow identities: {examples}")
+    result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
+    result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
+    return result.sort_values(["SECURITY_CODE", "REPORT_DATE"], kind="stable").reset_index(drop=True)
+
+
+def fetch_detailed_interim_cashflow_comparables(
+    period: tuple[int, str] | None = None,
+) -> pd.DataFrame:
+    """Fetch detailed current/prior YTD statements used only for capex evidence."""
+    year, period_end = _latest_available_interim_period() if period is None else period
+    year = int(year)
+    if period_end not in _INTERIM_REPORT_LABELS:
+        raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    years = [year - 1, year]
+    expected_dates = [f"{item}-{period_end}" for item in years]
+    frames = [
+        _fetch_all_pages(
+            RPT_DETAILED_CASHFLOW,
+            _DETAILED_CASHFLOW_COLUMNS,
+            f"(REPORT_DATE='{report_date}')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\")",
+        )
+        for report_date in expected_dates
+    ]
+    frame = _required_frames(
+        frames,
+        [f"detailed cashflow interim {report_date}" for report_date in expected_dates],
+    )
+    return _validate_detailed_interim_cashflow(frame, expected_dates)
+
+
+def fetch_interim_financials_parallel() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return one coherent income/compact-cashflow/detailed-cashflow batch."""
+    fetchers = {
+        "income_interim": fetch_interim_income_comparables,
+        "cashflow_interim": fetch_interim_cashflow_comparables,
+        "detailed_cashflow_interim": fetch_detailed_interim_cashflow_comparables,
+    }
+    worker_count = max(1, min(len(fetchers), int(CONCURRENCY) // _DATACENTER_WORKERS))
+    results: dict[str, pd.DataFrame] = {}
+    parallel_error: DataFetchError | None = None
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {executor.submit(fetch): label for label, fetch in fetchers.items()}
+        try:
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+        except DataFetchError as exc:
+            parallel_error = exc
+            for future in futures:
+                future.cancel()
+    if parallel_error is not None:
+        time.sleep(1.0)
+        results = {}
+        try:
+            for label, fetch in fetchers.items():
+                results[label] = fetch()
+        except DataFetchError as exc:
+            raise DataFetchError(
+                f"interim financial refresh failed in parallel ({parallel_error}); "
+                f"sequential recovery also failed ({exc})"
+            ) from exc
+    return (
+        results["income_interim"],
+        results["cashflow_interim"],
+        results["detailed_cashflow_interim"],
+    )
+
+
+def fetch_all_financials_parallel() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return one all-or-error annual financial refresh batch.
+
+    Income, cash flow, balance sheets and main-financial indicators start in
+    the same batch. The outer and page pools share a fixed concurrency budget,
+    so nested pagination cannot multiply request pressure beyond CONCURRENCY.
+    """
+    fetchers = {
+        "income": fetch_income_history,
+        "cashflow": fetch_cashflow_history,
+        "balance": fetch_balance_history,
+        "indicators": fetch_main_financial_indicator_history,
+    }
+    results: dict[str, pd.DataFrame] = {}
+    parallel_error: DataFetchError | None = None
+    with ThreadPoolExecutor(max_workers=_DATACENTER_BATCH_WORKERS) as executor:
+        futures = {executor.submit(fetch): label for label, fetch in fetchers.items()}
+        try:
+            for future in as_completed(futures):
+                label = futures[future]
+                results[label] = future.result()
+        except DataFetchError as exc:
+            parallel_error = exc
+            for future in futures:
+                future.cancel()
+    if parallel_error is not None:
+        # A transient reset in any dataset invalidates the entire concurrent
+        # generation.  Retry all four sequentially so they still form one
+        # coherent all-or-error batch; never mix partial parallel results with
+        # the recovery generation.
+        time.sleep(1.0)
+        results = {}
+        try:
+            for label, fetch in fetchers.items():
+                results[label] = fetch()
+        except DataFetchError as exc:
+            raise DataFetchError(
+                f"annual financial refresh failed in parallel ({parallel_error}); "
+                f"sequential recovery also failed ({exc})"
+            ) from exc
+    return results["income"], results["cashflow"], results["balance"], results["indicators"]

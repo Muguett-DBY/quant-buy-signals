@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "source_policy": "CAPCO 2025H2 period-end cutoff fallback for later listings",
+  "records": {
+    "001220": {
+      "name": "世盟股份",
+      "section_code": "G",
+      "section_name": "交通运输、仓储和邮政业",
+      "subclass_code": "",
+      "subclass_name": "",
+      "division_code": "54",
+      "division_name": "道路运输业",
+      "source_authority": "深圳证券交易所",
+      "source_title": "世盟供应链管理股份有限公司上市公告书",
+      "source_url": "https://disc.static.szse.cn/disc/disk03/finalpage/2026-02-02/ceb5f0cd-1065-4cc4-b6c0-91303f8a13a2.PDF",
+      "source_sha256": "60ccc3a5a63a78043ecd3185455b05ff42c4ef88aa8b0a7e177deaa8f4310c27",
+      "source_pdf_page": 15,
+      "published_date": "2026-02-02"
+    },
+    "001396": {
+      "name": "誉帆科技",
+      "section_code": "M",
+      "section_name": "科学研究和技术服务业",
+      "subclass_code": "",
+      "subclass_name": "",
+      "division_code": "74",
+      "division_name": "专业技术服务业",
+      "source_authority": "深圳证券交易所",
+      "source_title": "上海誉帆环境科技股份有限公司上市公告书",
+      "source_url": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2025-12-29/fc2d33ee-1a37-4c83-8a2d-308be27aeae1.PDF",
+      "source_sha256": "25906832a1c786b82249ddaf5ef5791de0e2f8374f3bc82399f710eb6cd5c52e",
+      "source_pdf_page": 13,
+      "published_date": "2025-12-29"
+    },
+    "301449": {
+      "name": "天溯计量",
+      "section_code": "M",
+      "section_name": "科学研究和技术服务业",
+      "subclass_code": "",
+      "subclass_name": "",
+      "division_code": "74",
+      "division_name": "专业技术服务业",
+      "source_authority": "深圳证券交易所",
+      "source_title": "深圳天溯计量检测股份有限公司上市公告书",
+      "source_url": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2025-12-22/216ca665-57d8-47ba-ab22-52d82cb1e4b9.PDF",
+      "source_sha256": "8118547bf743cc256673352dddc1b97f816cfe19279d0b22ae3922b1a1e406b6",
+      "source_pdf_page": 18,
+      "published_date": "2025-12-22"
+    },
+    "688712": {
+      "name": "北芯生命",
+      "section_code": "C",
+      "section_name": "制造业",
+      "subclass_code": "CG",
+      "subclass_name": "专用、通用及交通运输设备",
+      "division_code": "35",
+      "division_name": "专用设备制造业",
+      "source_authority": "上海证券交易所",
+      "source_title": "深圳北芯生命科技股份有限公司上市公告书",
+      "source_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-02-04/688712_20260204_A9LF.pdf",
+      "source_sha256": "398246db2a784017e72c3463dd02c3038db5cbea5b272be17387364b321551f6",
+      "source_pdf_page": 16,
+      "published_date": "2026-02-04"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "metric": "TOTAL_OPERATE_INCOME",
+  "policy": "Only exchange-filed annual reports that explicitly disclose zero revenue may replace an upstream null.",
+  "records": [
+    {
+      "code": "600610",
+      "report_date": "2018-12-31",
+      "value": 0.0,
+      "source_document": "2018年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2019-06-28/1206403533.PDF",
+      "source_sha256": "be8bcff17be1068616a0df419d9bce26d23c18ae22fcc987693d4c63d7abdd5b",
+      "source_page": 7,
+      "source_statement": "主要会计数据披露2018年营业收入为0。"
+    },
+    {
+      "code": "688382",
+      "report_date": "2022-12-31",
+      "value": 0.0,
+      "source_document": "2022年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2023-04-26/1216582630.PDF",
+      "source_sha256": "163fe6ddb4cda27083cf78794380a7811fea224e78e5155e307cf4e60e002063",
+      "source_page": 9,
+      "source_statement": "近三年主要会计数据披露2022年营业收入为0。"
+    },
+    {
+      "code": "688302",
+      "report_date": "2023-12-31",
+      "value": 0.0,
+      "source_document": "2023年年度报告摘要",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2024-04-13/1219600783.PDF",
+      "source_sha256": "c1172906216b11e62d919f4c7fd88e42a3424124504533c08a599f83f9cabf28",
+      "source_page": 11,
+      "source_statement": "近三年主要会计数据披露2023年营业收入为0。"
+    }
+  ]
+}

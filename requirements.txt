@@ -1,0 +1,8 @@
+pandas==3.0.3
+numpy==2.4.6
+streamlit==1.59.2
+plotly==6.9.0
+requests==2.34.2
+# Explicit security floor for Streamlit's image dependency.
+pillow==12.3.0
+orjson==3.11.9

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "metric": "BALANCE_SHEET_CANONICAL_VALUES",
+  "policy": "Only an exact code/report-date exchange-filed audited balance sheet whose assets, liabilities, parent, minority, and total equity values internally reconcile may replace a mixed-statement bulk-API row; every original API value remains attached for audit.",
+  "records": [
+    {
+      "code": "002766",
+      "report_date": "2017-12-31",
+      "canonical_values": {
+        "TOTAL_ASSETS": 3660176992.98,
+        "TOTAL_LIABILITIES": 2012750505.12,
+        "TOTAL_EQUITY": 1647426487.86,
+        "TOTAL_PARENT_EQUITY": 1627587784.89,
+        "MINORITY_EQUITY": 19838702.97,
+        "MONETARYFUNDS": 869475074.23,
+        "SHORT_LOAN": 842100774.44,
+        "LONG_LOAN": 5856000.0,
+        "BONDS_PAYABLE": 479134716.1,
+        "NONCURRENT_LIAB_1YEAR": 3456000.0
+      },
+      "reporting_basis": "2016-2018年度全面审计并追溯重述后的2017年合并口径",
+      "source_document": "深圳市索菱实业股份有限公司2016-2018年度审计报告（更新后）",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2020-05-23/1207852063.PDF",
+      "source_sha256": "f142c1de83b2bc9f34ae5eb22a377ade5f2e2e23201a9526ac51eda482d3a8a6",
+      "source_pages": [8, 9],
+      "source_statement": "经全面审计和追溯重述的2017年合并资产负债表披露资产、负债、归母权益、少数股东权益和所有者权益合计；相关货币资金与有息负债项目同步取自该表。"
+    },
+    {
+      "code": "600228",
+      "report_date": "2020-12-31",
+      "canonical_values": {
+        "TOTAL_ASSETS": 1065106220.71,
+        "TOTAL_LIABILITIES": 240127349.63,
+        "TOTAL_EQUITY": 824978871.08,
+        "TOTAL_PARENT_EQUITY": 824978871.08,
+        "MINORITY_EQUITY": 0.0,
+        "MONETARYFUNDS": 888106761.83,
+        "SHORT_LOAN": 0.0
+      },
+      "reporting_basis": "2021年反向收购后会计购买方的2020年审计比较口径",
+      "source_document": "返利网数字科技股份有限公司2021年年度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2022-04-30/1213268739.PDF",
+      "source_sha256": "41986625a5a964639105ff093517789fda545983e9666ac31f90c76d54af6a4c",
+      "source_pages": [83, 84, 85],
+      "source_statement": "反向收购后会计购买方的2020年审计比较资产负债表披露资产、负债、归母及所有者权益；少数股东权益和短期借款栏为空，按该精确口径记为零。"
+    }
+  ]
+}

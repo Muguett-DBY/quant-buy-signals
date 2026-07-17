@@ -1,0 +1,331 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+import pytest
+import requests
+
+from data.cache import SafeFileCache
+from data.market_coldness import (
+    EASTMONEY_FIELDS,
+    EASTMONEY_SOURCE,
+    EASTMONEY_UNIVERSE,
+    EastmoneyMarketColdnessAdapter,
+    MarketColdnessError,
+    fetch_market_coldness_snapshot,
+)
+
+
+FIXED_TIME = datetime(2026, 7, 16, 5, 10, 9, tzinfo=timezone.utc)
+
+
+def _row(code="600000", market=1, **overrides):
+    value = {
+        "f12": code,
+        "f13": market,
+        "f14": f"股票{code}",
+        "f24": -12.5,
+        "f25": -8.25,
+        "f8": 0.71,
+        "f10": 0.83,
+        "f26": 19991110,
+    }
+    value.update(overrides)
+    return value
+
+
+def _page(total, rows):
+    return {"rc": 0, "data": {"total": total, "diff": rows}}
+
+
+class _FakeResponse:
+    def __init__(self, payload=None, *, raw=None, declared_length=None):
+        if raw is None:
+            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.content = raw
+        self.headers = {
+            "Content-Length": str(len(raw) if declared_length is None else declared_length),
+        }
+        self.closed = False
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size):
+        for offset in range(0, len(self.content), chunk_size):
+            yield self.content[offset : offset + chunk_size]
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeHttpClient:
+    def __init__(self, page_actions):
+        self.page_actions = {
+            page: list(actions) if isinstance(actions, list) else [actions] for page, actions in page_actions.items()
+        }
+        self.calls = []
+        self.responses = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        page = kwargs["params"]["pn"]
+        actions = self.page_actions.get(page)
+        if not actions:
+            raise AssertionError(f"unexpected request for page {page}")
+        action = actions.pop(0)
+        if isinstance(action, BaseException):
+            raise action
+        response = action if isinstance(action, _FakeResponse) else _FakeResponse(action)
+        self.responses.append(response)
+        return response
+
+
+def _adapter(client, *, page_size=2, retries=1):
+    return EastmoneyMarketColdnessAdapter(
+        http_client=client,
+        page_size=page_size,
+        retries=retries,
+        retry_delay=0,
+        clock=lambda: FIXED_TIME,
+    )
+
+
+def test_multi_page_whole_market_fetch_is_complete_provenanced_and_excludes_bj_filters():
+    missing = _row("000001", 0, f25="-", f8=None, f10=0)
+    missing.pop("f24")
+    missing["f26"] = "--"
+    client = _FakeHttpClient(
+        {
+            1: _page(3, [_row("600000", 1), missing]),
+            2: _page(3, [_row("300001", 0, f26="20091030")]),
+        }
+    )
+
+    batch = _adapter(client).fetch_all()
+
+    assert batch.total_expected == 3
+    assert batch.page_count == 2
+    assert len(batch.records) == 3
+    assert [record.code for record in batch.records] == ["600000", "000001", "300001"]
+    assert {record.exchange for record in batch.records} == {"SH", "SZ"}
+    assert all(record.source == EASTMONEY_SOURCE for record in batch.records)
+    assert all(record.retrieved_at == "2026-07-16T05:10:09Z" for record in batch.records)
+    assert len(client.calls) == 2  # pagination, never one request per stock
+    for _, kwargs in client.calls:
+        assert kwargs["stream"] is True
+        assert kwargs["params"]["fs"] == EASTMONEY_UNIVERSE
+        assert kwargs["params"]["fields"] == ",".join(EASTMONEY_FIELDS)
+        assert "t:81" not in kwargs["params"]["fs"]
+    assert all(response.closed for response in client.responses)
+
+    record = batch.records[1]
+    assert record.change_60d_pct is None
+    assert record.change_ytd_pct is None
+    assert record.turnover_rate_pct is None
+    assert record.volume_ratio == 0.0  # a real upstream zero remains distinguishable from missing
+    assert record.listing_date is None
+    assert "f24" not in record.upstream_fields
+    assert record.missing_reasons == {
+        "change_60d_pct": "upstream_field_absent:f24",
+        "change_ytd_pct": "upstream_placeholder:f25",
+        "turnover_rate_pct": "upstream_null:f8",
+        "listing_date": "upstream_placeholder:f26",
+    }
+
+    snapshot = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [missing])})), use_cache=False
+    )
+    assert snapshot.available
+    assert snapshot.universe_coverage_rate == 1.0
+    assert snapshot.coverage.by_metric["change_60d_pct"].present == 0
+    assert snapshot.coverage.by_metric["change_60d_pct"].missing == 1
+    assert snapshot.coverage.by_metric["volume_ratio"].coverage_rate == 1.0
+    assert snapshot.coverage.complete_records == 0
+
+
+def test_missing_or_short_page_is_rejected_instead_of_returning_partial_market():
+    client = _FakeHttpClient(
+        {
+            1: _page(3, [_row("600000"), _row("000001", 0)]),
+            2: _page(3, []),
+        }
+    )
+
+    with pytest.raises(MarketColdnessError, match=r"page 2 row-count mismatch: expected=1, received=0"):
+        _adapter(client).fetch_all()
+
+
+def test_total_must_remain_identical_on_every_page():
+    client = _FakeHttpClient(
+        {
+            1: _page(3, [_row("600000"), _row("000001", 0)]),
+            2: _page(4, [_row("300001", 0)]),
+        }
+    )
+
+    with pytest.raises(MarketColdnessError, match="total changed during pagination"):
+        _adapter(client).fetch_all()
+
+
+def test_duplicate_code_across_pages_is_rejected_and_public_result_is_structured_failure():
+    pages = {
+        1: _page(3, [_row("600000"), _row("000001", 0)]),
+        2: _page(3, [_row("600000")]),
+    }
+    with pytest.raises(MarketColdnessError, match="duplicate.*600000"):
+        _adapter(_FakeHttpClient(pages)).fetch_all()
+
+    result = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient(pages)),
+        use_cache=False,
+    )
+    assert not result.available
+    assert result.records == ()
+    assert result.total_expected is None
+    assert result.universe_coverage_rate is None
+    assert result.failure["stage"] == "source_fetch"
+    assert result.failure["kind"] == "MarketColdnessError"
+    assert "duplicate" in result.reason
+
+
+@pytest.mark.parametrize(
+    ("row", "message"),
+    [
+        (_row("920001", 0), "non-Shanghai/Shenzhen"),
+        (_row("830001", 0), "non-Shanghai/Shenzhen"),
+        (_row("600000", 0), "market/code mismatch"),
+        (_row("000001", 1), "market/code mismatch"),
+    ],
+)
+def test_beijing_codes_and_market_identity_mismatches_are_rejected(row, message):
+    with pytest.raises(MarketColdnessError, match=message):
+        _adapter(_FakeHttpClient({1: _page(1, [row])})).fetch_all()
+
+
+@pytest.mark.parametrize("bad_value", [True, float("nan"), float("inf"), float("-inf")])
+def test_boolean_nan_and_infinity_are_never_accepted_as_market_metrics(bad_value):
+    client = _FakeHttpClient({1: _page(1, [_row(f24=bad_value)])})
+
+    with pytest.raises(MarketColdnessError):
+        _adapter(client).fetch_all()
+
+
+def test_nonnegative_market_fields_reject_negative_values():
+    for field in ("f8", "f10"):
+        with pytest.raises(MarketColdnessError, match=f"{field} must be non-negative"):
+            _adapter(_FakeHttpClient({1: _page(1, [_row(**{field: -0.01})])})).fetch_all()
+
+
+def test_transport_timeout_is_retried_and_successful_response_is_closed():
+    client = _FakeHttpClient({1: [requests.Timeout("slow"), _page(1, [_row()])]})
+
+    batch = _adapter(client, retries=2).fetch_all()
+
+    assert len(batch.records) == 1
+    assert len(client.calls) == 2
+    assert len(client.responses) == 1
+    assert client.responses[0].closed
+
+
+def test_declared_oversized_response_is_rejected_without_retry_and_closed():
+    response = _FakeResponse(_page(1, [_row()]), declared_length=5 * 1024 * 1024)
+    client = _FakeHttpClient({1: response})
+
+    with pytest.raises(MarketColdnessError, match="byte limit"):
+        _adapter(client, retries=3).fetch_all()
+
+    assert len(client.calls) == 1
+    assert response.closed
+
+
+def test_cache_hit_replays_strict_records_without_calling_network(tmp_path):
+    cache_path = tmp_path / "coldness.json.gz"
+    first_client = _FakeHttpClient({1: _page(1, [_row()])})
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(first_client),
+        cache_path=cache_path,
+    )
+
+    assert first.available
+    assert not first.cache_hit
+    assert first.cache_diagnostic.endswith(";saved")
+    assert len(first_client.calls) == 1
+    loaded = SafeFileCache(cache_path, schema_version=1, max_uncompressed_bytes=64 * 1024 * 1024).load()
+    assert loaded.hit, loaded.reason
+    assert loaded.value["contract"]["universe"] == EASTMONEY_UNIVERSE
+    assert loaded.value["records"][0]["upstream_fields"]["f24"] == -12.5
+
+    class _MustNotFetch:
+        calls = 0
+
+        def fetch_all(self):
+            self.calls += 1
+            raise AssertionError("cache hit must return before network")
+
+    offline = _MustNotFetch()
+    second = fetch_market_coldness_snapshot(adapter=offline, cache_path=cache_path)
+
+    assert second.available
+    assert second.cache_hit
+    assert second.cache_diagnostic == "hit"
+    assert second.records == first.records
+    assert offline.calls == 0
+
+
+def test_force_refresh_bypasses_hit_but_preserves_cache_cas(tmp_path):
+    cache_path = tmp_path / "coldness.json.gz"
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row("600000", 1)])})),
+        cache_path=cache_path,
+    )
+    refresh_client = _FakeHttpClient({1: _page(1, [_row("000001", 0)])})
+
+    refreshed = fetch_market_coldness_snapshot(
+        adapter=_adapter(refresh_client),
+        cache_path=cache_path,
+        force_refresh=True,
+    )
+    replay = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({})),
+        cache_path=cache_path,
+    )
+
+    assert first.records[0].code == "600000"
+    assert refreshed.records[0].code == "000001"
+    assert len(refresh_client.calls) == 1
+    assert refreshed.cache_diagnostic == "forced_refresh;saved"
+    assert replay.cache_hit
+    assert replay.records == refreshed.records
+
+
+def test_semantically_invalid_checksummed_cache_is_refetched(tmp_path):
+    cache_path = tmp_path / "coldness.json.gz"
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row()])})),
+        cache_path=cache_path,
+    )
+    assert first.available
+    SafeFileCache(cache_path, schema_version=1).save({"unexpected": []})
+
+    client = _FakeHttpClient({1: _page(1, [_row("000001", 0)])})
+    replacement = fetch_market_coldness_snapshot(
+        adapter=_adapter(client),
+        cache_path=cache_path,
+    )
+
+    assert replacement.available
+    assert replacement.records[0].code == "000001"
+    assert replacement.cache_diagnostic.startswith("invalid_hit:")
+    assert replacement.cache_diagnostic.endswith(";saved")
+    assert len(client.calls) == 1
+
+
+def test_constructor_rejects_invalid_retry_and_page_contract_before_io():
+    with pytest.raises(ValueError, match="retries"):
+        EastmoneyMarketColdnessAdapter(retries=0)
+    with pytest.raises(ValueError, match="page_size"):
+        EastmoneyMarketColdnessAdapter(page_size=0)
+    with pytest.raises(ValueError, match="timeout"):
+        EastmoneyMarketColdnessAdapter(timeout=True)
