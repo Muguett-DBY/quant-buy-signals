@@ -66,11 +66,11 @@ python -m build --wheel --no-isolation
 python -m tools.build_desktop
 ```
 
-使用 `python -m tools.build_desktop --desktop` 交付时，所有版本化制品必须进入桌面 `6BUYING_POINT/<版本>/`，应用目录固定为 `app/`；稳定快捷方式固定放在 `6BUYING_POINT/DS_DCF.lnk`。不得重新把版本目录、ZIP 或快捷方式散放到桌面根目录。
+使用 `python -m tools.build_desktop --desktop` 交付时，所有版本化制品必须进入桌面 `6BUYING_POINT/<版本>/`：应用目录固定为 `app/`，并同放可双击的 `DS_DCF-v<版本>-windows-x64-installer.exe`、便携 ZIP 和该版本更新清单；稳定快捷方式固定放在 `6BUYING_POINT/DS_DCF.lnk`。安装器必须在不需要管理员权限的当前用户目录内先完成内置 ZIP 的字节数、SHA256、内部版本清单与安全路径校验，才允许首次安装。不得重新把版本目录、ZIP、安装器或快捷方式散放到桌面根目录。
 
 构建后还必须把唯一 wheel 安装到仓库外的空目录，并从该目录导入 `data.industry` 与 `tools.run_full_audit`，确认行业 JSON 和审计入口确实打入制品。wheel 是库/导入完整性制品，不是桌面运行包；根目录 `.streamlit/config.toml` 仅由受控的源码桌面包携带。随后检查 `git status --short`、`git ls-files --eol` 和下述禁入清单；固定种子沪深 eligible universe 审计必须在代码树干净且提交已确定时生成。最终源码压缩包必须从干净提交的 tracked files 构造，并执行 `python -m tools.verify_release_zip <zip路径>`；该检查会验证禁入文件、行尾、schema、沪深随机 100 身份及审计哈希与包内代码/规则/行业/依赖完全一致，禁止直接压缩含缓存的工作目录。
 
-Windows 运行制品由 `python -m tools.build_desktop` 使用固定版本 PyInstaller 构建。构建器依次运行 EXE 的 `--version`、资源 `--health-check`，并让冻结 EXE 真正拉起 Streamlit 子进程、等待本机健康端点返回 `ok`；三项全部通过后才生成包含内部发布清单的便携 ZIP。CI 的 Windows/Python 3.12 发布门禁执行同一构建流程。`--desktop` 仅把已经验证的目录、ZIP 和稳定快捷方式复制到当前用户桌面。桌面启动器只监听 `127.0.0.1`，缓存保存在 `%LOCALAPPDATA%\DS_DCF\cache`。上次成功分析结果仅在快照制品 SHA256、规则状态哈希、schema 和公司身份全部一致时恢复；任何不一致都会拒绝复用。更新必须来自配置的 HTTPS 清单，按包大小和 SHA256 校验后再检查 ZIP 路径、大小、压缩率、内部版本和 EXE 身份，并安装到桌面 `6BUYING_POINT/<版本>/app/`，同时保留经校验的便携 ZIP。环境变量、`6BUYING_POINT/update_config.json`、随包配置按此顺序选择更新源；已有目标版本还会逐文件复核，任何额外、缺失或被篡改文件都会拒绝当成已安装版本。不得用 HTTP、无哈希下载或原地覆盖旧版本替代该流程。
+Windows 运行制品由 `python -m tools.build_desktop` 使用固定版本 PyInstaller 构建。构建器依次运行 EXE 的 `--version`、资源 `--health-check`，并让冻结 EXE 真正拉起 Streamlit 子进程、等待本机健康端点返回 `ok`；三项全部通过后才生成包含内部发布清单的便携 ZIP。随后构建一份单文件安装器，安装器内嵌同一 ZIP 与更新清单，并实际执行 `--version` 和只读 `--verify-bundle`。CI 的 Windows/Python 3.12 发布门禁执行同一构建流程。`--desktop` 仅把已经验证的目录、ZIP、安装器、更新清单和稳定快捷方式复制到当前用户桌面。桌面启动器只监听 `127.0.0.1`，缓存保存在 `%LOCALAPPDATA%\DS_DCF\cache`。上次成功分析结果仅在快照制品 SHA256、规则状态哈希、schema 和公司身份全部一致时恢复；任何不一致都会拒绝复用。更新必须来自配置的 HTTPS 清单，按包大小和 SHA256 校验后再检查 ZIP 路径、大小、压缩率、内部版本和 EXE 身份，并安装到桌面 `6BUYING_POINT/<版本>/app/`，同时保留经校验的便携 ZIP。环境变量、`6BUYING_POINT/update_config.json`、随包配置按此顺序选择更新源；已有目标版本还会逐文件复核，任何额外、缺失或被篡改文件都会拒绝当成已安装版本。不得用 HTTP、无哈希下载或原地覆盖旧版本替代该流程。
 
 证监会行业源只能由 `tools/build_official_industry_source.py` 从官方代码排序 PDF 确定性生成。生成器会核验 PDF SHA256、最少记录数、代码唯一性和门类代码映射；期后新股的补录 JSON 必须保存交易所文件 URL、SHA256、页码和行业代码。任何手工改写但无法回溯到这些来源的数据都不能进入发布包。
 

@@ -7,12 +7,12 @@ import zipfile
 import pytest
 
 from desktop.version import __version__
-from desktop import launcher
+from desktop import installer, launcher
 from tools import build_desktop
 
 
 def test_desktop_version_matches_project_and_release_manifest():
-    assert __version__ == "11.0.0"
+    assert __version__ == "11.0.1"
     assert build_desktop._project_version() == __version__
     assert build_desktop._release_manifest() == {
         "schema_version": 1,
@@ -33,6 +33,18 @@ def test_desktop_bundle_and_health_gate_include_every_financial_evidence_file():
     assert evidence_files <= set(launcher._HEALTH_REQUIRED_RESOURCE_FILES)
     for relative in evidence_files:
         assert f'ROOT / "data" / "{Path(relative).name}"' in spec
+
+
+def test_bootstrap_installer_spec_and_default_release_url_are_version_bound():
+    spec = (Path(__file__).resolve().parents[1] / "desktop" / "DS_DCF_Installer.spec").read_text(encoding="utf-8")
+
+    assert "DS_DCF_INSTALLER_PACKAGE" in spec
+    assert "DS_DCF_INSTALLER_MANIFEST" in spec
+    assert build_desktop._default_package_url().endswith(
+        f"/v{__version__}/DS_DCF-v{__version__}-windows-x64-portable.zip"
+    )
+    assert installer._PORTABLE_PACKAGE_NAME == f"DS_DCF-v{__version__}-windows-x64-portable.zip"
+    assert installer._BUNDLED_MANIFEST_NAME == f"DS_DCF-v{__version__}-update-manifest.json"
 
 
 def test_desktop_portable_zip_is_deterministic_and_version_rooted(tmp_path):
@@ -71,15 +83,19 @@ def test_desktop_build_cleanup_never_removes_its_allowed_root(tmp_path):
 
 
 def test_desktop_delivery_groups_every_release_under_one_version_folder(tmp_path):
-    library, version_root, app_root, archive = build_desktop._desktop_delivery_paths(
+    library, version_root, app_root, archive, installer_path, manifest_path = build_desktop._desktop_delivery_paths(
         tmp_path,
         f"DS_DCF-v{__version__}-windows-x64-portable.zip",
+        f"DS_DCF-v{__version__}-windows-x64-installer.exe",
+        f"DS_DCF-v{__version__}-update-manifest.json",
     )
 
     assert library == tmp_path / "6BUYING_POINT"
     assert version_root == library / __version__
     assert app_root == version_root / "app"
     assert archive == version_root / f"DS_DCF-v{__version__}-windows-x64-portable.zip"
+    assert installer_path == version_root / f"DS_DCF-v{__version__}-windows-x64-installer.exe"
+    assert manifest_path == version_root / f"DS_DCF-v{__version__}-update-manifest.json"
 
 
 def test_desktop_delivery_is_atomic_and_immutable(tmp_path):
@@ -90,20 +106,30 @@ def test_desktop_delivery_is_atomic_and_immutable(tmp_path):
     (release / "DS_DCF.exe").write_bytes(b"MZ")
     archive = tmp_path / "portable.zip"
     archive.write_bytes(b"zip")
+    bootstrapper = tmp_path / "installer.exe"
+    bootstrapper.write_bytes(b"MZ-installer")
+    manifest = tmp_path / "update-manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
 
-    library, version_root, app_root, copied_archive = build_desktop._deliver_to_desktop(
-        release,
-        archive,
-        desktop,
+    library, version_root, app_root, copied_archive, copied_installer, copied_manifest = (
+        build_desktop._deliver_to_desktop(
+            release,
+            archive,
+            bootstrapper,
+            manifest,
+            desktop,
+        )
     )
 
     assert library == desktop / "6BUYING_POINT"
     assert version_root == library / __version__
     assert (app_root / "DS_DCF.exe").read_bytes() == b"MZ"
     assert copied_archive.read_bytes() == b"zip"
+    assert copied_installer.read_bytes() == b"MZ-installer"
+    assert copied_manifest.read_text(encoding="utf-8") == "{}\n"
     assert not list(library.glob(".*-staging-*"))
     with pytest.raises(RuntimeError, match="already exists"):
-        build_desktop._deliver_to_desktop(release, archive, desktop)
+        build_desktop._deliver_to_desktop(release, archive, bootstrapper, manifest, desktop)
 
 
 def test_desktop_delivery_cleans_failed_staging(tmp_path, monkeypatch):
@@ -113,13 +139,17 @@ def test_desktop_delivery_cleans_failed_staging(tmp_path, monkeypatch):
     release.mkdir()
     archive = tmp_path / "portable.zip"
     archive.write_bytes(b"zip")
+    bootstrapper = tmp_path / "installer.exe"
+    bootstrapper.write_bytes(b"MZ-installer")
+    manifest = tmp_path / "update-manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
 
     def fail_copytree(*_args, **_kwargs):
         raise OSError("injected copy failure")
 
     monkeypatch.setattr(build_desktop.shutil, "copytree", fail_copytree)
     with pytest.raises(OSError, match="injected"):
-        build_desktop._deliver_to_desktop(release, archive, desktop)
+        build_desktop._deliver_to_desktop(release, archive, bootstrapper, manifest, desktop)
 
     library = desktop / "6BUYING_POINT"
     assert not (library / __version__).exists()

@@ -35,14 +35,14 @@ python -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501
 
 ## Windows 桌面版
 
-桌面版是 Windows EXE 与便携 ZIP，不是 Android APK。它在本机 `127.0.0.1` 启动内置 Streamlit 服务，运行缓存写入 `%LOCALAPPDATA%\DS_DCF\cache`，不会污染安装目录。成功完成一次完整分析后，下一次启动可以复用与快照文件 SHA256、规则哈希和 schema 严格绑定的结果；快照或规则变化时会自动失效并重新分析。
+桌面版是 Windows EXE 安装器与便携 ZIP，不是 Android APK。首次使用请双击版本目录中的 `DS_DCF-v<版本>-windows-x64-installer.exe`；它不需要管理员权限，会先核对内置 ZIP 的字节数、SHA256、内部版本清单和安全路径，再安装到当前用户的版本库。它在本机 `127.0.0.1` 启动内置 Streamlit 服务，运行缓存写入 `%LOCALAPPDATA%\DS_DCF\cache`，不会污染安装目录。成功完成一次完整分析后，下一次启动可以复用与快照文件 SHA256、规则哈希和 schema 严格绑定的结果；快照或规则变化时会自动失效并重新分析。
 
 ```powershell
 python -m tools.build_desktop
 python -m tools.build_desktop --desktop
 ```
 
-构建器会实际启动冻结后的 Streamlit 子进程并请求本机健康端点；只有版本、资源与服务器三项冒烟检查全部通过才生成便携包。第二条命令把每一版的便携目录和 ZIP 统一放进桌面 `6BUYING_POINT/<版本>/`（程序位于该目录的 `app/`），稳定快捷方式放在 `6BUYING_POINT/DS_DCF.lnk`，不会再把不同版本散落在桌面根目录。控制窗口提供“检查更新”；官方随包配置指向公开仓库 `Muguett-DBY/quant-buy-signals` 的 HTTPS 清单，下载包必须同时通过字节数、SHA256、内部版本清单和安全 ZIP 路径校验，并安装到新的 `6BUYING_POINT/<版本>/app/`，旧版本和已下载便携 ZIP 都会保留。更新源优先级是环境变量、`6BUYING_POINT/update_config.json`、随包配置；配置缺失时更新按钮会明确报告“尚未配置更新源”，不会接受 HTTP 地址。
+构建器会实际启动冻结后的 Streamlit 子进程并请求本机健康端点；只有版本、资源与服务器三项冒烟检查全部通过才生成便携包和安装器。第二条命令把每一版的应用目录、便携 ZIP、安装器和该版本更新清单统一放进桌面 `6BUYING_POINT/<版本>/`（程序位于该目录的 `app/`），稳定快捷方式放在 `6BUYING_POINT/DS_DCF.lnk`，不会再把不同版本散落在桌面根目录。控制窗口提供“检查更新”；官方随包配置指向公开仓库 `Muguett-DBY/quant-buy-signals` 的 HTTPS 清单，下载包必须同时通过字节数、SHA256、内部版本清单和安全 ZIP 路径校验，并安装到新的 `6BUYING_POINT/<版本>/app/`，旧版本和已下载便携 ZIP 都会保留。更新源优先级是环境变量、`6BUYING_POINT/update_config.json`、随包配置；配置缺失时更新按钮会明确报告“尚未配置更新源”，不会接受 HTTP 地址。
 
 ## 验证
 

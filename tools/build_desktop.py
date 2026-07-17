@@ -20,6 +20,7 @@ from desktop.version import __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_RELEASE_BASE_URL = "https://github.com/Muguett-DBY/quant-buy-signals/releases/download"
 
 
 def _inside(parent: Path, child: Path) -> bool:
@@ -89,16 +90,40 @@ def _desktop_directory() -> Path:
     return path
 
 
-def _desktop_delivery_paths(desktop: Path, zip_name: str) -> tuple[Path, Path, Path, Path]:
-    """Return library/version/app/ZIP paths for one immutable desktop release."""
+def _desktop_delivery_paths(
+    desktop: Path,
+    zip_name: str,
+    installer_name: str,
+    manifest_name: str,
+) -> tuple[Path, Path, Path, Path, Path, Path]:
+    """Return library/version/app/ZIP/installer/manifest paths for one immutable release."""
     library = desktop.resolve() / DESKTOP_LIBRARY_NAME
     version_root = library / __version__
-    return library, version_root, version_root / "app", version_root / zip_name
+    return (
+        library,
+        version_root,
+        version_root / "app",
+        version_root / zip_name,
+        version_root / installer_name,
+        version_root / manifest_name,
+    )
 
 
-def _deliver_to_desktop(release_dir: Path, zip_path: Path, desktop: Path) -> tuple[Path, Path, Path, Path]:
-    """Atomically publish one immutable version under the Desktop library."""
-    library, version_root, desktop_folder, desktop_zip = _desktop_delivery_paths(desktop, zip_path.name)
+def _deliver_to_desktop(
+    release_dir: Path,
+    zip_path: Path,
+    installer_path: Path,
+    manifest_path: Path,
+    desktop: Path,
+) -> tuple[Path, Path, Path, Path, Path, Path]:
+    """Atomically publish app, portable ZIP, installer, and manifest under one version folder."""
+
+    library, version_root, desktop_folder, desktop_zip, desktop_installer, desktop_manifest = _desktop_delivery_paths(
+        desktop,
+        zip_path.name,
+        installer_path.name,
+        manifest_path.name,
+    )
     library.mkdir(parents=True, exist_ok=True)
     if version_root.exists():
         raise RuntimeError(f"desktop version folder already exists: {version_root}")
@@ -106,11 +131,13 @@ def _deliver_to_desktop(release_dir: Path, zip_path: Path, desktop: Path) -> tup
     try:
         shutil.copytree(release_dir, staging / "app")
         shutil.copy2(zip_path, staging / zip_path.name)
+        shutil.copy2(installer_path, staging / installer_path.name)
+        shutil.copy2(manifest_path, staging / manifest_path.name)
         os.replace(staging, version_root)
     except BaseException:
         _safe_remove_tree(staging, allowed_root=library)
         raise
-    return library, version_root, desktop_folder, desktop_zip
+    return library, version_root, desktop_folder, desktop_zip, desktop_installer, desktop_manifest
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -120,6 +147,48 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--desktop", action="store_true", help="copy the verified folder and ZIP to the Desktop")
     parser.add_argument("--package-url", help="HTTPS URL used to emit a deployable update manifest")
     return parser
+
+
+def _default_package_url() -> str:
+    return f"{PUBLIC_RELEASE_BASE_URL}/v{__version__}/DS_DCF-v{__version__}-windows-x64-portable.zip"
+
+
+def _build_installer(*, package: Path, manifest: Path, output_root: Path, work_root: Path) -> Path:
+    """Build and smoke-test the one-file first-install bootstrapper."""
+
+    pyinstaller_dist = work_root / "installer-dist"
+    pyinstaller_work = work_root / "installer-work"
+    _safe_remove_tree(pyinstaller_dist, allowed_root=work_root)
+    _safe_remove_tree(pyinstaller_work, allowed_root=work_root)
+    environment = dict(os.environ)
+    environment["DS_DCF_INSTALLER_PACKAGE"] = str(package.resolve())
+    environment["DS_DCF_INSTALLER_MANIFEST"] = str(manifest.resolve())
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--distpath",
+            str(pyinstaller_dist),
+            "--workpath",
+            str(pyinstaller_work),
+            str(ROOT / "desktop" / "DS_DCF_Installer.spec"),
+        ],
+        cwd=ROOT,
+        check=True,
+        env=environment,
+    )
+    built = pyinstaller_dist / "DS_DCF_Installer.exe"
+    if not built.is_file():
+        raise RuntimeError("PyInstaller did not produce the DS_DCF installer")
+    installer = output_root / f"DS_DCF-v{__version__}-windows-x64-installer.exe"
+    installer.unlink(missing_ok=True)
+    shutil.copy2(built, installer)
+    subprocess.run([str(installer), "--version"], cwd=output_root, check=True, timeout=60)
+    subprocess.run([str(installer), "--verify-bundle"], cwd=output_root, check=True, timeout=180)
+    return installer
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -183,32 +252,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         "zip_size": zip_path.stat().st_size,
         "zip_sha256": package_sha256,
     }
-    if args.package_url:
-        from desktop.updater import _validate_https_url
+    from desktop.updater import _validate_https_url
 
-        package_url = _validate_https_url(args.package_url, field="package_url")
-        update_manifest = {
-            "schema_version": 1,
-            "product": PRODUCT_ID,
-            "version": __version__,
-            "published_at": datetime.now(timezone.utc).isoformat(),
-            "package_url": package_url,
-            "sha256": package_sha256,
-            "size": zip_path.stat().st_size,
-        }
-        manifest_path = output_root / f"DS_DCF-v{__version__}-update-manifest.json"
-        manifest_path.write_text(
-            json.dumps(update_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        summary["update_manifest"] = str(manifest_path)
+    package_url = _validate_https_url(args.package_url or _default_package_url(), field="package_url")
+    update_manifest = {
+        "schema_version": 1,
+        "product": PRODUCT_ID,
+        "version": __version__,
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "package_url": package_url,
+        "sha256": package_sha256,
+        "size": zip_path.stat().st_size,
+    }
+    manifest_path = output_root / f"DS_DCF-v{__version__}-update-manifest.json"
+    manifest_path.write_text(
+        json.dumps(update_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    installer_path = _build_installer(
+        package=zip_path,
+        manifest=manifest_path,
+        output_root=output_root,
+        work_root=work_root,
+    )
+    summary.update({"update_manifest": str(manifest_path), "installer": str(installer_path)})
 
     if args.desktop:
         from desktop.updater import create_desktop_shortcut
 
         desktop = _desktop_directory()
-        library, version_root, desktop_folder, desktop_zip = _deliver_to_desktop(release_dir, zip_path, desktop)
+        library, version_root, desktop_folder, desktop_zip, desktop_installer, desktop_manifest = _deliver_to_desktop(
+            release_dir,
+            zip_path,
+            installer_path,
+            manifest_path,
+            desktop,
+        )
         shortcut = create_desktop_shortcut(desktop_folder / "DS_DCF.exe")
         summary.update(
             {
@@ -216,6 +296,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "desktop_version_root": str(version_root),
                 "desktop_folder": str(desktop_folder),
                 "desktop_zip": str(desktop_zip),
+                "desktop_installer": str(desktop_installer),
+                "desktop_update_manifest": str(desktop_manifest),
                 "desktop_shortcut": str(shortcut) if shortcut is not None else None,
             }
         )

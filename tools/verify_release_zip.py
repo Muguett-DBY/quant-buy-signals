@@ -113,11 +113,13 @@ _REQUIRED_FILES = {
     "tools/verify_release_zip.py",
     "desktop/__init__.py",
     "desktop/launcher.py",
+    "desktop/installer.py",
     "desktop/updater.py",
     "desktop/version.py",
     "desktop/update_config.json",
     "desktop/version_info.txt",
     "desktop/DS_DCF.spec",
+    "desktop/DS_DCF_Installer.spec",
     "requirements-bootstrap.txt",
     "requirements.txt",
     "requirements-lock.txt",
@@ -134,7 +136,7 @@ _AUDIT_CSV_PATH = "audit/random100_audit_seed20260715.csv"
 _AUDIT_MARKDOWN_PATH = "audit/random100_audit_seed20260715.md"
 _RELEASE_AUDIT_PATHS = {_AUDIT_JSON_PATH, _AUDIT_CSV_PATH, _AUDIT_MARKDOWN_PATH}
 _EXPECTED_AUDIT_SEED = 20260715
-_EXPECTED_RELEASE_VERSION = "11.0.0"
+_EXPECTED_RELEASE_VERSION = "11.0.1"
 _EXPECTED_PROJECT_LICENSE = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 _EXPECTED_LICENSE_SHA256 = "a7106a6f8ee245b6e8b0482b8eab8c874a8a40819c8718c92180e0ef3dad596c"
 _EXPECTED_UPDATE_MANIFEST_URL = (

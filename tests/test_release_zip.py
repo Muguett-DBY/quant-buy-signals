@@ -759,7 +759,7 @@ def _write_minimal_release(
     omit_files=(),
     extra_files=None,
 ):
-    prefix = "DS_DCF-v11.0.0/"
+    prefix = "DS_DCF-v11.0.1/"
     runtime_versions = {
         "numpy": "2.4.6",
         "orjson": "3.11.9",
@@ -796,14 +796,16 @@ def _write_minimal_release(
         "data/snapshot.py": b"# snapshot\n",
         "desktop/__init__.py": b"\n",
         "desktop/launcher.py": b"# desktop launcher\n",
+        "desktop/installer.py": b"# desktop installer\n",
         "desktop/updater.py": b"# desktop updater\n",
-        "desktop/version.py": b"__version__ = '11.0.0'\n",
+        "desktop/version.py": b"__version__ = '11.0.1'\n",
         "desktop/update_config.json": (
             b'{"manifest_url":"https://github.com/Muguett-DBY/quant-buy-signals/'
             b'releases/latest/download/update-manifest.json"}\n'
         ),
         "desktop/version_info.txt": b"# version info\n",
         "desktop/DS_DCF.spec": b"# pyinstaller spec\n",
+        "desktop/DS_DCF_Installer.spec": b"# pyinstaller installer spec\n",
         "engine/audit.py": b"# audit\n",
         "engine/buy_screener.py": b"# rules\n",
         "engine/dcf.py": b"# dcf\n",
@@ -833,7 +835,7 @@ def _write_minimal_release(
             + _locked_line("build", "1.5.0")
         ).encode(),
         "pyproject.toml": (
-            b"[project]\nname='ds-dcf'\nversion='11.0.0'\nrequires-python='>=3.11,<3.15'\n"
+            b"[project]\nname='ds-dcf'\nversion='11.0.1'\nrequires-python='>=3.11,<3.15'\n"
             b"license='LicenseRef-PolyForm-Noncommercial-1.0.0'\nlicense-files=['LICENSE']\n"
             b"dependencies=['numpy==2.4.6','orjson==3.11.9','pandas==3.0.3','plotly==6.9.0','pillow==12.3.0',"
             b"'requests==2.34.2','streamlit==1.59.2']\n"
@@ -1561,7 +1563,7 @@ def test_release_zip_verifier_rejects_case_collisions_symlinks_and_embedded_cred
     with ZipFile(clean) as source, ZipFile(symlink, "w", compression=ZIP_DEFLATED) as target:
         for entry in source.infolist():
             target.writestr(entry, source.read(entry))
-        link = ZipInfo("DS_DCF-v11.0.0/link-to-outside")
+        link = ZipInfo("DS_DCF-v11.0.1/link-to-outside")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         target.writestr(link, "../../outside")

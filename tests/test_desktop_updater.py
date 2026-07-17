@@ -17,9 +17,9 @@ def _manifest_payload(**updates):
     payload = {
         "schema_version": 1,
         "product": "DS_DCF",
-        "version": "11.0.1",
+        "version": "11.0.2",
         "published_at": "2026-07-17T00:00:00+00:00",
-        "package_url": "https://downloads.example.test/DS_DCF-v11.0.1.zip",
+        "package_url": "https://downloads.example.test/DS_DCF-v11.0.2.zip",
         "sha256": "a" * 64,
         "size": 123,
     }
@@ -63,7 +63,7 @@ class _Session:
         return self.response
 
 
-def _write_release_zip(path, *, version="11.0.1", mutations=None):
+def _write_release_zip(path, *, version="11.0.2", mutations=None):
     root = f"DS_DCF-v{version}"
     entries = {
         f"{root}/DS_DCF.exe": b"MZ-test-executable",
@@ -98,7 +98,7 @@ def _write_release_zip(path, *, version="11.0.1", mutations=None):
 
 def test_update_manifest_is_strict_https_dated_and_canonical():
     manifest = _parsed_manifest()
-    assert manifest.version == "11.0.1"
+    assert manifest.version == "11.0.2"
     assert manifest.package_url.startswith("https://")
 
     with pytest.raises(updater.UpdateError, match="HTTPS"):
@@ -117,9 +117,19 @@ def test_update_manifest_is_strict_https_dated_and_canonical():
         )
 
 
+def test_local_package_verification_is_side_effect_free_and_reuses_update_gates(tmp_path):
+    package = tmp_path / "release.zip"
+    manifest = _write_release_zip(package)
+
+    verified = updater.verify_update_package(package, manifest)
+
+    assert verified == package.resolve()
+    assert list(tmp_path.iterdir()) == [package]
+
+
 def test_manifest_fetch_rejects_insecure_redirect_and_duplicate_json_key():
     duplicate = (
-        b'{"schema_version":1,"schema_version":1,"product":"DS_DCF","version":"11.0.1",'
+        b'{"schema_version":1,"schema_version":1,"product":"DS_DCF","version":"11.0.2",'
         b'"published_at":"2026-07-17T00:00:00+00:00","package_url":"https://example.test/p.zip",'
         b'"sha256":"' + b"a" * 64 + b'","size":123}'
     )
@@ -135,7 +145,7 @@ def test_manifest_fetch_rejects_insecure_redirect_and_duplicate_json_key():
 def test_download_requires_exact_manifest_size_and_sha256(tmp_path):
     body = b"verified update bytes"
     manifest = updater.UpdateManifest(
-        version="11.0.1",
+        version="11.0.2",
         published_at="2026-07-17T00:00:00+00:00",
         package_url="https://downloads.example.test/package.zip",
         sha256=hashlib.sha256(body).hexdigest(),
@@ -159,7 +169,7 @@ def test_download_requires_exact_manifest_size_and_sha256(tmp_path):
 def test_download_never_overwrites_or_deletes_a_preexisting_partial_file(tmp_path):
     body = b"verified update bytes"
     manifest = updater.UpdateManifest(
-        version="11.0.1",
+        version="11.0.2",
         published_at="2026-07-17T00:00:00+00:00",
         package_url="https://downloads.example.test/package.zip",
         sha256=hashlib.sha256(body).hexdigest(),
@@ -181,7 +191,7 @@ def test_download_never_overwrites_or_deletes_a_preexisting_partial_file(tmp_pat
 def test_temporary_cleanup_failure_does_not_mask_the_validation_error(tmp_path, monkeypatch):
     body = b"corrupt update bytes"
     manifest = updater.UpdateManifest(
-        version="11.0.1",
+        version="11.0.2",
         published_at="2026-07-17T00:00:00+00:00",
         package_url="https://downloads.example.test/package.zip",
         sha256="0" * 64,
@@ -211,11 +221,11 @@ def test_valid_update_installs_side_by_side_without_overwriting_current_version(
         create_shortcut=False,
     )
 
-    assert installed.version == "11.0.1"
+    assert installed.version == "11.0.2"
     assert installed.executable.read_bytes() == b"MZ-test-executable"
-    assert installed.version_dir == (tmp_path / "versions" / "11.0.1").resolve()
-    assert installed.install_dir == (tmp_path / "versions" / "11.0.1" / "app").resolve()
-    assert installed.package.name == "DS_DCF-v11.0.1-windows-x64-portable.zip"
+    assert installed.version_dir == (tmp_path / "versions" / "11.0.2").resolve()
+    assert installed.install_dir == (tmp_path / "versions" / "11.0.2" / "app").resolve()
+    assert installed.package.name == "DS_DCF-v11.0.2-windows-x64-portable.zip"
     assert installed.package.read_bytes() == package.read_bytes()
     assert package.is_file()
 
@@ -284,9 +294,9 @@ def test_existing_version_rejects_an_application_root_symlink(tmp_path):
     "mutation, message",
     [
         ({"../escape.exe": b"bad"}, "one versioned product root"),
-        ({"DS_DCF-v11.0.1/ds_dcf.EXE": b"collision"}, "case-colliding"),
-        ({"DS_DCF-v11.0.1/CON.txt": b"reserved"}, "reserved Windows"),
-        ({"DS_DCF-v11.0.1/invalid?.dll": b"bad"}, "unsafe path component"),
+        ({"DS_DCF-v11.0.2/ds_dcf.EXE": b"collision"}, "case-colliding"),
+        ({"DS_DCF-v11.0.2/CON.txt": b"reserved"}, "reserved Windows"),
+        ({"DS_DCF-v11.0.2/invalid?.dll": b"bad"}, "unsafe path component"),
     ],
 )
 def test_update_zip_rejects_traversal_case_collisions_and_reserved_names(tmp_path, mutation, message):
@@ -305,7 +315,7 @@ def test_update_zip_rejects_traversal_case_collisions_and_reserved_names(tmp_pat
 
 def test_update_zip_rejects_symbolic_links(tmp_path):
     package = tmp_path / "symlink.zip"
-    root = "DS_DCF-v11.0.1"
+    root = "DS_DCF-v11.0.2"
     link = zipfile.ZipInfo(f"{root}/link")
     link.create_system = 3
     link.external_attr = (stat.S_IFLNK | 0o777) << 16
@@ -323,9 +333,9 @@ def test_update_zip_rejects_symbolic_links(tmp_path):
 @pytest.mark.parametrize(
     "name, mode, message",
     [
-        ("DS_DCF-v11.0.1/mode-says-directory", stat.S_IFDIR | 0o755, "type disagrees"),
-        ("DS_DCF-v11.0.1/mode-says-file/", stat.S_IFREG | 0o644, "type disagrees"),
-        ("DS_DCF-v11.0.1", stat.S_IFREG | 0o644, "root must be a directory"),
+        ("DS_DCF-v11.0.2/mode-says-directory", stat.S_IFDIR | 0o755, "type disagrees"),
+        ("DS_DCF-v11.0.2/mode-says-file/", stat.S_IFREG | 0o644, "type disagrees"),
+        ("DS_DCF-v11.0.2", stat.S_IFREG | 0o644, "root must be a directory"),
     ],
 )
 def test_update_zip_rejects_external_mode_and_path_type_mismatches(tmp_path, name, mode, message):
@@ -356,7 +366,7 @@ def test_corrupt_zip_and_target_path_conflict_are_normalized_to_update_error(tmp
     package.write_bytes(b"not-a-zip")
     raw = package.read_bytes()
     manifest = updater.UpdateManifest(
-        version="11.0.1",
+        version="11.0.2",
         published_at="2026-07-17T00:00:00+00:00",
         package_url="https://downloads.example.test/corrupt.zip",
         sha256=hashlib.sha256(raw).hexdigest(),
@@ -374,7 +384,7 @@ def test_corrupt_zip_and_target_path_conflict_are_normalized_to_update_error(tmp
     valid_manifest = _write_release_zip(valid)
     root = tmp_path / "blocked"
     root.mkdir()
-    (root / "11.0.1").write_bytes(b"path conflict")
+    (root / "11.0.2").write_bytes(b"path conflict")
     with pytest.raises(updater.UpdateError, match="directory is missing"):
         updater.install_update_package(
             valid,

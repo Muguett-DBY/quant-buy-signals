@@ -499,6 +499,41 @@ def _verify_install_against_archive(
     return executable
 
 
+def verify_update_package(
+    package_path: str | os.PathLike[str],
+    manifest: UpdateManifest,
+) -> Path:
+    """Verify a local update ZIP without changing the installed version library.
+
+    The bootstrap installer uses this same gate before its first installation,
+    so a release ZIP cannot have a weaker trust path than an in-app update.
+    """
+
+    package = Path(package_path).expanduser().resolve()
+    if not package.is_file():
+        raise UpdateError("update package does not exist")
+    package_size, package_digest = _sha256_file(package)
+    if package_size != manifest.size:
+        raise UpdateError("stored update package size does not match the manifest")
+    if package_digest != manifest.sha256:
+        raise UpdateError("stored update package SHA-256 does not match the manifest")
+    try:
+        with zipfile.ZipFile(package, "r") as archive:
+            package_root, entries = _validated_zip_entries(archive, version=manifest.version)
+            internal_name = f"{package_root}/release-manifest.json"
+            try:
+                _validate_internal_release_manifest(archive.read(internal_name), version=manifest.version)
+            except (KeyError, RuntimeError, zipfile.BadZipFile) as exc:
+                raise UpdateError("update ZIP internal release manifest could not be read") from exc
+    except UpdateError:
+        raise
+    except zipfile.BadZipFile as exc:
+        raise UpdateError("update package is not a valid ZIP archive") from exc
+    except OSError as exc:
+        raise UpdateError(f"update package could not be read: {type(exc).__name__}") from exc
+    return package
+
+
 def install_update_package(
     package_path: str | os.PathLike[str],
     manifest: UpdateManifest,
@@ -509,14 +544,7 @@ def install_update_package(
 ) -> InstalledUpdate:
     if _semver_tuple(manifest.version) <= _semver_tuple(current_version):
         raise UpdateError("refusing to install the same version or a downgrade")
-    package = Path(package_path).expanduser().resolve()
-    if not package.is_file():
-        raise UpdateError("update package does not exist")
-    package_size, package_digest = _sha256_file(package)
-    if package_size != manifest.size:
-        raise UpdateError("stored update package size does not match the manifest")
-    if package_digest != manifest.sha256:
-        raise UpdateError("stored update package SHA-256 does not match the manifest")
+    package = verify_update_package(package_path, manifest)
 
     root = Path(versions_root).expanduser().resolve() if versions_root is not None else default_version_library_root()
     target_version = (root / manifest.version).resolve()
@@ -718,4 +746,5 @@ __all__ = [
     "install_update_package",
     "load_update_manifest_url",
     "parse_update_manifest",
+    "verify_update_package",
 ]
