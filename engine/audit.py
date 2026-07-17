@@ -197,7 +197,7 @@ _DEPENDENCY_FILES = (
     _ROOT / "pyproject.toml",
 )
 PATCH6_SOURCE_PATH = r"E:\模板汇总MD\补丁6.md"
-PATCH6_SOURCE_SHA256 = "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56"
+PATCH6_SOURCE_SHA256 = "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6"
 TYPE7_SOURCE_DOCUMENTS = {
     "template1": {
         "path_at_model_authoring": r"E:\模板汇总MD\第1模板.md",

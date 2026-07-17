@@ -151,6 +151,19 @@ STRONG_CYCLICAL_INDUSTRIES = {
     "CONST_MACHINERY",
     "AGRICULTURE",
 }
+# ``STRONG_CYCLICAL_INDUSTRIES`` 还服务于其他模板的保守杠杆约束，不能
+# 直接拿来给情况五自动确认为强周期。情况五的适用门槛更严格：行业分类
+# 只能提供“产品有公开大宗价格”的一项线索，仍须盈利/毛利率或人工原始
+# 证据共同确认。运输、农业、新能源设备等大类混有大量非强周期公司，故
+# 不允许仅凭宽泛行业标签自动进入情况五。
+TYPE5_DIRECT_CYCLICAL_INDUSTRIES = {
+    "STEEL",
+    "NONFERROUS",
+    "CHEMICAL",
+    "BUILDING_MATERIAL",
+    "OIL_GAS",
+    "COAL",
+}
 # 第19模板明确区分两类VC标的：高景气赛道不超过300亿元、平稳
 # 产业反转不超过100亿元。旧值 ``30e8`` 只有30亿元，缩小了10倍。
 TYPE6_GROWTH_MARKET_CAP_LIMIT = 300e8  # 300亿元
@@ -172,6 +185,13 @@ QUALITATIVE_SCORE_KEYS = (
     "growth_sustainability_score",
     "type3_bubble_score",
     "cyclical_industry_score",
+    # 情况五的七类专用证据。每个分数都必须随附来源、证据编号和截止日；
+    # 它们不会被自动财务代理补全，避免把单年 PE/PB 冒充周期底部证据。
+    "type5_cycle_attribute_score",
+    "type5_bottom_signal_score",
+    "type5_survival_score",
+    "type5_upside_elasticity_score",
+    "type5_normalized_earnings_score",
 ) + TYPE7_DIRECT_SCORE_KEYS
 
 _PARENT_EQUITY_KEYS = (
@@ -278,10 +298,46 @@ def _verified_score(container: Mapping[str, Any], key: str) -> Optional[float]:
 
 
 def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> str:
+    """Return a short human-facing evidence description, never an internal ID.
+
+    Evidence IDs remain in the JSON/audit record for replay, but identifiers
+    such as ``patch6-observable-outcomes-v1`` are implementation details and
+    are meaningless in an investment-screening page.
+    """
     _score, evidence = _normalise_score_evidence(container, key)
     if evidence is None:
         return fallback
-    return f"证据:{evidence['evidence_id']}"
+    evidence_id = str(evidence.get("evidence_id") or "")
+    summary = str(evidence.get("summary") or "").strip()
+    if evidence_id.startswith(f"{QUANTITATIVE_EVIDENCE_MODEL_ID}:"):
+        automatic_reasons = {
+            "accounting_integrity_score": "财务报表与现金流数据",
+            "business_model_score": "经营效率与现金流数据",
+            "catalyst_score": "财务趋势与同行数据",
+            "growth_quality_score": "收入利润与现金流数据",
+            "growth_sustainability_score": "增长趋势与行业数据",
+            "industry_bubble_score": "行业营收与利润数据",
+            "industry_durability_score": "行业营收与利润数据",
+            "management_alignment_score": "股本与现金流数据",
+            "moat_score": "盈利能力与同行数据",
+            "moat_durability_score": "多年盈利稳定性数据",
+            "runway_score": "增长趋势与同行数据",
+            "technology_score": "研发与经营数据",
+            "type3_bubble_score": "行业与估值数据",
+        }
+        return automatic_reasons.get(key, "可核验的财务与行业数据")
+    # A researcher-supplied Chinese summary is useful on the page, but reject
+    # machine syntax even if it was accidentally put into ``summary``.
+    technical_marker = re.compile(
+        r"(?:patch\d|observable|model=|evidence_level=|(?:^|[_:-])v\d|[a-z]+_[a-z]+)",
+        re.IGNORECASE,
+    )
+    if summary and not technical_marker.search(summary):
+        return _compact_reason(summary)
+    source = str(evidence.get("source") or "").strip()
+    if "东方财富" in source or "eastmoney" in source.lower():
+        return "东方财富的可核验数据"
+    return "已登记的外部证据"
 
 
 def _date_key(record: Mapping[str, Any]) -> str:
@@ -839,10 +895,10 @@ def _compact_reason(value: Any) -> str:
 
 
 def _format_rmb(value: Any) -> str:
-    """Format RMB evidence without ambiguous/truncated scientific notation."""
+    """Format RMB evidence without ambiguous technical missing-value markers."""
     number = _safe_float(value)
     if number is None:
-        return "N/A"
+        return "暂无数据"
     absolute = abs(number)
     if absolute >= 1e8:
         return f"{number / 1e8:.2f}亿"
@@ -3754,12 +3810,17 @@ def _score_type5_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
     )
 
 
-def score_type5_counter_cyclical(
+def _score_type5_legacy_counter_cyclical(
     m: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
     dcf_result: Optional[Mapping[str, Any]] = None,
 ):
-    """情况五：强周期底部；“回升”必须连续改善而非只比较谷值与最新。"""
+    """Pre-2026-07-17 Type5 implementation, retained temporarily for migration review.
+
+    The public scorer below implements the current Patch6 appendix.  Keeping
+    this private function for one release cycle lets old audit payloads remain
+    inspectable, but it is deliberately never called by production code.
+    """
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
         return _score_type5_financial(m, benchmarks)
     industry = str(m.get("industry", ""))
@@ -3924,6 +3985,185 @@ def score_type5_counter_cyclical(
         extra_condition=forced,
         evidence_complete=history_complete,
     )
+
+
+def _type5_cycle_profit_history(m: Mapping[str, Any]) -> tuple[list[float], list[int]]:
+    """Return only fully dated annual profit observations for normalisation."""
+    points: list[tuple[int, float]] = []
+    for raw_year, raw_value in zip(m.get("net_profit_years", []), m.get("net_profit_history", [])):
+        value = _safe_float(raw_value)
+        if isinstance(raw_year, (int, np.integer)) and value is not None:
+            points.append((int(raw_year), value))
+    points.sort()
+    return [value for _, value in points], [year for year, _ in points]
+
+
+def _type5_external_score(m: Mapping[str, Any], key: str) -> tuple[Optional[float], Optional[str]]:
+    """Read one traceable user-supplied Type5 score and its display reason."""
+    score = _verified_score(m, key)
+    if score is None:
+        return None, None
+    return score, _evidence_reason(m, key, "已登记的外部证据")
+
+
+def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
+    """Use 5–10 consecutive annual profits, never the current single-year PE."""
+    profits, years = _type5_cycle_profit_history(m)
+    if len(profits) < 5 or not _aligned_consecutive(profits, years, 5):
+        return None, 0
+    selected = profits[-10:]
+    normalised_profit = float(np.mean(selected))
+    market_cap = _safe_float(m.get("market_cap"))
+    if normalised_profit <= 0 or market_cap is None or market_cap <= 0:
+        return None, len(selected)
+    return market_cap / normalised_profit, len(selected)
+
+
+def score_type5_counter_cyclical(
+    m: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+    dcf_result: Optional[Mapping[str, Any]] = None,
+):
+    """Patch6 Type5: strong-cycle bottom overlay, not a generic recovery model.
+
+    The 2026-07-17 appendix requires strong-cycle *attributes* in 5a before
+    this framework applies.  It forbids using the current PE as a cycle-value
+    signal and explicitly excludes banks, insurers, brokers and wide-moat
+    weak-cycle companies.  Where the market snapshot lacks industry cost,
+    inventory, replacement-cost or capital-M&A data, this function preserves
+    diagnostic values but fails closed as ``证据不足`` rather than inventing a
+    buy point.
+    """
+    del benchmarks, dcf_result
+    industry = str(m.get("industry") or "")
+    if industry in FINANCIAL_INDUSTRIES:
+        return _not_applicable("type5", "金融机构不适用强周期底部模型")
+
+    scores: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    profits, profit_years = _type5_cycle_profit_history(m)
+    profit_cycle = _has_cycle_history(profits, profit_years)
+    margins = [
+        value for value in (_safe_float(item) for item in m.get("gross_margin_history", [])) if value is not None
+    ]
+    margin_years = list(m.get("gross_margin_years", []))
+    margin_swing = (
+        len(margins) >= 4 and _aligned_consecutive(margins, margin_years, 4) and max(margins) - min(margins) > 0.15
+    )
+    direct_commodity_industry = industry in TYPE5_DIRECT_CYCLICAL_INDUSTRIES
+
+    cycle_score, cycle_reason = _type5_external_score(m, "type5_cycle_attribute_score")
+    if cycle_score is None:
+        # Compatibility with existing evidence files.  New imports should use
+        # the more precise ``type5_cycle_attribute_score`` field.
+        cycle_score, cycle_reason = _type5_external_score(m, "cyclical_industry_score")
+    if cycle_score is not None:
+        if cycle_score < 7.0:
+            return _not_applicable("type5", "外部证据未确认强周期属性")
+        scores["5a"] = cycle_score
+        reasons["5a"] = cycle_reason or "外部证据确认强周期"
+    elif direct_commodity_industry and margin_swing and profit_cycle:
+        # This is the only automatic route: a narrow commodity-industry label
+        # plus two independently observable cross-cycle outcomes.  It does
+        # not claim to have observed a capacity-clearing event.
+        scores["5a"] = 7.0
+        reasons["5a"] = "大宗行业/毛利/利润周期"
+    elif direct_commodity_industry:
+        return _insufficient_evidence("type5", "强周期属性缺毛利或盈利历史")
+    else:
+        return _not_applicable("type5", "非强周期标的，适用其他框架")
+
+    bottom_score, bottom_reason = _type5_external_score(m, "type5_bottom_signal_score")
+    if bottom_score is None:
+        # Current snapshot has no 5–10Y PB percentile, replacement cost,
+        # commodity cash-cost curve, or industry utilisation/inventory series.
+        # A neutral diagnostic is shown only in the structured result and can
+        # never make the type eligible without the four source families.
+        scores["5b"], reasons["5b"] = 5.0, "缺PB分位/成本/库存证据"
+        bottom_complete = False
+    else:
+        scores["5b"], reasons["5b"] = bottom_score, bottom_reason or "周期底部外部证据"
+        bottom_complete = True
+
+    survival_score, survival_reason = _type5_external_score(m, "type5_survival_score")
+    if survival_score is None:
+        debt_ratio = _safe_float(m.get("debt_ratio"))
+        monetary_funds = _safe_float(m.get("monetary_funds"))
+        interest_debt = _safe_float(m.get("interest_debt"))
+        assets = _safe_float(m.get("total_assets"))
+        fcf_history = [value for value in (_safe_float(item) for item in m.get("fcf_history", [])) if value is not None]
+        signals = sum(
+            (
+                debt_ratio is not None and debt_ratio <= 0.50,
+                monetary_funds is not None and interest_debt is not None and monetary_funds >= interest_debt,
+                monetary_funds is not None and assets is not None and assets > 0 and monetary_funds / assets >= 0.10,
+                len(fcf_history) >= 3 and all(value >= 0 for value in fcf_history[-3:]),
+            )
+        )
+        scores["5c"] = {0: 2.0, 1: 4.0, 2: 6.0, 3: 8.0, 4: 9.0}[signals]
+        reasons["5c"] = f"资产负债表稳健{signals}项"
+        survival_complete = False
+    else:
+        scores["5c"], reasons["5c"] = survival_score, survival_reason or "抗周期外部证据"
+        survival_complete = True
+
+    elasticity_score, elasticity_reason = _type5_external_score(m, "type5_upside_elasticity_score")
+    if elasticity_score is None:
+        positive_profits = [value for value in profits if value > 0]
+        multiple = (
+            max(positive_profits) / min(positive_profits)
+            if len(positive_profits) >= 4 and min(positive_profits) > 0
+            else None
+        )
+        if multiple is None:
+            scores["5d"], reasons["5d"] = 2.0, "缺完整周期盈利历史"
+        elif multiple >= 5.0:
+            scores["5d"], reasons["5d"] = 6.0, f"历史利润振幅{multiple:.1f}倍"
+        elif multiple >= 3.0:
+            scores["5d"], reasons["5d"] = 5.0, f"历史利润振幅{multiple:.1f}倍"
+        else:
+            scores["5d"], reasons["5d"] = 3.0, "历史利润弹性偏弱"
+        elasticity_complete = False
+    else:
+        scores["5d"], reasons["5d"] = elasticity_score, elasticity_reason or "上行弹性外部证据"
+        elasticity_complete = True
+
+    earnings_score, earnings_reason = _type5_external_score(m, "type5_normalized_earnings_score")
+    if earnings_score is None:
+        normalised_pe, years_used = _type5_normalised_pe(m)
+        if normalised_pe is None:
+            scores["5e"], reasons["5e"] = 2.0, "缺5年完整周期均利"
+        elif normalised_pe <= 8.0:
+            scores["5e"], reasons["5e"] = 9.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
+        elif normalised_pe <= 12.0:
+            scores["5e"], reasons["5e"] = 7.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
+        elif normalised_pe <= 18.0:
+            scores["5e"], reasons["5e"] = 5.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
+        elif normalised_pe <= 25.0:
+            scores["5e"], reasons["5e"] = 3.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
+        else:
+            scores["5e"], reasons["5e"] = 1.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
+        earnings_complete = False
+    else:
+        scores["5e"], reasons["5e"] = earnings_score, earnings_reason or "正常化盈利外部证据"
+        earnings_complete = True
+
+    # 5a≥7 has already been enforced above.  Unlike the previous model,
+    # Type5 has no “cycle stage ≤3” veto and no hard 5c≥5 trigger gate:
+    # total≥7 is the appendix's sole buy-point decision after applicability.
+    evidence_complete = all((bottom_complete, survival_complete, elasticity_complete, earnings_complete))
+    if not evidence_complete:
+        missing = []
+        if not bottom_complete:
+            missing.append("底部")
+        if not survival_complete:
+            missing.append("抗压")
+        if not elasticity_complete:
+            missing.append("上行弹性")
+        if not earnings_complete:
+            missing.append("均利")
+        reasons["_missing"] = "缺" + "/".join(missing) + "证据"
+    return _finish("type5", scores, reasons, evidence_complete=evidence_complete)
 
 
 def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):

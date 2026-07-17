@@ -11,6 +11,7 @@ from ui.buy_types_page import (
     TYPE_ORDER,
     _bear_case_lines,
     _diagnostic_type_label,
+    _display_reason,
     _format_metric,
     _make_narrative,
     _normalise_code,
@@ -31,9 +32,9 @@ def _display_number(value, digits=1, suffix=""):
     try:
         number = float(value)
     except (TypeError, ValueError):
-        return "N/A"
+        return "暂无数据"
     if not math.isfinite(number):
-        return "N/A"
+        return "暂无数据"
     return f"{number:.{digits}f}{suffix}"
 
 
@@ -41,7 +42,7 @@ def _display_percent(value):
     try:
         return _display_number(float(value) * 100.0, 1, "%")
     except (TypeError, ValueError):
-        return "N/A"
+        return "暂无数据"
 
 
 def _add_business_candidate_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -159,7 +160,7 @@ def show():
                 with kpi_cols[4]:
                     st.metric("负债率", _display_percent(row.get("debt_ratio")))
                 with kpi_cols[5]:
-                    st.metric("行业", _industry_display_name(row.get("industry", "N/A"), code_to_cn))
+                    st.metric("行业", _industry_display_name(row.get("industry", "未知"), code_to_cn))
 
                 if buy_types:
                     labels = " · ".join([TYPE_NAMES.get(t, t) for t in buy_types])
@@ -190,8 +191,10 @@ def show():
                     label = TYPE_NAMES.get(t, t)
                     icon = _status_icon(triggered=trig, veto=veto, status=status_code)
                     score_text = (
-                        "N/A"
-                        if status_code in {"not_applicable", "insufficient_evidence"}
+                        "不适用"
+                        if status_code == "not_applicable"
+                        else "证据不足"
+                        if status_code == "insufficient_evidence"
                         else f"{_format_metric(sc, digits=2)}分"
                     )
                     with st.expander(f"{icon} {label} — {score_text}", expanded=trig):
@@ -217,10 +220,12 @@ def show():
                         dim_lines = []
                         for key, name, wt in dims:
                             v = subs.get(key, 0)
-                            r = reasons.get(key, "")
+                            r = _display_reason(reasons.get(key, ""))
                             value_text = (
-                                "N/A"
-                                if status_code in {"not_applicable", "insufficient_evidence"}
+                                "不适用"
+                                if status_code == "not_applicable"
+                                else "证据不足"
+                                if status_code == "insufficient_evidence"
                                 else f"{_format_metric(v)}分"
                             )
                             dim_lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")

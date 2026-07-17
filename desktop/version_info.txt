@@ -15,11 +15,11 @@ VSVersionInfo(
         u'040904B0',
         [StringStruct(u'CompanyName', u'DS_DCF'),
          StringStruct(u'FileDescription', u'DS_DCF valuation and seven-framework diagnostics'),
-         StringStruct(u'FileVersion', u'11.0.1'),
+         StringStruct(u'FileVersion', u'11.1.0'),
          StringStruct(u'InternalName', u'DS_DCF'),
          StringStruct(u'OriginalFilename', u'DS_DCF.exe'),
          StringStruct(u'ProductName', u'DS_DCF'),
-         StringStruct(u'ProductVersion', u'11.0.1')])
+         StringStruct(u'ProductVersion', u'11.1.0')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]

@@ -454,6 +454,33 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertEqual(confirmed_veto[3]["_evidence"], "incomplete")
         self.assertIn("_veto", confirmed_veto[3])
 
+    def test_evidence_reason_never_exposes_internal_model_or_evidence_ids(self):
+        automatic = {
+            "runway_score": 8.0,
+            "runway_score_evidence": {
+                "source": "Eastmoney reported data; Patch6 observable-outcome formula v1",
+                "evidence_id": "patch6-observable-outcomes-v1:runway_score:600519:20260717",
+                "as_of": "2026-07-17",
+                "summary": "runway_score=8.0;model=patch6-observable-outcomes-v1",
+            },
+        }
+        manual = {
+            "type5_bottom_signal_score": 8.0,
+            "type5_bottom_signal_score_evidence": {
+                "source": "行业协会",
+                "evidence_id": "bottom-2025-01",
+                "as_of": "2025-12-31",
+                "summary": "PB分位与库存去化",
+            },
+        }
+
+        automatic_reason = bs._evidence_reason(automatic, "runway_score", "fallback")
+        manual_reason = bs._evidence_reason(manual, "type5_bottom_signal_score", "fallback")
+
+        self.assertEqual(automatic_reason, "增长趋势与同行数据")
+        self.assertEqual(manual_reason, "PB分位与库存去化")
+        self.assertNotIn("patch6", automatic_reason + manual_reason)
+
 
 class TestMetricExtraction(unittest.TestCase):
     def test_metric_extraction_preserves_exact_rows_for_strict_ttm_source_binding(self):
@@ -1881,7 +1908,7 @@ class TestTypeRules(unittest.TestCase):
             ),
         ):
             self.assertFalse(outcome[0], type_key)
-            if type_key in {"type3", "type6"}:
+            if type_key in {"type3", "type5", "type6"}:
                 self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
             else:
                 self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
@@ -1987,7 +2014,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("银行业", outcome[3]["2a"])
         self.assertIn("金融回归", outcome[3]["2b"])
 
-    def test_bank_type5_requires_real_cycle_and_regulatory_survival_evidence(self):
+    def test_financial_institutions_are_not_forced_into_type5_strong_cycle_model(self):
         financial = base_metrics(
             industry="BANK",
             pb=0.70,
@@ -2005,11 +2032,9 @@ class TestTypeRules(unittest.TestCase):
 
         outcome = bs.score_type5_counter_cyclical(financial, {"BANK": {"median_pb": 1.0}})
 
-        self.assertTrue(outcome[0])
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_TRIGGERED)
-        self.assertEqual(outcome[3]["_evidence"], "complete")
-        self.assertGreaterEqual(outcome[2]["5a"], 7.0)
-        self.assertEqual(outcome[2]["5c"], 10.0)
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertIn("金融机构", outcome[3]["_scope"])
 
     def test_insurance_and_securities_regulatory_checks_use_native_fields(self):
         insurance = base_metrics(
@@ -2251,39 +2276,38 @@ class TestTypeRules(unittest.TestCase):
         self.assertTrue(bs._has_cycle_history([100, 60, 30, 45, 70]))
         self.assertFalse(bs._has_cycle_history([10, 20, 30, 45, 70]))
 
-    def test_type5_patch6_cycle_stage_veto_requires_complete_history(self):
+    def test_type5_requires_strong_cycle_attributes_and_never_uses_cycle_stage_veto(self):
         m = base_metrics(
             industry="COAL",
-            net_profit_history=[300, 50, 80, 120],
+            net_profit_history=[300, 50, 80, 120, 70],
+            gross_margin_history=[0.42, 0.22, 0.10, 0.31, 0.20],
+            gross_margin_years=[2021, 2022, 2023, 2024, 2025],
             pe=100,
             pb=0.8,
             interim_profit_yoy=-0.50,
         )
         triggered, _, scores, reasons = bs.score_type5_counter_cyclical(m, benchmarks())
         self.assertFalse(triggered)
-        self.assertLessEqual(scores["5a"], 3.0)
-        self.assertIn("_veto", reasons)
-        self.assertEqual(reasons["_status"], bs.STATUS_VETOED)
+        self.assertEqual(scores["5a"], 7.0)
+        self.assertNotIn("_veto", reasons)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("证据", reasons["_missing"])
 
-    def test_type5_requires_5a_seven_and_5c_five(self):
+    def test_type5_uses_total_after_5a_without_an_extra_5c_hard_gate(self):
         m = base_metrics(
             industry="COAL",
-            net_profit_history=[100, 20, 30, 25, 30],
-            pe=120,
-            pb=1.4,
-            net_margin=0.03,
-            margin_median_hist=0.10,
-            roe=0.10,
-            free_cash_flow=20,
-            fcf_history=[10, 15, 20],
-            monetary_funds=50,
-            total_assets=300,
+            type5_cycle_attribute_score=8.0,
+            type5_bottom_signal_score=10.0,
+            type5_survival_score=1.0,
+            type5_upside_elasticity_score=10.0,
+            type5_normalized_earnings_score=10.0,
         )
         triggered, total, scores, reasons = bs.score_type5_counter_cyclical(m, benchmarks())
         self.assertGreaterEqual(total, 7.0)
-        self.assertLess(scores["5a"], 7.0)
-        self.assertFalse(triggered)
-        self.assertIn("_condition", reasons)
+        self.assertTrue(triggered)
+        self.assertEqual(scores["5c"], 1.0)
+        self.assertNotIn("_veto", reasons)
+        self.assertEqual(reasons["_status"], bs.STATUS_TRIGGERED)
 
     def test_type5_rejects_non_cyclical_industry_even_when_company_numbers_look_cyclical(self):
         outcome = bs.score_type5_counter_cyclical(
@@ -2472,7 +2496,9 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(type1[2]["1c"], 5.0)
         self.assertIn("末1000.00元", type1[3]["1c"])
         self.assertNotIn("e+", type1[3]["1c"].lower())
-        self.assertEqual(cyclical[2]["5e"], 9.0)
+        self.assertEqual(cyclical[2]["5e"], 0.0)
+        self.assertEqual(cyclical[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertNotIn("FCF", cyclical[3]["5e"])
 
         inflated = dict(payload)
         inflated["base_fcf"] = 1_000.0
@@ -2480,7 +2506,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertFalse(rejected[0])
         self.assertEqual(rejected[1], 0.0)
 
-    def test_exact_fifty_percent_current_decline_caps_scores_without_inventing_type4_type6_vetoes(self):
+    def test_exact_fifty_percent_current_decline_caps_scores_without_inventing_vetoes(self):
         type_builders = {
             "type1": lambda metric: bs.score_type1_dcf(
                 complete_type1_metrics(**{f"interim_{metric}_yoy": -0.50}),
@@ -2500,21 +2526,6 @@ class TestTypeRules(unittest.TestCase):
                 benchmarks(),
                 complete_dcf_evidence(),
             ),
-            "type5": lambda metric: bs.score_type5_counter_cyclical(
-                base_metrics(
-                    industry="COAL",
-                    net_profit_history=[300.0, 50.0, 80.0, 120.0],
-                    roe=0.12,
-                    pb=0.8,
-                    pe=120.0,
-                    net_margin=0.03,
-                    margin_median_hist=0.10,
-                    monetary_funds=50.0,
-                    total_assets=300.0,
-                    **{f"interim_{metric}_yoy": -0.50},
-                ),
-                benchmarks(),
-            ),
             "type6": lambda metric: bs.score_type6_vc(
                 base_metrics(
                     market_cap=10e8,
@@ -2530,13 +2541,12 @@ class TestTypeRules(unittest.TestCase):
                 benchmarks(median_cagr=0.60, median_cagr_count=20),
             ),
         }
-        capped_items = {"type1": "1d", "type3": "3b", "type4": "4b", "type5": "5a", "type6": "6d"}
-        expected_caps = {"type1": 1.0, "type3": 2.0, "type4": 2.0, "type5": 2.0, "type6": 2.0}
+        capped_items = {"type1": "1d", "type3": "3b", "type4": "4b", "type6": "6d"}
+        expected_caps = {"type1": 1.0, "type3": 2.0, "type4": 2.0, "type6": 2.0}
         expected_statuses = {
             "type1": bs.STATUS_OBSERVE,
             "type3": bs.STATUS_TRIGGERED,
             "type4": bs.STATUS_TRIGGERED,
-            "type5": bs.STATUS_VETOED,
             "type6": bs.STATUS_TRIGGERED,
         }
 
@@ -2547,16 +2557,13 @@ class TestTypeRules(unittest.TestCase):
                     self.assertEqual(triggered, type_key in {"type3", "type4", "type6"})
                     self.assertLessEqual(scores[capped_items[type_key]], expected_caps[type_key])
                     self.assertEqual(reasons["_status"], expected_statuses[type_key])
-                    if type_key in {"type1", "type3", "type4", "type6"}:
-                        self.assertNotIn("_veto", reasons)
-                    else:
-                        self.assertIn("_veto", reasons)
+                    self.assertNotIn("_veto", reasons)
 
     def test_current_period_caps_are_progressive_without_extra_type6_current_period_veto(self):
-        for decline, type3_cap, type4_cap, type5_cap, type6_cap in (
-            (-0.01, 5.0, 6.0, 6.0, 4.0),
-            (-0.20, 4.0, 4.0, 4.0, 3.0),
-            (-0.90, 2.0, 2.0, 2.0, 2.0),
+        for decline, type3_cap, type4_cap, type6_cap in (
+            (-0.01, 5.0, 6.0, 4.0),
+            (-0.20, 4.0, 4.0, 3.0),
+            (-0.90, 2.0, 2.0, 2.0),
         ):
             with self.subTest(decline=decline):
                 type3 = bs.score_type3_sustainable_growth(
@@ -2571,21 +2578,6 @@ class TestTypeRules(unittest.TestCase):
                     ),
                     benchmarks(),
                     complete_dcf_evidence(),
-                )
-                type5 = bs.score_type5_counter_cyclical(
-                    base_metrics(
-                        industry="COAL",
-                        net_profit_history=[300.0, 50.0, 80.0, 120.0],
-                        roe=0.12,
-                        pb=0.8,
-                        pe=120.0,
-                        net_margin=0.03,
-                        margin_median_hist=0.10,
-                        monetary_funds=50.0,
-                        total_assets=300.0,
-                        interim_profit_yoy=decline,
-                    ),
-                    benchmarks(),
                 )
                 type6 = bs.score_type6_vc(
                     base_metrics(
@@ -2603,11 +2595,8 @@ class TestTypeRules(unittest.TestCase):
                 )
                 self.assertLessEqual(type3[2]["3b"], type3_cap)
                 self.assertLessEqual(type4[2]["4b"], type4_cap)
-                self.assertLessEqual(type5[2]["5a"], type5_cap)
                 self.assertLessEqual(type6[2]["6d"], type6_cap)
                 if decline == -0.90:
-                    self.assertFalse(type5[0])
-                    self.assertIn("_veto", type5[3])
                     self.assertTrue(type6[0])
                     self.assertEqual(type6[3]["_status"], bs.STATUS_TRIGGERED)
                     self.assertNotIn("_veto", type6[3])
@@ -2746,6 +2735,8 @@ class TestTypeRules(unittest.TestCase):
                 base_metrics(
                     industry="COAL",
                     net_profit_history=[300.0, 50.0, 80.0, 120.0],
+                    gross_margin_history=[0.42, 0.21, 0.10, 0.30],
+                    gross_margin_years=[2022, 2023, 2024, 2025],
                     roe=0.12,
                     pb=0.8,
                     pe=120.0,
@@ -2753,6 +2744,10 @@ class TestTypeRules(unittest.TestCase):
                     margin_median_hist=0.10,
                     monetary_funds=50.0,
                     total_assets=300.0,
+                    type5_bottom_signal_score=8.0,
+                    type5_survival_score=8.0,
+                    type5_upside_elasticity_score=8.0,
+                    type5_normalized_earnings_score=8.0,
                 ),
                 cyclical_benchmarks,
             ),
@@ -2806,21 +2801,6 @@ class TestTypeRules(unittest.TestCase):
                 bench,
                 complete_dcf_evidence(),
             ),
-            "type5": bs.score_type5_counter_cyclical(
-                base_metrics(
-                    industry="COAL",
-                    net_profit_history=[300.0, 50.0, 80.0, 120.0],
-                    roe=0.12,
-                    pb=0.8,
-                    pe=120.0,
-                    net_margin=0.03,
-                    margin_median_hist=0.10,
-                    monetary_funds=50.0,
-                    total_assets=300.0,
-                    **current_loss,
-                ),
-                {"COAL": benchmarks()["SOFTWARE"], "ALL": benchmarks()["ALL"]},
-            ),
         }
 
         type1 = outcomes["type1"]
@@ -2839,13 +2819,6 @@ class TestTypeRules(unittest.TestCase):
         self.assertLessEqual(type4[2]["4b"], 2.0)
         self.assertEqual(type4[3]["_status"], bs.STATUS_TRIGGERED)
         self.assertNotIn("_veto", type4[3])
-
-        type5 = outcomes["type5"]
-        self.assertFalse(type5[0])
-        self.assertLessEqual(type5[2]["5a"], 2.0)
-        self.assertLessEqual(type5[2]["5c"], 3.0)
-        self.assertEqual(type5[3]["_veto"], "周期阶段不符合")
-        self.assertIn("5a≥7且5c≥5", type5[3]["_condition"])
 
     def test_score_explanations_do_not_call_arbitrary_current_period_a_midyear_report(self):
         self.assertNotIn("中报", inspect.getsource(bs))

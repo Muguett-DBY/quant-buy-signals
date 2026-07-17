@@ -562,7 +562,7 @@ def _audit_payload(files):
             "audit_schema_version": 3,
             "patch6_source": {
                 "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
-                "sha256": "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56",
+                "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6",
             },
             "type7_source_documents": {
                 "template1": {
@@ -579,7 +579,7 @@ def _audit_payload(files):
                 },
                 "patch6": {
                     "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
-                    "sha256": "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56",
+                    "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6",
                 },
             },
             "generated_at_utc": "2026-07-15T12:00:00+00:00",
@@ -759,7 +759,7 @@ def _write_minimal_release(
     omit_files=(),
     extra_files=None,
 ):
-    prefix = "DS_DCF-v11.0.1/"
+    prefix = "DS_DCF-v11.1.0/"
     runtime_versions = {
         "numpy": "2.4.6",
         "orjson": "3.11.9",
@@ -798,7 +798,7 @@ def _write_minimal_release(
         "desktop/launcher.py": b"# desktop launcher\n",
         "desktop/installer.py": b"# desktop installer\n",
         "desktop/updater.py": b"# desktop updater\n",
-        "desktop/version.py": b"__version__ = '11.0.1'\n",
+        "desktop/version.py": b"__version__ = '11.1.0'\n",
         "desktop/update_config.json": (
             b'{"manifest_url":"https://github.com/Muguett-DBY/quant-buy-signals/'
             b'releases/latest/download/update-manifest.json"}\n'
@@ -835,7 +835,7 @@ def _write_minimal_release(
             + _locked_line("build", "1.5.0")
         ).encode(),
         "pyproject.toml": (
-            b"[project]\nname='ds-dcf'\nversion='11.0.1'\nrequires-python='>=3.11,<3.15'\n"
+            b"[project]\nname='ds-dcf'\nversion='11.1.0'\nrequires-python='>=3.11,<3.15'\n"
             b"license='LicenseRef-PolyForm-Noncommercial-1.0.0'\nlicense-files=['LICENSE']\n"
             b"dependencies=['numpy==2.4.6','orjson==3.11.9','pandas==3.0.3','plotly==6.9.0','pillow==12.3.0',"
             b"'requests==2.34.2','streamlit==1.59.2']\n"
@@ -1563,7 +1563,7 @@ def test_release_zip_verifier_rejects_case_collisions_symlinks_and_embedded_cred
     with ZipFile(clean) as source, ZipFile(symlink, "w", compression=ZIP_DEFLATED) as target:
         for entry in source.infolist():
             target.writestr(entry, source.read(entry))
-        link = ZipInfo("DS_DCF-v11.0.1/link-to-outside")
+        link = ZipInfo("DS_DCF-v11.1.0/link-to-outside")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         target.writestr(link, "../../outside")

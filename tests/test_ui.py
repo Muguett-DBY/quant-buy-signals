@@ -13,6 +13,7 @@ from ui.buy_types_page import (
     TYPE_DIMENSIONS,
     _bear_case_lines,
     _diagnostic_type_label,
+    _display_reason,
     _dcf_audit_rows,
     _eligible_analysis_inputs,
     _filter_type_selection,
@@ -47,9 +48,9 @@ def test_score_formatter_rejects_non_finite_values():
 
 
 def test_metric_formatter_never_exposes_missing_or_non_finite_values():
-    assert _format_metric(None) == "N/A"
-    assert _format_metric(float("nan")) == "N/A"
-    assert _format_metric("bad") == "N/A"
+    assert _format_metric(None) == "暂无数据"
+    assert _format_metric(float("nan")) == "暂无数据"
+    assert _format_metric("bad") == "暂无数据"
     assert _format_metric(0.1234, digits=1, scale=100, suffix="%") == "12.3%"
 
 
@@ -452,7 +453,7 @@ def test_status_icon_gives_veto_precedence_over_trigger():
     assert _status_icon(triggered=False, veto=False) == "⬜"
 
 
-def test_na_and_insufficient_statuses_are_rendered_as_na_instead_of_failure():
+def test_not_applicable_and_insufficient_statuses_are_rendered_without_english_markers():
     assert _status_icon(triggered=False, veto=False, status="not_applicable") == "➖"
     assert _status_icon(triggered=False, veto=False, status="insufficient_evidence") == "❓"
 
@@ -473,10 +474,16 @@ def test_na_and_insufficient_statuses_are_rendered_as_na_instead_of_failure():
         status="insufficient_evidence",
     )
 
-    assert "N/A，不适用" in not_applicable
+    assert "不适用" in not_applicable
     assert "趋势增速不足10%" in not_applicable
-    assert "N/A，证据不足" in insufficient
+    assert "证据不足" in insufficient
     assert "一票否决" not in not_applicable + insufficient
+
+
+def test_display_reason_hides_legacy_machine_evidence_ids():
+    assert _display_reason("证据:patch6-observable") == "可核验的财务与行业数据"
+    assert _display_reason("证据:patch6-type2c-qua") == "量价与换手数据"
+    assert _display_reason("PB分位与库存去化") == "PB分位与库存去化"
 
 
 def test_diagnostic_selection_excludes_na_and_insufficient_frameworks():

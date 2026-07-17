@@ -60,11 +60,11 @@ TYPE_DIMENSIONS = {
         ("4f", "股价泡沫防范", 0.07),
     ],
     "type5": [
-        ("5a", "周期阶段", 0.35),
+        ("5a", "强周期属性", 0.35),
         ("5b", "底部信号", 0.25),
         ("5c", "抗周期能力", 0.20),
         ("5d", "上行弹性", 0.10),
-        ("5e", "估值匹配", 0.10),
+        ("5e", "正常化盈利估值", 0.10),
     ],
     "type6": [
         ("6a", "产业爆发", 0.25),
@@ -132,11 +132,31 @@ def _fmt_score(v):
 
 
 def _format_metric(value, *, digits: int = 1, scale: float = 1.0, suffix: str = "") -> str:
-    """Format a UI metric without displaying ``nan``/``inf`` or crashing on missing data."""
+    """Format a UI metric without exposing technical missing-value markers."""
     number = _fmt_score(value)
     if number is None:
-        return "N/A"
+        return "暂无数据"
     return f"{number * scale:.{digits}f}{suffix}"
+
+
+def _display_reason(value: object) -> str:
+    """Defensively hide old cache/model identifiers from all user-facing text."""
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "patch6-observable",
+            "patch6-type2c",
+            "evidence_level=",
+            "model=",
+            "opt_upper_v",
+        )
+    ):
+        if "type2c" in lowered or "量价" in text:
+            return "量价与换手数据"
+        return "可核验的财务与行业数据"
+    return text
 
 
 def _filter_stock_search(frame: pd.DataFrame, term: str) -> pd.DataFrame:
@@ -841,6 +861,16 @@ def _type_status(info: Mapping[str, Any]) -> str:
     return "triggered" if info.get("triggered") else "not_triggered"
 
 
+def _type_status_label(type_key: str, status: str) -> str:
+    """Use Patch6's Type5 phase language instead of a generic score label."""
+    if type_key == "type5":
+        if status == "triggered":
+            return "✅ 最佳买点"
+        if status in {"observe", "not_triggered", "conditional"}:
+            return "👀 适用·谨慎相位"
+    return TYPE_STATUS_LABELS.get(status, "— 未触发")
+
+
 def _status_icon(*, triggered: bool, veto: bool, status: str | None = None) -> str:
     """Return a single status icon without conflating N/A or missing evidence with veto."""
     if status == "not_applicable":
@@ -876,7 +906,7 @@ def _bear_case_lines(row) -> list[str]:
             continue
         dimension = str(item.get("dimension", "")).strip()
         score = _fmt_score(item.get("score"))
-        reason = str(item.get("reason", "")).strip()
+        reason = _display_reason(item.get("reason", ""))
         if dimension and score is not None and reason:
             lines.append(f"{dimension} {score:.1f}分：{reason}")
     return lines
@@ -1320,7 +1350,7 @@ def _render_radar_chart(type_key, row):
     for key, _, _ in dims:
         value = _fmt_score(sub_scores.get(key))
         values.append(value if value is not None else 0.0)
-        texts.append(f"{value:.2f}" if value is not None else "N/A")
+        texts.append(f"{value:.2f}" if value is not None else "—")
     closed_labels = labels + [labels[0]]
     closed_values = values + [values[0]]
     closed_texts = texts + [texts[0]]
@@ -1368,8 +1398,14 @@ def _render_judgment_matrix(row):
         sc = info.get("total", 0)
         triggered = info.get("triggered", False)
         status_code = _type_status(info)
-        status = TYPE_STATUS_LABELS.get(status_code, "— 未触发")
-        score_text = "N/A" if status_code in {"not_applicable", "insufficient_evidence"} else f"{sc:.1f}"
+        status = _type_status_label(t, status_code)
+        score_text = (
+            "不适用"
+            if status_code == "not_applicable"
+            else "证据不足"
+            if status_code == "insufficient_evidence"
+            else f"{sc:.1f}"
+        )
         rows_data.append(
             {
                 "类型": TYPE_NAMES.get(t, t),
@@ -1418,8 +1454,14 @@ def _render_dimension_table(type_key, row):
     _render_radar_chart(type_key, row)
     st.caption("7分虚线仅作视觉参考，不是单个子项门槛；是否触发以加权总分和一票否决规则为准。")
 
-    status = TYPE_STATUS_LABELS.get(status_code, "— 未触发")
-    total_text = "N/A" if status_code in {"not_applicable", "insufficient_evidence"} else _format_metric(total)
+    status = _type_status_label(type_key, status_code)
+    total_text = (
+        "不适用"
+        if status_code == "not_applicable"
+        else "证据不足"
+        if status_code == "insufficient_evidence"
+        else _format_metric(total)
+    )
     st.caption(f"总分: **{total_text}/10** | 状态: {status} | 阈值: ≥7.0")
 
     dims = TYPE_DIMENSIONS.get(type_key, [])
@@ -1431,13 +1473,17 @@ def _render_dimension_table(type_key, row):
     for dim_key, dim_name, weight in dims:
         score = sub_scores.get(dim_key)
         score_f = _fmt_score(score)
-        reason = reasons.get(dim_key, "")
+        reason = _display_reason(reasons.get(dim_key, ""))
         rows_data.append(
             {
                 "维度": dim_name,
                 "评分": (
-                    "N/A"
-                    if status_code in {"not_applicable", "insufficient_evidence"} or score_f is None
+                    "不适用"
+                    if status_code == "not_applicable"
+                    else "证据不足"
+                    if status_code == "insufficient_evidence"
+                    else "暂无数据"
+                    if score_f is None
                     else f"{score_f:.3f}"
                     if type_key == "type7"
                     else f"{score_f:.1f}"
@@ -1458,12 +1504,16 @@ def _render_dimension_table(type_key, row):
 def _make_narrative(type_key, total, subs, reasons, dims, *, triggered=False, veto=False, status=None):
     label = TYPE_NAMES.get(type_key, type_key)
     if status == "not_applicable":
-        scope = str(reasons.get("_scope") or "该框架不适用")
-        return f"{label}: N/A，不适用。{scope}。"
+        scope = _display_reason(reasons.get("_scope") or "该框架不适用")
+        return f"{label}: 不适用。{scope}。"
     if status == "insufficient_evidence":
-        missing = str(reasons.get("_missing") or "关键证据不足")
-        return f"{label}: N/A，证据不足。{missing}。"
-    if status == "conditional":
+        missing = _display_reason(reasons.get("_missing") or "关键证据不足")
+        return f"{label}: 证据不足。{missing}。"
+    if type_key == "type5" and status == "triggered":
+        trigger_word = "最佳买点"
+    elif type_key == "type5" and status in {"observe", "not_triggered", "conditional"}:
+        trigger_word = "适用·谨慎相位"
+    elif status == "conditional":
         trigger_word = "条件候选，尚未满足执行纪律"
     elif status == "observe":
         trigger_word = "观察"
@@ -1478,7 +1528,7 @@ def _make_narrative(type_key, total, subs, reasons, dims, *, triggered=False, ve
     parts = []
     for key, name, _weight in dims:
         v = _fmt_score(subs.get(key))
-        r = reasons.get(key, "")
+        r = _display_reason(reasons.get(key, ""))
         r_short = str(r)[:20]
         if v is None:
             parts.append(f"{name}无数据({r_short or '未提供评分'})")
@@ -1554,7 +1604,11 @@ def _render_stock_inline(row):
         label = TYPE_NAMES.get(t, t)
         icon = _status_icon(triggered=trig, veto=veto, status=status_code)
         score_text = (
-            "N/A" if status_code in {"not_applicable", "insufficient_evidence"} else f"{_format_metric(sc, digits=2)}分"
+            "不适用"
+            if status_code == "not_applicable"
+            else "证据不足"
+            if status_code == "insufficient_evidence"
+            else f"{_format_metric(sc, digits=2)}分"
         )
         with st.expander(f"{icon} {label} — {score_text}", expanded=trig):
             narrative = _make_narrative(
@@ -1579,10 +1633,12 @@ def _render_stock_inline(row):
             lines = []
             for key, name, wt in dims:
                 v = subs.get(key, 0)
-                r = reasons.get(key, "")
+                r = _display_reason(reasons.get(key, ""))
                 value_text = (
-                    "N/A"
-                    if status_code in {"not_applicable", "insufficient_evidence"}
+                    "不适用"
+                    if status_code == "not_applicable"
+                    else "证据不足"
+                    if status_code == "insufficient_evidence"
                     else f"{_format_metric(v, digits=3 if t == 'type7' else 1)}分"
                 )
                 lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")
@@ -1884,18 +1940,24 @@ def show():
         st.caption(
             "JSON 顶层键为6位股票代码。每个0-10分字段必须同时提供同名 _evidence 对象，"
             "其中包含 source、evidence_id、as_of（YYYY-MM-DD）；Type7 的补丁5前置条件还要求"
-            " type7_research_sources 至少列出3家不同发布方。文件仅叠加到本次评分，不改写市场快照。"
+            " type7_research_sources 至少列出3家不同发布方。Type5 要成为买点，须分别提供强周期属性、"
+            "底部、抗周期、上行弹性和正常化盈利五类专用证据；未提供只会显示证据不足，不会假装成买点。"
+            "文件仅叠加到本次评分，不改写市场快照。"
         )
         st.code(
-            '{"000001":{"technology_score":8,"technology_score_evidence":'
-            '{"source":"公告","evidence_id":"ann-2025-01","as_of":"2025-12-31"},'
-            '"position_size_pct":3,"type6_portfolio_pct":10,'
-            '"type7_research_sources":[{"title":"行业报告A","publisher":"机构A",'
-            '"url":"https://example.com/a","as_of":"2025-12-31","evidence_id":"r-a"},'
-            '{"title":"行业报告B","publisher":"机构B","url":"https://example.com/b",'
-            '"as_of":"2025-12-31","evidence_id":"r-b"},{"title":"行业报告C",'
-            '"publisher":"机构C","url":"https://example.com/c","as_of":"2025-12-31",'
-            '"evidence_id":"r-c"}]}}',
+            '{"601088":{"type5_cycle_attribute_score":8,'
+            '"type5_cycle_attribute_score_evidence":{"source":"行业协会","evidence_id":"cycle-2025",'
+            '"as_of":"2025-12-31","summary":"煤价与产能周期确认"},'
+            '"type5_bottom_signal_score":7,"type5_bottom_signal_score_evidence":'
+            '{"source":"行业成本曲线","evidence_id":"bottom-2025","as_of":"2025-12-31",'
+            '"summary":"PB分位与库存去化"},"type5_survival_score":8,'
+            '"type5_survival_score_evidence":{"source":"年报和分红公告","evidence_id":"survive-2025",'
+            '"as_of":"2025-12-31","summary":"净现金与分红可持续"},'
+            '"type5_upside_elasticity_score":7,"type5_upside_elasticity_score_evidence":'
+            '{"source":"供需报告","evidence_id":"upside-2025","as_of":"2025-12-31",'
+            '"summary":"供需缺口和产能释放"},"type5_normalized_earnings_score":7,'
+            '"type5_normalized_earnings_score_evidence":{"source":"历年财报","evidence_id":"norm-2025",'
+            '"as_of":"2025-12-31","summary":"十年均利PE低于中位"}}}',
             language="json",
         )
         evidence_file = st.file_uploader(
@@ -2101,9 +2163,9 @@ def show():
     with mc2:
         st.metric("有买入信号", total_with_signal)
     with mc3:
-        st.metric("平均诊断分", f"{display['diagnostic_score'].mean():.2f}" if not display.empty else "N/A")
+        st.metric("平均诊断分", f"{display['diagnostic_score'].mean():.2f}" if not display.empty else "暂无数据")
     with mc4:
-        st.metric("最高诊断分", f"{display['diagnostic_score'].max():.1f}" if not display.empty else "N/A")
+        st.metric("最高诊断分", f"{display['diagnostic_score'].max():.1f}" if not display.empty else "暂无数据")
 
     st.divider()
 

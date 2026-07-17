@@ -12,7 +12,7 @@ from tools import build_desktop
 
 
 def test_desktop_version_matches_project_and_release_manifest():
-    assert __version__ == "11.0.1"
+    assert __version__ == "11.1.0"
     assert build_desktop._project_version() == __version__
     assert build_desktop._release_manifest() == {
         "schema_version": 1,

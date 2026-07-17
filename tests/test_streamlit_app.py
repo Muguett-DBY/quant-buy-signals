@@ -226,10 +226,10 @@ def test_stock_lookup_preserves_not_applicable_and_insufficient_evidence_statuse
 
     assert not at.exception
     expander_labels = [element.label for element in at.expander]
-    assert "➖ 3️⃣ 可持续高增长 — N/A" in expander_labels
-    assert "❓ 5️⃣ 强周期底部 — N/A" in expander_labels
-    assert any("N/A，不适用" in element.value for element in at.info)
-    assert any("N/A，证据不足" in element.value for element in at.warning)
+    assert "➖ 3️⃣ 可持续高增长 — 不适用" in expander_labels
+    assert "❓ 5️⃣ 强周期底部 — 证据不足" in expander_labels
+    assert any("不适用" in element.value for element in at.info)
+    assert any("证据不足" in element.value for element in at.warning)
     assert all("0.00分" not in label for label in expander_labels if "可持续高增长" in label or "强周期底部" in label)
 
 
