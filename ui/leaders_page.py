@@ -87,7 +87,7 @@ def show():
         st.info("👈 请先在「七种买入类型」页面点击「开始分析」加载数据")
         return
 
-    # 行业候选只使用真正触发且未被否决的非 VC 框架。
+    # 行业候选只使用真正触发且未被否决的非高风险早期/困境框架。
     base_frame = _with_diagnostic_fields(st.session_state.get("leaders_df", st.session_state["buy_types_df"]))
     df = _add_business_candidate_columns(base_frame)
     _render_global_status(df)
@@ -98,7 +98,7 @@ def show():
     tab1, tab2 = st.tabs(["🏆 行业买入候选", "🔍 个股查询"])
 
     with tab1:
-        st.caption("每个细分行业最多展示2只已触发且未否决的非VC买入候选；不构成行业地位或投资结论。")
+        st.caption("每个细分行业最多展示2只已触发且未被否决的非高风险早期/困境型买入候选；不构成行业地位或投资结论。")
 
         from data.industry import _INDUSTRY_RULES
 
@@ -118,7 +118,7 @@ def show():
             with cols[i % 4]:
                 st.markdown(f"**{cn_name}**")
                 if sub.empty:
-                    st.caption("暂无非VC买入信号")
+                    st.caption("暂无非高风险早期/困境型买入信号")
                 for _, r in sub.iterrows():
                     sc = r.get("business_score", 0)
                     cd = r.get("code", "")

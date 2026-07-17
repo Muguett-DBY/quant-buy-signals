@@ -9,8 +9,10 @@ import pandas as pd
 import pytest
 
 from data.capex_evidence import resolve_capex_evidence
+from data.financial_source_evidence import zero_capex_evidence
 from engine.audit import (
     _audit_bear_case,
+    _audit_validate_capex_provenance,
     _independent_checks,
     _markdown_cell,
     _scoring_replay_checks,
@@ -60,6 +62,26 @@ def _cashflow_row(report_date: str, operating_cash_flow: float, capex: float) ->
         "CONSTRUCT_LONG_ASSET": value,
         "CAPEX_PROVENANCE": provenance,
     }
+
+
+def test_independent_audit_accepts_committed_exchange_filed_zero_capex_evidence():
+    code = "600854"
+    report_date = "2026-03-31"
+    official_evidence = zero_capex_evidence()[(code, report_date)]
+    value, provenance = resolve_capex_evidence(
+        None,
+        None,
+        report_date=report_date,
+        security_code=code,
+        official_evidence=official_evidence,
+    )
+
+    assert value == 0.0
+    assert _audit_validate_capex_provenance(
+        provenance,
+        expected_value=value,
+        expected_report_date=report_date,
+    ) == "complete"
 
 
 def _market(count: int = 5):

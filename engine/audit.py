@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 
 import config as _production_config
+from data.financial_source_evidence import FinancialSourceEvidenceError, zero_capex_evidence
 from engine import buy_screener as _production_screener
 from engine.buy_screener import validate_screening_result
 from engine.dcf import ReportingPeriodContract
@@ -95,7 +96,7 @@ _AUDIT_NAMES = {
     "type3": "3️⃣ 可持续高增长",
     "type4": "4️⃣ 长坡厚雪",
     "type5": "5️⃣ 强周期底部",
-    "type6": "6️⃣ VC属性",
+    "type6": "6️⃣ 高风险早期/困境型",
     "type7": "7️⃣ 优质股权型",
 }
 _AUDIT_QUALIFY_THRESHOLD = 7.0
@@ -1311,8 +1312,11 @@ _AUDIT_CAPEX_KEYS = (
     "购建固定资产无形资产和其他长期资产支付的现金",
 )
 _AUDIT_CAPEX_PROVENANCE_SCHEMA_VERSION = 1
+_AUDIT_CAPEX_FIELD = "CONSTRUCT_LONG_ASSET"
 _AUDIT_STANDARD_CASHFLOW_REPORT = "RPT_DMSK_FN_CASHFLOW"
 _AUDIT_DETAILED_CASHFLOW_REPORT = "RPT_F10_FINANCE_GCASHFLOW"
+_AUDIT_OFFICIAL_QUARTERLY_REPORT = "CNINFO_EXCHANGE_FILED_QUARTERLY_REPORT"
+_AUDIT_OFFICIAL_ANNUAL_REPORT = "CNINFO_EXCHANGE_FILED_ANNUAL_REPORT"
 _AUDIT_EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _AUDIT_NON_CAPEX_OUTFLOW_FIELDS = (
     "INVEST_PAY_CASH",
@@ -1495,7 +1499,6 @@ def _audit_validate_capex_provenance(
         provenance.get("schema_version") != _AUDIT_CAPEX_PROVENANCE_SCHEMA_VERSION
         or provenance.get("status") != "complete"
         or provenance.get("report_date") != expected_report_date
-        or provenance.get("source_url") != _AUDIT_EASTMONEY_DATACENTER_URL
         or not _close(provenance.get("value"), expected_value, abs_tol=0.01)
     ):
         return "invalid_capex_provenance"
@@ -1503,10 +1506,49 @@ def _audit_validate_capex_provenance(
     label = provenance.get("evidence_label")
     source_report = provenance.get("source_report")
     components = provenance.get("components")
+    if label == "fact_official_report_zero":
+        expected_source_report = (
+            _AUDIT_OFFICIAL_ANNUAL_REPORT
+            if expected_report_date.endswith("-12-31")
+            else _AUDIT_OFFICIAL_QUARTERLY_REPORT
+        )
+        code = provenance.get("security_code")
+        if (
+            not isinstance(code, str)
+            or re.fullmatch(r"\d{6}", code) is None
+            or source_report != expected_source_report
+            or provenance.get("source_field") != _AUDIT_CAPEX_FIELD
+            or provenance.get("formula") != "exchange_filed_statement_zero"
+            or provenance.get("derivation_method") is not None
+            or not _close(expected_value, 0.0, abs_tol=0.01)
+            or not isinstance(components, Mapping)
+            or not _close(components.get("reported_value"), 0.0, abs_tol=0.01)
+        ):
+            return "invalid_capex_provenance"
+        try:
+            committed = zero_capex_evidence().get((code, expected_report_date))
+        except FinancialSourceEvidenceError:
+            return "invalid_capex_provenance"
+        if not isinstance(committed, Mapping):
+            return "invalid_capex_provenance"
+        for field in (
+            "evidence_type",
+            "source_document",
+            "source_url",
+            "source_sha256",
+            "source_page",
+            "source_statement",
+        ):
+            if provenance.get(field) != committed.get(field):
+                return "invalid_capex_provenance"
+        return "complete"
+
+    if provenance.get("source_url") != _AUDIT_EASTMONEY_DATACENTER_URL:
+        return "invalid_capex_provenance"
     if label == "fact_source_reported":
         if (
             source_report not in {_AUDIT_STANDARD_CASHFLOW_REPORT, _AUDIT_DETAILED_CASHFLOW_REPORT}
-            or provenance.get("source_field") != "CONSTRUCT_LONG_ASSET"
+            or provenance.get("source_field") != _AUDIT_CAPEX_FIELD
             or provenance.get("formula") != "source_reported"
             or provenance.get("derivation_method") is not None
             or not isinstance(components, Mapping)

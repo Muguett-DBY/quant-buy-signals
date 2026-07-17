@@ -28,7 +28,7 @@ TYPE_NAMES = {
     "type3": "3️⃣ 可持续高增长",
     "type4": "4️⃣ 长坡厚雪",
     "type5": "5️⃣ 强周期底部",
-    "type6": "6️⃣ VC属性",
+    "type6": "6️⃣ 高风险早期/困境型",
     "type7": "7️⃣ 优质股权型",
 }
 TYPE_DIMENSIONS = {
@@ -81,10 +81,10 @@ TYPE_DIMENSIONS = {
 }
 
 TYPE6_GLOBAL_RISK_NOTICE = (
-    "VC属性标的单只股票仓位不得超过5%，此类资产合计仓位不得超过15%；"
+    "高风险早期/困境型标的单只股票仓位不得超过5%，此类资产合计仓位不得超过15%；"
     "买入前必须明确并能承受判断错误时的最大损失。"
-    "当前自动数据源不提供6b技术突破/6c模式创新的可验证原始证据；"
-    "可通过本页的外部证据 JSON 显式提供0-10分及来源，未提供时自动评分会保守降级。"
+    "当前自动数据不能直接证明技术突破或商业模式创新；"
+    "可在本页导入可核验的外部资料补充评分依据，未提供时不会据此给出买入信号。"
 )
 
 MAX_USER_EVIDENCE_BYTES = 1_000_000
@@ -1009,7 +1009,7 @@ def _render_global_status(frame: pd.DataFrame) -> None:
         strict_ttm = validation.get("strict_ttm_source_coverage")
         if isinstance(strict_ttm, Mapping):
             ttm_parts: list[str] = []
-            labels = {"revenue": "收入", "fcff": "FCFF"}
+            labels = {"revenue": "收入", "fcff": "自由现金流"}
             for metric in ("revenue", "fcff"):
                 metric_coverage = strict_ttm.get(metric)
                 if not isinstance(metric_coverage, Mapping):
@@ -1020,7 +1020,7 @@ def _render_global_status(frame: pd.DataFrame) -> None:
                 if isinstance(complete, int) and isinstance(denominator, int) and coverage is not None:
                     ttm_parts.append(f"{labels[metric]} {complete}/{denominator} ({coverage * 100:.1f}%)")
             if ttm_parts:
-                st.caption("严格TTM源覆盖（沪深非金融）: " + " | ".join(ttm_parts))
+                st.caption("近十二个月数据覆盖（沪深非金融）: " + " | ".join(ttm_parts))
 
         comparative_missing = validation.get("comparative_missing_codes")
         if isinstance(comparative_missing, (list, tuple, set)) and comparative_missing:
@@ -1087,7 +1087,7 @@ def _dcf_audit_rows(
     *,
     skip_classifications: Mapping[str, Mapping[str, str]] | None = None,
 ) -> list[dict]:
-    """Flatten six-point DCF/P-B bands and parameters for durable UI/export evidence."""
+    """Flatten valuation bands and parameters for durable UI/export evidence."""
     score_by_code = {_normalise_code(row.get("code")): row for row in scores.to_dict(orient="records")}
     result_by_code = {_normalise_code(code): value for code, value in dcf_results.items() if isinstance(value, Mapping)}
     reasons = {_normalise_code(code): str(reason) for code, reason in skip_reasons.items()}
@@ -1101,7 +1101,7 @@ def _dcf_audit_rows(
         score_row = score_by_code[code]
         result = result_by_code.get(code)
         is_financial = str(score_row.get("industry", "")) in {"BANK", "INSURANCE", "SECURITIES"}
-        model = "justified P/B" if is_financial else "FCFF DCF"
+        model = "净资产收益估值" if is_financial else "现金流估值"
         if result is None:
             classification = classifications.get(code, {})
             rows.append(
@@ -1115,7 +1115,7 @@ def _dcf_audit_rows(
                 }
             )
             continue
-        model = "justified P/B" if bool(result.get("_pb_valuation")) else "FCFF DCF"
+        model = "净资产收益估值" if bool(result.get("_pb_valuation")) else "现金流估值"
         record = {
             "代码": code,
             "名称": score_row.get("name", result.get("name", "")),
@@ -1128,15 +1128,15 @@ def _dcf_audit_rows(
             "买入区上界": result.get("buy_zone_upper"),
             "卖出区下界": result.get("sell_zone_lower"),
             "安全边际%": result.get("safety_margin_pct"),
-            "基础WACC": result.get("base_wacc"),
-            "基础FCF": result.get("base_fcf"),
+            "基础折现率": result.get("base_wacc"),
+            "基础自由现金流": result.get("base_fcf"),
         }
         points = result.get("dcf_points", {})
         for scenario in ("pessimistic", "neutral", "optimistic"):
             band = points.get(scenario, {}) if isinstance(points, Mapping) else {}
             record[f"{scenario}_lower"] = band.get("lower") if isinstance(band, Mapping) else None
             record[f"{scenario}_upper"] = band.get("upper") if isinstance(band, Mapping) else None
-        record["参数JSON"] = json.dumps(
+        record["估值参数（JSON）"] = json.dumps(
             _json_safe(result.get("params", {})),
             ensure_ascii=False,
             sort_keys=True,
@@ -1291,7 +1291,7 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
                 key="download_dcf_audit_csv",
             )
         st.download_button(
-            "下载完整分析 JSON",
+            "下载完整分析资料（JSON）",
             st.session_state.get("buy_types_analysis_json")
             if isinstance(st.session_state.get("buy_types_analysis_json"), bytes)
             else _analysis_export_json(frame),
@@ -1310,8 +1310,8 @@ def _render_stock_dcf(code: str) -> None:
         reason = reasons.get(normalized) if isinstance(reasons, Mapping) else None
         st.caption(f"估值：未产生有效结果。原因：{reason or '未返回结构化原因'}")
         return
-    model = "金融 justified P/B" if bool(result.get("_pb_valuation")) else "非金融 FCFF DCF"
-    with st.expander(f"{model} 六点估值与参数", expanded=False):
+    model = "金融公司净资产收益估值" if bool(result.get("_pb_valuation")) else "非金融公司现金流估值"
+    with st.expander(f"{model}：三种情景的估值区间与参数", expanded=False):
         points = result.get("dcf_points", {})
         rows = []
         for scenario, label in (("pessimistic", "悲观"), ("neutral", "中性"), ("optimistic", "乐观")):
@@ -1644,7 +1644,7 @@ def _render_stock_inline(row):
                 lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")
             st.caption("  \n".join(lines))
             if t == "type7" and isinstance(td.get("ledger"), Mapping):
-                st.caption("Type7 原始规则：第1模板、第5模板、补丁5三套百分制分数必须分别严格大于70。")
+                st.caption("优质股权型的原始规则：第1模板、第5模板、补丁5三套百分制分数都必须严格大于70。")
                 st.json(td["ledger"], expanded=False)
 
 
@@ -1777,16 +1777,16 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             "evidence_available": False,
             "evidence_reason": "validation_or_acquisition_error",
         }
-        st.warning(f"市场冷度证据校验失败；情况二将显示证据不足：{type(exc).__name__}: {exc}")
+        st.warning("市场冷度资料校验未通过；情况二会显示“证据不足”，不会按零分或买入信号处理。")
 
-    dcf_status = st.status("估值中（非金融FCFF DCF / 金融justified P/B）...", expanded=True)
+    dcf_status = st.status("估值中（非金融公司按现金流估值，金融公司按盈利能力和净资产估值）...", expanded=True)
 
     def dcf_cb(done, total):
         if done == total or done % 500 == 0:
             dcf_status.write(f"估值: {done}/{total}")
 
     score_status = st.status("指标提取与七类型评分中...", expanded=True)
-    history_status = st.status("Type7长周期证据等待上界预筛选...", expanded=False)
+    history_status = st.status("优质股权型所需的长期资料正在预筛选...", expanded=False)
 
     def score_cb(done, total):
         if done == total or done % 500 == 0:
@@ -1794,7 +1794,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
 
     def quality_history_cb(done, total):
         if done == total or done % 20 == 0:
-            history_status.update(label=f"Type7十年回报与五年估值: {done}/{total}", expanded=True)
+            history_status.update(label=f"优质股权型的十年回报与五年估值资料: {done}/{total}", expanded=True)
 
     try:
         previous_quality = st.session_state.get("buy_types_analysis_quality")
@@ -1851,7 +1851,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     except Exception as exc:
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
-        history_status.update(label="Type7长周期证据未完成", state="error")
+        history_status.update(label="优质股权型的长期资料未完成", state="error")
         message = f"{type(exc).__name__}: {exc}"
         st.session_state["buy_types_refresh_error"] = message
         return False
@@ -1912,7 +1912,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
         state="complete",
     )
     score_status.update(label=f"指标提取与七类型评分完成: {len(analysis.scores)} 只", state="complete")
-    history_status.update(label="Type7长周期证据阶段完成（仅抓取数学上仍可能达标者）", state="complete")
+    history_status.update(label="优质股权型的长期资料阶段完成（仅核验仍可能达标的公司）", state="complete")
     st.session_state.pop("buy_types_refresh_error", None)
     st.toast("✅ 分析完成，新一代数据已生效！", icon="🎉")
     return True
@@ -1936,13 +1936,12 @@ def show():
     force_refresh = bool(st.session_state.pop("force_data_refresh", False))
     user_evidence_payload: object = None
     evidence_input_error = ""
-    with st.expander("🧾 可选：导入 Type5/Type6/Type7 外部证据", expanded=False):
+    with st.expander("🧾 高级功能：导入外部资料（可选）", expanded=False):
         st.caption(
-            "JSON 顶层键为6位股票代码。每个0-10分字段必须同时提供同名 _evidence 对象，"
-            "其中包含 source、evidence_id、as_of（YYYY-MM-DD）；Type7 的补丁5前置条件还要求"
-            " type7_research_sources 至少列出3家不同发布方。Type5 要成为买点，须分别提供强周期属性、"
-            "底部、抗周期、上行弹性和正常化盈利五类专用证据；未提供只会显示证据不足，不会假装成买点。"
-            "文件仅叠加到本次评分，不改写市场快照。"
+            "仅当你有可核验的行业或公司资料时使用。每项评分都必须附上来源、资料编号和日期；"
+            "优质股权型还需要至少三家不同机构的研究资料。强周期要成为买点，必须同时证明强周期属性、"
+            "底部、抗压能力、上行弹性和多年平均盈利估值。没有这些资料时，程序只会显示“证据不足”，"
+            "不会伪装成买入信号。资料仅用于本次评分，不会改写市场快照。"
         )
         st.code(
             '{"601088":{"type5_cycle_attribute_score":8,'
@@ -1961,7 +1960,7 @@ def show():
             language="json",
         )
         evidence_file = st.file_uploader(
-            "选择外部证据 JSON（最大1MB）",
+            "选择外部资料文件（JSON 格式，最大 1MB）",
             type=["json"],
             accept_multiple_files=False,
             key="buy_types_evidence_file",
@@ -2002,14 +2001,14 @@ def show():
     if not has_last_good:
         refresh_error = st.session_state.get("buy_types_refresh_error", "")
         if refresh_error:
-            st.error(f"上次尝试未产生可用结果：{refresh_error}")
+            st.error("上次分析未产生可用结果。请重新抓取数据后再试；若持续失败，请查看数据来源状态。")
         st.info("👆 点击上方按钮开始沪深 A 股分析和七种买入类型评分")
         st.markdown("""
         **分析内容：**
         1. 抓取沪深行情；源响应中如含北交所记录，会在进入分析快照前剔除
         2. 批量获取最新财报数据
-        3. 对非金融公司跑 FCFF DCF、对银行/保险/券商跑 justified P/B（模板25）
-        4. 按补丁6七种买入类型逐维度评分（0-10分制；Type7保留三套百分制原账本）
+        3. 对非金融公司按未来现金流估值；对银行、保险和券商按盈利能力和净资产估值（模板25）
+        4. 按补丁6七种买入类型逐维度评分（0-10分制；优质股权型保留三套百分制原始账本）
         5. 展示全部子维度得分 + 评分依据
         """)
         return

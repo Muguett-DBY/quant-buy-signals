@@ -109,8 +109,8 @@ def test_buy_types_page_shows_provenance_and_keeps_extreme_finite_metrics_by_def
     assert any(
         "类型6全局风控" in value
         and "15%" in value
-        and "外部证据 JSON" in value
-        and "未提供时自动评分会保守降级" in value
+        and "技术突破或商业模式创新" in value
+        and "不会据此给出买入信号" in value
         for value in warnings
     )
     assert any("财报覆盖 2/2 (100.0%)" in element.value for element in at.caption)
@@ -122,9 +122,9 @@ def test_buy_types_page_shows_provenance_and_keeps_extreme_finite_metrics_by_def
     )
     assert any("缺少同比中期财报证据" in value and "不进入当前估值和评分代" in value for value in warnings)
     assert any(
-        "严格TTM源覆盖（沪深非金融）" in element.value
+        "近十二个月数据覆盖（沪深非金融）" in element.value
         and "收入 2/2 (100.0%)" in element.value
-        and "FCFF 1/2 (50.0%)" in element.value
+        and "自由现金流 1/2 (50.0%)" in element.value
         for element in at.caption
     )
 
@@ -248,9 +248,8 @@ def test_industry_candidate_page_repeats_global_status_and_uses_accurate_name():
     assert any("1 只标的发生可追踪估值错误" in value for value in warnings)
     assert any(
         "类型6全局风控" in value
-        and "6b技术突破/6c模式创新的可验证原始证据" in value
-        and "外部证据 JSON" in value
-        and "未提供时自动评分会保守降级" in value
+        and "技术突破或商业模式创新" in value
+        and "不会据此给出买入信号" in value
         for value in warnings
     )
 

@@ -367,7 +367,7 @@ def test_dcf_audit_rows_preserve_six_points_parameters_and_skip_reason():
 
     assert rows[0]["pessimistic_lower"] == 1.0
     assert rows[0]["optimistic_upper"] == 6.0
-    assert '"growth":0.05' in rows[0]["参数JSON"]
+    assert '"growth":0.05' in rows[0]["估值参数（JSON）"]
     assert rows[1]["跳过原因"] == "现金流为负"
     assert rows[1]["跳过分类"] == "economic_not_applicable"
 
