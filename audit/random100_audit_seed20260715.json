@@ -108,11 +108,11 @@
   "eligible_universe_size": 4986,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-17T20:16:29.996107+00:00",
+    "generated_at_utc": "2026-07-17T20:40:07.000669+00:00",
     "snapshot_content_sha256": "4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd",
     "snapshot_artifact_sha256": "99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D",
     "eligible_universe_sha256": "498d2ae3592b055d6ae2699a930173796eeaf3acb46abfd0e1814cc259f8e261",
-    "code_sha256": "c5b9ef0def7da2179c992eb9712861e45726d6e9efb1ec6e00c89b11a4080f8d",
+    "code_sha256": "29a290035a49ac8ebf88fab36e0117180375c998cf451eeac70a587e21de3bd1",
     "rules_sha256": "65e341bbd47d85ef6c48e19a9415fb0559b24e7e1143ac7879d80485e96dae31",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
     "dependency_manifest_sha256": "955e972b611e0b9a3a0b60bb7844c116ac1aa24d7a098c4b9bc5e1bbedfb8e18",
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "893b06f9573e25cd4db70b952ea2086434237519",
+      "commit": "8ed662c6ca28a576dca4102987594274356ef5ca",
       "dirty": false
     },
     "runtime": {
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 224.55128598213196,
         "source_quote_timestamp_oldest": 1784271600.0,
         "source_quote_timestamp_latest": 1784273760.0,
-        "source_quote_age_seconds": 47601.98035311699,
+        "source_quote_age_seconds": 49010.72162556648,
         "trading_source_trade_dates": [
           "2026-07-17"
         ],
@@ -196541,6 +196541,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "9f4d34f05c977bdf9a415ad8f202bd925145e8227bd6e15cebd5c652d80b88e6",
-    "markdown": "3fc483ac39c069a70a8ba3e0355ececf19557c91c21ec4c3fe5ec6dfe29286d5"
+    "markdown": "7cd21f8db47159c9e2ad9c4b26a3c3752edeb27d45d586a9e6ff7b83d65d5b80"
   }
 }

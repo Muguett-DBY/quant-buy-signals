@@ -14,7 +14,7 @@
 - triggered_by_type: `{'type1': 1, 'type2': 7, 'type3': 0, 'type4': 0, 'type5': 0, 'type6': 0, 'type7': 0}`
 - snapshot_content_sha256: `4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd`
 - snapshot_artifact_sha256: `99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D`
-- code_sha256: `c5b9ef0def7da2179c992eb9712861e45726d6e9efb1ec6e00c89b11a4080f8d`
+- code_sha256: `29a290035a49ac8ebf88fab36e0117180375c998cf451eeac70a587e21de3bd1`
 - rules_sha256: `65e341bbd47d85ef6c48e19a9415fb0559b24e7e1143ac7879d80485e96dae31`
 - dependency_manifest_sha256: `955e972b611e0b9a3a0b60bb7844c116ac1aa24d7a098c4b9bc5e1bbedfb8e18`
 - industry_sha256: `e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631`
@@ -22,7 +22,7 @@
 - type7_source_documents: `{'template1': {'path_at_model_authoring': 'E:\\模板汇总MD\\第1模板.md', 'sha256': '98d8a101a08cdb122afd23c793faa3edf5e4e426eae09e7fc20901476ea95b1d'}, 'template5': {'path_at_model_authoring': 'E:\\模板汇总MD\\第5模板.md', 'sha256': '37a9cd43633bcd0bc1f2811738d48a7d1cff659e5ef11b6fd9152f2ed0686946'}, 'patch5': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁5.md', 'sha256': '8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4'}, 'patch6': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}}`
 - risk_parameter_sources: `{'model_as_of': '2026-07-15', 'risk_free_rate_as_of': '2026-07-15', 'risk_free_rate_source': 'ChinaBond China Government Bond Yield Curve 10Y', 'risk_free_rate_source_url': 'https://yield.chinabond.com.cn/cbweb-sh-mn/sh/searchShTable?locale=zh_CN', 'equity_risk_premium_as_of': '2026-04-01', 'equity_risk_premium_basis': 'china_rating_based_total_erp', 'equity_risk_premium_source_url': 'https://pages.stern.nyu.edu/~adamodar/pc/datasets/ctrypremApr26.xlsx', 'ctrypremApr26.xlsx': '2bcfaace0ee4132ced6039ea0a2f26999af8d5366f8fbde81cf71dfb2735566e', 'industry_data_as_of': '2026-01-05', 'betaChina.xls': 'ff9187e1ca2dc5ee697e240d368f5c8f1956bc00c4ff8e8b0b0d46c698f2aee9', 'waccChina.xls': '525ff4a15a2585fd2d1c06fc758296654370837da95e7107f64a14b0f03667a6'}`
 - scoring_verification_scope: `{'same_source_replay': 'recomputes every published field from reordered production inputs', 'same_source_valuation_replay': 'recomputes valuation existence, payloads, skip reasons and sampled issues', 'independent_runtime_checks': 'recompute weights, trigger relations, ranking, bear cases, valuation formulas and source binding', 'business_rule_oracle': 'fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py'}`
-- git: `{'commit': '893b06f9573e25cd4db70b952ea2086434237519', 'dirty': False}`
+- git: `{'commit': '8ed662c6ca28a576dca4102987594274356ef5ca', 'dirty': False}`
 
 ## 公司明细
 
