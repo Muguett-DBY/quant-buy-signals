@@ -159,7 +159,11 @@ jobs:
             exit 0
           }
           $root = Join-Path $env:RUNNER_TEMP 'ds-dcf-source-package'
-          $package = Join-Path $root 'DS_DCF-v11.0.0'
+          $version = (python -c "from desktop.version import __version__; print(__version__)").Trim()
+          if (-not $version) {
+            throw 'Could not determine the desktop release version.'
+          }
+          $package = Join-Path $root "DS_DCF-v$version"
           New-Item -ItemType Directory -Path $package -Force | Out-Null
           git ls-files | ForEach-Object {
             $source = Join-Path $PWD $_
@@ -167,6 +171,6 @@ jobs:
             New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
             Copy-Item -LiteralPath $source -Destination $destination
           }
-          $zip = Join-Path $env:RUNNER_TEMP 'DS_DCF-v11.0.0.zip'
+          $zip = Join-Path $env:RUNNER_TEMP "DS_DCF-v$version.zip"
           Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel Optimal
           python -m tools.verify_release_zip $zip

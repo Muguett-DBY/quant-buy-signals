@@ -108,17 +108,17 @@
   "eligible_universe_size": 4986,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-17T16:24:49.439807+00:00",
+    "generated_at_utc": "2026-07-17T18:54:33.227606+00:00",
     "snapshot_content_sha256": "4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd",
     "snapshot_artifact_sha256": "99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D",
     "eligible_universe_sha256": "498d2ae3592b055d6ae2699a930173796eeaf3acb46abfd0e1814cc259f8e261",
-    "code_sha256": "814a615fa875adecb54060f30fb984d1f4504175248f70e5fe7f29344a6cb238",
-    "rules_sha256": "055d82930ec230b5c7ed14ee7d411b309169948b338eca7431243abcd0ddd9a6",
+    "code_sha256": "d96ade81d693a1f04f4413e0a51ef71ebc255a9d451e39e36f391b0b073e6297",
+    "rules_sha256": "17f1d6c1417eb1b6cb6f7949ccf648bc1b80a60392642781d6bac8bd8c6bf33c",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
-    "dependency_manifest_sha256": "a1e4067eafcf246d2345ff960d6ff801d5d18c21c797b3e00eba217b9b1a43c7",
+    "dependency_manifest_sha256": "206cb1362736d783aa46c23d594c70d706cf26de6dc1751bff426fc09951bb9e",
     "patch6_source": {
       "path_at_model_authoring": "E:\\模板汇总MD\\补丁6.md",
-      "sha256": "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56"
+      "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6"
     },
     "type7_source_documents": {
       "template1": {
@@ -135,7 +135,7 @@
       },
       "patch6": {
         "path_at_model_authoring": "E:\\模板汇总MD\\补丁6.md",
-        "sha256": "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56"
+        "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6"
       }
     },
     "risk_parameter_sources": {
@@ -158,8 +158,8 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "6a44cb23f317f548d1834ef2d20302118f71ede3",
-      "dirty": false
+      "commit": "0c27e50f47f66f59ee915e9710135a3bfd43119c",
+      "dirty": true
     },
     "runtime": {
       "python": "3.12.10",
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 224.55128598213196,
         "source_quote_timestamp_oldest": 1784271600.0,
         "source_quote_timestamp_latest": 1784273760.0,
-        "source_quote_age_seconds": 33700.95718050003,
+        "source_quote_age_seconds": 42681.479211330414,
         "trading_source_trade_dates": [
           "2026-07-17"
         ],
@@ -42894,7 +42894,7 @@
         "reasons": {
           "2a": "产业聚合增速-5.0%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-42.1%;YTD-2",
           "2d": "当前PB/行业3.4倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -42972,12 +42972,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -44396,31 +44396,31 @@
       "num_types": 0,
       "primary_type": null,
       "primary_label": "无触发（不买）",
-      "diagnostic_type": "type5",
-      "diagnostic_label": "5️⃣ 强周期底部",
-      "max_score": 4.1,
+      "diagnostic_type": "type2",
+      "diagnostic_label": "2️⃣ 两热一冷",
+      "max_score": 3.9,
       "bear_case": [
         {
           "dimension": "_veto",
-          "score": 2.0,
-          "reason": "周期阶段不符合"
+          "score": 1.0,
+          "reason": "产业与公司热度平均须>4"
         },
         {
-          "dimension": "_condition",
-          "score": 2.0,
-          "reason": "须满足5a≥7且5c≥5"
+          "dimension": "2b",
+          "score": 1.0,
+          "reason": "拐点1项:最新同口径利润增"
         },
         {
-          "dimension": "5a",
-          "score": 2.0,
-          "reason": "最新报告期利润为负"
+          "dimension": "2a",
+          "score": 1.0,
+          "reason": "产业聚合增速-8.0%"
         }
       ],
       "type1_score": 0.0,
       "type2_score": 3.9,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 4.1,
+      "type5_score": 6.0,
       "type6_score": 3.3,
       "type7_score": 2.8,
       "type1": {
@@ -44459,7 +44459,7 @@
         "reasons": {
           "2a": "产业聚合增速-8.0%",
           "2b": "拐点1项:最新同口径利润增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-11.1%;YTD-1",
           "2d": "当前PB/行业0.7倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -44527,30 +44527,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.1,
+        "total": 6.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 4.0,
+          "5d": 6.0,
           "5e": 9.0
         },
         "reasons": {
-          "5a": "最新报告期利润为负",
-          "5b": "量化底部信号4项",
-          "5c": "最新报告期利润为负",
-          "5d": "峰谷弹性67.4倍",
-          "5e": "PB0.78破净",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健1项",
+          "5d": "历史利润振幅67.4倍",
+          "5e": "10年均利PE6.5倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -44564,8 +44563,8 @@
         },
         "reasons": {
           "6a": "产业增速-8.0%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -46013,7 +46012,7 @@
         "reasons": {
           "2a": "产业聚合增速2.6%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-10.7%;YTD8.",
           "2d": "当前PB/行业0.4倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -46063,11 +46062,11 @@
           "4f": 10.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期经营现金流为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局1.0倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支0年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -46090,12 +46089,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -47538,7 +47537,7 @@
       "type2_score": 5.0,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.9,
+      "type5_score": 6.2,
       "type6_score": 0.0,
       "type7_score": 3.8,
       "type1": {
@@ -47577,7 +47576,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-24.0%;YTD-2",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -47645,30 +47644,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.9,
+        "total": 6.2,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 6.0,
+          "5d": 6.0,
           "5e": 7.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流降幅≥50%",
-          "5b": "量化底部信号4项",
-          "5c": "最新同口径经营现金流降幅≥50%",
-          "5d": "峰谷弹性18.3倍",
-          "5e": "PB1.16低位",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健2项",
+          "5d": "历史利润振幅18.3倍",
+          "5e": "10年均利PE11.6倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -49143,7 +49141,7 @@
         "reasons": {
           "2a": "产业聚合增速6.1%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-26.5%;YTD-2",
           "2d": "当前PB/行业1.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -49193,11 +49191,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局6.8倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -49220,12 +49218,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -50708,7 +50706,7 @@
         "reasons": {
           "2a": "产业聚合增速6.0%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-26.4%;YTD-3",
           "2d": "归母利润趋势PEG1.0",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -50731,11 +50729,11 @@
           "3e": 7.5
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流转负",
           "3c": "ROIC-WACC=-2.8%",
           "3d": "弱代理2.0分:最新同口径经营现金流转负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -50757,11 +50755,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流转负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局8.0倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -50784,12 +50782,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -52232,7 +52230,7 @@
       "type2_score": 5.1,
       "type3_score": 3.6,
       "type4_score": 0.0,
-      "type5_score": 2.9,
+      "type5_score": 5.2,
       "type6_score": 0.0,
       "type7_score": 4.3,
       "type1": {
@@ -52271,7 +52269,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径利润明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-2.8%;YTD-18",
           "2d": "归母利润趋势PEG1.0",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -52294,11 +52292,11 @@
           "3e": 6.1
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期经营现金流为负",
           "3c": "ROIC-WACC=-0.2%",
           "3d": "弱代理2.0分:最新报告期经营现金流为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -52338,30 +52336,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 2.9,
+        "total": 5.2,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 2.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 2.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 4.0,
+          "5d": 6.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "最新报告期经营现金流为负",
-          "5b": "量化底部信号0项",
-          "5c": "最新报告期经营现金流为负",
-          "5d": "峰谷弹性14.6倍",
-          "5e": "周期估值不便宜",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健1项",
+          "5d": "历史利润振幅14.6倍",
+          "5e": "8年均利PE30.8倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -53789,7 +53786,7 @@
         {
           "dimension": "2c",
           "score": 8.0,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-38.4%;YTD-3"
         }
       ],
       "type1_score": 0.0,
@@ -53835,7 +53832,7 @@
         "reasons": {
           "2a": "产业聚合增速6.1%",
           "2b": "年度利润明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-38.4%;YTD-3",
           "2d": "当前PB/行业0.6倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -53911,12 +53908,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -55398,7 +55395,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "最新同口径利润明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-36.4%;YTD-3",
           "2d": "当前PB/行业0.7倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -55474,12 +55471,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -56922,7 +56919,7 @@
       "type2_score": 5.2,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.4,
+      "type5_score": 0.0,
       "type6_score": 5.2,
       "type7_score": 3.0,
       "type1": {
@@ -56961,7 +56958,7 @@
         "reasons": {
           "2a": "产业聚合增速3.0%",
           "2b": "拐点2项:现金流支撑+最新同口径利润增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-14.8%;YTD-2",
           "2d": "当前PB/行业1.1倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -57028,29 +57025,28 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.4,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 2.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新报告期利润为负",
-          "5b": "量化底部信号2项",
-          "5c": "最新报告期利润为负",
-          "5d": "峰谷弹性22.8倍",
-          "5e": "周期估值不便宜",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
-          "_applicable": "yes",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
+          "_status": "not_applicable",
+          "_applicable": "no",
           "_evidence": "complete"
         },
-        "veto": true,
-        "status": "vetoed",
-        "applicable": true,
+        "veto": false,
+        "status": "not_applicable",
+        "applicable": false,
         "evidence_complete": true
       },
       "type6": {
@@ -57065,8 +57061,8 @@
         },
         "reasons": {
           "6a": "产业增速3.0%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -58463,7 +58459,7 @@
         {
           "dimension": "2c",
           "score": 7.0,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-21.2%;YTD-1"
         },
         {
           "dimension": "2b",
@@ -58475,7 +58471,7 @@
       "type2_score": 7.4,
       "type3_score": 5.5,
       "type4_score": 3.7,
-      "type5_score": 5.3,
+      "type5_score": 5.6,
       "type6_score": 0.0,
       "type7_score": 5.2,
       "type1": {
@@ -58491,7 +58487,7 @@
           "1a": "远离买入区251%",
           "1b": "五项满分2项",
           "1c": "FCF4.7%;末14.01亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -58515,7 +58511,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点6项:营收加速+净利率连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-21.2%;YTD-1",
           "2d": "归母利润趋势PEG0.1",
           "_status": "triggered",
           "_applicable": "yes",
@@ -58537,11 +58533,11 @@
           "3e": 7.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代8;扣非1.00/稀释0.0%",
           "3c": "ROIC-WACC=8.0%",
           "3d": "弱代理4.0分:趋势增速23.0%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -58563,11 +58559,11 @@
           "4f": 6.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净6/毛6/现4/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局1.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支5年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -58581,30 +58577,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 5.3,
+        "total": 5.6,
         "sub_scores": {
-          "5a": 3.0,
-          "5b": 4.0,
-          "5c": 9.5,
-          "5d": 9.0,
-          "5e": 5.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 6.0,
+          "5d": 6.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "未处周期低迷后期",
-          "5b": "量化底部信号1项",
-          "5c": "归一4.75亿;最新14.01亿;抗周期",
-          "5d": "峰谷弹性98.7倍",
-          "5e": "PB2.49中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健2项",
+          "5d": "历史利润振幅98.7倍",
+          "5e": "10年均利PE54.2倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -60027,7 +60022,7 @@
         {
           "dimension": "2c",
           "score": 6.5,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-9.6%;YTD-6."
         },
         {
           "dimension": "2a",
@@ -60078,7 +60073,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-9.6%;YTD-6.",
           "2d": "当前PB/行业0.7倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -60154,12 +60149,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -61642,7 +61637,7 @@
         "reasons": {
           "2a": "产业聚合增速1.9%",
           "2b": "拐点1项:最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日0.3%;YTD-13.",
           "2d": "当前PB/行业0.4倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -61692,11 +61687,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润降幅≥20%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.5倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_missing": "缺厚雪证据",
@@ -61720,12 +61715,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -61747,8 +61742,8 @@
         },
         "reasons": {
           "6a": "产业增速1.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润降幅≥20%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -63196,7 +63191,7 @@
         "reasons": {
           "2a": "产业聚合增速8.0%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-18.0%;YTD-3",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -63246,11 +63241,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期利润为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局4.3倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -63273,12 +63268,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -64760,7 +64755,7 @@
         "reasons": {
           "2a": "产业聚合增速6.7%",
           "2b": "拐点证据不足",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-35.1%;YTD-3",
           "2d": "当前PB/行业1.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -64837,12 +64832,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -64864,8 +64859,8 @@
         },
         "reasons": {
           "6a": "产业增速6.7%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流转负",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -66266,7 +66261,7 @@
         {
           "dimension": "2c",
           "score": 7.5,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-32.1%;YTD-2"
         }
       ],
       "type1_score": 5.1,
@@ -66289,7 +66284,7 @@
           "1a": "远离买入区380%",
           "1b": "五项满分4项",
           "1c": "FCF4.0%;末8.89亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -66313,7 +66308,7 @@
         "reasons": {
           "2a": "产业聚合增速6.7%",
           "2b": "拐点4项:营收加速+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-32.1%;YTD-2",
           "2d": "当前PB/行业1.2倍",
           "_adjustment": "强两热一冷允许中性估值",
           "_status": "observe",
@@ -66363,11 +66358,11 @@
           "4f": 4.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净4/毛10/现9/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支8年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -66390,12 +66385,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -67831,7 +67826,7 @@
         {
           "dimension": "2c",
           "score": 7.9,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-29.0%;YTD-3"
         }
       ],
       "type1_score": 0.0,
@@ -67877,7 +67872,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "拐点2项:最新同口径营收增+最新同口径利",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-29.0%;YTD-3",
           "2d": "当前PB/行业0.7倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -67953,12 +67948,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -69401,7 +69396,7 @@
       "type2_score": 5.1,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 4.1,
+      "type5_score": 0.0,
       "type6_score": 3.5,
       "type7_score": 2.4,
       "type1": {
@@ -69440,7 +69435,7 @@
         "reasons": {
           "2a": "产业聚合增速1.5%",
           "2b": "拐点2项:最新同口径营收增+最新同口径利",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-11.5%;YTD6.",
           "2d": "当前PB/行业0.5倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -69508,30 +69503,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.1,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 9.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新报告期经营现金流为负",
-          "5b": "量化底部信号3项",
-          "5c": "最新报告期经营现金流为负",
-          "5d": "峰谷弹性16.1倍",
-          "5e": "PB0.98破净",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -69545,8 +69539,8 @@
         },
         "reasons": {
           "6a": "产业增速1.5%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥20%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -71008,7 +71002,7 @@
         "reasons": {
           "2a": "产业聚合增速-5.0%",
           "2b": "最新同口径经营现金流明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-27.1%;YTD-2",
           "2d": "当前PB/行业6.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -71086,12 +71080,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -71113,8 +71107,8 @@
         },
         "reasons": {
           "6a": "产业增速-5.0%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥20%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -72522,7 +72516,7 @@
       "type2_score": 4.9,
       "type3_score": 0.0,
       "type4_score": 3.2,
-      "type5_score": 4.8,
+      "type5_score": 5.9,
       "type6_score": 4.5,
       "type7_score": 3.9,
       "type1": {
@@ -72538,7 +72532,7 @@
           "1a": "远离买入区2547%",
           "1b": "五项满分1项",
           "1c": "FCF3.5%;末1.54亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -72562,7 +72556,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点2项:现金流支撑+最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-25.2%;YTD-1",
           "2d": "当前PB/行业0.9倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -72612,11 +72606,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净4/毛8/现7/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局11.5倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -72630,30 +72624,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.8,
+        "total": 5.9,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 9.5,
-          "5d": 7.0,
-          "5e": 5.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 8.0,
+          "5d": 5.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "ROE仅2.5%",
-          "5b": "量化底部信号2项",
-          "5c": "归一1.48亿;最新1.54亿;抗周期4",
-          "5d": "峰谷弹性4.9倍",
-          "5e": "PB1.82中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健3项",
+          "5d": "历史利润振幅4.9倍",
+          "5e": "10年均利PE42.0倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -72667,8 +72660,8 @@
         },
         "reasons": {
           "6a": "产业增速1.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "困境反转未验证",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -74091,7 +74084,7 @@
       "type2_score": 5.9,
       "type3_score": 5.1,
       "type4_score": 3.7,
-      "type5_score": 4.8,
+      "type5_score": 6.2,
       "type6_score": 0.0,
       "type7_score": 5.1,
       "type1": {
@@ -74131,7 +74124,7 @@
         "reasons": {
           "2a": "产业聚合增速-8.2%",
           "2b": "最新同口径经营现金流下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-28.0%;YTD-1",
           "2d": "归母利润趋势PEG0.5",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -74154,11 +74147,11 @@
           "3e": 7.3
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流同比下降",
           "3c": "ROIC-WACC=1.4%",
           "3d": "弱代理5.0分:最新同口径经营现金流同比",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -74180,11 +74173,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流同比下降",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支20年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -74198,30 +74191,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.8,
+        "total": 6.2,
         "sub_scores": {
-          "5a": 3.0,
-          "5b": 2.0,
-          "5c": 9.5,
-          "5d": 9.0,
-          "5e": 5.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 9.0,
+          "5d": 6.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流同比下降",
-          "5b": "量化底部信号0项",
-          "5c": "归一4.81亿;最新21.18亿;抗周期",
-          "5d": "峰谷弹性8.8倍",
-          "5e": "PB1.91中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健4项",
+          "5d": "历史利润振幅8.8倍",
+          "5e": "10年均利PE38.4倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -75696,7 +75688,7 @@
         "reasons": {
           "2a": "产业聚合增速2.6%",
           "2b": "最新同口径经营现金流明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-14.7%;YTD-2",
           "2d": "归母利润趋势PEG4.6",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -75747,11 +75739,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥20%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.2倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -75774,12 +75766,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -77261,7 +77253,7 @@
         "reasons": {
           "2a": "产业聚合增速-1.8%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-30.9%;YTD-3",
           "2d": "当前PB/行业5.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -77339,12 +77331,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -78826,7 +78818,7 @@
         "reasons": {
           "2a": "产业聚合增速7.4%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-21.8%;YTD-1",
           "2d": "当前PB/行业0.5倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -78903,12 +78895,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -80496,7 +80488,7 @@
       "type2_score": 4.7,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 7.2,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 0.0,
       "type1": {
@@ -80534,7 +80526,7 @@
         "reasons": {
           "2a": "银行业息差/不良周期",
           "2b": "金融回归2项",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-4.8%;YTD-2.",
           "2d": "金融PB/同行1.0倍",
           "_veto": "金融两热平均须大于4",
           "_status": "vetoed",
@@ -80602,28 +80594,28 @@
       },
       "type5": {
         "triggered": false,
-        "total": 7.2,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 6.0,
-          "5b": 7.0,
-          "5c": 9.0,
-          "5d": 9.0,
-          "5e": 6.1
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "净息差处周期低位",
-          "5b": "金融底部信号4项",
-          "5c": "银行监管满分4项",
-          "5d": "金融周期振幅0.5倍",
-          "5e": "金融PB/同行1.0倍",
-          "_condition": "须周期回升且监管稳健",
-          "_status": "conditional",
-          "_applicable": "yes",
+          "5a": "金融机构不适用强周期底部模型",
+          "5b": "金融机构不适用强周期底部模型",
+          "5c": "金融机构不适用强周期底部模型",
+          "5d": "金融机构不适用强周期底部模型",
+          "5e": "金融机构不适用强周期底部模型",
+          "_scope": "金融机构不适用强周期底部模型",
+          "_status": "not_applicable",
+          "_applicable": "no",
           "_evidence": "complete"
         },
         "veto": false,
-        "status": "conditional",
-        "applicable": true,
+        "status": "not_applicable",
+        "applicable": false,
         "evidence_complete": true
       },
       "type6": {
@@ -81370,7 +81362,7 @@
         "reasons": {
           "2a": "产业聚合增速6.5%",
           "2b": "拐点1项:最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日21.9%;YTD51.",
           "2d": "当前PB/行业3.2倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -81394,11 +81386,11 @@
           "3e": 3.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流降幅≥50%",
           "3c": "ROIC-WACC=-10.5%",
           "3d": "弱代理2.0分:最新同口径经营现金流降幅",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_downgrade": "产业或股价泡沫风险",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
@@ -81448,12 +81440,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -82935,7 +82927,7 @@
         "reasons": {
           "2a": "产业聚合增速-6.6%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日3.4%;YTD4.9%",
           "2d": "当前PB/行业1.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -83013,12 +83005,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -84501,7 +84493,7 @@
         "reasons": {
           "2a": "产业聚合增速2.4%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-38.3%;YTD-3",
           "2d": "当前PB/行业1.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -84551,11 +84543,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润转负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局22.3倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_missing": "缺厚雪证据",
@@ -84579,12 +84571,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -84606,8 +84598,8 @@
         },
         "reasons": {
           "6a": "产业增速2.4%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润转负",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -86054,7 +86046,7 @@
         "reasons": {
           "2a": "产业聚合增速1.0%",
           "2b": "拐点2项:最新同口径营收增+最新同口径利",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-2.1%;YTD-12",
           "2d": "当前PB/行业0.9倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -86131,12 +86123,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -86158,8 +86150,8 @@
         },
         "reasons": {
           "6a": "产业增速1.0%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -87567,7 +87559,7 @@
       "type2_score": 5.2,
       "type3_score": 0.0,
       "type4_score": 2.8,
-      "type5_score": 3.2,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 4.9,
       "type1": {
@@ -87607,7 +87599,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-26.9%;YTD-2",
           "2d": "归母利润趋势PEG0.6",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -87657,11 +87649,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流转负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局4.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -87675,30 +87667,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.2,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 2.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 5.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流转负",
-          "5b": "量化底部信号0项",
-          "5c": "最新同口径经营现金流转负",
-          "5d": "峰谷弹性6.9倍",
-          "5e": "PB1.95中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -89109,31 +89100,31 @@
       "num_types": 0,
       "primary_type": null,
       "primary_label": "无触发（不买）",
-      "diagnostic_type": "type5",
-      "diagnostic_label": "5️⃣ 强周期底部",
-      "max_score": 4.4,
+      "diagnostic_type": "type6",
+      "diagnostic_label": "6️⃣ VC属性",
+      "max_score": 3.8,
       "bear_case": [
         {
+          "dimension": "_veto",
+          "score": 2.6,
+          "reason": "仅0项核心证据≥5"
+        },
+        {
           "dimension": "_condition",
-          "score": 2.0,
-          "reason": "须满足5a≥7且5c≥5"
+          "score": 2.6,
+          "reason": "须确认实际仓位符合建议上限"
         },
         {
-          "dimension": "5e",
-          "score": 2.0,
-          "reason": "周期估值不便宜"
-        },
-        {
-          "dimension": "5a",
-          "score": 4.0,
-          "reason": "最新同口径利润降幅≥20%"
+          "dimension": "6b",
+          "score": 2.6,
+          "reason": "研发与经营数据"
         }
       ],
       "type1_score": 0.0,
       "type2_score": 2.8,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 4.4,
+      "type5_score": 4.5,
       "type6_score": 3.8,
       "type7_score": 2.9,
       "type1": {
@@ -89172,7 +89163,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径利润明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日40.0%;YTD40.",
           "2d": "当前PB/行业2.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -89241,29 +89232,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.4,
+        "total": 4.5,
         "sub_scores": {
-          "5a": 4.0,
-          "5b": 6.0,
-          "5c": 4.0,
-          "5d": 5.0,
-          "5e": 2.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 2.0,
+          "5d": 3.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "最新同口径利润降幅≥20%",
-          "5b": "量化底部信号3项",
-          "5c": "最新同口径利润降幅≥20%",
-          "5d": "峰谷弹性2.2倍",
-          "5e": "周期估值不便宜",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "not_triggered",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健0项",
+          "5d": "历史利润弹性偏弱",
+          "5e": "10年均利PE123.8倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
         "veto": false,
-        "status": "not_triggered",
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -89277,8 +89268,8 @@
         },
         "reasons": {
           "6a": "产业增速1.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润降幅≥20%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -90689,7 +90680,7 @@
         {
           "dimension": "6b",
           "score": 5.3,
-          "reason": "证据:patch6-observable"
+          "reason": "研发与经营数据"
         },
         {
           "dimension": "6a",
@@ -90740,7 +90731,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "拐点4项:营收加速+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日90.7%;YTD185",
           "2d": "当前PB/行业2.2倍",
           "_veto": "市场周期不够冷",
           "_condition": "估值须合理或满足强周期修正",
@@ -90764,11 +90755,11 @@
           "3e": 2.6
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期利润为负",
           "3c": "ROIC-WACC=-13.9%",
           "3d": "弱代理2.0分:最新报告期利润为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_downgrade": "产业或股价泡沫风险",
           "_status": "vetoed",
@@ -90819,12 +90810,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -90846,8 +90837,8 @@
         },
         "reasons": {
           "6a": "产业增速16.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "利润改善77.3%",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -92247,14 +92238,14 @@
         {
           "dimension": "6c",
           "score": 5.5,
-          "reason": "证据:patch6-observable"
+          "reason": "经营效率与现金流数据"
         }
       ],
       "type1_score": 4.0,
       "type2_score": 5.4,
       "type3_score": 0.0,
       "type4_score": 2.6,
-      "type5_score": 3.4,
+      "type5_score": 0.0,
       "type6_score": 5.7,
       "type7_score": 4.1,
       "type1": {
@@ -92294,7 +92285,7 @@
         "reasons": {
           "2a": "产业聚合增速10.3%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-23.5%;YTD-2",
           "2d": "当前PB/行业1.0倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -92343,11 +92334,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期经营现金流为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局9.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -92361,30 +92352,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.4,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 2.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新报告期经营现金流为负",
-          "5b": "量化底部信号4项",
-          "5c": "最新报告期经营现金流为负",
-          "5d": "峰谷弹性5.8倍",
-          "5e": "周期估值不便宜",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -92398,8 +92388,8 @@
         },
         "reasons": {
           "6a": "产业增速10.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新经营现金流仍负但改善",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -93861,7 +93851,7 @@
         "reasons": {
           "2a": "产业聚合增速2.4%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-41.0%;YTD-1",
           "2d": "归母利润趋势PEG0.5",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -93884,11 +93874,11 @@
           "3e": 7.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流降幅≥50%",
           "3c": "ROIC-WACC=5.3%",
           "3d": "弱代理2.0分:最新同口径经营现金流降幅",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -93910,11 +93900,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局9.0倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -93937,12 +93927,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -95401,7 +95391,7 @@
           "1a": "远离买入区489%",
           "1b": "五项满分4项",
           "1c": "FCF1.1%;末7039.06万",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -95425,7 +95415,7 @@
         "reasons": {
           "2a": "产业聚合增速6.6%",
           "2b": "拐点5项:营收加速+利润连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-32.4%;YTD-3",
           "2d": "归母利润趋势PEG4.9",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -95448,11 +95438,11 @@
           "3e": 8.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代5;扣非0.66/稀释0.0%",
           "3c": "ROIC-WACC=-8.5%",
           "3d": "弱代理4.0分:趋势增速23.4%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -95474,11 +95464,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净3/毛10/现8/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局4.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支17年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -95501,12 +95491,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -95528,8 +95518,8 @@
         },
         "reasons": {
           "6a": "产业增速6.6%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "利润连续两年改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -96990,7 +96980,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日24.8%;YTD69.",
           "2d": "当前PB/行业4.1倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -97068,12 +97058,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -98494,7 +98484,7 @@
         {
           "dimension": "2c",
           "score": 3.4,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日14.1%;YTD34."
         }
       ],
       "type1_score": 3.9,
@@ -98541,7 +98531,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "最新同口径经营现金流明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日14.1%;YTD34.",
           "2d": "归母利润趋势PEG5.4",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -98564,11 +98554,11 @@
           "3e": 3.4
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流降幅≥20%",
           "3c": "ROIC-WACC=-4.1%",
           "3d": "弱代理4.0分:最新同口径经营现金流降幅",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -98590,11 +98580,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥20%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局20.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -98617,12 +98607,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -100104,7 +100094,7 @@
         "reasons": {
           "2a": "产业聚合增速7.8%",
           "2b": "最新同口径利润下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-23.0%;YTD0.",
           "2d": "当前PB/行业1.3倍",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -100127,11 +100117,11 @@
           "3e": 6.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期利润为负",
           "3c": "ROIC-WACC=-26.4%",
           "3d": "弱代理2.0分:最新报告期利润为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -100180,12 +100170,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -101652,7 +101642,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-36.9%;YTD-5",
           "2d": "归母利润趋势PEG25.6",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -101729,12 +101719,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -103216,7 +103206,7 @@
         "reasons": {
           "2a": "产业聚合增速6.6%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-47.5%;YTD-1",
           "2d": "归母利润趋势PEG1.1",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -103239,11 +103229,11 @@
           "3e": 7.1
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期经营现金流为负",
           "3c": "ROIC-WACC=-7.3%",
           "3d": "弱代理2.0分:最新报告期经营现金流为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_status": "vetoed",
           "_applicable": "yes",
@@ -103293,12 +103283,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -103320,8 +103310,8 @@
         },
         "reasons": {
           "6a": "产业增速6.6%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -104732,7 +104722,7 @@
         {
           "dimension": "6b",
           "score": 2.8,
-          "reason": "证据:patch6-observable"
+          "reason": "研发与经营数据"
         },
         {
           "dimension": "6a",
@@ -104783,7 +104773,7 @@
         "reasons": {
           "2a": "产业聚合增速0.4%",
           "2b": "拐点2项:最新同口径营收增+最新同口径利",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-8.0%;YTD-34",
           "2d": "当前PB/行业9.1倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -104861,12 +104851,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -104888,8 +104878,8 @@
         },
         "reasons": {
           "6a": "产业增速0.4%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -106336,7 +106326,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-20.8%;YTD-2",
           "2d": "当前PB/行业1.2倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -106386,11 +106376,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局8.2倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -106413,12 +106403,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -107851,7 +107841,7 @@
         {
           "dimension": "2c",
           "score": 6.9,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-26.7%;YTD-1"
         },
         {
           "dimension": "2b",
@@ -107902,7 +107892,7 @@
         "reasons": {
           "2a": "产业聚合增速5.9%",
           "2b": "拐点4项:营收加速+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-26.7%;YTD-1",
           "2d": "归母利润趋势PEG0.6",
           "_status": "triggered",
           "_applicable": "yes",
@@ -107924,11 +107914,11 @@
           "3e": 6.9
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代5;扣非0.46/稀释0.0%",
           "3c": "ROIC-WACC=-9.0%",
           "3d": "弱代理4.0分:趋势增速40.5%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -107977,12 +107967,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -108004,8 +107994,8 @@
         },
         "reasons": {
           "6a": "产业增速5.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "利润改善161.6%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -109466,7 +109456,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-22.2%;YTD-1",
           "2d": "当前PB/行业5.1倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -109544,12 +109534,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -109571,8 +109561,8 @@
         },
         "reasons": {
           "6a": "产业增速7.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新经营现金流仍负但改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -110980,7 +110970,7 @@
       "type2_score": 4.9,
       "type3_score": 3.5,
       "type4_score": 0.0,
-      "type5_score": 3.9,
+      "type5_score": 5.6,
       "type6_score": 4.4,
       "type7_score": 3.7,
       "type1": {
@@ -111019,7 +111009,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-30.7%;YTD-2",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -111042,11 +111032,11 @@
           "3e": 7.6
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径利润降幅≥50%",
           "3c": "ROIC-WACC=-10.5%",
           "3d": "弱代理2.0分:最新同口径利润降幅≥50",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -111086,30 +111076,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.9,
+        "total": 5.6,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 7.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 6.0,
+          "5d": 6.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "最新同口径利润降幅≥50%",
-          "5b": "量化底部信号3项",
-          "5c": "最新同口径利润降幅≥50%",
-          "5d": "峰谷弹性6.4倍",
-          "5e": "PB1.33低位",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健2项",
+          "5d": "历史利润振幅6.4倍",
+          "5e": "10年均利PE39.4倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -111123,8 +111112,8 @@
         },
         "reasons": {
           "6a": "产业增速1.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -112563,7 +112552,7 @@
           "1a": "远离买入区313%",
           "1b": "五项满分3项",
           "1c": "FCF3.7%;末9.57亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -112587,7 +112576,7 @@
         "reasons": {
           "2a": "产业聚合增速1.8%",
           "2b": "拐点3项:现金流支撑+最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-13.6%;YTD-1",
           "2d": "当前PB/行业1.1倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -112636,11 +112625,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净5/毛10/现5/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.3倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -112663,12 +112652,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -114104,7 +114093,7 @@
         {
           "dimension": "6b",
           "score": 3.9,
-          "reason": "证据:patch6-observable"
+          "reason": "研发与经营数据"
         }
       ],
       "type1_score": 0.0,
@@ -114150,7 +114139,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-2.5%;YTD32.",
           "2d": "归母利润趋势PEG1.3",
           "_status": "observe",
           "_applicable": "yes",
@@ -114172,11 +114161,11 @@
           "3e": 4.4
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流转负",
           "3c": "ROIC-WACC=-11.5%",
           "3d": "弱代理2.0分:最新同口径经营现金流转负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_status": "vetoed",
           "_applicable": "yes",
@@ -114226,12 +114215,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -114253,8 +114242,8 @@
         },
         "reasons": {
           "6a": "产业增速16.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流转负",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -115716,7 +115705,7 @@
         "reasons": {
           "2a": "产业聚合增速1.8%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-31.6%;YTD-3",
           "2d": "当前PB/行业1.4倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -115740,11 +115729,11 @@
           "3e": 7.7
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径利润降幅≥50%",
           "3c": "ROIC-WACC=8.0%",
           "3d": "弱代理2.0分:最新同口径利润降幅≥50",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -115766,11 +115755,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -115793,12 +115782,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -117280,7 +117269,7 @@
         "reasons": {
           "2a": "产业聚合增速7.4%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日63.5%;YTD65.",
           "2d": "当前PB/行业2.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -117358,12 +117347,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -117385,8 +117374,8 @@
         },
         "reasons": {
           "6a": "产业增速7.4%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "困境反转未验证",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -118810,7 +118799,7 @@
           "1a": "远离买入区285%",
           "1b": "五项满分2项",
           "1c": "FCF1.6%;末1.41亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -118834,7 +118823,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点4项:营收加速+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日3.1%;YTD-9.5",
           "2d": "归母利润趋势PEG23.9",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -118857,11 +118846,11 @@
           "3e": 4.8
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代8;扣非0.94/稀释0.0%",
           "3c": "ROIC-WACC=-4.5%",
           "3d": "弱代理4.0分:增速趋势减速-8.1%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -118883,11 +118872,11 @@
           "4f": 4.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净8/毛10/现1/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支7年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -118910,12 +118899,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -120398,7 +120387,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径经营现金流下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-16.8%;YTD10",
           "2d": "归母利润趋势PEG2.1",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -120448,11 +120437,11 @@
           "4f": 6.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流同比下降",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支5年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -120475,12 +120464,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -121962,7 +121951,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-21.8%;YTD-1",
           "2d": "当前PB/行业1.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -121985,11 +121974,11 @@
           "3e": 6.9
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径经营现金流同比下降",
           "3c": "ROIC-WACC=-10.4%",
           "3d": "弱代理2.0分:最新同口径经营现金流同比",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_status": "vetoed",
           "_applicable": "yes",
@@ -122039,12 +122028,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -122066,8 +122055,8 @@
         },
         "reasons": {
           "6a": "产业增速1.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流同比下降",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -123467,7 +123456,7 @@
         {
           "dimension": "2c",
           "score": 4.3,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-6.7%;YTD307"
         }
       ],
       "type1_score": 0.0,
@@ -123513,7 +123502,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "拐点4项:营收加速+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-6.7%;YTD307",
           "2d": "当前PB/行业10.2倍",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -123536,11 +123525,11 @@
           "3e": 4.3
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代6;扣非1.11/稀释0.0%",
           "3c": "ROIC-WACC=-11.0%",
           "3d": "弱代理4.0分:趋势增速20.0%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_status": "vetoed",
           "_applicable": "yes",
@@ -123590,12 +123579,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -125026,7 +125015,7 @@
         {
           "dimension": "2c",
           "score": 6.0,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-15.2%;YTD-7"
         },
         {
           "dimension": "2a",
@@ -125077,7 +125066,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-15.2%;YTD-7",
           "2d": "当前PB/行业0.5倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -125153,12 +125142,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -125180,8 +125169,8 @@
         },
         "reasons": {
           "6a": "产业增速8.5%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流转负",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -126644,7 +126633,7 @@
         "reasons": {
           "2a": "产业聚合增速2.5%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-33.3%;YTD-3",
           "2d": "当前PB/行业1.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -126695,11 +126684,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局4.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -126722,12 +126711,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -128163,7 +128152,7 @@
         {
           "dimension": "2c",
           "score": 7.3,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-13.4%;YTD-2"
         }
       ],
       "type1_score": 3.1,
@@ -128210,7 +128199,7 @@
         "reasons": {
           "2a": "产业聚合增速3.9%",
           "2b": "最新同口径经营现金流下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-13.4%;YTD-2",
           "2d": "归母利润趋势PEG0.5",
           "_status": "observe",
           "_applicable": "yes",
@@ -128259,11 +128248,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流同比下降",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局7.3倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支23年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -128286,12 +128275,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -129735,7 +129724,7 @@
       "type2_score": 4.5,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.7,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 3.6,
       "type1": {
@@ -129774,7 +129763,7 @@
         "reasons": {
           "2a": "产业聚合增速-2.0%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-7.2%;YTD-17",
           "2d": "当前PB/行业0.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -129842,30 +129831,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.7,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 5.0,
-          "5e": 9.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流转负",
-          "5b": "量化底部信号3项",
-          "5c": "最新同口径经营现金流转负",
-          "5d": "峰谷弹性2.2倍",
-          "5e": "PB0.73破净",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -131383,7 +131371,7 @@
       "type2_score": 5.1,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.3,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 0.0,
       "type1": {
@@ -131422,7 +131410,7 @@
         "reasons": {
           "2a": "券商业绩/风控周期",
           "2b": "金融回归1项",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-9.5%;YTD-21",
           "2d": "金融PB/同行1.6倍",
           "_missing": "金融公司拐点证据不足",
           "_condition": "金融估值须合理",
@@ -131491,30 +131479,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.3,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 4.0,
-          "5b": 3.0,
+          "5a": 0.0,
+          "5b": 0.0,
           "5c": 0.0,
-          "5d": 9.0,
-          "5e": 2.41
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "归母利润周期未反转",
-          "5b": "金融底部信号0项",
-          "5c": "金融监管字段缺失",
-          "5d": "金融周期振幅7.1倍",
-          "5e": "金融PB/同行1.6倍",
-          "_missing": "金融监管证据不足",
-          "_condition": "须周期回升且监管稳健",
-          "_status": "insufficient_evidence",
-          "_applicable": "yes",
-          "_evidence": "incomplete"
+          "5a": "金融机构不适用强周期底部模型",
+          "5b": "金融机构不适用强周期底部模型",
+          "5c": "金融机构不适用强周期底部模型",
+          "5d": "金融机构不适用强周期底部模型",
+          "5e": "金融机构不适用强周期底部模型",
+          "_scope": "金融机构不适用强周期底部模型",
+          "_status": "not_applicable",
+          "_applicable": "no",
+          "_evidence": "complete"
         },
         "veto": false,
-        "status": "insufficient_evidence",
-        "applicable": true,
-        "evidence_complete": false
+        "status": "not_applicable",
+        "applicable": false,
+        "evidence_complete": true
       },
       "type6": {
         "triggered": false,
@@ -132305,7 +132292,7 @@
         {
           "dimension": "2c",
           "score": 5.9,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-1.7%;YTD-9."
         },
         {
           "dimension": "2d",
@@ -132322,7 +132309,7 @@
       "type2_score": 7.4,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 6.0,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 0.0,
       "type1": {
@@ -132362,7 +132349,7 @@
         "reasons": {
           "2a": "券商业绩/风控周期",
           "2b": "金融回归4项",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-1.7%;YTD-9.",
           "2d": "金融PB/同行0.7倍",
           "_status": "triggered",
           "_applicable": "yes",
@@ -132429,28 +132416,28 @@
       },
       "type5": {
         "triggered": false,
-        "total": 6.0,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 4.0,
-          "5b": 5.0,
-          "5c": 10.0,
-          "5d": 5.0,
-          "5e": 8.17
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "归母利润周期未反转",
-          "5b": "金融底部信号3项",
-          "5c": "券商风控满分5项",
-          "5d": "金融周期振幅0.9倍",
-          "5e": "金融PB/同行0.7倍",
-          "_condition": "须周期回升且监管稳健",
-          "_status": "observe",
-          "_applicable": "yes",
+          "5a": "金融机构不适用强周期底部模型",
+          "5b": "金融机构不适用强周期底部模型",
+          "5c": "金融机构不适用强周期底部模型",
+          "5d": "金融机构不适用强周期底部模型",
+          "5e": "金融机构不适用强周期底部模型",
+          "_scope": "金融机构不适用强周期底部模型",
+          "_status": "not_applicable",
+          "_applicable": "no",
           "_evidence": "complete"
         },
         "veto": false,
-        "status": "observe",
-        "applicable": true,
+        "status": "not_applicable",
+        "applicable": false,
         "evidence_complete": true
       },
       "type6": {
@@ -133197,7 +133184,7 @@
         "reasons": {
           "2a": "产业聚合增速-5.9%",
           "2b": "拐点证据不足",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-16.9%;YTD-2",
           "2d": "当前PB/行业0.7倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -133274,12 +133261,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -134761,7 +134748,7 @@
         "reasons": {
           "2a": "产业聚合增速1.9%",
           "2b": "拐点证据不足",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-15.2%;YTD-1",
           "2d": "当前PB/行业0.3倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -134838,12 +134825,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -134865,8 +134852,8 @@
         },
         "reasons": {
           "6a": "产业增速1.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -136274,7 +136261,7 @@
       "type2_score": 4.3,
       "type3_score": 0.0,
       "type4_score": 2.6,
-      "type5_score": 3.7,
+      "type5_score": 6.3,
       "type6_score": 0.0,
       "type7_score": 4.2,
       "type1": {
@@ -136314,7 +136301,7 @@
         "reasons": {
           "2a": "产业聚合增速1.4%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-3.3%;YTD18.",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -136364,11 +136351,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -136382,30 +136369,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.7,
+        "total": 6.3,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 7.0,
-          "5e": 7.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 8.0,
+          "5d": 5.0,
+          "5e": 5.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流降幅≥50%",
-          "5b": "量化底部信号2项",
-          "5c": "最新同口径经营现金流降幅≥50%",
-          "5d": "峰谷弹性3.3倍",
-          "5e": "PB1.19低位",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健3项",
+          "5d": "历史利润振幅3.3倍",
+          "5e": "10年均利PE13.4倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -137840,7 +137826,7 @@
       "type2_score": 5.5,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.2,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 3.8,
       "type1": {
@@ -137879,7 +137865,7 @@
         "reasons": {
           "2a": "产业聚合增速10.3%",
           "2b": "拐点证据不足",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-21.9%;YTD-3",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -137947,30 +137933,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.2,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 2.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 5.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "最新同口径经营现金流转负",
-          "5b": "量化底部信号0项",
-          "5c": "最新同口径经营现金流转负",
-          "5d": "峰谷弹性26.8倍",
-          "5e": "PB1.80中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -139421,7 +139406,7 @@
           "1a": "远离买入区530%",
           "1b": "五项满分2项",
           "1c": "FCF0.5%;末4326.62万",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -139445,7 +139430,7 @@
         "reasons": {
           "2a": "产业聚合增速2.5%",
           "2b": "拐点3项:净利率连升+利润连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-18.2%;YTD-2",
           "2d": "归母利润趋势PEG3.6",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -139495,11 +139480,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净1/毛6/现9/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局6.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_veto": "持久护城河不足",
@@ -139523,12 +139508,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -139550,8 +139535,8 @@
         },
         "reasons": {
           "6a": "产业增速2.5%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "利润连续两年改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -141013,7 +140998,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "最新同口径利润下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-56.6%;YTD-7",
           "2d": "当前PB/行业2.4倍",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -141090,12 +141075,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -142531,14 +142516,14 @@
         {
           "dimension": "6b",
           "score": 0.5,
-          "reason": "证据:patch6-observable"
+          "reason": "研发与经营数据"
         }
       ],
       "type1_score": 0.0,
       "type2_score": 2.9,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 2.6,
+      "type5_score": 4.5,
       "type6_score": 3.5,
       "type7_score": 2.7,
       "type1": {
@@ -142577,7 +142562,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-18.7%;YTD-2",
           "2d": "当前PB/行业26.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -142646,22 +142631,21 @@
       },
       "type5": {
         "triggered": false,
-        "total": 2.6,
+        "total": 4.5,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
+          "5a": 7.0,
+          "5b": 5.0,
           "5c": 2.0,
-          "5d": 3.0,
+          "5d": 2.0,
           "5e": 2.0
         },
         "reasons": {
-          "5a": "最新报告期利润为负",
-          "5b": "量化底部信号2项",
-          "5c": "最新报告期利润为负",
-          "5d": "弹性历史不足",
-          "5e": "周期估值不便宜",
-          "_missing": "历史盈利年数不足",
-          "_condition": "须满足5a≥7且5c≥5",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健0项",
+          "5d": "缺完整周期盈利历史",
+          "5e": "缺5年完整周期均利",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -142683,8 +142667,8 @@
         },
         "reasons": {
           "6a": "产业增速1.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -144131,7 +144115,7 @@
         "reasons": {
           "2a": "产业聚合增速-0.4%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-1.5%;YTD1.8",
           "2d": "当前PB/行业1.1倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -144208,12 +144192,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -145695,7 +145679,7 @@
         "reasons": {
           "2a": "产业聚合增速-0.6%",
           "2b": "最新同口径经营现金流下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日7.5%;YTD6.9%",
           "2d": "归母利润趋势PEG1.9",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -145773,12 +145757,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -147260,7 +147244,7 @@
         "reasons": {
           "2a": "产业聚合增速6.7%",
           "2b": "拐点2项:最新同口径营收增+最新同口径利",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-28.7%;YTD-2",
           "2d": "当前PB/行业0.8倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -147336,12 +147320,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -147363,8 +147347,8 @@
         },
         "reasons": {
           "6a": "产业增速6.7%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新经营现金流仍负但改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -148767,14 +148751,14 @@
         {
           "dimension": "2c",
           "score": 8.0,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-28.8%;YTD-2"
         }
       ],
       "type1_score": 5.4,
       "type2_score": 7.4,
       "type3_score": 4.7,
       "type4_score": 4.7,
-      "type5_score": 4.3,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 5.4,
       "type1": {
@@ -148790,7 +148774,7 @@
           "1a": "远离买入区659%",
           "1b": "五项满分5项",
           "1c": "FCF2.6%;末8372.40万",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -148814,7 +148798,7 @@
         "reasons": {
           "2a": "产业聚合增速10.3%",
           "2b": "拐点4项:利润连升+现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-28.8%;YTD-2",
           "2d": "归母利润趋势PEG1.9",
           "_adjustment": "强两热一冷允许中性估值",
           "_status": "triggered",
@@ -148837,11 +148821,11 @@
           "3e": 7.9
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代6;扣非0.88/稀释0.0%",
           "3c": "ROIC-WACC=-4.6%",
           "3d": "弱代理4.0分:趋势增速16.0%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -148863,11 +148847,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净5/毛10/现6/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局6.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -148881,30 +148865,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.3,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 3.0,
-          "5b": 2.0,
-          "5c": 8.0,
-          "5d": 7.0,
-          "5e": 5.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "未处周期低迷后期",
-          "5b": "量化底部信号0项",
-          "5c": "归一8372.40万;最新8372.40",
-          "5d": "峰谷弹性3.7倍",
-          "5e": "PB2.10中性",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -150377,7 +150360,7 @@
         "reasons": {
           "2a": "产业聚合增速-5.2%",
           "2b": "拐点2项:净利率连升+利润连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-13.5%;YTD0.",
           "2d": "归母利润趋势PEG0.8",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -150427,11 +150410,11 @@
           "4f": 10.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期经营现金流为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局0.6倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支0年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -150454,12 +150437,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -151941,7 +151924,7 @@
         "reasons": {
           "2a": "产业聚合增速3.9%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-5.6%;YTD-5.",
           "2d": "当前PB/行业0.8倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -152018,12 +152001,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -153456,7 +153439,7 @@
         {
           "dimension": "2c",
           "score": 7.1,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-17.6%;YTD-1"
         },
         {
           "dimension": "2b",
@@ -153468,7 +153451,7 @@
       "type2_score": 8.4,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 4.2,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 5.4,
       "type1": {
@@ -153507,7 +153490,7 @@
         "reasons": {
           "2a": "产业聚合增速10.4%",
           "2b": "拐点6项:营收加速+净利率连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-17.6%;YTD-1",
           "2d": "归母利润趋势PEG0.3",
           "_status": "triggered",
           "_applicable": "yes",
@@ -153574,22 +153557,21 @@
       },
       "type5": {
         "triggered": false,
-        "total": 4.2,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 3.0,
-          "5b": 2.0,
-          "5c": 8.0,
-          "5d": 9.0,
-          "5e": 2.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "未处周期低迷后期",
-          "5b": "量化底部信号0项",
-          "5c": "归一240.63亿;最新444.47亿;",
-          "5d": "峰谷弹性28.1倍",
-          "5e": "周期估值不便宜",
-          "_missing": "缺少强周期波动证据",
-          "_condition": "须满足5a≥7且5c≥5",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -155072,7 +155054,7 @@
         "reasons": {
           "2a": "产业聚合增速2.6%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-20.4%;YTD-2",
           "2d": "当前PB/行业0.4倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -155122,11 +155104,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期利润为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.4倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -155149,12 +155131,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -156637,7 +156619,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-20.0%;YTD-2",
           "2d": "当前PB/行业1.0倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -156686,11 +156668,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局39.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -156713,12 +156695,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -158200,7 +158182,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "拐点3项:营收加速+利润连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-25.1%;YTD-2",
           "2d": "归母利润趋势PEG3.3",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -158223,11 +158205,11 @@
           "3e": 7.5
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期经营现金流为负",
           "3c": "ROIC-WACC=-6.4%",
           "3d": "弱代理2.0分:最新报告期经营现金流为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -158276,12 +158258,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -159764,7 +159746,7 @@
         "reasons": {
           "2a": "产业聚合增速6.7%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-27.9%;YTD-1",
           "2d": "当前PB/行业0.7倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -159814,11 +159796,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润转负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局3.0倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -159841,12 +159823,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -159868,8 +159850,8 @@
         },
         "reasons": {
           "6a": "产业增速6.7%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润转负",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -161285,7 +161267,7 @@
         {
           "dimension": "2c",
           "score": 6.5,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-11.4%;YTD-1"
         }
       ],
       "type1_score": 5.2,
@@ -161332,7 +161314,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-11.4%;YTD-1",
           "2d": "当前PB/行业0.4倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -161381,11 +161363,11 @@
           "4f": 2.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期经营现金流为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局1.7倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支10年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -161408,12 +161390,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -162897,7 +162879,7 @@
         "reasons": {
           "2a": "产业聚合增速3.9%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-2.0%;YTD-3.",
           "2d": "当前PB/行业0.9倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -162947,11 +162929,11 @@
           "4f": 2.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润降幅≥20%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局2.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支14年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -162974,12 +162956,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -164415,7 +164397,7 @@
         {
           "dimension": "2c",
           "score": 7.7,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-31.3%;YTD-2"
         }
       ],
       "type1_score": 5.1,
@@ -164462,7 +164444,7 @@
         "reasons": {
           "2a": "产业聚合增速8.6%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-31.3%;YTD-2",
           "2d": "当前PB/行业0.5倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -164511,11 +164493,11 @@
           "4f": 10.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径经营现金流降幅≥50%",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局1.5倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支0年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -164538,12 +164520,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -166025,7 +166007,7 @@
         "reasons": {
           "2a": "产业聚合增速8.0%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-29.4%;YTD-4",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -166102,12 +166084,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -166129,8 +166111,8 @@
         },
         "reasons": {
           "6a": "产业增速8.0%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -167526,7 +167508,7 @@
         {
           "dimension": "2c",
           "score": 5.8,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日2.1%;YTD-17."
         },
         {
           "dimension": "2d",
@@ -167554,7 +167536,7 @@
           "1a": "远离买入区71%",
           "1b": "五项满分4项",
           "1c": "FCF6.1%;末3.57亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -167578,7 +167560,7 @@
         "reasons": {
           "2a": "产业聚合增速-1.4%",
           "2b": "拐点5项:营收加速+利润连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日2.1%;YTD-17.",
           "2d": "归母利润趋势PEG1.5",
           "_status": "observe",
           "_applicable": "yes",
@@ -167600,11 +167582,11 @@
           "3e": 5.8
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代8;扣非0.85/稀释0.0%",
           "3c": "ROIC-WACC=2.1%",
           "3d": "弱代理4.0分:趋势增速20.7%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -167626,11 +167608,11 @@
           "4f": 10.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净6/毛8/现9/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局1.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支0年",
           "_4f_formula": "opt_upper_v1",
           "_status": "observe",
@@ -167653,12 +167635,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -169094,7 +169076,7 @@
         {
           "dimension": "2c",
           "score": 7.7,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-24.9%;YTD-3"
         }
       ],
       "type1_score": 0.0,
@@ -169140,7 +169122,7 @@
         "reasons": {
           "2a": "产业聚合增速8.6%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-24.9%;YTD-3",
           "2d": "当前PB/行业0.5倍",
           "_status": "observe",
           "_applicable": "yes",
@@ -169216,12 +169198,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -169243,8 +169225,8 @@
         },
         "reasons": {
           "6a": "产业增速8.6%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径经营现金流降幅≥50%",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -170661,14 +170643,14 @@
         {
           "dimension": "2c",
           "score": 7.4,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-24.2%;YTD-1"
         }
       ],
       "type1_score": 0.0,
       "type2_score": 7.4,
       "type3_score": 4.0,
       "type4_score": 0.0,
-      "type5_score": 3.8,
+      "type5_score": 0.0,
       "type6_score": 6.0,
       "type7_score": 4.2,
       "type1": {
@@ -170707,7 +170689,7 @@
         "reasons": {
           "2a": "产业聚合增速10.3%",
           "2b": "拐点3项:营收加速+最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-24.2%;YTD-1",
           "2d": "当前PB/行业0.4倍",
           "_status": "triggered",
           "_applicable": "yes",
@@ -170729,11 +170711,11 @@
           "3e": 7.4
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代4;扣非1.15/稀释0.0%",
           "3c": "ROIC-WACC=-14.5%",
           "3d": "弱代理4.0分:趋势增速13.1%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_veto": "护城河证据不足",
           "_status": "vetoed",
           "_applicable": "yes",
@@ -170774,30 +170756,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.8,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 6.0,
-          "5d": 2.0,
-          "5e": 7.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "ROE仅-2.3%",
-          "5b": "量化底部信号2项",
-          "5c": "归一-2.44亿;最新1233.23万;",
-          "5d": "周期弹性不足",
-          "5e": "PB1.33低位",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -170811,8 +170792,8 @@
         },
         "reasons": {
           "6a": "产业增速10.3%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润改善",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -172258,7 +172239,7 @@
         "reasons": {
           "2a": "产业聚合增速1.7%",
           "2b": "年度利润明显下滑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-14.2%;YTD-2",
           "2d": "当前PB/行业0.8倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -172281,11 +172262,11 @@
           "3e": 7.2
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径利润同比下降",
           "3c": "ROIC-WACC=-4.9%",
           "3d": "弱代理2.0分:最新同口径利润同比下降",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -172334,12 +172315,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -173777,7 +173758,7 @@
         {
           "dimension": "2c",
           "score": 8.0,
-          "reason": "证据:patch6-type2c-qua"
+          "reason": "量价冷度;60日-40.1%;YTD-7"
         }
       ],
       "type1_score": 4.6,
@@ -173800,7 +173781,7 @@
           "1a": "远离买入区1163%",
           "1b": "五项满分4项",
           "1c": "FCF1.0%;末2.47亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -173824,7 +173805,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "拐点6项:营收加速+净利率连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-40.1%;YTD-7",
           "2d": "归母利润趋势PEG1.7",
           "_status": "triggered",
           "_applicable": "yes",
@@ -173846,11 +173827,11 @@
           "3e": 8.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代8;扣非0.94/稀释0.0%",
           "3c": "ROIC-WACC=1.3%",
           "3d": "弱代理4.0分:趋势增速15.9%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -173872,11 +173853,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净9/毛8/现9/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局8.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支20年",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -173899,12 +173880,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -175386,7 +175367,7 @@
         "reasons": {
           "2a": "产业聚合增速7.4%",
           "2b": "最新同口径利润下滑,拐点封顶",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-19.3%;YTD-2",
           "2d": "归母利润趋势PEG2.6",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "observe",
@@ -175409,11 +175390,11 @@
           "3e": 6.9
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径利润同比下降",
           "3c": "ROIC-WACC=-7.8%",
           "3d": "弱代理5.0分:最新同口径利润同比下降",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -175462,12 +175443,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -176910,7 +176891,7 @@
       "type2_score": 3.0,
       "type3_score": 0.0,
       "type4_score": 0.0,
-      "type5_score": 3.4,
+      "type5_score": 6.0,
       "type6_score": 3.9,
       "type7_score": 2.7,
       "type1": {
@@ -176949,7 +176930,7 @@
         "reasons": {
           "2a": "产业聚合增速-7.9%",
           "2b": "拐点1项:最新同口径利润增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-21.4%;YTD17",
           "2d": "当前PB/行业8.9倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -177018,30 +176999,29 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.4,
+        "total": 6.0,
         "sub_scores": {
-          "5a": 2.0,
-          "5b": 4.0,
-          "5c": 3.0,
-          "5d": 9.0,
-          "5e": 2.0
+          "5a": 7.0,
+          "5b": 5.0,
+          "5c": 8.0,
+          "5d": 6.0,
+          "5e": 1.0
         },
         "reasons": {
-          "5a": "最新报告期利润为负",
-          "5b": "量化底部信号2项",
-          "5c": "最新报告期利润为负",
-          "5d": "峰谷弹性8.6倍",
-          "5e": "周期估值不便宜",
-          "_veto": "周期阶段不符合",
-          "_condition": "须满足5a≥7且5c≥5",
-          "_status": "vetoed",
+          "5a": "大宗行业/毛利/利润周期",
+          "5b": "缺PB分位/成本/库存证据",
+          "5c": "资产负债表稳健3项",
+          "5d": "历史利润振幅8.6倍",
+          "5e": "10年均利PE228.7倍",
+          "_missing": "缺底部/抗压/上行弹性/均利证据",
+          "_status": "insufficient_evidence",
           "_applicable": "yes",
-          "_evidence": "complete"
+          "_evidence": "incomplete"
         },
-        "veto": true,
-        "status": "vetoed",
+        "veto": false,
+        "status": "insufficient_evidence",
         "applicable": true,
-        "evidence_complete": true
+        "evidence_complete": false
       },
       "type6": {
         "triggered": false,
@@ -177055,8 +177035,8 @@
         },
         "reasons": {
           "6a": "产业增速-7.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新经营现金流仍负但改善",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -178503,7 +178483,7 @@
         "reasons": {
           "2a": "产业聚合增速1.8%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-31.4%;YTD-2",
           "2d": "当前PB/行业0.5倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -178580,12 +178560,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -178607,8 +178587,8 @@
         },
         "reasons": {
           "6a": "产业增速1.8%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润转负",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -180070,7 +180050,7 @@
         "reasons": {
           "2a": "产业聚合增速0.9%",
           "2b": "拐点3项:营收加速+最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-26.7%;YTD-1",
           "2d": "当前PB/行业2.5倍",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -180147,12 +180127,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -181634,7 +181614,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "拐点1项:最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-35.1%;YTD-4",
           "2d": "当前PB/行业0.8倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -181711,12 +181691,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -181738,8 +181718,8 @@
         },
         "reasons": {
           "6a": "产业增速7.9%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润降幅≥50%",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -183186,7 +183166,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点2项:现金流支撑+最新同口径营收增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-11.9%;YTD-4",
           "2d": "当前PB/行业0.8倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -183236,11 +183216,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新报告期经营现金流为负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局4.1倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -183263,12 +183243,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -184750,7 +184730,7 @@
         "reasons": {
           "2a": "产业聚合增速-4.5%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-40.1%;YTD-4",
           "2d": "当前PB/行业0.6倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -184827,12 +184807,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -184854,8 +184834,8 @@
         },
         "reasons": {
           "6a": "产业增速-4.5%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润转负",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -186303,7 +186283,7 @@
         "reasons": {
           "2a": "产业聚合增速7.9%",
           "2b": "最新同口径利润恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-30.5%;YTD-2",
           "2d": "当前PB/行业0.7倍",
           "_veto": "产业与公司热度平均须>4",
           "_status": "vetoed",
@@ -186353,11 +186333,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "最新同口径利润转负",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局13.5倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -186380,12 +186360,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -187821,7 +187801,7 @@
         {
           "dimension": "6b",
           "score": 5.4,
-          "reason": "证据:patch6-observable"
+          "reason": "研发与经营数据"
         }
       ],
       "type1_score": 0.0,
@@ -187867,7 +187847,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "年度利润暴跌",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日52.6%;YTD52.",
           "2d": "当前PB/行业1.4倍",
           "_veto": "市场周期不够冷",
           "_condition": "估值须合理或满足强周期修正",
@@ -187891,11 +187871,11 @@
           "3e": 2.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新同口径利润转负",
           "3c": "ROIC-WACC=-10.6%",
           "3d": "弱代理2.0分:最新同口径利润转负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_downgrade": "产业或股价泡沫风险",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
@@ -187945,12 +187925,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -187972,8 +187952,8 @@
         },
         "reasons": {
           "6a": "产业增速8.5%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径利润转负",
           "6e": "建议单票≤1%,组合≤8%",
           "_profile": "高景气技术型",
@@ -189434,7 +189414,7 @@
         "reasons": {
           "2a": "产业聚合增速16.3%",
           "2b": "拐点1项:现金流支撑",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日55.6%;YTD107",
           "2d": "当前PB/行业3.3倍",
           "_veto": "市场周期不够冷",
           "_condition": "估值须合理或满足强周期修正",
@@ -189512,12 +189492,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -190999,7 +190979,7 @@
         "reasons": {
           "2a": "产业聚合增速-0.4%",
           "2b": "拐点1项:最新同口径利润增",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-50.1%;YTD1.",
           "2d": "当前PB/行业2.0倍",
           "_veto": "产业与公司热度平均须>4",
           "_condition": "估值须合理或满足强周期修正",
@@ -191077,12 +191057,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -191104,8 +191084,8 @@
         },
         "reasons": {
           "6a": "产业增速-0.4%",
-          "6b": "证据:patch6-observable",
-          "6c": "证据:patch6-observable",
+          "6b": "研发与经营数据",
+          "6c": "经营效率与现金流数据",
           "6d": "最新同口径营收同比下降",
           "6e": "建议单票≤3%,组合≤15%",
           "_profile": "平稳产业反转型",
@@ -192552,7 +192532,7 @@
         "reasons": {
           "2a": "产业聚合增速8.5%",
           "2b": "最新同口径现金恶化",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日-31.8%;YTD-5",
           "2d": "归母利润趋势PEG2.2",
           "_condition": "估值须合理或满足强周期修正",
           "_status": "not_triggered",
@@ -192575,11 +192555,11 @@
           "3e": 8.0
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "最新报告期经营现金流为负",
           "3c": "ROIC-WACC=-3.6%",
           "3d": "弱代理2.0分:最新报告期经营现金流为负",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -192628,12 +192608,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -194092,7 +194072,7 @@
           "1a": "远离买入区3171%",
           "1b": "五项满分3项",
           "1c": "FCF0.4%;末2.99亿",
-          "1d": "证据:patch6-observable",
+          "1d": "财务趋势与同行数据",
           "_veto": "买入区深度不足",
           "_condition": "须进入模型买入区",
           "_status": "vetoed",
@@ -194116,7 +194096,7 @@
         "reasons": {
           "2a": "产业聚合增速1.3%",
           "2b": "拐点6项:营收加速+净利率连升",
-          "2c": "证据:patch6-type2c-qua",
+          "2c": "量价冷度;60日19.5%;YTD122",
           "2d": "当前PB/行业9.5倍",
           "_veto": "市场周期不够冷",
           "_condition": "估值须合理或满足强周期修正",
@@ -194140,11 +194120,11 @@
           "3e": 2.4
         },
         "reasons": {
-          "3a": "证据:patch6-observable",
+          "3a": "盈利能力与同行数据",
           "3b": "质代7;扣非0.67/稀释0.0%",
           "3c": "ROIC-WACC=2.0%",
           "3d": "弱代理9.0分:趋势增速38.7%",
-          "3e": "证据:patch6-observable",
+          "3e": "行业与估值数据",
           "_downgrade": "产业或股价泡沫风险",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
@@ -194167,11 +194147,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净3/毛10/现4/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局24.8倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_missing": "缺厚雪证据",
@@ -194195,12 +194175,12 @@
           "5e": 0.0
         },
         "reasons": {
-          "5a": "缺强周期产业证据",
-          "5b": "缺强周期产业证据",
-          "5c": "缺强周期产业证据",
-          "5d": "缺强周期产业证据",
-          "5e": "缺强周期产业证据",
-          "_scope": "缺强周期产业证据",
+          "5a": "非强周期标的，适用其他框架",
+          "5b": "非强周期标的，适用其他框架",
+          "5c": "非强周期标的，适用其他框架",
+          "5d": "非强周期标的，适用其他框架",
+          "5e": "非强周期标的，适用其他框架",
+          "_scope": "非强周期标的，适用其他框架",
           "_status": "not_applicable",
           "_applicable": "no",
           "_evidence": "complete"
@@ -195641,7 +195621,7 @@
       "type2_score": 4.4,
       "type3_score": 0.0,
       "type4_score": 2.3,
-      "type5_score": 3.5,
+      "type5_score": 0.0,
       "type6_score": 0.0,
       "type7_score": 4.2,
       "type1": {
@@ -195732,11 +195712,11 @@
           "4f": 0.0
         },
         "reasons": {
-          "4a": "证据:patch6-observable",
+          "4a": "增长趋势与同行数据",
           "4b": "净6/毛10/现2/ROIC1",
-          "4c": "证据:patch6-observable",
+          "4c": "多年盈利稳定性数据",
           "4d": "价格/10年中性终局86.9倍",
-          "4e": "证据:patch6-observable",
+          "4e": "行业营收与利润数据",
           "4f": "乐观上沿透支30年+",
           "_4f_formula": "opt_upper_v1",
           "_status": "not_triggered",
@@ -195750,22 +195730,21 @@
       },
       "type5": {
         "triggered": false,
-        "total": 3.5,
+        "total": 0.0,
         "sub_scores": {
-          "5a": 3.0,
-          "5b": 2.0,
-          "5c": 8.0,
-          "5d": 2.0,
-          "5e": 2.0
+          "5a": 0.0,
+          "5b": 0.0,
+          "5c": 0.0,
+          "5d": 0.0,
+          "5e": 0.0
         },
         "reasons": {
-          "5a": "未处周期低迷后期",
-          "5b": "量化底部信号0项",
-          "5c": "归一1413.77万;最新6160.03",
-          "5d": "周期弹性不足",
-          "5e": "周期估值不便宜",
-          "_missing": "缺少强周期波动证据",
-          "_condition": "须满足5a≥7且5c≥5",
+          "5a": "强周期属性缺毛利或盈利历史",
+          "5b": "强周期属性缺毛利或盈利历史",
+          "5c": "强周期属性缺毛利或盈利历史",
+          "5d": "强周期属性缺毛利或盈利历史",
+          "5e": "强周期属性缺毛利或盈利历史",
+          "_missing": "强周期属性缺毛利或盈利历史",
           "_status": "insufficient_evidence",
           "_applicable": "yes",
           "_evidence": "incomplete"
@@ -196561,7 +196540,7 @@
     }
   ],
   "companion_artifacts_sha256": {
-    "csv": "217c7c9595ec1f92ddae96e3e41b8d0144720ff4cab5bbe36aa01cb6ee91ed75",
-    "markdown": "9a28c7b0a53dcbbaf7b7a861e8739409cd82ec42e8d0e0f63fa6ffa574a914cb"
+    "csv": "25fe553c366761de5099af05aec645cdf428b0d03f04eb365a64c5e8ced06b47",
+    "markdown": "0487e8fa071de4ae2231b4e458527b7768e0a0d82b2b921bab8837ba654a00bb"
   }
 }
