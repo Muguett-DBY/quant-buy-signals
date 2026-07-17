@@ -108,7 +108,7 @@
   "eligible_universe_size": 4986,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-17T18:54:33.227606+00:00",
+    "generated_at_utc": "2026-07-17T19:18:17.488961+00:00",
     "snapshot_content_sha256": "4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd",
     "snapshot_artifact_sha256": "99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D",
     "eligible_universe_sha256": "498d2ae3592b055d6ae2699a930173796eeaf3acb46abfd0e1814cc259f8e261",
@@ -158,8 +158,8 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "0c27e50f47f66f59ee915e9710135a3bfd43119c",
-      "dirty": true
+      "commit": "96641ef4fbe0d948d23594905d5871bccc860b97",
+      "dirty": false
     },
     "runtime": {
       "python": "3.12.10",
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 224.55128598213196,
         "source_quote_timestamp_oldest": 1784271600.0,
         "source_quote_timestamp_latest": 1784273760.0,
-        "source_quote_age_seconds": 42681.479211330414,
+        "source_quote_age_seconds": 44110.756890535355,
         "trading_source_trade_dates": [
           "2026-07-17"
         ],
@@ -196541,6 +196541,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "25fe553c366761de5099af05aec645cdf428b0d03f04eb365a64c5e8ced06b47",
-    "markdown": "0487e8fa071de4ae2231b4e458527b7768e0a0d82b2b921bab8837ba654a00bb"
+    "markdown": "07c2e90234e3ef56c61ff37f87601a42b3516a4a972b2e851a3ab869c53be427"
   }
 }
