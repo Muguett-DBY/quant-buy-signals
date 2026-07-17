@@ -108,14 +108,14 @@
   "eligible_universe_size": 4986,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-17T15:13:33.707846+00:00",
+    "generated_at_utc": "2026-07-17T16:24:49.439807+00:00",
     "snapshot_content_sha256": "4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd",
     "snapshot_artifact_sha256": "99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D",
     "eligible_universe_sha256": "498d2ae3592b055d6ae2699a930173796eeaf3acb46abfd0e1814cc259f8e261",
-    "code_sha256": "a15f20b7ccbe0d19dbd117c3324d4f6f570d31e46b7d834716f923a12586d998",
+    "code_sha256": "814a615fa875adecb54060f30fb984d1f4504175248f70e5fe7f29344a6cb238",
     "rules_sha256": "055d82930ec230b5c7ed14ee7d411b309169948b338eca7431243abcd0ddd9a6",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
-    "dependency_manifest_sha256": "d9c6ce4d509cebc544c5ed6ef64207ca54a9303e97a0e419ac28c337dc80bef1",
+    "dependency_manifest_sha256": "a1e4067eafcf246d2345ff960d6ff801d5d18c21c797b3e00eba217b9b1a43c7",
     "patch6_source": {
       "path_at_model_authoring": "E:\\模板汇总MD\\补丁6.md",
       "sha256": "a3c174fe036d97898c0768aa8e0c07060b0a1697b25db58d680f3824a4b8ff56"
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "b9ed35a42858c4944d778d6871cf516443a069e2",
+      "commit": "6a44cb23f317f548d1834ef2d20302118f71ede3",
       "dirty": false
     },
     "runtime": {
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 224.55128598213196,
         "source_quote_timestamp_oldest": 1784271600.0,
         "source_quote_timestamp_latest": 1784273760.0,
-        "source_quote_age_seconds": 29428.89962744713,
+        "source_quote_age_seconds": 33700.95718050003,
         "trading_source_trade_dates": [
           "2026-07-17"
         ],
@@ -196562,6 +196562,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "217c7c9595ec1f92ddae96e3e41b8d0144720ff4cab5bbe36aa01cb6ee91ed75",
-    "markdown": "bfc5e12ed98cef4c106506a17473ba154f2b5078556f1d3dbfcfda4373e9f4d1"
+    "markdown": "9a28c7b0a53dcbbaf7b7a861e8739409cd82ec42e8d0e0f63fa6ffa574a914cb"
   }
 }
