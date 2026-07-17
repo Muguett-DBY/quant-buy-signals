@@ -108,14 +108,14 @@
   "eligible_universe_size": 4986,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-17T19:18:17.488961+00:00",
+    "generated_at_utc": "2026-07-17T20:16:29.996107+00:00",
     "snapshot_content_sha256": "4c33c1589e05b80bbf6492de7841113da75bfbfc6ce9000cd504c82160ff18dd",
     "snapshot_artifact_sha256": "99853144F09BC9965FB7B66A5C734505B3E13D042DE81E0A0A8F2970A3295D5D",
     "eligible_universe_sha256": "498d2ae3592b055d6ae2699a930173796eeaf3acb46abfd0e1814cc259f8e261",
-    "code_sha256": "d96ade81d693a1f04f4413e0a51ef71ebc255a9d451e39e36f391b0b073e6297",
-    "rules_sha256": "17f1d6c1417eb1b6cb6f7949ccf648bc1b80a60392642781d6bac8bd8c6bf33c",
+    "code_sha256": "c5b9ef0def7da2179c992eb9712861e45726d6e9efb1ec6e00c89b11a4080f8d",
+    "rules_sha256": "65e341bbd47d85ef6c48e19a9415fb0559b24e7e1143ac7879d80485e96dae31",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
-    "dependency_manifest_sha256": "206cb1362736d783aa46c23d594c70d706cf26de6dc1751bff426fc09951bb9e",
+    "dependency_manifest_sha256": "955e972b611e0b9a3a0b60bb7844c116ac1aa24d7a098c4b9bc5e1bbedfb8e18",
     "patch6_source": {
       "path_at_model_authoring": "E:\\模板汇总MD\\补丁6.md",
       "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6"
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "96641ef4fbe0d948d23594905d5871bccc860b97",
+      "commit": "893b06f9573e25cd4db70b952ea2086434237519",
       "dirty": false
     },
     "runtime": {
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 224.55128598213196,
         "source_quote_timestamp_oldest": 1784271600.0,
         "source_quote_timestamp_latest": 1784273760.0,
-        "source_quote_age_seconds": 44110.756890535355,
+        "source_quote_age_seconds": 47601.98035311699,
         "trading_source_trade_dates": [
           "2026-07-17"
         ],
@@ -70940,7 +70940,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 4.0,
       "bear_case": [
         {
@@ -85984,7 +85984,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 4.3,
       "bear_case": [
         {
@@ -89101,7 +89101,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 3.8,
       "bear_case": [
         {
@@ -90669,7 +90669,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 6.5,
       "bear_case": [
         {
@@ -92222,7 +92222,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.7,
       "bear_case": [
         {
@@ -104711,7 +104711,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 4.9,
       "bear_case": [
         {
@@ -109394,7 +109394,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.0,
       "bear_case": [
         {
@@ -114077,7 +114077,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.2,
       "bear_case": [
         {
@@ -117207,7 +117207,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 4.5,
       "bear_case": [
         {
@@ -121889,7 +121889,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.3,
       "bear_case": [
         {
@@ -139367,7 +139367,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.4,
       "bear_case": [
         {
@@ -142500,7 +142500,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 3.5,
       "bear_case": [
         {
@@ -176868,7 +176868,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 3.9,
       "bear_case": [
         {
@@ -187785,7 +187785,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 5.5,
       "bear_case": [
         {
@@ -190917,7 +190917,7 @@
       "primary_type": null,
       "primary_label": "无触发（不买）",
       "diagnostic_type": "type6",
-      "diagnostic_label": "6️⃣ VC属性",
+      "diagnostic_label": "6️⃣ 高风险早期/困境型",
       "max_score": 3.8,
       "bear_case": [
         {
@@ -196540,7 +196540,7 @@
     }
   ],
   "companion_artifacts_sha256": {
-    "csv": "25fe553c366761de5099af05aec645cdf428b0d03f04eb365a64c5e8ced06b47",
-    "markdown": "07c2e90234e3ef56c61ff37f87601a42b3516a4a972b2e851a3ab869c53be427"
+    "csv": "9f4d34f05c977bdf9a415ad8f202bd925145e8227bd6e15cebd5c652d80b88e6",
+    "markdown": "3fc483ac39c069a70a8ba3e0355ececf19557c91c21ec4c3fe5ec6dfe29286d5"
   }
 }
