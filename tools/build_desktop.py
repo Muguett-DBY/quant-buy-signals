@@ -517,7 +517,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     from desktop.updater import _validate_https_url
 
     package_url = _validate_https_url(
-        "https://ci-smoke.invalid/unpublishable.zip" if args.ci_smoke else (args.package_url or _default_package_url()),
+        f"https://ci-smoke.invalid/DS_DCF-v{__version__}-windows-x64-portable.zip"
+        if args.ci_smoke
+        else (args.package_url or _default_package_url()),
         field="package_url",
     )
     update_manifest = {

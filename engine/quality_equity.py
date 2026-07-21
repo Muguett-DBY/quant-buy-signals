@@ -968,11 +968,11 @@ def _item(
 
 
 def _section(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    total_weight = sum(float(item["weight"]) for item in items)
+    total_weight = math.fsum(float(item["weight"]) for item in items)
     if not math.isclose(total_weight, 100.0, abs_tol=1e-9):
         raise QualityEquityError(f"section weights total {total_weight}, expected 100")
-    score = round(sum(float(item["points"]) for item in items), 2)
-    coverage = sum(float(item["weight"]) for item in items if item.get("complete")) / 100.0
+    score = round(math.fsum(float(item["points"]) for item in items), 2)
+    coverage = math.fsum(float(item["weight"]) for item in items if item.get("complete")) / 100.0
     return {"score": score, "coverage": round(coverage, 4), "items": list(items)}
 
 
@@ -1492,16 +1492,16 @@ def _make_patch5(
     ]
     for section in sections:
         components = section["components"]
-        section["points"] = round(sum(float(component["points"]) for component in components), 4)
+        section["points"] = round(math.fsum(float(component["points"]) for component in components), 4)
         section["complete"] = all(bool(component["complete"]) for component in components)
         if not math.isclose(
-            sum(float(component["max_points"]) for component in components),
+            math.fsum(float(component["max_points"]) for component in components),
             float(section["max_points"]),
             abs_tol=1e-9,
         ):
             raise QualityEquityError(f"Patch 5 section weight mismatch: {section['key']}")
-    total = round(sum(float(section["points"]) for section in sections), 2)
-    coverage = sum(float(section["max_points"]) for section in sections if section["complete"]) / 100.0
+    total = round(math.fsum(float(section["points"]) for section in sections), 2)
+    coverage = math.fsum(float(section["max_points"]) for section in sections if section["complete"]) / 100.0
     safety = next(section for section in sections if section["key"] == "p5_safety")
     return {
         "score": total,

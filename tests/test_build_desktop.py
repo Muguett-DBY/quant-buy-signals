@@ -440,7 +440,9 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
     assert summary["release_ready"] is False
     assert "update_manifest" not in summary
     assert "update_manifest_signature" not in summary
-    assert installer_manifest["package_url"] == "https://ci-smoke.invalid/unpublishable.zip"
+    assert installer_manifest["package_url"] == (
+        f"https://ci-smoke.invalid/DS_DCF-v{__version__}-windows-x64-portable.zip"
+    )
     assert not (work_root / "ci-smoke-installer-manifest.json").exists()
     assert not list(output_root.glob("*update-manifest*"))
     assert not list(output_root.glob("*.sig"))

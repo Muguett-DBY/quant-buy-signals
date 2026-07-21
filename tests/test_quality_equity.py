@@ -484,6 +484,7 @@ def test_market_history_prerequisite_is_independent_of_terminal_profit_projectio
     item19 = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_19")
 
     assert not item19["complete"]
+    assert ledger["template1"]["score"] == 87.30
     assert ledger["prerequisites"]["ten_year_return_and_five_year_valuation"]["passed"]
     assert validate_quality_equity_ledger(ledger) == []
 
