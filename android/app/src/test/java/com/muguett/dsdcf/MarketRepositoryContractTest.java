@@ -21,6 +21,8 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class MarketRepositoryContractTest {
     @Test
@@ -276,43 +278,131 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
-    public void mixedTriggeredAndConditionalCompaniesRemainVisibleInBothModes() {
+    public void triggeredConditionalObserveAndApplicableCompaniesRemainBrowsable() {
+        Map<String, MarketRepository.TypeScore> scores = typeScores(
+                "type1", "triggered",
+                "type2", "not_triggered",
+                "type6", "conditional",
+                "type7", "observe"
+        );
         assertTrue(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
                 0,
                 0
         ));
         assertTrue(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
                 1,
                 0
         ));
         assertTrue(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
                 0,
                 1
         ));
         assertTrue(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
                 1,
                 6
         ));
         assertFalse(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
                 1,
                 1
         ));
         assertTrue(MarketRepository.matchesSignalFilter(
                 Collections.singletonList("type1"),
                 Collections.singletonList("type6"),
+                scores,
+                2,
+                7
+        ));
+        assertFalse(MarketRepository.matchesSignalFilter(
+                Collections.singletonList("type1"),
+                Collections.singletonList("type6"),
+                scores,
                 2,
                 6
         ));
+        assertTrue(MarketRepository.matchesSignalFilter(
+                Collections.singletonList("type1"),
+                Collections.singletonList("type6"),
+                scores,
+                3,
+                2
+        ));
+        assertFalse(MarketRepository.matchesSignalFilter(
+                Collections.singletonList("type1"),
+                Collections.singletonList("type6"),
+                scores,
+                3,
+                3
+        ));
+    }
+
+    @Test
+    public void typeCoverageSummaryShowsObserveCompaniesInsteadOfAnApparentZero() {
+        Map<String, String> names = new HashMap<>();
+        Map<String, Map<String, Integer>> coverage = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            String key = "type" + number;
+            names.put(key, number + "类");
+            Map<String, Integer> counts = new HashMap<>();
+            counts.put("triggered", number == 1 ? 2 : 0);
+            counts.put("conditional", number == 6 ? 14 : 0);
+            counts.put("observe", number == 7 ? 1 : 0);
+            coverage.put(key, counts);
+        }
+        MarketRepository.MarketData data = new MarketRepository.MarketData(
+                "2026-07-21",
+                "2026-07-21T08:30:00Z",
+                LocalDate.parse("2026-07-21"),
+                Instant.parse("2026-07-21T08:30:00Z"),
+                4_988,
+                2,
+                14,
+                names,
+                coverage,
+                Collections.emptyList()
+        );
+
+        String summary = data.typeCoverageSummary();
+        assertTrue(summary.contains("1类：实际2家，待确认0家，观察0家"));
+        assertTrue(summary.contains("6类：实际0家，待确认14家，观察0家"));
+        assertTrue(summary.contains("7类：实际0家，待确认0家，观察1家"));
+    }
+
+    @Test
+    public void observeOnlyCompanyIsClearlyLabelledAsNonBuyObservation() {
+        Map<String, String> names = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            names.put("type" + number, number + "类");
+        }
+        MarketRepository.MarketEntry entry = new MarketRepository.MarketEntry(
+                "600988",
+                "赤峰黄金",
+                "有色金属",
+                25.0,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                typeScores("type7", "observe"),
+                names,
+                null
+        );
+
+        assertTrue(entry.hasObservedFramework());
+        assertTrue(entry.displayLabel().contains("观察：7类（不是买入信号）"));
+        assertFalse(entry.displayLabel().contains("买入信号："));
     }
 
     @Test
@@ -388,6 +478,17 @@ public final class MarketRepositoryContractTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
         generator.initialize(256);
         return generator.generateKeyPair();
+    }
+
+    private static Map<String, MarketRepository.TypeScore> typeScores(String... overrides) {
+        Map<String, MarketRepository.TypeScore> scores = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            scores.put("type" + number, new MarketRepository.TypeScore("not_applicable", null, ""));
+        }
+        for (int index = 0; index < overrides.length; index += 2) {
+            scores.put(overrides[index], new MarketRepository.TypeScore(overrides[index + 1], 5.8, ""));
+        }
+        return scores;
     }
 
     private static byte[] sign(KeyPair keyPair, byte[] payload) throws Exception {

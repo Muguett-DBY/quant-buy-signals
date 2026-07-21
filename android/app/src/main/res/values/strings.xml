@@ -11,6 +11,7 @@
     <string-array name="display_modes">
         <item>实际买入信号</item>
         <item>待确认候选（非买入）</item>
+        <item>观察名单（非买入）</item>
         <item>全部沪深公司</item>
     </string-array>
     <string-array name="type_filters">

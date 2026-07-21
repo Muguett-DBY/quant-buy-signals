@@ -261,6 +261,7 @@ public final class MainActivity extends Activity {
             if (!MarketRepository.matchesSignalFilter(
                     entry.buyTypes,
                     entry.conditionalTypes,
+                    entry.typeScores,
                     selectedMode,
                     selectedType
             )) {

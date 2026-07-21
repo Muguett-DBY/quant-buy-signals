@@ -462,25 +462,34 @@ def test_p256_key_generator_never_overwrites_and_only_prints_the_public_key(tmp_
     generator = Path(__file__).resolve().parents[1] / "tools/generate_p256_signing_key.ps1"
     protected_parent = tmp_path / "protected"
     protected_parent.mkdir()
-    current_identity = subprocess.run(
-        ["whoami.exe"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    ).stdout.strip()
     subprocess.run(
         [
-            "icacls.exe",
-            str(protected_parent),
-            "/inheritance:r",
-            "/grant:r",
-            f"{current_identity}:(OI)(CI)(F)",
-            "SYSTEM:(OI)(CI)(F)",
+            shutil.which("pwsh"),
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "$path=$env:DS_DCF_ACL_TEST_PATH; "
+                "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
+                "$acl.SetAccessRuleProtection($true,$false); "
+                "$inherit=[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'; "
+                "$none=[Security.AccessControl.PropagationFlags]::None; "
+                "$allow=[Security.AccessControl.AccessControlType]::Allow; "
+                "$full=[Security.AccessControl.FileSystemRights]::FullControl; "
+                "$user=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
+                "$system=[Security.Principal.SecurityIdentifier]::new('S-1-5-18'); "
+                "$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new("
+                "$user,$full,$inherit,$none,$allow)); "
+                "$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new("
+                "$system,$full,$inherit,$none,$allow)); "
+                "Set-Acl -LiteralPath $path -AclObject $acl"
+            ),
         ],
         check=True,
         capture_output=True,
-        text=True,
+        env={**os.environ, "DS_DCF_ACL_TEST_PATH": str(protected_parent)},
+        encoding="utf-8",
+        errors="replace",
         timeout=10,
     )
     output = protected_parent / "desktop-signing-key.properties"
@@ -498,12 +507,13 @@ def test_p256_key_generator_never_overwrites_and_only_prints_the_public_key(tmp_
 
     generated = subprocess.run(
         command,
-        check=True,
+        check=False,
         capture_output=True,
         encoding="utf-8",
         errors="replace",
         timeout=30,
     )
+    assert generated.returncode == 0, generated.stderr
     lines = generated.stdout.strip().splitlines()
     assert len(lines) == 1
     public_key = base64.b64decode(lines[0], validate=True)

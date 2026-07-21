@@ -369,6 +369,44 @@ def test_security_workflow_rejects_mobile_and_update_signing_material():
     assert "android/release\\.properties" in workflow
 
 
+def test_android_sdk_install_reports_sdkmanager_status_instead_of_yes_broken_pipe():
+    workflow = _workflow_text(TEST_WORKFLOW)
+
+    assert "set +o pipefail" in workflow
+    assert "sdkmanager_status=${PIPESTATUS[1]}" in workflow
+    assert 'exit "$sdkmanager_status"' in workflow
+
+
+@pytest.mark.parametrize("sdkmanager_status", [0, 23])
+def test_android_sdk_install_block_ignores_yes_broken_pipe_but_propagates_sdkmanager(tmp_path, sdkmanager_status):
+    executable = _bash_executable()
+    if executable is None:
+        pytest.skip("Bash is not installed on this test host")
+    parsed = _workflow(TEST_WORKFLOW)
+    step = next(
+        item
+        for item in parsed["jobs"]["android"]["steps"]
+        if item.get("name") == "Install the pinned Android SDK components"
+    )
+    sdkmanager = tmp_path / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+    sdkmanager.parent.mkdir(parents=True)
+    sdkmanager.write_text(f"#!/usr/bin/env bash\nexit {sdkmanager_status}\n", encoding="utf-8")
+    sdkmanager.chmod(0o755)
+    environment = os.environ.copy()
+    environment["ANDROID_HOME"] = tmp_path.as_posix()
+
+    result = subprocess.run(
+        [executable, "-e", "-o", "pipefail", "-c", step["run"]],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=environment,
+    )
+
+    assert result.returncode == sdkmanager_status, result.stderr
+
+
 @pytest.mark.parametrize(
     "pattern",
     [

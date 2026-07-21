@@ -205,9 +205,13 @@ jobs:
       - name: Install the pinned Android SDK components
         shell: bash
         run: |
+          set +o pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             'platforms;android-35' \
             'build-tools;35.0.0'
+          sdkmanager_status=${PIPESTATUS[1]}
+          set -o pipefail
+          exit "$sdkmanager_status"
 
       - name: Compile and lint the Android client
         working-directory: android

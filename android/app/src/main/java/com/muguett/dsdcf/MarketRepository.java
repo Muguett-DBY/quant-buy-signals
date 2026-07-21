@@ -959,13 +959,15 @@ public final class MarketRepository {
     static boolean matchesSignalFilter(
             List<String> buyTypes,
             List<String> conditionalTypes,
+            Map<String, TypeScore> typeScores,
             int displayMode,
             int typeNumber
     ) {
         if (buyTypes == null
                 || conditionalTypes == null
+                || typeScores == null
                 || displayMode < 0
-                || displayMode > 2
+                || displayMode > 3
                 || typeNumber < 0
                 || typeNumber > 7) {
             return false;
@@ -977,6 +979,9 @@ public final class MarketRepository {
             if (displayMode == 1) {
                 return !conditionalTypes.isEmpty();
             }
+            if (displayMode == 2) {
+                return hasTypeStatus(typeScores, "observe");
+            }
             return true;
         }
         String selectedType = "type" + typeNumber;
@@ -986,7 +991,20 @@ public final class MarketRepository {
         if (displayMode == 1) {
             return conditionalTypes.contains(selectedType);
         }
-        return buyTypes.contains(selectedType) || conditionalTypes.contains(selectedType);
+        TypeScore score = typeScores.get(selectedType);
+        if (displayMode == 2) {
+            return score != null && "observe".equals(score.status);
+        }
+        return score != null && !"not_applicable".equals(score.status);
+    }
+
+    private static boolean hasTypeStatus(Map<String, TypeScore> typeScores, String status) {
+        for (TypeScore score : typeScores.values()) {
+            if (score != null && status.equals(score.status)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static boolean isValidTypeKeyList(List<String> values) {
@@ -1485,8 +1503,10 @@ public final class MarketRepository {
                 Map<String, Integer> coverage = typeCoverage.get(key);
                 int triggered = coverage == null ? 0 : coverage.getOrDefault("triggered", 0);
                 int conditional = coverage == null ? 0 : coverage.getOrDefault("conditional", 0);
+                int observe = coverage == null ? 0 : coverage.getOrDefault("observe", 0);
                 String label = typeNames.getOrDefault(key, number + "类");
-                parts.add(label + "：实际" + triggered + "家，待确认" + conditional + "家");
+                parts.add(label + "：实际" + triggered + "家，待确认" + conditional
+                        + "家，观察" + observe + "家");
             }
             return "七类结果：\n" + String.join("\n", parts);
         }
@@ -1527,6 +1547,10 @@ public final class MarketRepository {
             return !conditionalTypes.isEmpty();
         }
 
+        public boolean hasObservedFramework() {
+            return hasTypeStatus(typeScores, "observe");
+        }
+
         public String displayLabel() {
             String priceText = price == null ? "价格暂无" : String.format(Locale.CHINA, "%.2f", price);
             List<String> labels = new ArrayList<>();
@@ -1535,6 +1559,10 @@ public final class MarketRepository {
             }
             if (hasConditionalCandidate()) {
                 labels.add("待确认：" + labels(conditionalTypes) + "（不是买入信号）");
+            }
+            List<String> observedTypes = typesWithStatus("observe");
+            if (!observedTypes.isEmpty()) {
+                labels.add("观察：" + labels(observedTypes) + "（不是买入信号）");
             }
             if (labels.isEmpty()) {
                 labels.add("未触发买入信号");
@@ -1565,10 +1593,23 @@ public final class MarketRepository {
             return String.join("、", labels);
         }
 
+        private List<String> typesWithStatus(String status) {
+            List<String> types = new ArrayList<>();
+            for (int number = 1; number <= 7; number++) {
+                String key = "type" + number;
+                TypeScore score = typeScores.get(key);
+                if (score != null && status.equals(score.status)) {
+                    types.add(key);
+                }
+            }
+            return types;
+        }
+
         @Override
         public int compareTo(MarketEntry other) {
-            int priority = (hasTriggeredSignal() ? 0 : hasConditionalCandidate() ? 1 : 2);
-            int otherPriority = (other.hasTriggeredSignal() ? 0 : other.hasConditionalCandidate() ? 1 : 2);
+            int priority = (hasTriggeredSignal() ? 0 : hasConditionalCandidate() ? 1 : hasObservedFramework() ? 2 : 3);
+            int otherPriority = (other.hasTriggeredSignal() ? 0
+                    : other.hasConditionalCandidate() ? 1 : other.hasObservedFramework() ? 2 : 3);
             if (priority != otherPriority) {
                 return Integer.compare(priority, otherPriority);
             }
