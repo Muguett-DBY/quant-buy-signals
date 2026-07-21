@@ -108,7 +108,7 @@
   "eligible_universe_size": 4988,
   "provenance": {
     "audit_schema_version": 3,
-    "generated_at_utc": "2026-07-21T07:25:53.579880+00:00",
+    "generated_at_utc": "2026-07-21T08:14:49.027091+00:00",
     "snapshot_content_sha256": "33db229fd81aab91f4e05a92fdce0676a961130155e7cb3d6b67d9cd58d96aee",
     "snapshot_artifact_sha256": "DDD63A6DB7380298CB5B5C5F7285013AFA967564B01FBD220F3352E6804DB9A1",
     "eligible_universe_sha256": "2d63f0d4c59a0b6afc41cc1ce8c3003056f0d47d277ec924a8ad3e38add60a88",
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "c604e3d95121576beca989931a10cec238ef2d65",
+      "commit": "129aecfd77c423286d3962bbe5ac879d6a7d7425",
       "dirty": false
     },
     "runtime": {
@@ -378,7 +378,7 @@
         "retrieval_age_seconds": 1625.7897074222565,
         "source_quote_timestamp_oldest": 1784530800.0,
         "source_quote_timestamp_latest": 1784532960.0,
-        "source_quote_age_seconds": 87476.37784790993,
+        "source_quote_age_seconds": 90510.44680380821,
         "trading_source_trade_dates": [
           "2026-07-20"
         ],
@@ -27197,7 +27197,7 @@
       "available_count": 92,
       "eligible_evidence_count": 168,
       "eligible_evidence_coverage": 0.03368083400160385,
-      "evidence_sha256": "fcc9b839ad02e7a69681886ddd3611ed35eefc3e64f8258604c98e2cb36d47f4",
+      "evidence_sha256": "093a6fe72ed8a8af53c75d1b7bf28c897acd2e3ad752db1d7f59d75f885b8014",
       "as_of_sessions": [
         "2026-07-20"
       ]
@@ -27219,7 +27219,7 @@
       "available_count": 1,
       "eligible_evidence_count": 1,
       "eligible_evidence_coverage": 0.00020048115477145148,
-      "evidence_sha256": "5b4612e7e3ef61a9d5f24d8e739e450e76088026e2a9a426bfc0e75932a5031f",
+      "evidence_sha256": "65f4247419491ae70b7376ee451254658b571137c0a7609266596ed39f121bc2",
       "as_of_sessions": [
         "2026-07-20"
       ]
@@ -200630,6 +200630,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "922ab506df7a13e1c19f105d71861e57f6f861d16c2efa7a11db3ceb47c94b4b",
-    "markdown": "2a9f304de432e5c72d29f3ab73efb05ab8abfe9bebe0a415198cfa4a980f2200"
+    "markdown": "3cd3dd6970a53e9ad755bf6effa3bb3bdf4fce395370d5d85763eb13dc4b0d70"
   }
 }
