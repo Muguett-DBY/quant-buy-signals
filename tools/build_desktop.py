@@ -532,7 +532,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "size": zip_path.stat().st_size,
     }
     if args.ci_smoke:
-        installer_manifest = work_root / "ci-smoke-installer-manifest.json"
+        # PyInstaller preserves the source basename for bundled data.  The
+        # bootstrapper deliberately looks up the release-style manifest name,
+        # so the CI-only manifest must use that same basename as a real build.
+        installer_manifest = work_root / f"DS_DCF-v{__version__}-update-manifest.json"
         installer_manifest.write_bytes(_canonical_manifest_bytes(update_manifest) + b"\n")
         try:
             installer_path = _build_installer(

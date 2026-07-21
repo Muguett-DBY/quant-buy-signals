@@ -416,6 +416,7 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
     def fake_build_installer(*, package, manifest, output_root, work_root):
         assert package.is_file()
         assert manifest.parent == work_root
+        assert manifest.name == f"DS_DCF-v{__version__}-update-manifest.json"
         installer_manifest.update(json.loads(manifest.read_text(encoding="utf-8")))
         installer = output_root / f"DS_DCF-v{__version__}-windows-x64-installer.exe"
         installer.write_bytes(b"MZ-ci-smoke-installer")
@@ -443,7 +444,7 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
     assert installer_manifest["package_url"] == (
         f"https://ci-smoke.invalid/DS_DCF-v{__version__}-windows-x64-portable.zip"
     )
-    assert not (work_root / "ci-smoke-installer-manifest.json").exists()
+    assert not (work_root / f"DS_DCF-v{__version__}-update-manifest.json").exists()
     assert not list(output_root.glob("*update-manifest*"))
     assert not list(output_root.glob("*.sig"))
     executable_commands = [command[-1] for command in commands if command and command[0].endswith("DS_DCF.exe")]
