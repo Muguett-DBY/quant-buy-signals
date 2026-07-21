@@ -51,6 +51,10 @@ _SINA_RESPONSE_CHUNK_BYTES = 64 * 1024
 _MIN_SINA_PRICE_RATIO = 0.5
 _MAX_SINA_PRICE_RATIO = 2.0
 _SINA_WORKERS = max(1, min(int(CONCURRENCY), 10))
+_SINA_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
+_SINA_RECOVERY_RETRIES = 2
+_MAX_SINA_RECOVERY_PAGES = 5
+_RETRYABLE_SINA_HTTP_STATUSES = frozenset({408, 425, 429})
 _SINA_CLASSIC_LINE = re.compile(r'var\s+hq_str_([a-z]{2}\d{5,6})="([^"]*)";')
 
 _QUOTE_COLUMNS = [
@@ -130,6 +134,19 @@ class QuoteFetchError(DataFetchError):
 
 class _SinaResourceLimitError(QuoteFetchError):
     """A Sina response exceeded a fixed local resource budget."""
+
+
+class _SinaTransientTransportError(QuoteFetchError):
+    """A Sina page exhausted retries because of HTTP or transport failures."""
+
+
+def _is_transient_sina_transport_error(exc: BaseException | None) -> bool:
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
+        return True
+    if not isinstance(exc, requests.HTTPError):
+        return False
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return isinstance(status, int) and (status in _RETRYABLE_SINA_HTTP_STATUSES or 500 <= status <= 599)
 
 
 def _bounded_sina_response_text(response: Any) -> str:
@@ -275,6 +292,7 @@ def _sina_page(
         "_s_r_a": "auto",
     }
     last_error: Exception | None = None
+    transient_only = True
     for attempt in range(retries):
         try:
             response = requests.get(SINA_URL, params=params, headers=SINA_H, timeout=timeout, stream=True)
@@ -302,11 +320,16 @@ def _sina_page(
             raise
         except (requests.RequestException, _json.JSONDecodeError, QuoteFetchError) as exc:
             last_error = exc
+            if not _is_transient_sina_transport_error(exc):
+                transient_only = False
             if attempt + 1 < retries:
                 time.sleep(0.5 * (attempt + 1))
-    raise QuoteFetchError(
-        f"failed to fetch Sina {node} page {page} after {retries} attempts: {last_error}"
-    ) from last_error
+    error_type = (
+        _SinaTransientTransportError
+        if transient_only and _is_transient_sina_transport_error(last_error)
+        else QuoteFetchError
+    )
+    raise error_type(f"failed to fetch Sina {node} page {page} after {retries} attempts: {last_error}") from last_error
 
 
 def _collect_sina_node(
@@ -335,8 +358,42 @@ def _collect_sina_node(
             for page in range(1, expected_pages + 1)
         }
         page_rows: dict[int, list[dict[str, Any]]] = {}
+        transient_failures: dict[int, _SinaTransientTransportError] = {}
         for future in as_completed(futures):
-            page_rows[futures[future]] = future.result()
+            page = futures[future]
+            try:
+                page_rows[page] = future.result()
+            except _SinaResourceLimitError:
+                # A response that exceeds the local safety budget is not a
+                # transient transport failure and must remain fail-fast.
+                raise
+            except _SinaTransientTransportError as exc:
+                transient_failures[page] = exc
+
+    if len(transient_failures) > _MAX_SINA_RECOVERY_PAGES:
+        failed_pages = sorted(transient_failures)
+        raise QuoteFetchError(
+            f"Sina {node} parallel fetch failed on {len(failed_pages)} pages, "
+            f"above recovery limit {_MAX_SINA_RECOVERY_PAGES}: {failed_pages[:_MAX_SINA_RECOVERY_PAGES]}"
+        ) from transient_failures[failed_pages[0]]
+
+    # A busy page may time out while the initial generation is fetched with
+    # bounded concurrency.  Retry the small failed subset sequentially with a
+    # longer timeout.  Completeness, schema, duplicate-identity and
+    # price-generation checks below remain unchanged and fail closed.
+    for page in sorted(transient_failures):
+        try:
+            page_rows[page] = _sina_page(
+                page,
+                node=node,
+                page_size=page_size,
+                timeout=_SINA_RECOVERY_TIMEOUT,
+                retries=_SINA_RECOVERY_RETRIES,
+            )
+        except _SinaResourceLimitError:
+            raise
+        except _SinaTransientTransportError as exc:
+            raise QuoteFetchError(f"failed to recover Sina {node} page {page} after the parallel fetch: {exc}") from exc
 
     rows: list[dict[str, Any]] = []
     for page in range(1, expected_pages + 1):

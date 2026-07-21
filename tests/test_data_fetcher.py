@@ -109,6 +109,119 @@ def test_sina_persistent_gap_before_nonempty_page_is_an_error(monkeypatch):
         fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
 
 
+def test_sina_parallel_page_failure_gets_one_bounded_sequential_recovery(monkeypatch):
+    calls = Counter()
+    recovery_arguments = []
+
+    def fake_page(page, **kwargs):
+        calls[page] += 1
+        if page == 2 and calls[page] == 1:
+            raise fetcher._SinaTransientTransportError("parallel timeout")
+        if page == 2:
+            recovery_arguments.append((kwargs.get("timeout"), kwargs.get("retries")))
+        return quote_rows(page, 1)
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+
+    rows = fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+    assert [row["code"] for row in rows] == ["010000", "020000", "030000"]
+    assert calls == Counter({2: 2, 1: 1, 3: 1})
+    assert recovery_arguments == [(fetcher._SINA_RECOVERY_TIMEOUT, fetcher._SINA_RECOVERY_RETRIES)]
+
+
+def test_sina_resource_limit_failure_is_never_retried(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        if page == 2:
+            raise fetcher._SinaResourceLimitError("too large")
+        return quote_rows(page, 1)
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="too large"):
+        fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+    assert calls[2] == 1
+
+
+def test_sina_schema_failure_is_not_retried_by_collection_recovery(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        if page == 2:
+            raise fetcher.QuoteFetchError("invalid page schema")
+        return quote_rows(page, 1)
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="invalid page schema"):
+        fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+    assert calls[2] == 1
+
+
+def test_sina_recovery_schema_failure_is_not_masked(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        if page == 2 and calls[page] == 1:
+            raise fetcher._SinaTransientTransportError("parallel timeout")
+        if page == 2:
+            raise fetcher.QuoteFetchError("invalid recovery schema")
+        return quote_rows(page, 1)
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="invalid recovery schema"):
+        fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+    assert calls[2] == 2
+
+
+def test_sina_persistent_transport_recovery_stops_after_bounded_second_phase(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        if page == 2:
+            raise fetcher._SinaTransientTransportError("timed out")
+        return quote_rows(page, 1)
+
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="failed to recover Sina hs_a page 2"):
+        fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+    assert calls[2] == 2
+
+
+def test_sina_systemic_parallel_failure_does_not_amplify_retries(monkeypatch):
+    calls = Counter()
+
+    def fake_page(page, **_kwargs):
+        calls[page] += 1
+        raise fetcher._SinaTransientTransportError(f"page {page} unavailable")
+
+    page_count = fetcher._MAX_SINA_RECOVERY_PAGES + 1
+    monkeypatch.setattr(fetcher, "_sina_page", fake_page)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: page_count)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="above recovery limit"):
+        fetcher._collect_sina_node("hs_a", max_workers=page_count, page_size=1, max_pages=page_count)
+
+    assert calls == Counter({page: 1 for page in range(1, page_count + 1)})
+
+
 class FakeResponse:
     def __init__(self, text, status=200, headers=None):
         self.text = text
@@ -117,7 +230,9 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}")
+            error = requests.HTTPError(f"HTTP {self.status_code}")
+            error.response = self
+            raise error
 
 
 class StreamingFakeResponse(FakeResponse):
@@ -158,6 +273,63 @@ def test_sina_page_uses_https_and_retries_http_status(monkeypatch):
     assert len(urls) == 2
     assert all(url.startswith("https://") for url in urls)
     assert all(kwargs.get("stream") is True for kwargs in request_kwargs)
+
+
+@pytest.mark.parametrize(
+    "transport_error",
+    [
+        requests.ReadTimeout("timed out"),
+        requests.ConnectionError("connection reset"),
+        requests.exceptions.ChunkedEncodingError("truncated response"),
+    ],
+)
+def test_sina_page_exhausted_transport_failures_are_typed_for_collection_recovery(monkeypatch, transport_error):
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fail_transport(*_args, **_kwargs):
+        raise transport_error
+
+    monkeypatch.setattr(fetcher.requests, "get", fail_transport)
+
+    with pytest.raises(fetcher._SinaTransientTransportError, match="after 3 attempts"):
+        fetcher._sina_page(1, retries=3)
+
+
+@pytest.mark.parametrize("status", [408, 425, 429, 500, 503])
+def test_sina_page_retryable_http_exhaustion_is_typed_for_collection_recovery(monkeypatch, status):
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse("error", status))
+
+    with pytest.raises(fetcher._SinaTransientTransportError, match=f"HTTP {status}"):
+        fetcher._sina_page(1, retries=1)
+
+
+def test_sina_page_permanent_http_error_is_not_typed_transient(monkeypatch):
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse("missing", 404))
+
+    with pytest.raises(fetcher.QuoteFetchError, match="HTTP 404") as caught:
+        fetcher._sina_page(1, retries=1)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+
+
+def test_sina_page_mixed_schema_and_transport_failures_are_not_typed_transient(monkeypatch):
+    outcomes = [FakeResponse("not-json"), requests.ReadTimeout("timed out"), requests.ReadTimeout("timed out")]
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(*_args, **_kwargs):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="after 3 attempts") as caught:
+        fetcher._sina_page(1, retries=3)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+    assert outcomes == []
 
 
 def test_sina_retrieval_time_is_not_misrepresented_as_trade_date(monkeypatch):
