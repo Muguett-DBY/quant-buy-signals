@@ -7,6 +7,7 @@ import threading
 import pytest
 import requests
 
+import data.market_coldness as market_coldness
 from data.cache import SafeFileCache
 from data.market_coldness import (
     EASTMONEY_FIELDS,
@@ -175,6 +176,92 @@ def test_remaining_pages_are_fetched_concurrently_but_consumed_in_page_order():
     assert [record.code for record in batch.records] == ["600000", "000001", "000002", "000003"]
 
 
+def test_first_page_transport_failure_gets_bounded_longer_recovery():
+    client = _FakeHttpClient({1: [requests.ReadTimeout("slow"), _page(1, [_row()])]})
+
+    batch = _adapter(client, retries=1).fetch_all()
+
+    assert len(batch.records) == 1
+    assert [kwargs["timeout"] for _, kwargs in client.calls] == [15.0, 30.0]
+
+
+def test_parallel_page_transport_failure_gets_bounded_sequential_recovery():
+    client = _FakeHttpClient(
+        {
+            1: _page(2, [_row("600000")]),
+            2: [requests.ReadTimeout("slow"), _page(2, [_row("000001", 0)])],
+        }
+    )
+
+    batch = _adapter(client, page_size=1, retries=1).fetch_all()
+
+    assert [record.code for record in batch.records] == ["600000", "000001"]
+    page_two_calls = [kwargs for _, kwargs in client.calls if kwargs["params"]["pn"] == 2]
+    assert [kwargs["timeout"] for kwargs in page_two_calls] == [15.0, 30.0]
+
+
+def test_parallel_page_schema_failure_is_not_retried_by_collection_recovery():
+    client = _FakeHttpClient(
+        {
+            1: _page(2, [_row("600000")]),
+            2: _FakeResponse(raw=b"{"),
+        }
+    )
+
+    with pytest.raises(MarketColdnessError, match="invalid JSON"):
+        _adapter(client, page_size=1, retries=1).fetch_all()
+
+    assert sum(kwargs["params"]["pn"] == 2 for _, kwargs in client.calls) == 1
+
+
+def test_recovery_schema_failure_is_not_masked_as_transport():
+    client = _FakeHttpClient(
+        {
+            1: _page(2, [_row("600000")]),
+            2: [
+                requests.ReadTimeout("slow"),
+                _FakeResponse(raw=b"{"),
+                _FakeResponse(raw=b"{"),
+            ],
+        }
+    )
+
+    with pytest.raises(MarketColdnessError, match="invalid JSON") as caught:
+        _adapter(client, page_size=1, retries=1).fetch_all()
+
+    assert not isinstance(caught.value, market_coldness._MarketColdnessTransientTransportError)
+    assert sum(kwargs["params"]["pn"] == 2 for _, kwargs in client.calls) == 3
+
+
+def test_persistent_page_transport_failure_stops_after_bounded_recovery():
+    client = _FakeHttpClient(
+        {
+            1: _page(2, [_row("600000")]),
+            2: [requests.ReadTimeout("slow") for _ in range(3)],
+        }
+    )
+
+    with pytest.raises(MarketColdnessError, match="failed to recover Eastmoney page 2"):
+        _adapter(client, page_size=1, retries=1).fetch_all()
+
+    assert sum(kwargs["params"]["pn"] == 2 for _, kwargs in client.calls) == 3
+
+
+def test_systemic_parallel_transport_failure_does_not_amplify_retries():
+    page_count = market_coldness._MAX_RECOVERY_PAGES + 2
+    actions = {1: _page(page_count, [_row("600000")])}
+    actions.update({page: requests.ReadTimeout("slow") for page in range(2, page_count + 1)})
+    client = _FakeHttpClient(actions)
+
+    with pytest.raises(MarketColdnessError, match="above recovery limit"):
+        _adapter(client, page_size=1, retries=1).fetch_all()
+
+    call_counts = {
+        page: sum(kwargs["params"]["pn"] == page for _, kwargs in client.calls) for page in range(1, page_count + 1)
+    }
+    assert call_counts == {page: 1 for page in range(1, page_count + 1)}
+
+
 def test_missing_or_short_page_is_rejected_instead_of_returning_partial_market():
     client = _FakeHttpClient(
         {
@@ -259,6 +346,54 @@ def test_transport_timeout_is_retried_and_successful_response_is_closed():
     assert client.responses[0].closed
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.ReadTimeout("timed out"),
+        requests.ConnectionError("connection reset"),
+        requests.exceptions.ChunkedEncodingError("truncated response"),
+    ],
+)
+def test_recoverable_transport_errors_are_classified_transient(error):
+    assert market_coldness._is_transient_transport_error(error)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [requests.exceptions.SSLError("certificate rejected"), requests.exceptions.ProxyError("proxy rejected")],
+)
+def test_security_and_proxy_failures_are_not_classified_transient(error):
+    assert not market_coldness._is_transient_transport_error(error)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(408, True), (425, True), (429, True), (500, True), (503, True), (404, False), (407, False), (499, False)],
+)
+def test_only_retryable_http_statuses_are_classified_transient(status, expected):
+    response = requests.Response()
+    response.status_code = status
+    assert market_coldness._is_transient_transport_error(requests.HTTPError(response=response)) is expected
+
+
+def test_mixed_schema_and_transport_failures_are_not_typed_transient():
+    client = _FakeHttpClient(
+        {
+            1: [
+                _FakeResponse(raw=b"not-json"),
+                requests.ReadTimeout("slow"),
+                requests.ReadTimeout("slow"),
+            ]
+        }
+    )
+    adapter = _adapter(client, retries=3)
+
+    with pytest.raises(MarketColdnessError, match="failed after 3 attempt") as caught:
+        adapter._request_page(1)
+
+    assert not isinstance(caught.value, market_coldness._MarketColdnessTransientTransportError)
+
+
 def test_declared_oversized_response_is_rejected_without_retry_and_closed():
     response = _FakeResponse(_page(1, [_row()]), declared_length=5 * 1024 * 1024)
     client = _FakeHttpClient({1: response})
@@ -268,6 +403,54 @@ def test_declared_oversized_response_is_rejected_without_retry_and_closed():
 
     assert len(client.calls) == 1
     assert response.closed
+
+
+def test_acquisition_byte_budget_counts_failed_attempt_bodies(monkeypatch):
+    valid = _FakeResponse(_page(1, [_row()]))
+    invalid = _FakeResponse(raw=b"{" + (b" " * (len(valid.content) - 1)))
+    monkeypatch.setattr(market_coldness, "_MAX_ACQUISITION_RESPONSE_BYTES", len(valid.content) + 1)
+    client = _FakeHttpClient({1: [invalid, valid]})
+
+    with pytest.raises(MarketColdnessError, match="acquisition attempts exceed byte limit"):
+        _adapter(client, retries=2).fetch_all()
+
+    assert len(client.calls) == 2
+    assert invalid.closed and valid.closed
+
+
+def test_acquisition_byte_budget_latches_the_first_over_limit_chunk():
+    budget = market_coldness._AcquisitionByteBudget(10)
+    budget.charge(5)
+
+    with pytest.raises(MarketColdnessError, match="11 > 10"):
+        budget.charge(6)
+    with pytest.raises(MarketColdnessError, match="already exceed.*11 > 10"):
+        budget.charge(0)
+
+    assert budget._consumed == 11
+    assert budget._exhausted is True
+
+
+def test_acquisition_byte_budget_preflight_stops_queued_page_requests(monkeypatch):
+    page_count = 20
+    first_response = _FakeResponse(_page(page_count, [_row("600000")]))
+    remaining = {
+        page: _FakeResponse(_page(page_count, [_row(f"{page - 1:06d}", 0)])) for page in range(2, page_count + 1)
+    }
+    monkeypatch.setattr(
+        market_coldness,
+        "_MAX_ACQUISITION_RESPONSE_BYTES",
+        len(first_response.content) + 1,
+    )
+    client = _FakeHttpClient({1: first_response, **remaining})
+
+    with pytest.raises(MarketColdnessError, match="byte limit"):
+        _adapter(client, page_size=1, retries=1, max_workers=2).fetch_all()
+
+    requested_pages = [kwargs["params"]["pn"] for _, kwargs in client.calls]
+    assert requested_pages[0] == 1
+    assert 2 <= len(requested_pages) <= 3
+    assert set(requested_pages).issubset({1, 2, 3})
 
 
 def test_cache_hit_replays_strict_records_without_calling_network(tmp_path):

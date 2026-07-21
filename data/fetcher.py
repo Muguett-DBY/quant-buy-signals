@@ -141,6 +141,8 @@ class _SinaTransientTransportError(QuoteFetchError):
 
 
 def _is_transient_sina_transport_error(exc: BaseException | None) -> bool:
+    if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
+        return False
     if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
         return True
     if not isinstance(exc, requests.HTTPError):

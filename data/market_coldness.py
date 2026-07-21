@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 import requests
@@ -49,6 +50,10 @@ DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_WORKERS = 10
 DEFAULT_PAGE_WORKERS = max(1, min(int(CONCURRENCY), MAX_PAGE_WORKERS))
 DEFAULT_MARKET_COLDNESS_CACHE_PATH = CACHE_DIRECTORY / "market_coldness" / "eastmoney_sh_sz_a.json.gz"
+_RECOVERY_TIMEOUT_FLOOR_SECONDS = 30.0
+_RECOVERY_RETRIES = 2
+_MAX_RECOVERY_PAGES = 5
+_RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
 
 _CACHE_SCHEMA_VERSION = 1
 _MAX_PAGE_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -74,6 +79,63 @@ class MarketColdnessError(RuntimeError):
 
 class _MarketColdnessResourceLimitError(MarketColdnessError):
     """A fixed local byte, page or row budget was exceeded."""
+
+
+class _MarketColdnessTransientTransportError(MarketColdnessError):
+    """A page exhausted retries using only recoverable transport failures."""
+
+
+class _AcquisitionByteBudget:
+    """Thread-safe body-byte budget shared by every acquisition attempt."""
+
+    def __init__(self, limit: int):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("acquisition byte limit must be a positive integer")
+        self.limit = limit
+        self._consumed = 0
+        self._exhausted = False
+        self._lock = Lock()
+
+    def charge(self, size: int) -> None:
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ValueError("acquisition byte charge must be a non-negative integer")
+        with self._lock:
+            if self._exhausted:
+                raise _MarketColdnessResourceLimitError(
+                    f"Eastmoney acquisition attempts already exceed byte limit: {self._consumed} > {self.limit}"
+                )
+            next_total = self._consumed + size
+            self._consumed = next_total
+            if next_total > self.limit:
+                # The chunk has already been yielded by the HTTP client.  Latch
+                # exhaustion while holding the lock so no concurrent reader
+                # can accept another chunk after the first over-limit charge.
+                self._exhausted = True
+                raise _MarketColdnessResourceLimitError(
+                    f"Eastmoney acquisition attempts exceed byte limit: {next_total} > {self.limit}"
+                )
+
+    def raise_if_exhausted(self) -> None:
+        """Reject a new network attempt once no response-body budget remains."""
+
+        with self._lock:
+            if self._exhausted or self._consumed >= self.limit:
+                self._exhausted = True
+                comparator = ">" if self._consumed > self.limit else ">="
+                raise _MarketColdnessResourceLimitError(
+                    f"Eastmoney acquisition attempts reached byte limit: {self._consumed} {comparator} {self.limit}"
+                )
+
+
+def _is_transient_transport_error(exc: BaseException | None) -> bool:
+    if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
+        return False
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
+        return True
+    if not isinstance(exc, requests.HTTPError):
+        return False
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return isinstance(status, int) and (status in _RETRYABLE_HTTP_STATUSES or 500 <= status <= 599)
 
 
 @dataclass(frozen=True)
@@ -246,7 +308,11 @@ def _decode_json_or_jsonp(raw: bytes, callback: str) -> Any:
         raise MarketColdnessError("Eastmoney response contains invalid JSON") from exc
 
 
-def _read_bounded_response(response: Any) -> bytes:
+def _read_bounded_response(
+    response: Any,
+    *,
+    acquisition_budget: _AcquisitionByteBudget | None = None,
+) -> bytes:
     headers = getattr(response, "headers", {}) or {}
     declared = headers.get("Content-Length") if hasattr(headers, "get") else None
     if declared not in (None, ""):
@@ -266,6 +332,8 @@ def _read_bounded_response(response: Any) -> bytes:
             if not isinstance(chunk, bytes):
                 raise MarketColdnessError("Eastmoney response yielded non-byte content")
             received += len(chunk)
+            if acquisition_budget is not None:
+                acquisition_budget.charge(len(chunk))
             if received > _MAX_PAGE_RESPONSE_BYTES:
                 raise _MarketColdnessResourceLimitError("Eastmoney page response exceeds byte limit")
             chunks.append(chunk)
@@ -274,6 +342,8 @@ def _read_bounded_response(response: Any) -> bytes:
     content = getattr(response, "content", None)
     if not isinstance(content, bytes):
         raise MarketColdnessError("Eastmoney response does not expose a byte body")
+    if acquisition_budget is not None:
+        acquisition_budget.charge(len(content))
     if len(content) > _MAX_PAGE_RESPONSE_BYTES:
         raise _MarketColdnessResourceLimitError("Eastmoney page response exceeds byte limit")
     return content
@@ -464,7 +534,14 @@ class EastmoneyMarketColdnessAdapter:
         self.max_workers = max_workers
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
-    def _request_page(self, page: int) -> tuple[Mapping[str, Any], int]:
+    def _request_page(
+        self,
+        page: int,
+        *,
+        timeout: float | None = None,
+        retries: int | None = None,
+        acquisition_budget: _AcquisitionByteBudget | None = None,
+    ) -> tuple[Mapping[str, Any], int]:
         # Eastmoney's public quote pages use jQuery-style JSONP callbacks; the
         # source intermittently closes otherwise equivalent requests that do
         # not follow this wire contract.
@@ -482,19 +559,35 @@ class EastmoneyMarketColdnessAdapter:
             "fields": ",".join(EASTMONEY_FIELDS),
             "cb": callback,
         }
+        request_timeout = self.timeout if timeout is None else timeout
+        request_retries = self.retries if retries is None else retries
+        if (
+            isinstance(request_timeout, bool)
+            or not isinstance(request_timeout, (int, float))
+            or not math.isfinite(float(request_timeout))
+            or float(request_timeout) <= 0
+            or isinstance(request_retries, bool)
+            or not isinstance(request_retries, int)
+            or request_retries < 1
+        ):
+            raise ValueError("page request timeout and retries must be positive")
+        request_timeout = float(request_timeout)
         last_error: BaseException | None = None
-        for attempt in range(self.retries):
+        transient_only = True
+        for attempt in range(request_retries):
             response = None
             try:
+                if acquisition_budget is not None:
+                    acquisition_budget.raise_if_exhausted()
                 response = self.http_client.get(
                     self.endpoint,
                     params=params,
                     headers=_HEADERS,
-                    timeout=self.timeout,
+                    timeout=request_timeout,
                     stream=True,
                 )
                 response.raise_for_status()
-                raw = _read_bounded_response(response)
+                raw = _read_bounded_response(response, acquisition_budget=acquisition_budget)
                 payload = _decode_json_or_jsonp(raw, callback)
                 if not isinstance(payload, Mapping):
                     raise MarketColdnessError("Eastmoney response root must be an object")
@@ -509,7 +602,9 @@ class EastmoneyMarketColdnessAdapter:
                 raise
             except Exception as exc:
                 last_error = exc
-                if attempt + 1 < self.retries and self.retry_delay > 0:
+                if not _is_transient_transport_error(exc):
+                    transient_only = False
+                if attempt + 1 < request_retries and self.retry_delay > 0:
                     time.sleep(self.retry_delay * (attempt + 1))
             finally:
                 close = getattr(response, "close", None)
@@ -517,13 +612,31 @@ class EastmoneyMarketColdnessAdapter:
                     close()
         if last_error is None:  # pragma: no cover - retries is validated as positive.
             raise MarketColdnessError(f"Eastmoney page {page} request failed")
-        raise MarketColdnessError(
-            f"Eastmoney page {page} failed after {self.retries} attempt(s): {_error_label(last_error)}"
+        error_type = (
+            _MarketColdnessTransientTransportError
+            if transient_only and _is_transient_transport_error(last_error)
+            else MarketColdnessError
+        )
+        raise error_type(
+            f"Eastmoney page {page} failed after {request_retries} attempt(s): {_error_label(last_error)}"
         ) from last_error
 
     def fetch_all(self) -> MarketColdnessBatch:
         retrieved_at = _utc_timestamp(self.clock)
-        first, first_bytes = self._request_page(1)
+        recovery_timeout = max(self.timeout * 2, _RECOVERY_TIMEOUT_FLOOR_SECONDS)
+        acquisition_budget = _AcquisitionByteBudget(_MAX_ACQUISITION_RESPONSE_BYTES)
+        try:
+            first, first_bytes = self._request_page(1, acquisition_budget=acquisition_budget)
+        except _MarketColdnessTransientTransportError:
+            try:
+                first, first_bytes = self._request_page(
+                    1,
+                    timeout=recovery_timeout,
+                    retries=_RECOVERY_RETRIES,
+                    acquisition_budget=acquisition_budget,
+                )
+            except _MarketColdnessTransientTransportError as exc:
+                raise MarketColdnessError(f"failed to recover Eastmoney page 1: {exc}") from exc
         total = _strict_nonnegative_int(first.get("total"), "total")
         if total == 0:
             raise MarketColdnessError("Eastmoney Shanghai/Shenzhen universe unexpectedly contains zero rows")
@@ -545,10 +658,41 @@ class EastmoneyMarketColdnessAdapter:
             # page during the daily post-close refresh.
             worker_count = min(self.max_workers, page_count - 1)
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = {executor.submit(self._request_page, page): page for page in range(2, page_count + 1)}
+                futures = {
+                    executor.submit(self._request_page, page, acquisition_budget=acquisition_budget): page
+                    for page in range(2, page_count + 1)
+                }
+                transient_failures: dict[int, _MarketColdnessTransientTransportError] = {}
                 for future in as_completed(futures):
                     page = futures[future]
-                    pages[page] = future.result()
+                    try:
+                        pages[page] = future.result()
+                    except _MarketColdnessResourceLimitError:
+                        for pending in futures:
+                            pending.cancel()
+                        raise
+                    except _MarketColdnessTransientTransportError as exc:
+                        transient_failures[page] = exc
+
+            if len(transient_failures) > _MAX_RECOVERY_PAGES:
+                failed_pages = sorted(transient_failures)
+                raise MarketColdnessError(
+                    f"Eastmoney parallel fetch failed on {len(failed_pages)} pages, "
+                    f"above recovery limit {_MAX_RECOVERY_PAGES}: {failed_pages[:_MAX_RECOVERY_PAGES]}"
+                ) from transient_failures[failed_pages[0]]
+
+            for page in sorted(transient_failures):
+                try:
+                    pages[page] = self._request_page(
+                        page,
+                        timeout=recovery_timeout,
+                        retries=_RECOVERY_RETRIES,
+                        acquisition_budget=acquisition_budget,
+                    )
+                except _MarketColdnessResourceLimitError:
+                    raise
+                except _MarketColdnessTransientTransportError as exc:
+                    raise MarketColdnessError(f"failed to recover Eastmoney page {page}: {exc}") from exc
 
         records: list[MarketColdnessRecord] = []
         seen: set[str] = set()

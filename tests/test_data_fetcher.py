@@ -313,6 +313,22 @@ def test_sina_page_permanent_http_error_is_not_typed_transient(monkeypatch):
     assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
 
 
+@pytest.mark.parametrize(
+    "permanent_transport_error",
+    [requests.exceptions.SSLError("certificate rejected"), requests.exceptions.ProxyError("proxy rejected")],
+)
+def test_sina_page_security_and_proxy_failures_are_not_typed_transient(monkeypatch, permanent_transport_error):
+    def fail_transport(*_args, **_kwargs):
+        raise permanent_transport_error
+
+    monkeypatch.setattr(fetcher.requests, "get", fail_transport)
+
+    with pytest.raises(fetcher.QuoteFetchError) as caught:
+        fetcher._sina_page(1, retries=1)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+
+
 def test_sina_page_mixed_schema_and_transport_failures_are_not_typed_transient(monkeypatch):
     outcomes = [FakeResponse("not-json"), requests.ReadTimeout("timed out"), requests.ReadTimeout("timed out")]
     monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
