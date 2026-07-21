@@ -327,12 +327,14 @@ def test_pages_action_revisions_and_release_patterns_are_pinned_and_bounded():
     assert "manifest\\.json" in workflow
 
 
-def test_tag_pushes_do_not_duplicate_the_main_release_test_run():
+def test_ci_workflow_runs_on_every_branch_push_and_supports_manual_reverification():
     workflow = _workflow_text(TEST_WORKFLOW)
 
     push_section = workflow[workflow.index("  push:") : workflow.index("  pull_request:")]
-    assert "tags-ignore:" in push_section
+    assert "branches:" in push_section
     assert '- "**"' in push_section
+    assert "tags-ignore:" not in push_section
+    assert "  workflow_dispatch:" in workflow
 
 
 def _locked_versions(path: Path) -> dict[str, str]:
