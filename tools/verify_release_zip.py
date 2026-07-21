@@ -43,8 +43,15 @@ _FORBIDDEN_SUFFIXES = (
     ".7z",
     ".pem",
     ".key",
+    ".der",
+    ".pk8",
+    ".pkcs8",
+    ".p8",
+    ".ppk",
     ".p12",
     ".pfx",
+    ".jks",
+    ".keystore",
 )
 _LF_SUFFIXES = (
     ".py",
@@ -85,6 +92,7 @@ _REQUIRED_FILES = {
     "data/financial_zero_capex_evidence.json",
     "data/financial_zero_revenue_evidence.json",
     "data/fetcher.py",
+    "data/growth_evidence.py",
     "data/industry.py",
     "data/industry_f10.json",
     "data/industry_em_map.json",
@@ -93,6 +101,7 @@ _REQUIRED_FILES = {
     "data/market_coldness.py",
     "data/market_history.py",
     "data/quality_history.py",
+    "data/research_reports.py",
     "data/snapshot.py",
     "engine/audit.py",
     "engine/buy_screener.py",
@@ -110,6 +119,7 @@ _REQUIRED_FILES = {
     "tools/build_official_industry_source.py",
     "tools/build_desktop.py",
     "tools/run_full_audit.py",
+    "tools/sign_desktop_update_manifest.ps1",
     "tools/verify_release_zip.py",
     "desktop/__init__.py",
     "desktop/launcher.py",
@@ -139,7 +149,7 @@ _EXPECTED_AUDIT_SEED = 20260715
 _EXPECTED_PROJECT_LICENSE = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 _EXPECTED_LICENSE_SHA256 = "a7106a6f8ee245b6e8b0482b8eab8c874a8a40819c8718c92180e0ef3dad596c"
 _EXPECTED_UPDATE_MANIFEST_URL = (
-    "https://github.com/Muguett-DBY/quant-buy-signals/releases/latest/download/update-manifest.json"
+    "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/windows-app/update-manifest.json"
 )
 _EXPECTED_PATCH6_SOURCE = {
     "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
@@ -218,7 +228,45 @@ _AUDIT_TYPE_STATUSES = {
     "blocked",
 }
 _AUDIT_NON_DIAGNOSTIC_STATUSES = {"not_applicable", "insufficient_evidence"}
-_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v1"
+_AUDIT_TYPE7_SCHEMA_VERSION = 4
+_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v4"
+_AUDIT_TYPE7_CONTENT_MODEL_ID = "type7-report-body-crosscheck-v2"
+_AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS = 365
+_AUDIT_TYPE7_RESEARCH_RECENT_AGE_DAYS = 183
+_AUDIT_TYPE7_MIN_BODY_SOURCES = 3
+_AUDIT_TYPE7_MIN_CROSSCHECK_REPORTS = 2
+_AUDIT_TYPE7_MAX_BODY_FETCHES = 6
+_AUDIT_TYPE7_MIN_BODY_CHARACTERS = 200
+_AUDIT_TYPE7_MAX_BODY_CHARACTERS = 100_000
+_AUDIT_TYPE7_FACT_RELATIVE_TOLERANCE = 0.02
+_AUDIT_TYPE7_MAX_FACTS_PER_BODY = 32
+_AUDIT_TYPE7_MAX_FACT_ABS_VALUE = 1_000_000_000.0
+_AUDIT_TYPE7_CONTENT_SIGNALS = {"analysis", "event", "forecast", "investment_view", "risk"}
+_AUDIT_TYPE7_CONTENT_IDENTITY_CHECKS = {
+    "code_in_body",
+    "name_in_body",
+    "detail_code",
+    "detail_name",
+    "detail_title",
+    "detail_publisher",
+    "detail_date",
+    "dom_json_body",
+}
+_AUDIT_TYPE7_FACT_METRICS = {
+    "adjusted_net_profit",
+    "eps",
+    "operating_cash_flow",
+    "parent_net_profit",
+    "revenue",
+}
+_AUDIT_TYPE7_FACT_UNITS = {"CNY_100M", "CNY_PER_SHARE"}
+_AUDIT_TYPE7_FACT_UNIT_BY_METRIC = {
+    "adjusted_net_profit": "CNY_100M",
+    "eps": "CNY_PER_SHARE",
+    "operating_cash_flow": "CNY_100M",
+    "parent_net_profit": "CNY_100M",
+    "revenue": "CNY_100M",
+}
 _AUDIT_TYPE7_TEMPLATE_WEIGHTS = {
     "template1": {f"t1_{index:02d}": 5.0 for index in range(1, 21)},
     "template5": {
@@ -241,12 +289,121 @@ _AUDIT_TYPE7_PATCH_WEIGHTS = {
     "p5_industry": {"p5_i1": 8.0, "p5_i2": 6.0, "p5_i3": 6.0},
     "p5_safety": {"p5_s1": 8.0, "p5_s2": 6.0, "p5_s3": 6.0},
 }
+_AUDIT_TYPE7_TEMPLATE1_CONTRACTS = {
+    "t1_01": ("未来生命周期", "mean(runway,industry_durability)", ({"runway", "industry"},)),
+    "t1_02": (
+        "成长潜力",
+        "mean(growth_sustainability,runway,revenue_growth)",
+        ({"growth_sustainability", "runway", "revenue_growth"},),
+    ),
+    "t1_03": ("主营收入增长", "piecewise_linear(revenue_CAGR)", ({"rate"},)),
+    "t1_04": ("扣非利润与FCF增长", "mean(profit_CAGR_score,FCF_CAGR_score)", ({"profit_cagr", "fcf_cagr"},)),
+    "t1_05": ("商业模式", "business", ({"score"},)),
+    "t1_06": ("财务健康", "mean(accounting,balance,ROIC_spread)", ({"accounting", "balance", "roic"},)),
+    "t1_07": ("细分产业环境", "industry", ({"score"},)),
+    "t1_08": ("股东权益公平", "shareholder", ({"dilution"},)),
+    "t1_09": ("长期竞争优势", "mean(moat,moat_durability)", ({"moat", "durability"},)),
+    "t1_10": ("文化与员工满意", "culture", ({"management_proxy"},)),
+    "t1_11": ("成本控制", "mean(margin_stability,accounting)", ({"margin", "accounting"},)),
+    "t1_12": ("资产劳动资金强度", "asset_light", ({"asset_turnover", "capex_intensity"},)),
+    "t1_13": ("弱周期属性", "cyclicality", ({"profit_volatility", "growth_consistency"},)),
+    "t1_14": ("垄断性与竞争地位", "mean(moat,industry_structure)", ({"moat", "industry"},)),
+    "t1_15": (
+        "长期财富积累",
+        "mean(moat_durability,growth_sustainability,ROIC_spread)",
+        ({"moat_durability", "growth_sustainability", "roic"},),
+    ),
+    "t1_16": ("奢侈品属性", "luxury", ({"gross_margin", "proxy_cap"},)),
+    "t1_17": ("顶级科技与创新", "technology", ({"score"},)),
+    "t1_18": (
+        "长期预期回报",
+        "expected_return",
+        (
+            {"earnings_growth_rate", "book_value_growth_rate"},
+            {
+                "earnings_growth_rate",
+                "book_value_growth_rate",
+                "horizon_years",
+                "annual_return",
+                "valuation_inputs",
+                "formula",
+            },
+        ),
+    ),
+    "t1_19": (
+        "十年回报与远期利润",
+        "mean(hfq_10y_CAGR_score,market_cap/projected_year10_profit_score)",
+        ({"shareholder_return", "terminal_profit_projection"},),
+    ),
+    "t1_20": ("DCF价格位置", "dcf", ({"type1_1a"},)),
+}
+_AUDIT_TYPE7_TEMPLATE5_LABELS = {
+    "t5_i1": "产业大周期",
+    "t5_i2": "产业小周期",
+    "t5_i3": "产业空间与格局",
+    "t5_q1": "商业模式",
+    "t5_q2": "长期护城河",
+    "t5_q3": "治理与股东文化",
+    "t5_q4": "财务健康",
+    "t5_v1": "历史估值分位",
+    "t5_v2": "绝对DCF估值",
+    "t5_v3": "预期回报率",
+}
+_AUDIT_TYPE7_EVIDENCE_LEVELS = {
+    "partial",
+    "primary",
+    "derived_proxy",
+    "derived_proxy_capped",
+    "reported_formula",
+    "validated_type1",
+    "historical_valuation_reversion_formula",
+    "independent_market_history",
+    "independent_market_history_plus_fading_growth_projection",
+}
+_AUDIT_TYPE7_PATCH_SECTION_LABELS = {
+    "p5_business": "商业模式",
+    "p5_moat": "护城河",
+    "p5_culture": "公司文化",
+    "p5_industry": "产业兴衰",
+    "p5_safety": "安全边际",
+}
+_AUDIT_TYPE7_PATCH_COMPONENT_LABELS = {
+    "p5_b1": "清晰度",
+    "p5_b2": "可扩展性",
+    "p5_b3": "黏性复购",
+    "p5_b4": "资本效率",
+    "p5_m1": "护城河强度",
+    "p5_m2": "定价权",
+    "p5_m3": "进入壁垒",
+    "p5_c1": "管理诚信",
+    "p5_c2": "激励一致",
+    "p5_c3": "创新适应",
+    "p5_c4": "治理透明",
+    "p5_i1": "生命周期",
+    "p5_i2": "竞争格局",
+    "p5_i3": "外部环境",
+    "p5_s1": "估值水平",
+    "p5_s2": "财务稳健",
+    "p5_s3": "下行保护",
+}
+_AUDIT_TYPE7_PATCH_SOURCE_INPUT_COMPONENTS = {
+    "p5_b1",
+    "p5_b3",
+    "p5_m2",
+    "p5_m3",
+    "p5_c3",
+    "p5_c4",
+    "p5_i3",
+    "p5_s3",
+}
+_AUDIT_TYPE7_PATCH_SOURCE_LEVELS = {"missing", "primary", "derived_proxy"}
 _AUDIT_TYPE7_PREREQUISITES = {
     "core_modules_80pct",
     "technology_patch4",
     "three_year_financials",
     "latest_quote_and_valuation",
     "three_external_reports",
+    "external_report_content_verification",
     "ten_year_return_and_five_year_valuation",
 }
 _MIN_RELEASE_ELIGIBLE_COMPANIES = 4_000
@@ -309,10 +466,12 @@ _RULE_FILES = {
     "data/financial_balance_sheet_evidence.json",
     "data/financial_zero_capex_evidence.json",
     "data/financial_zero_revenue_evidence.json",
+    "data/growth_evidence.py",
     "data/industry.py",
     "data/market_coldness.py",
     "data/market_history.py",
     "data/quality_history.py",
+    "data/research_reports.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
     "engine/market_coldness.py",
@@ -532,29 +691,359 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
+def _type7_linear(value: float | None, anchors: Sequence[tuple[float, float]], *, missing: float = 2.0) -> float:
+    if value is None:
+        return round(missing, 2)
+    if value <= anchors[0][0]:
+        return round(min(10.0, max(0.0, anchors[0][1])), 2)
+    for (left_x, left_y), (right_x, right_y) in zip(anchors, anchors[1:]):
+        if value <= right_x:
+            fraction = (value - left_x) / (right_x - left_x)
+            return round(min(10.0, max(0.0, left_y + fraction * (right_y - left_y))), 2)
+    return round(min(10.0, max(0.0, anchors[-1][1])), 2)
+
+
+def _type7_average(values: Sequence[float]) -> float:
+    return round(min(10.0, max(0.0, math.fsum(values) / len(values))), 2)
+
+
+def _type7_template_input_score(
+    section_key: str,
+    key: str,
+    inputs: Mapping[str, Any],
+) -> tuple[bool, float | None]:
+    if section_key == "template5":
+        if key not in _AUDIT_TYPE7_TEMPLATE5_LABELS or set(inputs) != {"normalized_score"}:
+            return False, None
+        return True, _finite_number(inputs.get("normalized_score"))
+    contract = _AUDIT_TYPE7_TEMPLATE1_CONTRACTS.get(key)
+    if contract is None or set(inputs) not in contract[2]:
+        return False, None
+    mean_inputs = {
+        "t1_01": ("runway", "industry"),
+        "t1_02": ("growth_sustainability", "runway", "revenue_growth"),
+        "t1_06": ("accounting", "balance", "roic"),
+        "t1_09": ("moat", "durability"),
+        "t1_11": ("margin", "accounting"),
+        "t1_14": ("moat", "industry"),
+        "t1_15": ("moat_durability", "growth_sustainability", "roic"),
+    }
+    if key in mean_inputs:
+        values = [_finite_number(inputs.get(field)) for field in mean_inputs[key]]
+        return (False, None) if any(value is None for value in values) else (True, _type7_average(values))
+    if key in {"t1_05", "t1_07", "t1_17"}:
+        return True, _finite_number(inputs.get("score"))
+    if key == "t1_20":
+        return True, _finite_number(inputs.get("type1_1a"))
+    if key == "t1_03":
+        raw = inputs.get("rate")
+        if raw is not None and _finite_number(raw) is None:
+            return False, None
+        return True, _type7_linear(
+            _finite_number(raw), [(-0.15, 0), (0.0, 2), (0.05, 5), (0.10, 7), (0.20, 9), (0.35, 10)]
+        )
+    if key == "t1_04":
+        raw_values = [inputs.get("profit_cagr"), inputs.get("fcf_cagr")]
+        if any(value is not None and _finite_number(value) is None for value in raw_values):
+            return False, None
+        scores = [
+            _type7_linear(_finite_number(value), [(-0.15, 0), (0.0, 2), (0.05, 5), (0.10, 7), (0.20, 9), (0.35, 10)])
+            for value in raw_values
+        ]
+        return True, _type7_average(scores)
+    if key == "t1_18" and "annual_return" in inputs:
+        return True, _type7_linear(
+            _finite_number(inputs.get("annual_return")),
+            [(-0.05, 0), (0.0, 1), (0.05, 4), (0.08, 6), (0.12, 8), (0.15, 9), (0.20, 10)],
+        )
+    return True, None
+
+
+def _audit_type7_cross_check_from_bodies(bodies: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for body in bodies:
+        evidence_id = str(body["evidence_id"])
+        for fact in body["facts"]:
+            grouped.setdefault((fact["fact_key"], fact["unit"]), []).append((evidence_id, float(fact["value"])))
+    candidates: list[tuple[int, float, str, str, float, list[str]]] = []
+    for (fact_key, unit), observations in grouped.items():
+        ordered = sorted(observations, key=lambda item: (item[1], item[0]))
+        for left in range(len(ordered)):
+            for right in range(left + _AUDIT_TYPE7_MIN_CROSSCHECK_REPORTS, len(ordered) + 1):
+                window = ordered[left:right]
+                values = [value for _, value in window]
+                center = math.fsum(values) / len(values)
+                spread = (max(values) - min(values)) / max(abs(center), 1e-12)
+                if spread <= _AUDIT_TYPE7_FACT_RELATIVE_TOLERANCE:
+                    candidates.append(
+                        (
+                            -len(window),
+                            spread,
+                            fact_key,
+                            unit,
+                            center,
+                            sorted(evidence_id for evidence_id, _ in window),
+                        )
+                    )
+    if not candidates:
+        return {
+            "passed": False,
+            "minimum_reports": _AUDIT_TYPE7_MIN_CROSSCHECK_REPORTS,
+            "fact_key": None,
+            "fact_unit": None,
+            "consensus_value": None,
+            "supporting_evidence_ids": [],
+            "max_relative_spread": None,
+        }
+    _, spread, fact_key, unit, center, evidence_ids = min(candidates)
+    return {
+        "passed": True,
+        "minimum_reports": _AUDIT_TYPE7_MIN_CROSSCHECK_REPORTS,
+        "fact_key": fact_key,
+        "fact_unit": unit,
+        "consensus_value": round(center, 6),
+        "supporting_evidence_ids": evidence_ids,
+        "max_relative_spread": round(spread, 8),
+    }
+
+
+def _audit_type7_content_valid(
+    value: Any,
+    *,
+    sources: Sequence[Mapping[str, str]],
+    code: str,
+    as_of: str,
+) -> bool:
+    """Independently validate bounded report-body summaries in a release."""
+
+    top_fields = {
+        "model_id",
+        "code",
+        "as_of",
+        "passed",
+        "required_bodies",
+        "attempted_bodies",
+        "verified_bodies",
+        "distinct_publishers",
+        "bodies",
+        "cross_check",
+        "reason",
+    }
+    if not isinstance(value, Mapping) or set(value) != top_fields:
+        return False
+    if (
+        value.get("model_id") != _AUDIT_TYPE7_CONTENT_MODEL_ID
+        or value.get("code") != code
+        or value.get("as_of") != as_of
+        or not isinstance(value.get("passed"), bool)
+        or value.get("required_bodies") != _AUDIT_TYPE7_MIN_BODY_SOURCES
+    ):
+        return False
+    counts: dict[str, int] = {}
+    for field in ("attempted_bodies", "verified_bodies", "distinct_publishers"):
+        raw = value.get(field)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            return False
+        counts[field] = raw
+    if (
+        counts["attempted_bodies"] > min(_AUDIT_TYPE7_MAX_BODY_FETCHES, len(sources))
+        or counts["verified_bodies"] > counts["attempted_bodies"]
+        or counts["distinct_publishers"] > counts["verified_bodies"]
+    ):
+        return False
+    reason = value.get("reason")
+    if not isinstance(reason, str) or len(reason) > 300 or any(ord(character) < 32 for character in reason):
+        return False
+    source_by_id = {source["evidence_id"]: source for source in sources}
+    bodies = value.get("bodies")
+    if not isinstance(bodies, list) or len(bodies) != counts["verified_bodies"]:
+        return False
+    body_fields = {
+        "evidence_id",
+        "content_sha256",
+        "content_length",
+        "paragraph_count",
+        "structure_signals",
+        "fact_count",
+        "facts",
+        "identity_checks",
+    }
+    normalized_bodies: list[dict[str, Any]] = []
+    body_ids: set[str] = set()
+    body_hashes: set[str] = set()
+    publisher_ids: set[str] = set()
+    for body in bodies:
+        if not isinstance(body, Mapping) or set(body) != body_fields:
+            return False
+        evidence_id = body.get("evidence_id")
+        source = source_by_id.get(evidence_id) if isinstance(evidence_id, str) else None
+        digest = body.get("content_sha256")
+        content_length = body.get("content_length")
+        paragraph_count = body.get("paragraph_count")
+        fact_count = body.get("fact_count")
+        facts = body.get("facts")
+        signals = body.get("structure_signals")
+        checks = body.get("identity_checks")
+        if (
+            source is None
+            or evidence_id in body_ids
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or digest in body_hashes
+            or isinstance(content_length, bool)
+            or not isinstance(content_length, int)
+            or not _AUDIT_TYPE7_MIN_BODY_CHARACTERS <= content_length <= _AUDIT_TYPE7_MAX_BODY_CHARACTERS
+            or isinstance(paragraph_count, bool)
+            or not isinstance(paragraph_count, int)
+            or paragraph_count < 2
+            or isinstance(fact_count, bool)
+            or not isinstance(fact_count, int)
+            or not isinstance(facts, list)
+            or fact_count != len(facts)
+            or len(facts) > _AUDIT_TYPE7_MAX_FACTS_PER_BODY
+            or not isinstance(signals, list)
+            or signals != sorted(set(signals))
+            or not signals
+            or not set(signals).issubset(_AUDIT_TYPE7_CONTENT_SIGNALS)
+            or not isinstance(checks, Mapping)
+            or set(checks) != _AUDIT_TYPE7_CONTENT_IDENTITY_CHECKS
+            or any(checks.get(key) is not True for key in _AUDIT_TYPE7_CONTENT_IDENTITY_CHECKS)
+        ):
+            return False
+        normalized_facts: list[dict[str, Any]] = []
+        fact_identities: set[tuple[str, str]] = set()
+        for fact in facts:
+            if not isinstance(fact, Mapping) or set(fact) != {"fact_key", "period", "metric", "unit", "value"}:
+                return False
+            fact_key = fact.get("fact_key")
+            period = fact.get("period")
+            metric = fact.get("metric")
+            unit = fact.get("unit")
+            raw_fact_value = fact.get("value")
+            fact_value = _finite_number(raw_fact_value)
+            identity = (str(fact_key), str(unit))
+            if (
+                not isinstance(fact_key, str)
+                or not isinstance(period, str)
+                or re.fullmatch(r"20[0-9]{2}Q[1-4]", period) is None
+                or not isinstance(metric, str)
+                or metric not in _AUDIT_TYPE7_FACT_METRICS
+                or fact_key != f"{period}:{metric}"
+                or not isinstance(unit, str)
+                or unit != _AUDIT_TYPE7_FACT_UNIT_BY_METRIC[metric]
+                or isinstance(raw_fact_value, bool)
+                or not isinstance(raw_fact_value, (int, float))
+                or fact_value is None
+                or abs(fact_value) > _AUDIT_TYPE7_MAX_FACT_ABS_VALUE
+                or fact_value != round(fact_value, 6)
+                or identity in fact_identities
+            ):
+                return False
+            fact_identities.add(identity)
+            normalized_facts.append(
+                {
+                    "fact_key": fact_key,
+                    "period": period,
+                    "metric": metric,
+                    "unit": unit,
+                    "value": fact_value,
+                }
+            )
+        normalized_facts.sort(key=lambda fact: (fact["fact_key"], fact["unit"]))
+        if facts != normalized_facts:
+            return False
+        body_ids.add(evidence_id)
+        body_hashes.add(digest)
+        publisher_ids.add(source["publisher_id"].casefold())
+        normalized_bodies.append(
+            {
+                "evidence_id": evidence_id,
+                "content_sha256": digest,
+                "content_length": content_length,
+                "paragraph_count": paragraph_count,
+                "structure_signals": list(signals),
+                "fact_count": fact_count,
+                "facts": normalized_facts,
+                "identity_checks": dict(checks),
+            }
+        )
+    normalized_bodies.sort(key=lambda item: item["evidence_id"])
+    if bodies != normalized_bodies or counts["distinct_publishers"] != len(publisher_ids):
+        return False
+    cross_check = value.get("cross_check")
+    cross_fields = {
+        "passed",
+        "minimum_reports",
+        "fact_key",
+        "fact_unit",
+        "consensus_value",
+        "supporting_evidence_ids",
+        "max_relative_spread",
+    }
+    if (
+        not isinstance(cross_check, Mapping)
+        or set(cross_check) != cross_fields
+        or not isinstance(cross_check.get("passed"), bool)
+        or cross_check.get("minimum_reports") != _AUDIT_TYPE7_MIN_CROSSCHECK_REPORTS
+    ):
+        return False
+    expected_cross_check = _audit_type7_cross_check_from_bodies(normalized_bodies)
+    if dict(cross_check) != expected_cross_check:
+        return False
+    expected_passed = bool(
+        counts["verified_bodies"] >= _AUDIT_TYPE7_MIN_BODY_SOURCES
+        and counts["distinct_publishers"] >= _AUDIT_TYPE7_MIN_BODY_SOURCES
+        and expected_cross_check["passed"]
+    )
+    return value["passed"] is expected_passed and bool(reason) is not expected_passed
+
+
+def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
     """Independently replay the Type 7 formula ledger in a release artifact."""
 
-    def close(actual: Any, expected: float) -> bool:
+    def close(actual: Any, expected: float, *, tolerance: float = 0.0001) -> bool:
         value = _finite_number(actual)
-        return value is not None and math.isclose(value, expected, rel_tol=0.0, abs_tol=0.0001)
+        return value is not None and math.isclose(value, expected, rel_tol=0.0, abs_tol=tolerance)
 
     if not isinstance(ledger, Mapping):
         return False
     if status == "not_applicable":
         return bool(
-            ledger.get("schema_version") == 1
+            set(ledger) == {"schema_version", "model_id", "code", "applicable", "reason"}
+            and ledger.get("schema_version") == _AUDIT_TYPE7_SCHEMA_VERSION
             and ledger.get("model_id") == _AUDIT_TYPE7_MODEL_ID
             and ledger.get("code") == code
             and ledger.get("applicable") is False
             and str(ledger.get("reason") or "").strip()
         )
-    if (
-        ledger.get("schema_version") != 1
+    expected_ledger_fields = {
+        "schema_version",
+        "model_id",
+        "code",
+        "source_rule",
+        "strict_threshold",
+        "scores",
+        "strict_checks",
+        "all_scores_strictly_above_70",
+        "prerequisites",
+        "prerequisites_complete",
+        "safety_veto",
+        "triggered",
+        "decisive_score_upper_bounds",
+        "decisively_not_triggered",
+        "research_request_needed",
+        "history_request_needed",
+        "upper_bounds_without_history",
+        "template1",
+        "template5",
+        "patch5",
+    }
+    if set(ledger) != expected_ledger_fields or (
+        ledger.get("schema_version") != _AUDIT_TYPE7_SCHEMA_VERSION
         or ledger.get("model_id") != _AUDIT_TYPE7_MODEL_ID
         or ledger.get("code") != code
         or ledger.get("source_rule") != "Template1>70 AND Template5>70 AND Patch5>70"
-        or _finite_number(ledger.get("strict_threshold")) != 70.0
+        or not close(ledger.get("strict_threshold"), 70.0, tolerance=1e-9)
     ):
         return False
 
@@ -563,33 +1052,65 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
     for section_key, expected_weights in _AUDIT_TYPE7_TEMPLATE_WEIGHTS.items():
         section = ledger.get(section_key)
         items = section.get("items") if isinstance(section, Mapping) else None
-        if not isinstance(section, Mapping) or not isinstance(items, list) or len(items) != len(expected_weights):
+        if (
+            not isinstance(section, Mapping)
+            or set(section) != {"score", "coverage", "items"}
+            or not isinstance(items, list)
+            or len(items) != len(expected_weights)
+        ):
             return False
         indexed: dict[str, Mapping[str, Any]] = {}
         for item in items:
+            if not isinstance(item, Mapping) or set(item) != {
+                "key",
+                "label",
+                "weight",
+                "score",
+                "points",
+                "complete",
+                "evidence_level",
+                "formula",
+                "inputs",
+            }:
+                return False
             key = item.get("key") if isinstance(item, Mapping) else None
             if not isinstance(key, str) or key not in expected_weights or key in indexed:
                 return False
             score = _finite_number(item.get("score"))
             weight = _finite_number(item.get("weight"))
             points = _finite_number(item.get("points"))
+            inputs = item.get("inputs")
+            if section_key == "template1":
+                contract = _AUDIT_TYPE7_TEMPLATE1_CONTRACTS.get(key)
+                expected_label = contract[0] if contract is not None else None
+                expected_formula = contract[1] if contract is not None else None
+            else:
+                expected_label = _AUDIT_TYPE7_TEMPLATE5_LABELS.get(key)
+                expected_formula = "Template5_source_weight*observable_score"
+            input_valid, replayed_score = (
+                _type7_template_input_score(section_key, key, inputs) if isinstance(inputs, Mapping) else (False, None)
+            )
             if (
                 score is None
                 or not 0 <= score <= 10
-                or weight != expected_weights[key]
+                or weight is None
+                or not close(weight, expected_weights[key], tolerance=1e-9)
                 or points is None
                 or not math.isclose(points, round(score * weight / 10.0, 4), rel_tol=0.0, abs_tol=0.0001)
                 or not isinstance(item.get("complete"), bool)
-                or not str(item.get("formula") or "").strip()
-                or not isinstance(item.get("inputs"), Mapping)
+                or item.get("label") != expected_label
+                or item.get("formula") != expected_formula
+                or item.get("evidence_level") not in _AUDIT_TYPE7_EVIDENCE_LEVELS
+                or not input_valid
+                or (replayed_score is not None and not close(score, replayed_score))
             ):
                 return False
             indexed[key] = item
         if set(indexed) != set(expected_weights):
             return False
-        expected_score = round(sum(float(item["points"]) for item in indexed.values()), 2)
+        expected_score = round(math.fsum(float(item["points"]) for item in indexed.values()), 2)
         expected_coverage = round(
-            sum(expected_weights[key] for key, item in indexed.items() if item["complete"]) / 100.0,
+            math.fsum(expected_weights[key] for key, item in indexed.items() if item["complete"]) / 100.0,
             4,
         )
         if not close(section.get("score"), expected_score) or not close(section.get("coverage"), expected_coverage):
@@ -599,7 +1120,12 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
 
     patch5 = ledger.get("patch5")
     dimensions = patch5.get("dimensions") if isinstance(patch5, Mapping) else None
-    if not isinstance(patch5, Mapping) or not isinstance(dimensions, list) or len(dimensions) != 5:
+    if (
+        not isinstance(patch5, Mapping)
+        or set(patch5) != {"score", "coverage", "safety_margin_score", "safety_margin_complete", "dimensions"}
+        or not isinstance(dimensions, list)
+        or len(dimensions) != 5
+    ):
         return False
     patch_sections: dict[str, Mapping[str, Any]] = {}
     for section in dimensions:
@@ -609,42 +1135,64 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         if (
             expected_weights is None
             or key in patch_sections
+            or not isinstance(section, Mapping)
+            or set(section) != {"key", "label", "max_points", "components", "points", "complete"}
             or not isinstance(components, list)
             or len(components) != len(expected_weights)
-            or _finite_number(section.get("max_points")) != 20.0
+            or not close(section.get("max_points"), 20.0, tolerance=1e-9)
+            or section.get("label") != _AUDIT_TYPE7_PATCH_SECTION_LABELS.get(key)
             or not isinstance(section.get("complete"), bool)
         ):
             return False
         indexed: dict[str, Mapping[str, Any]] = {}
         for component in components:
+            if not isinstance(component, Mapping) or set(component) != {
+                "key",
+                "label",
+                "max_points",
+                "score",
+                "points",
+                "complete",
+                "formula",
+                "inputs",
+            }:
+                return False
             component_key = component.get("key") if isinstance(component, Mapping) else None
             if not isinstance(component_key, str) or component_key not in expected_weights or component_key in indexed:
                 return False
             score = _finite_number(component.get("score"))
             maximum = expected_weights[component_key]
             points = _finite_number(component.get("points"))
+            inputs = component.get("inputs")
+            expected_input_fields = {"source"} if component_key in _AUDIT_TYPE7_PATCH_SOURCE_INPUT_COMPONENTS else set()
+            inputs_valid = isinstance(inputs, Mapping) and set(inputs) == expected_input_fields
+            if inputs_valid and expected_input_fields:
+                inputs_valid = inputs.get("source") in _AUDIT_TYPE7_PATCH_SOURCE_LEVELS
             if (
                 score is None
                 or not 0 <= score <= 10
-                or _finite_number(component.get("max_points")) != maximum
+                or not close(component.get("max_points"), maximum, tolerance=1e-9)
                 or points is None
                 or not math.isclose(points, round(score * maximum / 10.0, 4), rel_tol=0.0, abs_tol=0.0001)
                 or not isinstance(component.get("complete"), bool)
+                or component.get("label") != _AUDIT_TYPE7_PATCH_COMPONENT_LABELS.get(component_key)
+                or component.get("formula") != f"{maximum:g}*score/10"
+                or not inputs_valid
             ):
                 return False
             indexed[component_key] = component
         if set(indexed) != set(expected_weights):
             return False
-        expected_points = round(sum(float(item["points"]) for item in indexed.values()), 4)
+        expected_points = round(math.fsum(float(item["points"]) for item in indexed.values()), 4)
         expected_complete = all(item["complete"] for item in indexed.values())
         if not close(section.get("points"), expected_points) or section.get("complete") is not expected_complete:
             return False
         patch_sections[key] = section
     if set(patch_sections) != set(_AUDIT_TYPE7_PATCH_WEIGHTS):
         return False
-    expected_patch_score = round(sum(float(section["points"]) for section in patch_sections.values()), 2)
+    expected_patch_score = round(math.fsum(float(section["points"]) for section in patch_sections.values()), 2)
     expected_patch_coverage = round(
-        sum(20.0 for section in patch_sections.values() if section["complete"]) / 100.0,
+        math.fsum(20.0 for section in patch_sections.values() if section["complete"]) / 100.0,
         4,
     )
     safety = patch_sections["p5_safety"]
@@ -664,11 +1212,17 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
     for key, section in expected_sections.items():
         value = _finite_number(scores.get(key))
         section_score = _finite_number(section.get("score"))
-        if value is None or section_score is None or value != section_score:
+        if value is None or section_score is None or not close(value, section_score):
             return False
         score_values[key] = value
     strict = {key: value > 70.0 for key, value in score_values.items()}
-    if ledger.get("strict_checks") != strict or ledger.get("all_scores_strictly_above_70") is not all(strict.values()):
+    strict_checks = ledger.get("strict_checks")
+    if (
+        not isinstance(strict_checks, Mapping)
+        or any(not isinstance(value, bool) for value in strict_checks.values())
+        or dict(strict_checks) != strict
+        or ledger.get("all_scores_strictly_above_70") is not all(strict.values())
+    ):
         return False
     prerequisites = ledger.get("prerequisites")
     if not isinstance(prerequisites, Mapping) or set(prerequisites) != _AUDIT_TYPE7_PREREQUISITES:
@@ -676,6 +1230,54 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
     pass_flags = {key: record.get("passed") for key, record in prerequisites.items() if isinstance(record, Mapping)}
     if len(pass_flags) != len(_AUDIT_TYPE7_PREREQUISITES) or any(
         not isinstance(value, bool) for value in pass_flags.values()
+    ):
+        return False
+
+    core_prerequisite = prerequisites.get("core_modules_80pct")
+    template1_coverage = _finite_number(sections["template1"].get("coverage"))
+    core_actual = _finite_number(core_prerequisite.get("actual")) if isinstance(core_prerequisite, Mapping) else None
+    if (
+        not isinstance(core_prerequisite, Mapping)
+        or set(core_prerequisite) != {"passed", "actual", "required"}
+        or template1_coverage is None
+        or core_actual is None
+        or not close(core_actual, template1_coverage)
+        or not close(core_prerequisite.get("required"), 0.80)
+        or core_prerequisite.get("passed") is not (core_actual >= 0.80)
+    ):
+        return False
+
+    technology_prerequisite = prerequisites.get("technology_patch4")
+    technology_item = template_items["template1"].get("t1_17")
+    technology_score = _finite_number(technology_item.get("score")) if isinstance(technology_item, Mapping) else None
+    technology_applicable = (
+        technology_prerequisite.get("applicable") if isinstance(technology_prerequisite, Mapping) else None
+    )
+    expected_technology_status = (
+        "missing_validated_patch4_assessment" if technology_applicable is True else "not_applicable"
+    )
+    if (
+        not isinstance(technology_prerequisite, Mapping)
+        or set(technology_prerequisite) != {"passed", "applicable", "score", "validation_status"}
+        or not isinstance(technology_applicable, bool)
+        or technology_prerequisite.get("score") is not None
+        or technology_prerequisite.get("validation_status") != expected_technology_status
+        or technology_prerequisite.get("passed") is not (technology_applicable is False)
+        or (technology_score is not None and technology_score >= 7.0 and technology_applicable is not True)
+    ):
+        return False
+
+    financial_prerequisite = prerequisites.get("three_year_financials")
+    consecutive_years = (
+        financial_prerequisite.get("consecutive_years") if isinstance(financial_prerequisite, Mapping) else None
+    )
+    if (
+        not isinstance(financial_prerequisite, Mapping)
+        or set(financial_prerequisite) != {"passed", "consecutive_years"}
+        or isinstance(consecutive_years, bool)
+        or not isinstance(consecutive_years, int)
+        or consecutive_years < 0
+        or financial_prerequisite.get("passed") is not (consecutive_years >= 3)
     ):
         return False
 
@@ -702,8 +1304,12 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
     report_prerequisite = prerequisites.get("three_external_reports")
     if not isinstance(report_prerequisite, Mapping) or set(report_prerequisite) != {
         "passed",
+        "check_type",
         "source_count",
         "distinct_publishers",
+        "recent_source_count",
+        "max_age_days",
+        "recent_age_days",
         "sources",
     }:
         return False
@@ -714,7 +1320,16 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
     identities: set[str] = set()
     urls: set[str] = set()
     for source in sources:
-        fields = {"title", "publisher", "url", "as_of", "evidence_id"}
+        fields = {
+            "security_code",
+            "company_name",
+            "title",
+            "publisher",
+            "publisher_id",
+            "url",
+            "as_of",
+            "evidence_id",
+        }
         if (
             not isinstance(source, Mapping)
             or set(source) != fields
@@ -724,7 +1339,7 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         item = {field: str(source[field]).strip() for field in fields}
         try:
             parsed = urlsplit(item["url"])
-            _ = parsed.port
+            port = parsed.port
             source_date = date.fromisoformat(item["as_of"])
         except (ValueError, TypeError):
             return False
@@ -734,10 +1349,13 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
             any(not text or len(text) > 300 or any(ord(character) < 32 for character in text) for text in item.values())
             or parsed.scheme.lower() != "https"
             or not parsed.hostname
+            or port not in (None, 443)
             or parsed.username is not None
             or parsed.password is not None
             or bool(parsed.fragment)
+            or item["security_code"] != code
             or source_date > quote_as_of
+            or (quote_as_of - source_date).days > _AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS
             or identity in identities
             or canonical_url in urls
         ):
@@ -745,14 +1363,38 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         identities.add(identity)
         urls.add(canonical_url)
         normalized_sources.append(item)
-    normalized_sources.sort(key=lambda item: (item["as_of"], item["publisher"], item["evidence_id"]))
-    publisher_count = len({item["publisher"].casefold() for item in normalized_sources})
-    expected_report_pass = len(normalized_sources) >= 3 and publisher_count >= 3
+    normalized_sources.sort(
+        key=lambda item: (item["as_of"], item["publisher_id"], item["publisher"], item["evidence_id"])
+    )
+    publisher_count = len({item["publisher_id"].casefold() for item in normalized_sources})
+    recent_source_count = (
+        sum(
+            (quote_as_of - date.fromisoformat(item["as_of"])).days <= _AUDIT_TYPE7_RESEARCH_RECENT_AGE_DAYS
+            for item in normalized_sources
+        )
+        if quote_as_of is not None
+        else 0
+    )
+    expected_report_pass = len(normalized_sources) >= 3 and publisher_count >= 3 and recent_source_count >= 1
     if not (
         normalized_sources == sources
+        and report_prerequisite.get("check_type") == "metadata_availability_precheck"
         and report_prerequisite.get("source_count") == len(normalized_sources)
         and report_prerequisite.get("distinct_publishers") == publisher_count
+        and report_prerequisite.get("recent_source_count") == recent_source_count
+        and report_prerequisite.get("max_age_days") == _AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS
+        and report_prerequisite.get("recent_age_days") == _AUDIT_TYPE7_RESEARCH_RECENT_AGE_DAYS
         and report_prerequisite.get("passed") is expected_report_pass
+    ):
+        return False
+
+    content_prerequisite = prerequisites.get("external_report_content_verification")
+    content_as_of = quote_as_of.isoformat() if quote_as_of is not None else "0001-01-01"
+    if not _audit_type7_content_valid(
+        content_prerequisite,
+        sources=normalized_sources,
+        code=code,
+        as_of=content_as_of,
     ):
         return False
 
@@ -788,6 +1430,74 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         and ledger.get("triggered") is expected_trigger
     ):
         return False
+
+    expected_decisive_upper = {
+        "template1": round(
+            min(
+                100.0,
+                math.fsum(
+                    float(item["points"]) if item.get("complete") is True else expected_weight
+                    for key, item in template_items["template1"].items()
+                    for expected_weight in (_AUDIT_TYPE7_TEMPLATE_WEIGHTS["template1"][key],)
+                ),
+            ),
+            2,
+        ),
+        "template5": round(
+            min(
+                100.0,
+                math.fsum(
+                    float(item["points"]) if item.get("complete") is True else expected_weight
+                    for key, item in template_items["template5"].items()
+                    for expected_weight in (_AUDIT_TYPE7_TEMPLATE_WEIGHTS["template5"][key],)
+                ),
+            ),
+            2,
+        ),
+        "patch5": round(
+            min(
+                100.0,
+                math.fsum(
+                    float(component["points"])
+                    if component.get("complete") is True
+                    else _AUDIT_TYPE7_PATCH_WEIGHTS[section_key][str(component.get("key"))]
+                    for section_key, section in patch_sections.items()
+                    for component in section.get("components", [])
+                    if isinstance(component, Mapping)
+                ),
+            ),
+            2,
+        ),
+    }
+    published_decisive_upper = ledger.get("decisive_score_upper_bounds")
+    if (
+        not isinstance(published_decisive_upper, Mapping)
+        or set(published_decisive_upper) != set(expected_decisive_upper)
+        or any(not close(published_decisive_upper.get(key), value) for key, value in expected_decisive_upper.items())
+    ):
+        return False
+    expected_decisive_failure = any(value <= 70.0 for value in expected_decisive_upper.values())
+    if ledger.get("decisively_not_triggered") is not expected_decisive_failure:
+        return False
+
+    diagnostic_total = round(sum(round(value / 10.0, 3) / 3.0 for value in score_values.values()), 1)
+    if status != "blocked":
+        if expected_decisive_failure:
+            expected_status = "not_triggered"
+        elif safety_veto:
+            expected_status = "vetoed"
+        elif not prerequisites_complete:
+            expected_status = "insufficient_evidence"
+        elif expected_trigger:
+            expected_status = "triggered"
+        elif diagnostic_total >= 7.0 and not all(strict.values()):
+            expected_status = "conditional"
+        elif diagnostic_total >= 5.0:
+            expected_status = "observe"
+        else:
+            expected_status = "not_triggered"
+        if status != expected_status:
+            return False
 
     t1_items = template_items.get("template1", {})
     t5_items = template_items.get("template5", {})
@@ -846,10 +1556,43 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         return False
     expected_request = bool(
         not pass_flags["ten_year_return_and_five_year_valuation"]
-        and all(value for key, value in pass_flags.items() if key != "ten_year_return_and_five_year_valuation")
+        and all(
+            value
+            for key, value in pass_flags.items()
+            if key
+            not in {
+                "three_external_reports",
+                "external_report_content_verification",
+                "ten_year_return_and_five_year_valuation",
+            }
+        )
+        and not safety_veto
         and all(value > 70.0 for value in expected_upper.values())
+        and not expected_decisive_failure
     )
-    return ledger.get("history_request_needed") is expected_request
+    expected_research_request = bool(
+        (not pass_flags["three_external_reports"] or not pass_flags["external_report_content_verification"])
+        and all(
+            value
+            for key, value in pass_flags.items()
+            if key not in {"three_external_reports", "external_report_content_verification"}
+        )
+        and not safety_veto
+        and not expected_decisive_failure
+    )
+    return (
+        ledger.get("history_request_needed") is expected_request
+        and ledger.get("research_request_needed") is expected_research_request
+    )
+
+
+def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
+    """Fail closed when release JSON contains hostile Type 7 values."""
+
+    try:
+        return _audit_type7_ledger_valid_impl(code, ledger, status)
+    except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
+        return False
 
 
 def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
@@ -999,7 +1742,12 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
                 return None
             if status == "observe" and (reason_veto or not 5.0 <= total < _AUDIT_QUALIFY_THRESHOLD):
                 return None
-            if status == "not_triggered" and (reason_veto or total >= 5.0):
+            type7_decisive_failure = bool(
+                type_key == "type7"
+                and isinstance(type_payload.get("ledger"), Mapping)
+                and type_payload["ledger"].get("decisively_not_triggered") is True
+            )
+            if status == "not_triggered" and (reason_veto or (total >= 5.0 and not type7_decisive_failure)):
                 return None
             clean_sub_scores[type_key] = scores_for_type
             clean_reasons[type_key] = reasons
@@ -1327,8 +2075,86 @@ def _valid_reporting_period_contract(value: object) -> dict[str, str] | None:
     return {key: str(value[key]) for key in required}
 
 
+def _valid_supplemental_field_coverage(validation: Mapping[str, Any]) -> bool:
+    """Require schema-8 field-presence telemetry without inventing a coverage floor."""
+
+    coverage = validation.get("supplemental_field_coverage")
+    required_fields = {"GOODWILL", "OBTAIN_SUBSIDIARY_OTHER"}
+    if not isinstance(coverage, Mapping) or set(coverage) != required_fields:
+        return False
+    return all(
+        (number := _finite_number(coverage.get(field))) is not None and 0.0 <= number <= 1.0
+        for field in required_fields
+    )
+
+
+def _valid_optional_evidence_provenance(value: object, eligible_universe_size: object) -> bool:
+    """Validate a compact deep-evidence summary without requiring any candidate count."""
+
+    fields = {
+        "provided",
+        "evidence_count",
+        "available_count",
+        "eligible_evidence_count",
+        "eligible_evidence_coverage",
+        "evidence_sha256",
+        "as_of_sessions",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != fields
+        or isinstance(eligible_universe_size, bool)
+        or not isinstance(eligible_universe_size, int)
+        or eligible_universe_size <= 0
+        or not isinstance(value.get("provided"), bool)
+    ):
+        return False
+    counts = tuple(value.get(field) for field in ("evidence_count", "available_count", "eligible_evidence_count"))
+    if any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in counts):
+        return False
+    evidence_count, available_count, eligible_count = counts
+    coverage = _finite_number(value.get("eligible_evidence_coverage"))
+    if (
+        available_count > evidence_count
+        or eligible_count > evidence_count
+        or eligible_count > eligible_universe_size
+        or coverage is None
+        or not 0.0 <= coverage <= 1.0
+        or not math.isclose(
+            coverage,
+            eligible_count / eligible_universe_size,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or value.get("provided") is not (evidence_count > 0)
+    ):
+        return False
+    sessions = value.get("as_of_sessions")
+    if (
+        not isinstance(sessions, list)
+        or any(not isinstance(session, str) for session in sessions)
+        or sessions != sorted(set(sessions))
+        or len(sessions) > evidence_count
+    ):
+        return False
+    try:
+        if any(date.fromisoformat(session).isoformat() != session for session in sessions):
+            return False
+    except ValueError:
+        return False
+    evidence_sha256 = value.get("evidence_sha256")
+    if evidence_count == 0:
+        return evidence_sha256 is None and sessions == []
+    return (
+        bool(sessions)
+        and isinstance(evidence_sha256, str)
+        and re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is not None
+        and len(set(evidence_sha256)) >= 8
+    )
+
+
 def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
-    """Validate the schema-7 non-financial SH/SZ TTM population ledger."""
+    """Validate the schema-8 non-financial SH/SZ TTM population ledger."""
     coverage = validation.get("strict_ttm_source_coverage")
     if not isinstance(coverage, Mapping):
         return False
@@ -1435,7 +2261,7 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
 
 
 def _valid_listing_date_evidence(validation: Mapping[str, Any]) -> bool:
-    """Validate the schema-7 whole-market listing-date provenance ledger."""
+    """Validate the schema-8 whole-market listing-date provenance ledger."""
     evidence = validation.get("listing_date_evidence")
     analysis_quotes = validation.get("analysis_market_quotes")
     if not isinstance(evidence, Mapping) or isinstance(analysis_quotes, bool) or not isinstance(analysis_quotes, int):
@@ -2305,6 +3131,8 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     basename in {"coverage.xml", ".coverage", "cache.db", "secrets.toml"}
                     or basename.startswith(".coverage.")
                     or basename in _SSH_PRIVATE_KEY_NAMES
+                    or basename.endswith(("-signing-private-key.properties", "-release-credentials.properties"))
+                    or lower == "android/release.properties"
                 ):
                     errors.append(f"runtime or secret file in release: {normalised}")
                 if basename == ".env" or (
@@ -2376,8 +3204,8 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                         errors.append("audit is not bound to the authoritative Patch 6 source hash")
                     if provenance.get("type7_source_documents") != _EXPECTED_TYPE7_SOURCE_DOCUMENTS:
                         errors.append("audit is not bound to all authoritative Type 7 source hashes")
-                    if caller.get("snapshot_schema_version") != 7:
-                        errors.append("snapshot schema version is not 7")
+                    if caller.get("snapshot_schema_version") != 8:
+                        errors.append("snapshot schema version is not 8")
                     validation = caller.get("validation", {})
                     validation = validation if isinstance(validation, Mapping) else {}
                     reporting_period_contract = _valid_reporting_period_contract(
@@ -2386,7 +3214,9 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     if reporting_period_contract is None:
                         errors.append("snapshot reporting period contract is missing or invalid")
                     elif provenance.get("reporting_period_contract") != reporting_period_contract:
-                        errors.append("audit reporting period contract differs from the schema-7 snapshot contract")
+                        errors.append("audit reporting period contract differs from the schema-8 snapshot contract")
+                    if not _valid_supplemental_field_coverage(validation):
+                        errors.append("snapshot schema-8 supplemental field coverage ledger is missing or invalid")
                     if not _valid_listing_date_evidence(validation):
                         errors.append("snapshot listing-date provenance ledger is missing or invalid")
                     strict_ttm_coverage_valid = _valid_strict_ttm_source_coverage(validation)
@@ -2484,6 +3314,15 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     analysis_market_quotes = validation.get("analysis_market_quotes")
                     analysis_eligible_coverage = _finite_number(validation.get("analysis_eligible_coverage"))
                     eligible_universe_size = payload.get("eligible_universe_size")
+                    for field, label in (
+                        ("type3_growth_evidence", "Type 3 growth"),
+                        ("research_report_evidence", "Type 7 research-report"),
+                    ):
+                        if not _valid_optional_evidence_provenance(
+                            provenance.get(field),
+                            eligible_universe_size,
+                        ):
+                            errors.append(f"audit {label} provenance summary is missing or invalid")
                     eligible_identity_valid = (
                         validation.get("analysis_markets") == ["SH", "SZ"]
                         and isinstance(eligible_universe_size, int)

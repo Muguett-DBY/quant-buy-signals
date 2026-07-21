@@ -13,6 +13,8 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import pytest
 
 from engine.audit import _RULE_FILES as _AUDIT_RULE_FILES
+from engine.buy_screener import STATUS_INSUFFICIENT_EVIDENCE, score_type7_quality_equity
+from engine.quality_equity import TYPE7_DIRECT_SCORE_KEYS
 from tools.verify_release_zip import (
     _REQUIRED_FILES,
     _RULE_FILES as _RELEASE_RULE_FILES,
@@ -32,10 +34,12 @@ _EXPECTED_RULE_FILES = {
     "data/financial_balance_sheet_evidence.json",
     "data/financial_zero_capex_evidence.json",
     "data/financial_zero_revenue_evidence.json",
+    "data/growth_evidence.py",
     "data/industry.py",
     "data/market_coldness.py",
     "data/market_history.py",
     "data/quality_history.py",
+    "data/research_reports.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
     "engine/market_coldness.py",
@@ -449,8 +453,8 @@ def _audit_payload(files):
             "applicable": False,
             "evidence_complete": True,
             "ledger": {
-                "schema_version": 1,
-                "model_id": "patch6-type7-quality-equity-v1",
+                "schema_version": 4,
+                "model_id": "patch6-type7-quality-equity-v4",
                 "code": code,
                 "applicable": False,
                 "reason": type7_reason,
@@ -549,6 +553,10 @@ def _audit_payload(files):
             "retrieved_at_latest": 1_768_478_301.0,
         },
         "reporting_period_contract": dict(_REPORTING_PERIOD_CONTRACT),
+        "supplemental_field_coverage": {
+            "GOODWILL": 0.83,
+            "OBTAIN_SUBSIDIARY_OTHER": 0.79,
+        },
         "strict_ttm_source_coverage": strict_ttm_source_coverage,
     }
     return {
@@ -587,8 +595,26 @@ def _audit_payload(files):
             "snapshot_content_sha256": hashlib.sha256(b"fixture snapshot content").hexdigest(),
             "snapshot_artifact_sha256": hashlib.sha256(b"fixture snapshot artifact").hexdigest(),
             "eligible_universe_sha256": hashlib.sha256("\n".join(eligible_codes).encode("ascii")).hexdigest(),
+            "type3_growth_evidence": {
+                "provided": True,
+                "evidence_count": 2,
+                "available_count": 1,
+                "eligible_evidence_count": 2,
+                "eligible_evidence_coverage": 2 / len(eligible_codes),
+                "evidence_sha256": hashlib.sha256(b"fixture Type 3 growth evidence").hexdigest(),
+                "as_of_sessions": ["2026-07-15"],
+            },
+            "research_report_evidence": {
+                "provided": True,
+                "evidence_count": 3,
+                "available_count": 2,
+                "eligible_evidence_count": 3,
+                "eligible_evidence_coverage": 3 / len(eligible_codes),
+                "evidence_sha256": hashlib.sha256(b"fixture Type 7 research report evidence").hexdigest(),
+                "as_of_sessions": ["2026-07-15"],
+            },
             "caller_metadata": {
-                "snapshot_schema_version": 7,
+                "snapshot_schema_version": 8,
                 "snapshot_source": "network",
                 "snapshot_payload_sha256": hashlib.sha256(b"fixture snapshot payload").hexdigest(),
                 "snapshot_artifact_bytes": 123,
@@ -785,6 +811,7 @@ def _write_minimal_release(
         "data/financial_zero_capex_evidence.json": b"{}\n",
         "data/financial_zero_revenue_evidence.json": b"{}\n",
         "data/fetcher.py": b"# fetcher\n",
+        "data/growth_evidence.py": b"# Type 3 growth evidence\n",
         "data/industry.py": b"# industry\n",
         "data/industry_f10.json": b"{}\n",
         "data/industry_em_map.json": b"{}\n",
@@ -793,6 +820,7 @@ def _write_minimal_release(
         "data/market_coldness.py": b"# market coldness source\n",
         "data/market_history.py": b"# market history\n",
         "data/quality_history.py": b"# quality history\n",
+        "data/research_reports.py": b"# Type 7 research report evidence\n",
         "data/snapshot.py": b"# snapshot\n",
         "desktop/__init__.py": b"\n",
         "desktop/launcher.py": b"# desktop launcher\n",
@@ -801,7 +829,7 @@ def _write_minimal_release(
         "desktop/version.py": b"__version__ = '11.1.0'\n",
         "desktop/update_config.json": (
             b'{"manifest_url":"https://github.com/Muguett-DBY/quant-buy-signals/'
-            b'releases/latest/download/update-manifest.json"}\n'
+            b'releases/download/windows-app/update-manifest.json"}\n'
         ),
         "desktop/version_info.txt": b"# version info\n",
         "desktop/DS_DCF.spec": b"# pyinstaller spec\n",
@@ -822,6 +850,7 @@ def _write_minimal_release(
         "tools/build_official_industry_source.py": b"# official industry source generator\n",
         "tools/build_desktop.py": b"# desktop builder\n",
         "tools/run_full_audit.py": b"# audit cli\n",
+        "tools/sign_desktop_update_manifest.ps1": b"# desktop manifest signer\n",
         "tools/verify_release_zip.py": b"# verifier\n",
         "requirements-bootstrap.txt": _locked_line("pip", "26.1.2").encode(),
         "requirements.txt": b"numpy==2.4.6\norjson==3.11.9\npandas==3.0.3\nplotly==6.9.0\npillow==12.3.0\nrequests==2.34.2\nstreamlit==1.59.2\n",
@@ -928,11 +957,145 @@ def _set_all_scoring_statuses(payload, status, score):
         ]
 
 
+def _install_applicable_type7_ledger(payload):
+    company = payload["companies"][0]
+    code = company["code"]
+
+    def evidence(key, score=9.0):
+        return {
+            key: score,
+            f"{key}_evidence": {
+                "source": "release audit fixture",
+                "evidence_id": f"fixture:{code}:{key}",
+                "as_of": "2026-07-15",
+                "summary": f"{key}={score}",
+            },
+            f"{key}_evidence_level": "primary",
+        }
+
+    metric = {
+        "code": code,
+        "industry": "SOFTWARE",
+        "source_trade_date": "2026-07-15",
+        "trend_growth": 0.16,
+        "net_profit_history": [100, 120, 145, 175, 210],
+        "net_profit_years": [2021, 2022, 2023, 2024, 2025],
+        "fcf_history": [90, 108, 130, 158, 190],
+        "fcf_years": [2021, 2022, 2023, 2024, 2025],
+        "revenue_years": [2021, 2022, 2023, 2024, 2025],
+        "equity_history": [100, 120, 144, 172.8, 207.36],
+        "equity_years": [2021, 2022, 2023, 2024, 2025],
+        "interest_bearing_debt_ratio": 0.05,
+        "roic": 0.30,
+        "wacc": 0.09,
+        "gross_margin": 0.85,
+        "net_margin": 0.45,
+        "gross_margin_cv": 0.03,
+        "share_dilution_1yr": 0.0,
+        "profit_volatility": 0.18,
+        "growth_consistency": 0.20,
+        "total_assets": 300,
+        "revenue_latest": 250,
+        "net_profit_latest": 210,
+        "market_cap": 3_000,
+        "capex": 8,
+        "rd_intensity": 0.01,
+        "type7_research_sources": [
+            {
+                "security_code": code,
+                "company_name": "测试公司",
+                "title": f"industry report {index}",
+                "publisher": f"publisher {index}",
+                "publisher_id": f"publisher-id-{index}",
+                "url": f"https://example{index}.test/report",
+                "as_of": "2026-07-14",
+                "evidence_id": f"report-{code}-{index}",
+            }
+            for index in range(1, 4)
+        ],
+    }
+    for key in {
+        "business_model_score",
+        "moat_score",
+        "moat_durability_score",
+        "runway_score",
+        "industry_durability_score",
+        "accounting_integrity_score",
+        "management_alignment_score",
+        "technology_score",
+        "catalyst_score",
+        "growth_sustainability_score",
+        *TYPE7_DIRECT_SCORE_KEYS,
+    }:
+        metric.update(evidence(key))
+    metric.update(evidence("technology_score", score=6.0))
+    type1_outcome = (
+        True,
+        9.0,
+        {"1a": 9.0, "1b": 9.0, "1c": 9.0, "1d": 9.0},
+        {"_status": "triggered", "_evidence": "complete"},
+    )
+    history = {
+        "available": True,
+        "code": code,
+        "as_of": "2026-07-15",
+        "model_id": "type7-market-history-v1",
+        "shareholder_return": {"available": True, "cagr": 0.18, "total_return": 4.2},
+        "valuation_history": {
+            "available": True,
+            "current_pe_ttm": 20.0,
+            "median_pe_ttm": 25.0,
+            "current_pb_mrq": 6.0,
+            "median_pb_mrq": 7.0,
+            "pe_percentile": 0.10,
+            "pb_percentile": 0.12,
+        },
+    }
+    outcome, ledger = score_type7_quality_equity(metric, type1_outcome, history)
+    triggered, total, sub_scores, reasons = outcome
+    assert reasons["_status"] == STATUS_INSUFFICIENT_EVIDENCE
+    company["type7_score"] = total
+    company["type7"] = {
+        "triggered": triggered,
+        "total": total,
+        "sub_scores": sub_scores,
+        "reasons": reasons,
+        "veto": bool(reasons.get("_veto")),
+        "status": reasons["_status"],
+        "applicable": True,
+        "evidence_complete": reasons.get("_evidence") == "complete",
+        "ledger": ledger,
+    }
+
+
 def test_release_zip_verifier_accepts_a_clean_source_package(tmp_path):
     path = tmp_path / "release.zip"
     _write_minimal_release(path)
 
     assert _verify(path) == ()
+
+
+def test_release_zip_verifier_replays_an_applicable_type7_ledger_and_rejects_nested_tampering(tmp_path):
+    clean = tmp_path / "applicable-type7.zip"
+    _write_minimal_release(
+        clean,
+        mutate_payload=_install_applicable_type7_ledger,
+        rerender_companions=True,
+    )
+    assert _verify(clean) == ()
+
+    tampered = tmp_path / "tampered-applicable-type7.zip"
+
+    def install_and_tamper(payload):
+        _install_applicable_type7_ledger(payload)
+        payload["companies"][0]["type7"]["ledger"]["strict_checks"]["template1"] = 1
+
+    _write_minimal_release(
+        tampered,
+        mutate_payload=install_and_tamper,
+        rerender_companions=True,
+    )
+    assert any("100 complete company rows" in error for error in _verify(tampered))
 
 
 @pytest.mark.parametrize(
@@ -941,7 +1104,7 @@ def test_release_zip_verifier_accepts_a_clean_source_package(tmp_path):
         b'{"manifest_url":null}\n',
         b'{"manifest_url":"https://example.test/update.json"}\n',
         b'{"manifest_url":"https://github.com/Muguett-DBY/quant-buy-signals/'
-        b'releases/latest/download/update-manifest.json","manifest_url":"https://example.test/forged.json"}\n',
+        b'releases/download/windows-app/update-manifest.json","manifest_url":"https://example.test/forged.json"}\n',
         b'{"manifest_url":NaN}\n',
     ],
 )
@@ -988,7 +1151,7 @@ def test_release_zip_verifier_accepts_financial_pb_without_industrial_ttm_fields
     [
         (
             lambda payload: payload["provenance"]["caller_metadata"].update(snapshot_schema_version=4),
-            "snapshot schema version is not 7",
+            "snapshot schema version is not 8",
         ),
         (
             lambda payload: payload["provenance"]["caller_metadata"]["validation"]["reporting_period_contract"].update(
@@ -1006,11 +1169,46 @@ def test_release_zip_verifier_accepts_financial_pb_without_industrial_ttm_fields
         ),
     ],
 )
-def test_release_zip_verifier_requires_schema7_contract_and_ttm_coverage(tmp_path, tamper, expected_error):
-    path = tmp_path / "invalid-schema7-contract.zip"
+def test_release_zip_verifier_requires_schema8_contract_and_ttm_coverage(tmp_path, tamper, expected_error):
+    path = tmp_path / "invalid-schema8-contract.zip"
     _write_minimal_release(path, mutate_payload=tamper)
 
     assert any(expected_error in error for error in _verify(path))
+
+
+def test_release_zip_verifier_accepts_schema8_supplemental_coverage_boundaries(tmp_path):
+    path = tmp_path / "schema8-supplemental-boundaries.zip"
+
+    def mutate(payload):
+        coverage = payload["provenance"]["caller_metadata"]["validation"]["supplemental_field_coverage"]
+        coverage.update(GOODWILL=0.0, OBTAIN_SUBSIDIARY_OTHER=1.0)
+
+    _write_minimal_release(path, mutate_payload=mutate)
+
+    assert _verify(path) == ()
+
+
+@pytest.mark.parametrize(
+    "coverage",
+    [
+        {},
+        {"GOODWILL": 0.5},
+        {"GOODWILL": 0.5, "OBTAIN_SUBSIDIARY_OTHER": 0.5, "UNDECLARED": 0.5},
+        {"GOODWILL": None, "OBTAIN_SUBSIDIARY_OTHER": 0.5},
+        {"GOODWILL": True, "OBTAIN_SUBSIDIARY_OTHER": 0.5},
+        {"GOODWILL": -0.01, "OBTAIN_SUBSIDIARY_OTHER": 0.5},
+        {"GOODWILL": 0.5, "OBTAIN_SUBSIDIARY_OTHER": 1.01},
+    ],
+)
+def test_release_zip_verifier_rejects_invalid_schema8_supplemental_coverage(tmp_path, coverage):
+    path = tmp_path / "invalid-schema8-supplemental-coverage.zip"
+
+    def mutate(payload):
+        payload["provenance"]["caller_metadata"]["validation"]["supplemental_field_coverage"] = coverage
+
+    _write_minimal_release(path, mutate_payload=mutate)
+
+    assert any("supplemental field coverage" in error for error in _verify(path))
 
 
 def test_release_zip_verifier_rejects_internally_inconsistent_ttm_coverage(tmp_path):
@@ -1023,6 +1221,49 @@ def test_release_zip_verifier_rejects_internally_inconsistent_ttm_coverage(tmp_p
     _write_minimal_release(path, mutate_payload=tamper)
 
     assert any("strict TTM source coverage" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_accepts_canonical_empty_optional_evidence_summaries(tmp_path):
+    path = tmp_path / "empty-optional-evidence-summaries.zip"
+
+    def mutate(payload):
+        empty = {
+            "provided": False,
+            "evidence_count": 0,
+            "available_count": 0,
+            "eligible_evidence_count": 0,
+            "eligible_evidence_coverage": 0.0,
+            "evidence_sha256": None,
+            "as_of_sessions": [],
+        }
+        payload["provenance"]["type3_growth_evidence"] = dict(empty)
+        payload["provenance"]["research_report_evidence"] = dict(empty)
+
+    _write_minimal_release(path, mutate_payload=mutate)
+
+    assert _verify(path) == ()
+
+
+@pytest.mark.parametrize(
+    ("field", "mutation"),
+    [
+        ("type3_growth_evidence", lambda summary: summary.pop("available_count")),
+        ("type3_growth_evidence", lambda summary: summary.update(evidence_count=1)),
+        ("type3_growth_evidence", lambda summary: summary.update(eligible_evidence_coverage=0.5)),
+        ("research_report_evidence", lambda summary: summary.update(evidence_sha256="not-a-sha256")),
+        ("research_report_evidence", lambda summary: summary.update(as_of_sessions=["not-a-date"])),
+        ("research_report_evidence", lambda summary: summary.update(provided=False)),
+    ],
+)
+def test_release_zip_verifier_rejects_invalid_optional_evidence_provenance(tmp_path, field, mutation):
+    path = tmp_path / f"invalid-{field}.zip"
+
+    def mutate(payload):
+        mutation(payload["provenance"][field])
+
+    _write_minimal_release(path, mutate_payload=mutate)
+
+    assert any("provenance summary" in error for error in _verify(path))
 
 
 @pytest.mark.parametrize(
@@ -1134,11 +1375,19 @@ def test_audit_and_release_rule_hash_contracts_are_identical_and_required():
     assert _EXPECTED_RULE_FILES <= _REQUIRED_FILES
 
 
-def test_release_zip_verifier_rejects_tampered_new_rule_module(tmp_path):
-    path = tmp_path / "tampered-market-coldness-rule.zip"
+@pytest.mark.parametrize(
+    "module",
+    (
+        "data/growth_evidence.py",
+        "data/research_reports.py",
+        "engine/market_coldness.py",
+    ),
+)
+def test_release_zip_verifier_rejects_tampered_new_rule_module(tmp_path, module):
+    path = tmp_path / f"tampered-{Path(module).stem}-rule.zip"
     _write_minimal_release(
         path,
-        content_overrides={"engine/market_coldness.py": b"# tampered after audit generation\n"},
+        content_overrides={module: b"# tampered after audit generation\n"},
     )
 
     assert any("rules_sha256" in error for error in _verify(path))
@@ -1149,8 +1398,10 @@ def test_release_zip_verifier_requires_all_new_quantitative_rule_modules(tmp_pat
     omitted = (
         "data/capex_evidence.py",
         "data/financial_indicator_evidence.py",
+        "data/growth_evidence.py",
         "data/market_coldness.py",
         "data/market_history.py",
+        "data/research_reports.py",
         "engine/market_coldness.py",
         "engine/quantitative_evidence.py",
         "engine/risk.py",
@@ -1490,6 +1741,28 @@ def test_release_zip_verifier_rejects_internal_archives_build_residue_and_privat
         assert _verify(path), name
 
 
+@pytest.mark.parametrize(
+    ("name", "expected_error"),
+    [
+        ("secrets/client.der", "forbidden release artifact"),
+        ("secrets/client.pk8", "forbidden release artifact"),
+        ("secrets/client.pkcs8", "forbidden release artifact"),
+        ("secrets/client.p8", "forbidden release artifact"),
+        ("secrets/client.ppk", "forbidden release artifact"),
+        ("secrets/android.jks", "forbidden release artifact"),
+        ("secrets/android.keystore", "forbidden release artifact"),
+        ("secrets/desktop-signing-private-key.properties", "runtime or secret file"),
+        ("secrets/android-release-credentials.properties", "runtime or secret file"),
+        ("android/release.properties", "runtime or secret file"),
+    ],
+)
+def test_release_zip_verifier_independently_rejects_signing_material_formats(tmp_path, name, expected_error):
+    path = tmp_path / (name.replace("/", "-").replace(".", "-") + ".zip")
+    _write_minimal_release(path, extra_files={name: b"private signing material\n"})
+
+    assert any(expected_error in error for error in _verify(path))
+
+
 def test_release_zip_verifier_requires_full_sh_sz_universe_and_snapshot_identity(tmp_path):
     path = tmp_path / "invalid-universe.zip"
 
@@ -1642,6 +1915,7 @@ def test_release_zip_verifier_proves_real_audit_commit_and_audit_only_descendant
             b"*.txt text eol=lf\n"
             b"*.toml text eol=lf\n"
             b"*.spec text eol=lf\n"
+            b"*.ps1 text eol=lf\n"
             b".gitattributes text eol=lf\n"
             b"LICENSE text eol=lf\n"
             b"*.bat text eol=crlf\n"

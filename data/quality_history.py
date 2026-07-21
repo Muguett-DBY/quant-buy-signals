@@ -1,9 +1,11 @@
-"""Auditable long-horizon market evidence for the Type 7 quality-equity screen.
+"""Auditable long-horizon market evidence shared by screening models.
 
-The Type 7 rule references an actual ten-year shareholder return and a
-historical valuation percentile.  Neither value may be inferred from the
-current quote.  This module acquires the two independent histories in a
-bounded, cached batch and returns structured unavailable states on failure.
+The shared contract provides an actual ten-year shareholder return and a
+five-year historical valuation percentile.  Neither value may be inferred
+from the current quote.  This module acquires the two independent histories
+in a bounded, cached batch and returns structured unavailable states on
+failure.  The persisted model identifier remains stable for replay
+compatibility even as more than one screening model consumes the evidence.
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ _HEADERS = {
 
 
 class QualityHistoryError(RuntimeError):
-    """A Type 7 history source or payload contract failed."""
+    """A long-horizon market-history source or payload contract failed."""
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,7 @@ def _error_label(exc: BaseException, *, limit: int = 180) -> str:
 def _normalise_code(value: Any) -> str:
     code = str(value or "").strip()
     if not _A_SHARE_CODE.fullmatch(code):
-        raise ValueError("quality-history code must be a Shanghai/Shenzhen six-digit code")
+        raise ValueError("market-history code must be a Shanghai/Shenzhen six-digit code")
     return code
 
 
@@ -474,9 +476,9 @@ def _cache_path(code: str, as_of: date, cache_dir: Path) -> Path:
 
 def _from_cache(payload: Any, code: str, as_of: date) -> QualityHistoryEvidence:
     if not isinstance(payload, Mapping) or set(payload) != {"contract", "weekly_bars", "valuation_rows"}:
-        raise QualityHistoryError("quality-history cache payload shape is invalid")
+        raise QualityHistoryError("market-history cache payload shape is invalid")
     if payload.get("contract") != _cache_contract(code, as_of):
-        raise QualityHistoryError("quality-history cache contract mismatch")
+        raise QualityHistoryError("market-history cache contract mismatch")
     bars = _deserialize_bars(payload.get("weekly_bars"))
     rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, as_of)
     result = _calculate_evidence(code, as_of, bars, rows, cache_hit=True, cache_diagnostic="hit")
@@ -495,7 +497,7 @@ def fetch_quality_history(
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     use_cache: bool = True,
 ) -> QualityHistoryEvidence:
-    """Fetch and replay one company's Type 7 market-history evidence."""
+    """Fetch and replay one company's shared long-horizon market evidence."""
 
     normalized_code = _normalise_code(code)
     cutoff = _parse_as_of(as_of)
@@ -587,23 +589,23 @@ def fetch_quality_history_batch(
     max_workers: int = 8,
     progress_cb: Any = None,
 ) -> dict[str, dict[str, Any]]:
-    """Fetch a deterministic, bounded batch for candidates proven capable of Type 7."""
+    """Fetch a deterministic, bounded batch for preflight-approved candidates."""
 
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
-        raise TypeError("quality-history batch requests must be a sequence")
+        raise TypeError("market-history batch requests must be a sequence")
     if len(requests_) > MAX_BATCH_COMPANIES:
-        raise ValueError("quality-history batch exceeds the company limit")
+        raise ValueError("market-history batch exceeds the company limit")
     if isinstance(max_workers, bool) or not isinstance(max_workers, int) or not 1 <= max_workers <= 32:
         raise ValueError("max_workers must be between 1 and 32")
     prepared: list[tuple[str, str]] = []
     seen: set[str] = set()
     for request in requests_:
         if not isinstance(request, Mapping) or set(request) != {"code", "as_of"}:
-            raise ValueError("quality-history batch request shape is invalid")
+            raise ValueError("market-history batch request shape is invalid")
         code = _normalise_code(request.get("code"))
         as_of = _parse_as_of(request.get("as_of")).isoformat()
         if code in seen:
-            raise ValueError(f"quality-history batch contains duplicate code: {code}")
+            raise ValueError(f"market-history batch contains duplicate code: {code}")
         seen.add(code)
         prepared.append((code, as_of))
     prepared.sort()

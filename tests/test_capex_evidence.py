@@ -74,6 +74,21 @@ def test_zero_is_derived_only_when_detailed_outflow_residual_closes():
     )
 
 
+def test_large_statement_residual_of_tens_of_yuan_is_not_rounded_to_zero():
+    value, provenance = resolve_capex_evidence(
+        None,
+        _detail(
+            TOTAL_INVEST_OUTFLOW=65_233_624_857.68,
+            INVEST_PAY_CASH=65_233_624_792.68,
+        ),
+        report_date="2025-12-31",
+    )
+
+    assert value is None
+    assert provenance["status"] == "missing"
+    assert provenance["reason"] == "missing_detailed_component:TOTAL_INVEST_INFLOW"
+
+
 def test_zero_is_derived_from_net_investing_identity_when_total_outflow_is_blank():
     value, provenance = resolve_capex_evidence(
         None,

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import bisect
 import math
-from collections.abc import Mapping, MutableMapping
+import re
+from collections.abc import Iterable, Mapping, MutableMapping
 from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -32,8 +33,10 @@ MAX_FUTURE_SKEW_SECONDS = 5 * 60
 MIN_SOURCE_FIELD_COVERAGE = 0.90
 MIN_CROSS_SECTION_RECORDS = 1_000
 MIN_BOARD_TURNOVER_RECORDS = 200
+DIAGNOSTIC_CODE_LIMIT = 20
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+_SH_SZ_CODE = re.compile(r"[036][0-9]{5}")
 
 _ABSOLUTE_BANDS: Mapping[str, tuple[tuple[float, float], ...]] = {
     "change_60d_pct": (
@@ -172,16 +175,74 @@ def _board(code: str) -> str:
     raise MarketColdnessScoringError(f"unsupported A-share board code: {code}")
 
 
-def _listing_date(record: MarketColdnessRecord, as_of: date) -> date | None:
+def _listing_date(record: MarketColdnessRecord) -> date | None:
     if record.listing_date is None:
         return None
     try:
         listed = date.fromisoformat(record.listing_date)
     except ValueError as exc:
         raise MarketColdnessScoringError(f"invalid listing date for {record.code}") from exc
-    if listed > as_of:
-        raise MarketColdnessScoringError(f"future listing date for {record.code}")
+    if listed.isoformat() != record.listing_date:
+        raise MarketColdnessScoringError(f"invalid listing date for {record.code}")
     return listed
+
+
+def _validate_record_identity(record: MarketColdnessRecord) -> None:
+    code = record.code
+    if not isinstance(code, str) or _SH_SZ_CODE.fullmatch(code) is None:
+        raise MarketColdnessScoringError(f"unsupported A-share identity: {code!r}")
+    expected_exchange = "SH" if code.startswith("6") else "SZ"
+    expected_market_id = 1 if expected_exchange == "SH" else 0
+    if (
+        record.exchange != expected_exchange
+        or isinstance(record.eastmoney_market_id, bool)
+        or not isinstance(record.eastmoney_market_id, int)
+        or record.eastmoney_market_id != expected_market_id
+    ):
+        raise MarketColdnessScoringError(
+            f"market-coldness identity mismatch for {code}: "
+            f"exchange={record.exchange!r}, market_id={record.eastmoney_market_id!r}"
+        )
+
+
+def _bound_listed_quote_codes(values: Iterable[str] | None) -> frozenset[str] | None:
+    if values is None:
+        return None
+    if isinstance(values, (str, bytes, Mapping)):
+        raise ValueError("listed_quote_codes must be an iterable of canonical SH/SZ codes")
+    seen: set[str] = set()
+    try:
+        iterator = iter(values)
+    except TypeError as exc:
+        raise ValueError("listed_quote_codes must be an iterable of canonical SH/SZ codes") from exc
+    for raw_code in iterator:
+        if not isinstance(raw_code, str) or _SH_SZ_CODE.fullmatch(raw_code) is None:
+            raise ValueError("listed_quote_codes must contain only canonical SH/SZ codes")
+        if raw_code in seen:
+            raise ValueError(f"listed_quote_codes contains a duplicate code: {raw_code}")
+        seen.add(raw_code)
+    if not seen:
+        raise ValueError("listed_quote_codes must contain at least one canonical SH/SZ code")
+    return frozenset(seen)
+
+
+def _bounded_code_diagnostics(
+    listed_quote_codes: frozenset[str] | None,
+    isolated_future_listing_codes: list[str],
+    excluded_unbound_source_codes: list[str],
+) -> dict[str, Any]:
+    isolated = sorted(isolated_future_listing_codes)
+    excluded = sorted(excluded_unbound_source_codes)
+    return {
+        "listed_quote_binding_count": len(listed_quote_codes) if listed_quote_codes is not None else None,
+        "isolated_future_listing_count": len(isolated),
+        "isolated_future_listing_codes": isolated[:DIAGNOSTIC_CODE_LIMIT],
+        "isolated_future_listing_codes_truncated": len(isolated) > DIAGNOSTIC_CODE_LIMIT,
+        "excluded_unbound_source_record_count": len(excluded),
+        "excluded_unbound_source_record_codes": excluded[:DIAGNOSTIC_CODE_LIMIT],
+        "excluded_unbound_source_record_codes_truncated": len(excluded) > DIAGNOSTIC_CODE_LIMIT,
+        "diagnostic_code_limit": DIAGNOSTIC_CODE_LIMIT,
+    }
 
 
 def _business_days_ytd(session: date) -> int:
@@ -218,6 +279,7 @@ def build_market_coldness_evidence(
     snapshot: MarketColdnessSnapshot,
     *,
     as_of_session: date | str | None,
+    listed_quote_codes: Iterable[str] | None = None,
     now: datetime | None = None,
     min_cross_section_records: int = MIN_CROSS_SECTION_RECORDS,
     min_board_turnover_records: int = MIN_BOARD_TURNOVER_RECORDS,
@@ -225,9 +287,15 @@ def build_market_coldness_evidence(
 ) -> dict[str, dict[str, Any]]:
     """Build per-company 2c evidence from one verified full-market batch.
 
-    ``as_of_session`` must come from the independently validated quote
-    snapshot.  The coldness endpoint exposes retrieval time but no source
-    trading date, so omitting that binding cannot support an automatic signal.
+    ``as_of_session`` and ``listed_quote_codes`` must come from the same
+    independently validated quote snapshot.  Eastmoney can include announced
+    securities before their listing day; a future-dated source row is isolated
+    only when its code is absent from that independent listed-code set.  A
+    future date for a bound listed code remains a hard validation error.
+
+    Omitting ``listed_quote_codes`` preserves the legacy strict behaviour:
+    every future listing date fails closed because there is no independent
+    identity boundary that can prove the row is merely not yet listed.
     """
 
     if diagnostics is not None:
@@ -250,6 +318,7 @@ def build_market_coldness_evidence(
     ):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer")
+    bound_codes = _bound_listed_quote_codes(listed_quote_codes)
     session = _parse_session(as_of_session)
     if not snapshot.available:
         return unavailable("source_unavailable")
@@ -261,6 +330,12 @@ def build_market_coldness_evidence(
         raise MarketColdnessScoringError("market-coldness snapshot count mismatch")
     if snapshot.coverage.total_records != len(snapshot.records):
         raise MarketColdnessScoringError("market-coldness coverage count mismatch")
+    seen_source_codes: set[str] = set()
+    for record in snapshot.records:
+        _validate_record_identity(record)
+        if record.code in seen_source_codes:
+            raise MarketColdnessScoringError(f"duplicate market-coldness code: {record.code}")
+        seen_source_codes.add(record.code)
     for metric in (*_REQUIRED_METRICS, "listing_date"):
         coverage = _source_metric_coverage(snapshot, metric)
         if coverage is None or coverage < MIN_SOURCE_FIELD_COVERAGE:
@@ -277,8 +352,12 @@ def build_market_coldness_evidence(
         return unavailable("stale_or_future_retrieval", retrieval_age_seconds=age_seconds)
     retrieved_shanghai = retrieved.astimezone(_SHANGHAI)
     current_shanghai = current.astimezone(_SHANGHAI)
-    if session > retrieved_shanghai.date() or (retrieved_shanghai.date() - session).days > MAX_SESSION_AGE_DAYS:
-        return unavailable("session_retrieval_mismatch")
+    if session != retrieved_shanghai.date():
+        return unavailable(
+            "session_retrieval_mismatch",
+            retrieval_session=retrieved_shanghai.date().isoformat(),
+            requested_session=session.isoformat(),
+        )
     if session > current_shanghai.date() or (current_shanghai.date() - session).days > MAX_SESSION_AGE_DAYS:
         return unavailable("session_current_date_mismatch")
     # Intraday f8/f10 are incomplete.  A same-day snapshot can be diagnostic,
@@ -289,16 +368,22 @@ def build_market_coldness_evidence(
             decision_eligible_after="15:15:00 Asia/Shanghai",
         )
 
-    records_by_code: dict[str, MarketColdnessRecord] = {}
+    records_by_code: dict[str, tuple[MarketColdnessRecord, date | None, dict[str, float | None]]] = {}
     reference_records: list[tuple[MarketColdnessRecord, dict[str, float | None]]] = []
+    isolated_future_listing_codes: list[str] = []
+    excluded_unbound_source_codes: list[str] = []
     for record in snapshot.records:
-        if record.code in records_by_code:
-            raise MarketColdnessScoringError(f"duplicate market-coldness code: {record.code}")
-        if record.exchange not in {"SH", "SZ"}:
-            raise MarketColdnessScoringError(f"unsupported market-coldness exchange: {record.exchange}")
-        records_by_code[record.code] = record
-        listed = _listing_date(record, session)
+        listed = _listing_date(record)
+        if listed is not None and listed > session:
+            if bound_codes is not None and record.code not in bound_codes:
+                isolated_future_listing_codes.append(record.code)
+                continue
+            raise MarketColdnessScoringError(f"future listing date for {record.code}")
+        if bound_codes is not None and record.code not in bound_codes:
+            excluded_unbound_source_codes.append(record.code)
+            continue
         values = _validated_values(record)
+        records_by_code[record.code] = (record, listed, values)
         if (
             listed is None
             or (session - listed).days < MIN_LISTING_AGE_DAYS
@@ -315,6 +400,11 @@ def build_market_coldness_evidence(
             "insufficient_reference_cross_section",
             reference_records=len(reference_records),
             minimum_reference_records=min_cross_section_records,
+            **_bounded_code_diagnostics(
+                bound_codes,
+                isolated_future_listing_codes,
+                excluded_unbound_source_codes,
+            ),
         )
 
     global_sections: dict[str, list[float]] = {}
@@ -336,9 +426,7 @@ def build_market_coldness_evidence(
     weights = dict(_BASE_WEIGHTS)
     weights["change_ytd_pct"] *= ytd_reliability
     result: dict[str, dict[str, Any]] = {}
-    for code, record in records_by_code.items():
-        listed = _listing_date(record, session)
-        values = _validated_values(record)
+    for code, (_record, listed, values) in records_by_code.items():
         if (
             listed is None
             or (session - listed).days < MIN_LISTING_AGE_DAYS
@@ -443,6 +531,11 @@ def build_market_coldness_evidence(
                 "evidence_available": bool(result),
                 "evidence_reason": "available" if result else "no_eligible_records",
                 "evidence_count": len(result),
+                **_bounded_code_diagnostics(
+                    bound_codes,
+                    isolated_future_listing_codes,
+                    excluded_unbound_source_codes,
+                ),
             }
         )
     return result

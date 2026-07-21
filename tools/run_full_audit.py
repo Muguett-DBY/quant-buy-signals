@@ -14,9 +14,12 @@ import pandas as pd
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.market_coldness import fetch_market_coldness_snapshot
+from data.growth_evidence import fetch_growth_evidence_batch
 from data.quality_history import fetch_quality_history_batch
+from data.research_reports import fetch_research_reports_batch
 from data.snapshot import (
     DEFAULT_SNAPSHOT_PATH,
+    MAX_STALE_AGE_SECONDS,
     SNAPSHOT_SCHEMA_VERSION,
     get_market_snapshot,
     save_market_snapshot,
@@ -196,13 +199,35 @@ def _load_market_coldness_evidence(
     try:
         # Listing enrichment acquires the same validated whole-market source
         # batch during quote refresh. Reuse its safe cache here.
-        coldness_snapshot = fetch_market_coldness_snapshot(force_refresh=False)
+        # Historical audits must reuse the exact session's validated cache,
+        # even after its routine acquisition TTL expires.  A different day's
+        # turnover/volume ratio can never be rebound to this snapshot.
+        coldness_snapshot = fetch_market_coldness_snapshot(
+            force_refresh=False,
+            allow_expired_cache=True,
+        )
         evidence_diagnostics: dict[str, object] = {}
         evidence = build_market_coldness_evidence(
             coldness_snapshot,
             as_of_session=as_of_session,
+            listed_quote_codes=tuple(snapshot.quotes["code"]),
             diagnostics=evidence_diagnostics,
         )
+        if force_refresh and evidence_diagnostics.get("evidence_reason") in {
+            "stale_or_future_retrieval",
+            "session_retrieval_mismatch",
+        }:
+            coldness_snapshot = fetch_market_coldness_snapshot(
+                force_refresh=True,
+                allow_expired_cache=False,
+            )
+            evidence_diagnostics = {}
+            evidence = build_market_coldness_evidence(
+                coldness_snapshot,
+                as_of_session=as_of_session,
+                listed_quote_codes=tuple(snapshot.quotes["code"]),
+                diagnostics=evidence_diagnostics,
+            )
         eligible_count = len(eligible & set(evidence))
         eligible_coverage = eligible_count / len(eligible) if eligible else 0.0
         source_available = bool(coldness_snapshot.available)
@@ -258,7 +283,14 @@ def _load_market_coldness_evidence(
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     starting_state = audit_state_hashes()
-    cache = SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
+    # A non-refresh audit is a deterministic replay of the latest still-valid
+    # promoted generation.  Its cache TTL therefore matches the snapshot's
+    # explicit stale limit instead of the UI's short routine-refresh interval.
+    cache = SafeFileCache(
+        DEFAULT_SNAPSHOT_PATH,
+        schema_version=SNAPSHOT_SCHEMA_VERSION,
+        ttl=MAX_STALE_AGE_SECONDS,
+    )
     snapshot = get_market_snapshot(
         DataFetcher(
             enrich_listing_dates=True,
@@ -266,6 +298,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         cache,
         force_refresh=args.refresh,
+        allow_expired_cache=not args.refresh,
         persist_network=False,
     )
     reporting_period_contract = _snapshot_reporting_period_contract(snapshot)
@@ -285,6 +318,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         reporting_period_contract=reporting_period_contract,
         market_coldness_evidence=market_coldness_evidence,
         quality_history_loader=fetch_quality_history_batch,
+        type3_growth_loader=fetch_growth_evidence_batch,
+        research_report_loader=fetch_research_reports_batch,
     )
     active_payload_sha256 = snapshot.baseline_payload_sha256
     if snapshot.source == "network":
@@ -324,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         reporting_period_contract=reporting_period_contract,
         market_coldness_evidence=market_coldness_evidence,
         quality_history_evidence=analysis.quality_history_evidence,
+        type3_growth_evidence=getattr(analysis, "type3_growth_evidence", {}),
+        research_report_evidence=getattr(analysis, "research_report_evidence", {}),
     )
     ending_state = audit_state_hashes()
     provenance_state = {key: audit.provenance.get(key) for key in starting_state}

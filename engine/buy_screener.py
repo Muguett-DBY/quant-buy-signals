@@ -29,6 +29,7 @@ from config import (
     MARGINAL_TAX_RATE,
 )
 from data.financial_indicator_evidence import derive_main_financial_indicator_evidence
+from data.growth_evidence import GrowthEvidenceError, validate_growth_evidence_record
 from data.industry import begin_industry_generation, classify_industries, classify_industry, get_industry_benchmark
 from engine.dcf import (
     MAX_NORMALISED_FCFF_PREMIUM,
@@ -44,13 +45,19 @@ from engine.quantitative_evidence import (
     MIN_COMPARABLE_COVERAGE,
     MIN_SECTOR_COMPANIES,
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
+    TYPE3_GROWTH_VALIDATION_TOKEN,
+    derive_company_evidence,
     enrich_metrics,
 )
 from engine.quality_equity import (
     MODEL_ID as QUALITY_EQUITY_MODEL_ID,
+    RESEARCH_EVIDENCE_MODEL_ID,
+    SCHEMA_VERSION as QUALITY_EQUITY_SCHEMA_VERSION,
     TYPE7_DIRECT_SCORE_KEYS,
     assess_quality_equity,
+    normalise_research_content_verification,
     normalise_research_sources,
+    research_metadata_precheck,
     validate_quality_equity_ledger,
 )
 from engine.valuation_status import (
@@ -164,6 +171,14 @@ TYPE5_DIRECT_CYCLICAL_INDUSTRIES = {
     "OIL_GAS",
     "COAL",
 }
+# The persisted identifier predates Type5's reuse of the same source contract.
+# Keep it stable for cache/replay compatibility while using consumer-neutral
+# names in user-facing text.
+LONG_HORIZON_HISTORY_MODEL_ID = "type7-market-history-v1"
+TYPE5_PB_MIN_OBSERVATIONS = 500
+TYPE5_HISTORY_MIN_SPAN_DAYS = 1_743
+TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
+TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
 # 第19模板明确区分两类VC标的：高景气赛道不超过300亿元、平稳
 # 产业反转不超过100亿元。旧值 ``30e8`` 只有30亿元，缩小了10倍。
 TYPE6_GROWTH_MARKET_CAP_LIMIT = 300e8  # 300亿元
@@ -206,6 +221,7 @@ _EVIDENCE_ALLOWED_KEYS = {"source", "evidence_id", "as_of", "summary"}
 _EVIDENCE_SOURCE_MAX_LENGTH = 200
 _EVIDENCE_ID_MAX_LENGTH = 200
 _EVIDENCE_SUMMARY_MAX_LENGTH = 1_000
+_EVIDENCE_MAX_AGE_DAYS = 550
 _DCF_VALIDATION_CACHE_TOKEN = object()
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -242,8 +258,46 @@ def _safe_float(value: Any) -> Optional[float]:
     return result if math.isfinite(result) else None
 
 
+def _canonical_evidence_code(value: Any) -> str:
+    """Normalize a security identity for evidence binding without guessing markets."""
+    if value is None or isinstance(value, (bool, np.bool_)):
+        return ""
+    text = str(value).strip().upper()
+    if re.fullmatch(r"\d{1,6}", text):
+        return text.zfill(6)
+    return text if re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{0,31}", text) else ""
+
+
+def _evidence_reference_date(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    return parsed if parsed.isoformat() == value.strip() else None
+
+
+def _evidence_id_is_bound(evidence_id: str, expected_code: str) -> bool:
+    if not expected_code:
+        return True
+    tokens = {
+        normalized
+        for token in re.split(r"[^A-Za-z0-9._]+", evidence_id)
+        if (normalized := _canonical_evidence_code(token))
+    }
+    return expected_code in tokens
+
+
 def _normalise_score_evidence(
-    container: Mapping[str, Any], key: str
+    container: Mapping[str, Any],
+    key: str,
+    *,
+    expected_code: Any = None,
+    reference_date: Any = None,
+    max_age_days: int = _EVIDENCE_MAX_AGE_DAYS,
 ) -> tuple[Optional[float], Optional[dict[str, str]]]:
     """Accept a qualitative score only with traceable, dated source metadata."""
     evidence_level = container.get(f"{key}_evidence_level")
@@ -282,7 +336,18 @@ def _normalise_score_evidence(
         evidence_date = date.fromisoformat(as_of)
     except (TypeError, ValueError):
         return None, None
-    if evidence_date.isoformat() != as_of or evidence_date > _shanghai_today():
+    today = _shanghai_today()
+    reference = _evidence_reference_date(reference_date) or today
+    if (
+        evidence_date.isoformat() != as_of
+        or reference > today
+        or evidence_date > today
+        or evidence_date > reference
+        or (reference - evidence_date).days > max_age_days
+    ):
+        return None, None
+    expected = _canonical_evidence_code(expected_code)
+    if expected and not _evidence_id_is_bound(evidence_id, expected):
         return None, None
     normalised = {"source": source, "evidence_id": evidence_id, "as_of": as_of}
     summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
@@ -294,7 +359,12 @@ def _normalise_score_evidence(
 
 
 def _verified_score(container: Mapping[str, Any], key: str) -> Optional[float]:
-    return _normalise_score_evidence(container, key)[0]
+    return _normalise_score_evidence(
+        container,
+        key,
+        expected_code=container.get("code"),
+        reference_date=container.get("source_trade_date"),
+    )[0]
 
 
 def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> str:
@@ -304,7 +374,12 @@ def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> s
     such as ``patch6-observable-outcomes-v1`` are implementation details and
     are meaningless in an investment-screening page.
     """
-    _score, evidence = _normalise_score_evidence(container, key)
+    _score, evidence = _normalise_score_evidence(
+        container,
+        key,
+        expected_code=container.get("code"),
+        reference_date=container.get("source_trade_date"),
+    )
     if evidence is None:
         return fallback
     evidence_id = str(evidence.get("evidence_id") or "")
@@ -338,6 +413,54 @@ def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> s
     if "东方财富" in source or "eastmoney" in source.lower():
         return "东方财富的可核验数据"
     return "已登记的外部证据"
+
+
+def _normalise_structured_growth_evidence(
+    value: Any,
+    *,
+    expected_code: Any,
+    reference_date: Any,
+    missing_label: str,
+    content_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    """Preserve structured research while preventing an untraceable complete flag."""
+    if not isinstance(value, Mapping):
+        return {"status": "missing", "missing": [missing_label]}
+    result = dict(value)
+    status = str(result.get("status") or "").strip().lower()
+    if status in {"missing", "partial", "invalid"}:
+        result["status"] = status
+        return result
+    if status != "complete":
+        result["status"] = "invalid"
+        result["validation_error"] = "证据状态无效"
+        return result
+    expected = _canonical_evidence_code(expected_code)
+    supplied_code = _canonical_evidence_code(result.get("security_code"))
+    if result.get("security_code") is not None and (not supplied_code or supplied_code != expected):
+        result["status"] = "invalid"
+        result["validation_error"] = "完整证据的证券代码不匹配"
+        return result
+    metadata = {key: result[key] for key in _EVIDENCE_ALLOWED_KEYS if key in result}
+    _score, normalized = _normalise_score_evidence(
+        {"structured_score": 1.0, "structured_score_evidence": metadata},
+        "structured_score",
+        expected_code=expected_code,
+        reference_date=reference_date,
+    )
+    if normalized is None:
+        result["status"] = "invalid"
+        result["validation_error"] = "完整证据缺少有效来源、证券绑定或日期"
+        return result
+    content_complete = any(
+        isinstance(records, (list, tuple)) and bool(records) and all(isinstance(record, Mapping) for record in records)
+        for key in content_keys
+        if (records := result.get(key)) is not None
+    )
+    if not content_complete:
+        result["status"] = "invalid"
+        result["validation_error"] = "完整证据缺少可核验明细"
+    return result
 
 
 def _date_key(record: Mapping[str, Any]) -> str:
@@ -1380,7 +1503,15 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
             if len(report_date) >= 4 and report_date[:4].isdigit()
         ]
         recent_ocf = ocf_history[-3:]
-        if len(recent_ocf) == 3 and recent_ocf[0][1] != 0:
+        recent_ocf_years = [
+            int(report_date[:4]) for report_date, _ in recent_ocf if len(report_date) >= 4 and report_date[:4].isdigit()
+        ]
+        if (
+            len(recent_ocf) == 3
+            and len(recent_ocf_years) == 3
+            and _years_are_consecutive(recent_ocf_years, 3)
+            and recent_ocf[0][1] != 0
+        ):
             m["ocf_3yr_change"] = (recent_ocf[-1][1] - recent_ocf[0][1]) / abs(recent_ocf[0][1])
         else:
             m["ocf_3yr_change"] = None
@@ -1423,6 +1554,16 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     ]
     m["total_assets_history"] = [value for _, value in asset_points]
     m["total_assets_years"] = [year for year, _ in asset_points]
+    goodwill_points = [
+        (year, value)
+        for row in balances
+        if (year := _report_year(row)) is not None
+        and (value := _safe_float(row.get("GOODWILL"))) is not None
+        and value >= 0
+    ]
+    m["goodwill_history"] = [value for _, value in goodwill_points]
+    m["goodwill_years"] = [year for year, _ in goodwill_points]
+    m["goodwill_latest"] = goodwill_points[-1][1] if goodwill_points else None
 
     # 资产/负债可得时以同口径反算为准；否则API字段按百分数处理。
     assets, liabilities = m["total_assets"], m["total_liabilities"]
@@ -1496,6 +1637,8 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     m["interim_revenue_yoy_basis"] = revenue_yoy_basis
     m["interim_profit_yoy_basis"] = profit_yoy_basis
     m["interim_ocf_yoy_basis"] = ocf_yoy_basis
+    latest_interim_cashflow = cashflow_interim[-1] if cashflow_interim else {}
+    m["interim_acquisition_cashflow"] = _safe_float(latest_interim_cashflow.get("OBTAIN_SUBSIDIARY_OTHER"))
     m["interim_yoy_basis"] = (
         "same_period_yoy"
         if revenue_yoy_basis == "same_period_yoy" and profit_yoy_basis == "same_period_yoy"
@@ -1558,6 +1701,60 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         and m["q1_ocf"] < 0
     )
 
+    # This is a deliberately partial supplement to the two growth-quality
+    # inputs that were previously absent for every company.  Annual goodwill
+    # and the latest reported acquisition cash-flow line are objective and
+    # traceable, but neither identifies acquired revenue share or product
+    # segment concentration.  They improve the review evidence and must not
+    # relax Type3's complete-evidence gate on their own.
+    supplied_external_growth = fin_data.get("external_growth_evidence")
+    if isinstance(supplied_external_growth, Mapping):
+        m["external_growth_evidence"] = _normalise_structured_growth_evidence(
+            supplied_external_growth,
+            expected_code=m.get("code"),
+            reference_date=m.get("source_trade_date"),
+            missing_label="完整并购与商誉来源",
+            content_keys=("records", "transactions", "acquisitions", "goodwill_records"),
+        )
+    elif goodwill_points or m["interim_acquisition_cashflow"] is not None:
+        goodwill_sources = [
+            {
+                "report_date": _date_key(row),
+                "source_dataset": "东方财富年度资产负债表",
+                "source_field": "GOODWILL",
+            }
+            for row in balances
+            if _report_year(row) is not None and _safe_float(row.get("GOODWILL")) is not None
+        ]
+        acquisition_source = (
+            {
+                "report_date": _date_key(latest_interim_cashflow),
+                "source_dataset": "东方财富当期现金流量表",
+                "source_field": "OBTAIN_SUBSIDIARY_OTHER",
+            }
+            if m["interim_acquisition_cashflow"] is not None
+            else None
+        )
+        m["external_growth_evidence"] = {
+            "status": "partial",
+            "source": "年度资产负债表商誉与当期现金流并购项目",
+            "goodwill_years": list(m["goodwill_years"]),
+            "goodwill_values": list(m["goodwill_history"]),
+            "latest_interim_acquisition_cashflow": m["interim_acquisition_cashflow"],
+            "goodwill_source_records": goodwill_sources,
+            "acquisition_cashflow_source": acquisition_source,
+            "missing": ["逐笔并购收入占比", "完整并购交易清单"],
+        }
+    else:
+        m["external_growth_evidence"] = {"status": "missing", "missing": ["商誉与并购现金流来源"]}
+    m["segment_growth_sources"] = _normalise_structured_growth_evidence(
+        fin_data.get("segment_growth_sources"),
+        expected_code=m.get("code"),
+        reference_date=m.get("source_trade_date"),
+        missing_label="分产品或分地区收入增长来源",
+        content_keys=("segments", "records"),
+    )
+
     profits = m["net_profit_history"]
     m["profit_1yr_change"] = (
         (profit_points[-1][1] - profit_points[-2][1]) / abs(profit_points[-2][1])
@@ -1570,8 +1767,9 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     else:
         m["profit_volatility"] = None
     if _aligned_consecutive(margins, m.get("margin_years"), 3):
-        old = float(np.mean(margins[:2]))
-        recent = float(np.mean(margins[-2:]))
+        recent_margins = margins[-3:]
+        old = float(np.mean(recent_margins[:2]))
+        recent = float(np.mean(recent_margins[-2:]))
         m["margin_trajectory"] = (recent - old) / abs(old) if abs(old) > 0.001 else None
     else:
         m["margin_trajectory"] = None
@@ -1649,12 +1847,18 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     # Qualitative dimensions require a dated, traceable evidence record.  A
     # naked 0-10 number is not evidence and must fail closed.
     for key in QUALITATIVE_SCORE_KEYS:
-        evidence_score, evidence = _normalise_score_evidence(fin_data, key)
+        evidence_score, evidence = _normalise_score_evidence(
+            fin_data,
+            key,
+            expected_code=m.get("code"),
+            reference_date=m.get("source_trade_date"),
+        )
         m[key] = evidence_score
         m[f"{key}_evidence"] = evidence
     m["type7_research_sources"] = normalise_research_sources(
         fin_data.get("type7_research_sources"),
-        today=_shanghai_today(),
+        today=_evidence_reference_date(m.get("source_trade_date")) or _shanghai_today(),
+        security_code=str(m.get("code") or ""),
     )
     for key in ("position_size_pct", "type6_portfolio_pct"):
         value = _safe_float(fin_data.get(key))
@@ -1662,10 +1866,36 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     return m
 
 
+class _SectorBenchmarks(dict[str, dict[str, Any]]):
+    """Market benchmarks plus O(1) per-company leave-one-out views."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._leave_one_out: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def set_leave_one_out(self, values: Mapping[str, dict[str, dict[str, Any]]]) -> None:
+        self._leave_one_out = dict(values)
+
+    def for_code(self, code: Any) -> Mapping[str, Mapping[str, Any]]:
+        return self._leave_one_out.get(str(code or "").strip(), self)
+
+
+def _benchmarks_for_code(
+    benchmarks: Mapping[str, Mapping[str, Any]],
+    code: Any,
+) -> Mapping[str, Mapping[str, Any]]:
+    selector = getattr(benchmarks, "for_code", None)
+    if callable(selector):
+        selected = selector(code)
+        if isinstance(selected, Mapping):
+            return selected
+    return benchmarks
+
+
 def build_sector_benchmarks(metrics_list: list[dict]) -> dict[str, dict]:
     if not metrics_list:
         return {}
-    frame = pd.DataFrame(metrics_list)
+    frame = pd.DataFrame(metrics_list).reset_index(drop=True)
     columns = {
         "pe": "median_pe",
         "pb": "median_pb",
@@ -1687,36 +1917,73 @@ def build_sector_benchmarks(metrics_list: list[dict]) -> dict[str, dict]:
         "net_stable_funding_ratio_change": "median_stable_funding_change",
     }
 
-    def build_bucket(bucket: pd.DataFrame) -> dict[str, float]:
-        result: dict[str, float] = {}
+    def median_without(sorted_values: list[float], removed_position: int | None) -> tuple[float | None, int]:
+        count = len(sorted_values) - (1 if removed_position is not None else 0)
+        if count <= 0:
+            return None, 0
+
+        def remaining_value(position: int) -> float:
+            source_position = (
+                position + 1 if removed_position is not None and position >= removed_position else position
+            )
+            return sorted_values[source_position]
+
+        middle = count // 2
+        if count % 2:
+            return remaining_value(middle), count
+        return (remaining_value(middle - 1) + remaining_value(middle)) / 2.0, count
+
+    benchmark_keys = ("pessimistic_floor", "neutral_benchmark", "optimistic_ceiling", "fcf_margin_target")
+    leave_one_out_by_index: dict[int, dict[str, dict[str, Any]]] = {}
+    benchmarks = _SectorBenchmarks()
+
+    def add_bucket(label: str, bucket: pd.DataFrame) -> None:
+        result: dict[str, Any] = {}
+        per_index = {int(index): {} for index in bucket.index}
         for column, name in columns.items():
             if column not in bucket:
                 continue
-            values = pd.to_numeric(bucket[column], errors="coerce")
-            values = values[np.isfinite(values)]
-            if column in {"pe", "pb"}:
-                values = values[values > 0]
-            if not values.empty:
-                result[name] = float(values.median())
-                result[f"{name}_count"] = int(len(values))
-        return result
+            pairs: list[tuple[float, int]] = []
+            for index, raw_value in bucket[column].items():
+                value = _safe_float(raw_value)
+                if value is None or (column in {"pe", "pb"} and value <= 0):
+                    continue
+                pairs.append((value, int(index)))
+            pairs.sort(key=lambda item: (item[0], item[1]))
+            sorted_values = [value for value, _ in pairs]
+            positions = {index: position for position, (_value, index) in enumerate(pairs)}
+            full_median, full_count = median_without(sorted_values, None)
+            if full_median is not None:
+                result[name] = full_median
+                result[f"{name}_count"] = full_count
+            for index in per_index:
+                loo_median, loo_count = median_without(sorted_values, positions.get(index))
+                if loo_median is not None:
+                    per_index[index][name] = loo_median
+                    per_index[index][f"{name}_count"] = loo_count
 
-    benchmarks: dict[str, dict] = {}
+        static_source = get_industry_benchmark("DEFAULT" if label == "ALL" else label)
+        for key in benchmark_keys:
+            value = _safe_float(static_source.get(key))
+            if value is not None:
+                result[key] = value
+                for bucket_view in per_index.values():
+                    bucket_view[key] = value
+        benchmarks[label] = result
+        for index, bucket_view in per_index.items():
+            leave_one_out_by_index.setdefault(index, {})[label] = bucket_view
+
     if "industry" in frame:
         for industry, bucket in frame.groupby("industry", dropna=False):
-            code = str(industry)
-            benchmarks[code] = build_bucket(bucket)
-            industry_bench = get_industry_benchmark(code)
-            for key in ("pessimistic_floor", "neutral_benchmark", "optimistic_ceiling", "fcf_margin_target"):
-                value = _safe_float(industry_bench.get(key))
-                if value is not None:
-                    benchmarks[code][key] = value
-    benchmarks["ALL"] = build_bucket(frame)
-    default_bench = get_industry_benchmark("DEFAULT")
-    for key in ("pessimistic_floor", "neutral_benchmark", "optimistic_ceiling", "fcf_margin_target"):
-        value = _safe_float(default_bench.get(key))
-        if value is not None:
-            benchmarks["ALL"][key] = value
+            add_bucket(str(industry), bucket)
+    add_bucket("ALL", frame)
+    leave_one_out_by_code: dict[str, dict[str, dict[str, Any]]] = {}
+    if "code" in frame:
+        for index, raw_code in frame["code"].items():
+            code = str(raw_code or "").strip()
+            if code:
+                leave_one_out_by_code[code] = leave_one_out_by_index.get(int(index), {})
+    benchmarks.set_leave_one_out(leave_one_out_by_code)
     return benchmarks
 
 
@@ -2554,7 +2821,7 @@ def score_type1_dcf(
     financial_evidence_valid = is_financial and _valid_financial_pb_evidence(m, dcf_result)
     nonfinancial_evidence_valid = not is_financial and _valid_nonfinancial_dcf_evidence(m, dcf_result)
     if is_financial and not financial_evidence_valid:
-        return _insufficient_evidence("type1", "金融justified-PB证据不完整")
+        return _insufficient_evidence("type1", "金融股合理市净率估值证据不完整")
     if not is_financial and not nonfinancial_evidence_valid:
         return _insufficient_evidence("type1", "非金融DCF证据不完整")
     in_buy_zone = bool(
@@ -2748,7 +3015,7 @@ def score_type1_dcf(
     elif fcf is not None:
         scores["1c"], reasons["1c"] = 0.0, "自由现金流非正"
     else:
-        scores["1c"], reasons["1c"] = 0.0, ("缺justified-PB结果" if is_financial else "缺资本开支数据")
+        scores["1c"], reasons["1c"] = 0.0, ("缺金融股合理市净率估值结果" if is_financial else "缺资本开支数据")
 
     if is_financial:
         scores["1d"], catalyst_evidence_complete, reasons["1d"] = _financial_catalyst_score(m)
@@ -3130,7 +3397,7 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
 def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
     """情况三：使用趋势调整增长，拒绝3/5年CAGR择高。"""
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _not_applicable("type3", "金融机构不适用ROIC/WACC增长模板")
+        return _not_applicable("type3", "金融机构不适用投入回报增长模板")
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {}
     trend_growth = _safe_float(m.get("trend_growth"))
@@ -3266,12 +3533,12 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
         scores["3c"] = (
             9.5 if spread >= 0.10 else 7.5 if spread >= 0.05 else 5.5 if spread >= 0.02 else 3.5 if spread >= 0 else 1.5
         )
-        reasons["3c"] = f"ROIC-WACC={spread:.1%}"
+        reasons["3c"] = f"投入回报率减资金成本={spread:.1%}"
     else:
         # Missing evidence is unknown, not a confirmed 0-3 failure.  A neutral
         # display score keeps the radar shape stable while evidence_complete
         # below prevents this diagnostic from becoming a buy signal.
-        scores["3c"], reasons["3c"] = 5.0, "缺同口径ROIC/WACC"
+        scores["3c"], reasons["3c"] = 5.0, "缺同口径投入回报率和资金成本"
 
     explicit_sustainability = _verified_score(m, "growth_sustainability_score")
     sustainability_evidence_complete = explicit_sustainability is not None
@@ -4011,7 +4278,15 @@ def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
     profits, years = _type5_cycle_profit_history(m)
     if len(profits) < 5 or not _aligned_consecutive(profits, years, 5):
         return None, 0
-    selected = profits[-10:]
+    selected_points = list(zip(years, profits))[-10:]
+    consecutive_suffix = [selected_points[-1]]
+    for point in reversed(selected_points[:-1]):
+        if consecutive_suffix[0][0] - point[0] != 1:
+            break
+        consecutive_suffix.insert(0, point)
+    if len(consecutive_suffix) < 5:
+        return None, 0
+    selected = [value for _, value in consecutive_suffix]
     normalised_profit = float(np.mean(selected))
     market_cap = _safe_float(m.get("market_cap"))
     if normalised_profit <= 0 or market_cap is None or market_cap <= 0:
@@ -4019,20 +4294,275 @@ def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
     return market_cap / normalised_profit, len(selected)
 
 
+def _type5_contract_number(value: Any) -> Optional[float]:
+    """Parse one history-contract number without accepting booleans."""
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    return _safe_float(value)
+
+
+def _type5_pb_bottom_score(pb_percentile: Any, current_pb: Any) -> Optional[float]:
+    """Score a conjunctive five-year PB signal with exact public boundaries."""
+    percentile = _type5_contract_number(pb_percentile)
+    pb = _type5_contract_number(current_pb)
+    if percentile is None or pb is None or not 0 <= percentile <= 1 or pb <= 0:
+        return None
+    percentile_score = (
+        10.0
+        if percentile <= 0.10
+        else 8.0
+        if percentile <= 0.20
+        else 6.0
+        if percentile <= 0.30
+        else 4.0
+        if percentile <= 0.50
+        else 2.0
+    )
+    absolute_score = 10.0 if pb <= 1.0 else 8.0 if pb <= 1.2 else 6.0 if pb <= 1.5 else 4.0 if pb <= 2.0 else 2.0
+    # A low percentile at an objectively expensive PB (or the reverse) is not
+    # a complete valuation-bottom signal.
+    return min(percentile_score, absolute_score)
+
+
+def _type5_pb_history_inputs(
+    m: Mapping[str, Any],
+    history_evidence: Optional[Mapping[str, Any]],
+) -> Optional[tuple[float, float]]:
+    """Validate and bind the shared five-year valuation-history record."""
+    if not isinstance(history_evidence, Mapping):
+        return None
+    code = _canonical_evidence_code(m.get("code"))
+    reference_date = _evidence_reference_date(m.get("source_trade_date"))
+    if (
+        not code
+        or reference_date is None
+        or history_evidence.get("model_id") != LONG_HORIZON_HISTORY_MODEL_ID
+        or _canonical_evidence_code(history_evidence.get("code")) != code
+        or history_evidence.get("as_of") != reference_date.isoformat()
+    ):
+        return None
+    valuation = history_evidence.get("valuation_history")
+    if not isinstance(valuation, Mapping) or valuation.get("available") is not True:
+        return None
+    observations = valuation.get("pb_observations")
+    if (
+        isinstance(observations, (bool, np.bool_))
+        or not isinstance(observations, (int, np.integer))
+        or int(observations) < TYPE5_PB_MIN_OBSERVATIONS
+        or valuation.get("window_years") != 5
+    ):
+        return None
+    span_days = _type5_contract_number(valuation.get("span_days"))
+    start_delay = _type5_contract_number(valuation.get("start_delay_days"))
+    end_date = _evidence_reference_date(valuation.get("end_date"))
+    formula = valuation.get("formula")
+    if (
+        span_days is None
+        or span_days < TYPE5_HISTORY_MIN_SPAN_DAYS
+        or start_delay is None
+        or not 0 <= start_delay <= TYPE5_HISTORY_MAX_START_DELAY_DAYS
+        or end_date is None
+        or not 0 <= (reference_date - end_date).days <= TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
+        or not isinstance(formula, str)
+        or "percentile" not in formula
+    ):
+        return None
+    percentile = _type5_contract_number(valuation.get("pb_percentile"))
+    current_pb = _type5_contract_number(valuation.get("current_pb_mrq"))
+    if percentile is None or current_pb is None or _type5_pb_bottom_score(percentile, current_pb) is None:
+        return None
+    quote_pb_raw = m.get("pb")
+    if quote_pb_raw is not None:
+        quote_pb = _type5_contract_number(quote_pb_raw)
+        if quote_pb is None or quote_pb <= 0:
+            return None
+        relative_gap = abs(quote_pb - current_pb) / max(quote_pb, current_pb)
+        if relative_gap > 0.20:
+            return None
+    return percentile, current_pb
+
+
+def _type5_market_bottom_score(m: Mapping[str, Any]) -> Optional[float]:
+    """Use only same-session, security-bound coldness and price declines."""
+    reference_date = _evidence_reference_date(m.get("source_trade_date"))
+    score, evidence = _normalise_score_evidence(
+        m,
+        "market_coldness_score",
+        expected_code=m.get("code"),
+        reference_date=m.get("source_trade_date"),
+    )
+    components = m.get("market_coldness_components")
+    if (
+        reference_date is None
+        or score is None
+        or evidence is None
+        or evidence.get("as_of") != reference_date.isoformat()
+        or not isinstance(components, Mapping)
+        or components.get("as_of_session") != reference_date.isoformat()
+    ):
+        return None
+    raw_values = components.get("raw_values")
+    if not isinstance(raw_values, Mapping):
+        return None
+    change_60d = _type5_contract_number(raw_values.get("change_60d_pct"))
+    change_ytd = _type5_contract_number(raw_values.get("change_ytd_pct"))
+    if change_60d is None or change_ytd is None or not -100 <= change_60d <= 1_000 or not -100 <= change_ytd <= 1_000:
+        return None
+    # ``max`` is the less-negative period: both 60-day and YTD performance
+    # must be cold before the drawdown component can score highly.
+    confirmed_decline = max(change_60d, change_ytd)
+    drawdown_score = (
+        10.0
+        if confirmed_decline <= -30.0
+        else 9.0
+        if confirmed_decline <= -20.0
+        else 7.0
+        if confirmed_decline <= -10.0
+        else 5.0
+        if confirmed_decline <= -5.0
+        else 3.0
+        if confirmed_decline < 0
+        else 1.0
+    )
+    return min(score, drawdown_score)
+
+
+def _type5_consecutive_history(
+    m: Mapping[str, Any],
+    value_key: str,
+    year_key: str,
+) -> tuple[list[float], list[int]]:
+    """Return the latest four-to-ten-year fully consecutive suffix."""
+    raw_values = m.get(value_key)
+    raw_years = m.get(year_key)
+    if (
+        not isinstance(raw_values, (list, tuple))
+        or not isinstance(raw_years, (list, tuple))
+        or len(raw_values) != len(raw_years)
+    ):
+        return [], []
+    points: list[tuple[int, float]] = []
+    for raw_year, raw_value in zip(raw_years, raw_values):
+        if isinstance(raw_year, (bool, np.bool_)):
+            return [], []
+        value = _type5_contract_number(raw_value)
+        if not isinstance(raw_year, (int, np.integer)) or value is None:
+            return [], []
+        points.append((int(raw_year), value))
+    points.sort()
+    if len({year for year, _ in points}) != len(points):
+        return [], []
+    suffix = [points[-1]] if points else []
+    for point in reversed(points[:-1]):
+        if suffix[0][0] - point[0] != 1 or len(suffix) >= 10:
+            break
+        suffix.insert(0, point)
+    if len(suffix) < 4:
+        return [], []
+    return [value for _, value in suffix], [year for year, _ in suffix]
+
+
+def _type5_cycle_low_score(values: list[float]) -> Optional[float]:
+    if len(values) < 4:
+        return None
+    spread = max(values) - min(values)
+    if spread <= 0:
+        return None
+    position = (values[-1] - min(values)) / spread
+    return (
+        10.0
+        if position <= 0.10
+        else 8.0
+        if position <= 0.25
+        else 6.0
+        if position <= 0.40
+        else 4.0
+        if position <= 0.60
+        else 2.0
+    )
+
+
+def _type5_financial_bottom_score(m: Mapping[str, Any]) -> Optional[tuple[float, str]]:
+    """Locate a cycle low from reported margin or profit history."""
+    candidates: list[tuple[float, str]] = []
+    margins, _margin_years = _type5_consecutive_history(
+        m,
+        "gross_margin_history",
+        "gross_margin_years",
+    )
+    if margins:
+        changes = [current - prior for prior, current in zip(margins, margins[1:])]
+        if (
+            max(margins) - min(margins) > 0.15
+            and any(change < 0 for change in changes)
+            and any(change > 0 for change in changes)
+        ):
+            margin_score = _type5_cycle_low_score(margins)
+            if margin_score is not None:
+                candidates.append((margin_score, "毛"))
+    profits, profit_years = _type5_consecutive_history(
+        m,
+        "net_profit_history",
+        "net_profit_years",
+    )
+    if profits and _has_cycle_history(profits, profit_years):
+        profit_score = _type5_cycle_low_score(profits)
+        if profit_score is not None:
+            candidates.append((profit_score, "利"))
+    return max(candidates, default=None, key=lambda item: (item[0], item[1]))
+
+
+def _type5_automatic_bottom_score(
+    m: Mapping[str, Any],
+    history_evidence: Optional[Mapping[str, Any]],
+) -> tuple[float, str, bool]:
+    """Combine three independent, observable Type5 bottom-source families."""
+    pb_inputs = _type5_pb_history_inputs(m, history_evidence)
+    market_score = _type5_market_bottom_score(m)
+    financial_signal = _type5_financial_bottom_score(m)
+    missing = []
+    if pb_inputs is None:
+        missing.append("PB历史")
+    if market_score is None:
+        missing.append("冷度")
+    if financial_signal is None:
+        missing.append("财务周期")
+    if missing:
+        return 5.0, "缺" + "/".join(missing) + "证据", False
+
+    percentile, current_pb = pb_inputs
+    valuation_score = _type5_pb_bottom_score(percentile, current_pb)
+    if valuation_score is None:  # Defensive; the bound parser already checked this.
+        return 5.0, "缺PB历史证据", False
+    financial_score, financial_basis = financial_signal
+    raw_score = 0.40 * valuation_score + 0.30 * market_score + 0.30 * financial_score
+    resonant_sources = sum(score >= 6.0 for score in (valuation_score, market_score, financial_score))
+    # One cheap PB observation cannot masquerade as a bottom.  Two positive
+    # families remain only a weak diagnostic; an automatic score above seven
+    # requires all three independent families to resonate.
+    if resonant_sources < 2:
+        raw_score = min(raw_score, 4.0)
+    elif resonant_sources < 3:
+        raw_score = min(raw_score, 6.0)
+    score = round(raw_score, 1)
+    reason = f"PB{percentile:.0%}/{current_pb:.2f};冷{market_score:.0f};{financial_basis}{financial_score:.0f}"
+    return score, reason, True
+
+
 def score_type5_counter_cyclical(
     m: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
     dcf_result: Optional[Mapping[str, Any]] = None,
+    history_evidence: Optional[Mapping[str, Any]] = None,
 ):
     """Patch6 Type5: strong-cycle bottom overlay, not a generic recovery model.
 
     The 2026-07-17 appendix requires strong-cycle *attributes* in 5a before
     this framework applies.  It forbids using the current PE as a cycle-value
     signal and explicitly excludes banks, insurers, brokers and wide-moat
-    weak-cycle companies.  Where the market snapshot lacks industry cost,
-    inventory, replacement-cost or capital-M&A data, this function preserves
-    diagnostic values but fails closed as ``证据不足`` rather than inventing a
-    buy point.
+    weak-cycle companies.  The automatic path requires five-year PB history,
+    independently bound market coldness and reported financial-cycle history.
+    It never invents replacement cost, cash cost, utilisation or inventory.
     """
     del benchmarks, dcf_result
     industry = str(m.get("industry") or "")
@@ -4075,12 +4605,10 @@ def score_type5_counter_cyclical(
 
     bottom_score, bottom_reason = _type5_external_score(m, "type5_bottom_signal_score")
     if bottom_score is None:
-        # Current snapshot has no 5–10Y PB percentile, replacement cost,
-        # commodity cash-cost curve, or industry utilisation/inventory series.
-        # A neutral diagnostic is shown only in the structured result and can
-        # never make the type eligible without the four source families.
-        scores["5b"], reasons["5b"] = 5.0, "缺PB分位/成本/库存证据"
-        bottom_complete = False
+        scores["5b"], reasons["5b"], bottom_complete = _type5_automatic_bottom_score(
+            m,
+            history_evidence,
+        )
     else:
         scores["5b"], reasons["5b"] = bottom_score, bottom_reason or "周期底部外部证据"
         bottom_complete = True
@@ -4091,18 +4619,29 @@ def score_type5_counter_cyclical(
         monetary_funds = _safe_float(m.get("monetary_funds"))
         interest_debt = _safe_float(m.get("interest_debt"))
         assets = _safe_float(m.get("total_assets"))
-        fcf_history = [value for value in (_safe_float(item) for item in m.get("fcf_history", [])) if value is not None]
+        raw_fcf_history = list(m.get("fcf_history", []))
+        fcf_history = [value for value in (_safe_float(item) for item in raw_fcf_history) if value is not None]
+        fcf_complete = len(fcf_history) == len(raw_fcf_history) and _aligned_consecutive(
+            raw_fcf_history, m.get("fcf_years"), 3
+        )
         signals = sum(
             (
                 debt_ratio is not None and debt_ratio <= 0.50,
                 monetary_funds is not None and interest_debt is not None and monetary_funds >= interest_debt,
                 monetary_funds is not None and assets is not None and assets > 0 and monetary_funds / assets >= 0.10,
-                len(fcf_history) >= 3 and all(value >= 0 for value in fcf_history[-3:]),
+                fcf_complete and all(value >= 0 for value in fcf_history[-3:]),
             )
         )
         scores["5c"] = {0: 2.0, 1: 4.0, 2: 6.0, 3: 8.0, 4: 9.0}[signals]
         reasons["5c"] = f"资产负债表稳健{signals}项"
-        survival_complete = False
+        survival_complete = bool(
+            debt_ratio is not None
+            and monetary_funds is not None
+            and interest_debt is not None
+            and assets is not None
+            and assets > 0
+            and fcf_complete
+        )
     else:
         scores["5c"], reasons["5c"] = survival_score, survival_reason or "抗周期外部证据"
         survival_complete = True
@@ -4123,7 +4662,7 @@ def score_type5_counter_cyclical(
             scores["5d"], reasons["5d"] = 5.0, f"历史利润振幅{multiple:.1f}倍"
         else:
             scores["5d"], reasons["5d"] = 3.0, "历史利润弹性偏弱"
-        elasticity_complete = False
+        elasticity_complete = bool(profit_cycle and multiple is not None)
     else:
         scores["5d"], reasons["5d"] = elasticity_score, elasticity_reason or "上行弹性外部证据"
         elasticity_complete = True
@@ -4143,7 +4682,7 @@ def score_type5_counter_cyclical(
             scores["5e"], reasons["5e"] = 3.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
         else:
             scores["5e"], reasons["5e"] = 1.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
-        earnings_complete = False
+        earnings_complete = normalised_pe is not None and years_used >= 5
     else:
         scores["5e"], reasons["5e"] = earnings_score, earnings_reason or "正常化盈利外部证据"
         earnings_complete = True
@@ -4166,10 +4705,287 @@ def score_type5_counter_cyclical(
     return _finish("type5", scores, reasons, evidence_complete=evidence_complete)
 
 
+def _type5_history_request_needed(m: Mapping[str, Any], outcome: tuple) -> bool:
+    """Request PB history only when it can still change the Type5 decision."""
+    if not isinstance(outcome, tuple) or len(outcome) != 4:
+        return False
+    _triggered, _total, raw_scores, raw_reasons = outcome
+    if not isinstance(raw_scores, Mapping) or not isinstance(raw_reasons, Mapping):
+        return False
+    cycle_score = _safe_float(raw_scores.get("5a"))
+    if (
+        raw_reasons.get("_status") != STATUS_INSUFFICIENT_EVIDENCE
+        or raw_reasons.get("_missing") != "缺底部证据"
+        or cycle_score is None
+        or cycle_score < 7.0
+        or _type5_market_bottom_score(m) is None
+        or _type5_financial_bottom_score(m) is None
+    ):
+        return False
+    upper_scores = dict(raw_scores)
+    upper_scores["5b"] = 10.0
+    return _weighted_total(upper_scores, TYPE_WEIGHTS["type5"]) >= QUALIFY_THRESHOLD
+
+
+TYPE3_GROWTH_EVIDENCE_MODEL_ID = "type3-growth-evidence-v1"
+_TYPE3_GROWTH_EVIDENCE_FIELDS = {
+    "available",
+    "code",
+    "as_of",
+    "model_id",
+    "external_growth_evidence",
+    "segment_growth_sources",
+    "cache_hit",
+    "cache_diagnostic",
+    "reason",
+}
+
+
+def _type3_uncapped_partial_score(m: Mapping[str, Any], key: str) -> float | None:
+    evidence = m.get("quantitative_evidence")
+    payload = evidence.get(key) if isinstance(evidence, Mapping) else None
+    if not isinstance(payload, Mapping) or payload.get("evidence_level") != "partial":
+        return None
+    details = payload.get("details")
+    quality = details.get("evidence_quality") if isinstance(details, Mapping) else None
+    if not isinstance(quality, Mapping):
+        return None
+    expected_missing = {
+        "growth_quality_score": ["acquisition_cash_and_goodwill_history"],
+        "growth_sustainability_score": ["segment_growth_sources"],
+    }.get(key)
+    if quality.get("missing_inputs") != expected_missing:
+        return None
+    return _safe_float(details.get("score_before_evidence_cap"))
+
+
+def _type3_growth_request_needed(
+    m: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    """Fetch deep growth evidence only when it can still create a signal."""
+
+    quality_score = _type3_uncapped_partial_score(m, "growth_quality_score")
+    sustainability_score = _type3_uncapped_partial_score(m, "growth_sustainability_score")
+    if quality_score is None or sustainability_score is None:
+        return False
+    candidate = dict(m)
+    quantitative = m.get("quantitative_evidence")
+    if not isinstance(quantitative, Mapping):
+        return False
+    for key, score in (
+        # The automatic acquisition adapter is an aggregate proxy, not a
+        # transaction census, so its Patch6 3b score cannot exceed six.
+        ("growth_quality_score", min(quality_score, 6.0)),
+        # Segment history can raise the current capped diagnostic.  Ten is the
+        # safe request upper bound; the loaded evidence later determines the
+        # actual source-count/time-depth band.
+        ("growth_sustainability_score", 10.0),
+    ):
+        payload = quantitative.get(key)
+        evidence = payload.get("evidence") if isinstance(payload, Mapping) else None
+        if not isinstance(evidence, Mapping):
+            return False
+        candidate[key] = score
+        candidate[f"{key}_evidence"] = dict(evidence)
+        candidate[f"{key}_evidence_level"] = "derived_proxy"
+    outcome = score_type3_sustainable_growth(candidate, benchmarks)
+    if not isinstance(outcome, tuple) or len(outcome) != 4:
+        return False
+    _triggered, total, _scores, reasons = outcome
+    return (
+        _safe_float(total) is not None
+        and float(total) >= QUALIFY_THRESHOLD
+        and isinstance(reasons, Mapping)
+        and reasons.get("_status") not in {STATUS_NOT_APPLICABLE, STATUS_VETOED, STATUS_BLOCKED}
+    )
+
+
+def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Build the exact local-history input required by the growth adapter."""
+
+    def records(values_key: str, years_key: str, *, minimum: int) -> list[dict[str, Any]] | None:
+        raw_values = m.get(values_key)
+        raw_years = m.get(years_key)
+        if (
+            not isinstance(raw_values, (list, tuple))
+            or not isinstance(raw_years, (list, tuple))
+            or len(raw_values) != len(raw_years)
+        ):
+            return None
+        by_year: dict[int, float] = {}
+        for raw_year, raw_value in zip(raw_years, raw_values):
+            if isinstance(raw_year, bool):
+                return None
+            try:
+                year = int(raw_year)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            value = _safe_float(raw_value)
+            if not 1900 <= year <= 9999 or value is None or value < 0 or year in by_year:
+                return None
+            by_year[year] = value
+        ordered = sorted(by_year)
+        if len(ordered) < minimum:
+            return None
+        recent = ordered[-minimum:]
+        if any(current - previous != 1 for previous, current in zip(recent, recent[1:])):
+            return None
+        return [{"year": year, "value": by_year[year]} for year in ordered]
+
+    revenue_records = records("revenue_values", "revenue_years", minimum=5)
+    goodwill_records = records("goodwill_history", "goodwill_years", minimum=5)
+    code = str(m.get("code") or "")
+    as_of = str(m.get("source_trade_date") or "")
+    if (
+        revenue_records is None
+        or goodwill_records is None
+        or not re.fullmatch(r"[036][0-9]{5}", code)
+        or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
+    ):
+        return None
+    return {
+        "code": code,
+        "as_of": as_of,
+        "revenue_records": revenue_records,
+        "goodwill_records": goodwill_records,
+    }
+
+
+def _type3_growth_components_from_evidence(
+    evidence: Any,
+    *,
+    code: str,
+    as_of: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate one loader record before it can influence Type 3."""
+
+    try:
+        normalized = validate_growth_evidence_record(evidence, code, as_of)
+    except (GrowthEvidenceError, TypeError, ValueError) as exc:
+        raise ValueError(f"可持续增长证据校验失败:{code}:{exc}") from exc
+    if set(normalized) != _TYPE3_GROWTH_EVIDENCE_FIELDS:
+        raise ValueError(f"可持续增长证据标准化结构无效:{code}")
+    external = normalized.get("external_growth_evidence")
+    segments = normalized.get("segment_growth_sources")
+    if not isinstance(external, Mapping) or not isinstance(segments, Mapping):
+        raise ValueError(f"可持续增长证据子项无效:{code}")
+    return dict(external), dict(segments)
+
+
+def _refresh_type3_quantitative_evidence(
+    metric: dict[str, Any],
+    context: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Recompute only the two Type 3 scores unlocked by deep evidence."""
+
+    industry = str(metric.get("industry") or "DEFAULT")
+    industry_benchmark = benchmarks.get(industry, {}) if isinstance(benchmarks, Mapping) else {}
+    fallback_growth = (
+        _safe_float(industry_benchmark.get("median_cagr")) if isinstance(industry_benchmark, Mapping) else None
+    )
+    refreshed = derive_company_evidence(
+        metric,
+        context,
+        fallback_industry_growth=fallback_growth,
+    )
+    quantitative = metric.get("quantitative_evidence")
+    if not isinstance(quantitative, dict):
+        quantitative = {}
+        metric["quantitative_evidence"] = quantitative
+    levels = metric.get("quantitative_evidence_levels")
+    if not isinstance(levels, dict):
+        levels = {}
+        metric["quantitative_evidence_levels"] = levels
+    for key in ("growth_quality_score", "growth_sustainability_score"):
+        payload = refreshed.get(key)
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"可持续增长量化证据重算失败:{metric.get('code')}:{key}")
+        record = dict(payload)
+        quantitative[key] = record
+        level = str(record.get("evidence_level") or "missing")
+        levels[key] = level
+        if level == "derived_proxy":
+            metric[key] = record["score"]
+            metric[f"{key}_evidence"] = record["evidence"]
+            metric[f"{key}_evidence_level"] = level
+    if levels and all(level in {"primary", "derived_proxy"} for level in levels.values()):
+        metric["quantitative_evidence_status"] = "complete"
+    elif levels and all(level == "missing" for level in levels.values()):
+        metric["quantitative_evidence_status"] = "missing"
+    else:
+        metric["quantitative_evidence_status"] = "partial"
+
+
+_RESEARCH_EVIDENCE_FIELDS = {
+    "available",
+    "code",
+    "as_of",
+    "model_id",
+    "sources",
+    "distinct_publishers",
+    "content_verification",
+    "cache_hit",
+    "cache_diagnostic",
+    "reason",
+}
+
+
+def _type7_research_sources_from_evidence(
+    evidence: Any,
+    *,
+    code: str,
+    as_of: str,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Validate metadata and bounded body summaries before they influence Type 7."""
+
+    if not isinstance(evidence, Mapping) or set(evidence) != _RESEARCH_EVIDENCE_FIELDS:
+        raise ValueError(f"优质股权研报元数据结构无效:{code}")
+    if (
+        evidence.get("code") != code
+        or evidence.get("as_of") != as_of
+        or evidence.get("model_id") != RESEARCH_EVIDENCE_MODEL_ID
+        or not isinstance(evidence.get("available"), bool)
+        or not isinstance(evidence.get("cache_hit"), bool)
+    ):
+        raise ValueError(f"优质股权研报元数据身份无效:{code}")
+    for key in ("cache_diagnostic", "reason"):
+        text = evidence.get(key)
+        if not isinstance(text, str) or len(text) > 500 or any(ord(character) < 32 for character in text):
+            raise ValueError(f"优质股权研报元数据诊断字段无效:{code}")
+    try:
+        reference = date.fromisoformat(as_of)
+    except ValueError as exc:
+        raise ValueError(f"优质股权研报元数据日期无效:{code}") from exc
+    sources = normalise_research_sources(
+        evidence.get("sources"),
+        today=reference,
+        security_code=code,
+    )
+    publisher_count = len({source["publisher_id"].casefold() for source in sources})
+    published_count = evidence.get("distinct_publishers")
+    if isinstance(published_count, bool) or not isinstance(published_count, int) or published_count != publisher_count:
+        raise ValueError(f"优质股权研报元数据机构计数无效:{code}")
+    metadata_precheck = research_metadata_precheck(sources, reference=reference)
+    content_verification = normalise_research_content_verification(
+        evidence.get("content_verification"),
+        sources=sources,
+        security_code=code,
+        as_of=as_of,
+    )
+    expected_available = bool(metadata_precheck["passed"] and content_verification["passed"])
+    if evidence["available"] is not expected_available:
+        raise ValueError(f"优质股权研报元数据可用状态无效:{code}")
+    if (expected_available and evidence["reason"]) or (not expected_available and not evidence["reason"]):
+        raise ValueError(f"优质股权研报元数据失败原因无效:{code}")
+    return sources, content_verification
+
+
 def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
     """情况六：按第19模板区分300亿高景气与100亿反转两类标的。"""
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _not_applicable("type6", "金融机构不适用VC小盘模板")
+        return _not_applicable("type6", "金融机构不适用小盘高风险模板")
     industry = str(m.get("industry", ""))
     market_cap = _safe_float(m.get("market_cap"))
     industry_bucket = {} if industry == "DEFAULT" else benchmarks.get(industry, {})
@@ -4197,9 +5013,9 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     )
 
     if market_cap is None or market_cap <= 0:
-        return _insufficient_evidence("type6", "市值缺失或非正,无法确认VC范围")
+        return _insufficient_evidence("type6", "市值缺失或非正,无法确认小盘范围")
     if growth is None:
-        return _insufficient_evidence("type6", "产业增速样本不足,无法判定VC子类型")
+        return _insufficient_evidence("type6", "产业增速样本不足,无法判定高景气或反转类型")
 
     growth_subtype = growth >= 0.08
     subtype = "高景气技术型" if growth_subtype else "平稳产业反转型"
@@ -4292,7 +5108,7 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         scores["6e"] = min(single_score, portfolio_score)
         reasons["6e"] = f"单票{position:.0f}%,组合{portfolio:.0f}%"
         if not discipline_ready:
-            reasons["_condition"] = "须单票≤5%且VC组合≤15%"
+            reasons["_condition"] = "须单票≤5%且高风险组合≤15%"
     risk_cap = position if position is not None and position > 0 else recommended_single
     reasons["_risk"] = f"最坏归零时组合最大损失≤{risk_cap:.0f}%"
 
@@ -4324,7 +5140,7 @@ def score_type7_quality_equity(
     if industry in FINANCIAL_INDUSTRIES:
         reason = "金融需专属优质股权模型"
         return _not_applicable("type7", reason), {
-            "schema_version": 1,
+            "schema_version": QUALITY_EQUITY_SCHEMA_VERSION,
             "model_id": QUALITY_EQUITY_MODEL_ID,
             "code": str(m.get("code") or ""),
             "applicable": False,
@@ -4334,7 +5150,7 @@ def score_type7_quality_equity(
     ledger = assess_quality_equity(m, type1_outcome, history_evidence)
     ledger_errors = validate_quality_equity_ledger(ledger)
     if ledger_errors:
-        raise AssertionError("Type7量化账本不变量失败:" + ";".join(ledger_errors[:3]))
+        raise AssertionError("情况七量化账本不变量失败:" + ";".join(ledger_errors[:3]))
     source_scores = ledger["scores"]
     scores = {
         "7a": round(float(source_scores["template1"]) / 10.0, 3),
@@ -4345,32 +5161,37 @@ def score_type7_quality_equity(
     reasons = {
         "7a": f"第1模板{source_scores['template1']:.2f}",
         "7b": f"第5模板{source_scores['template5']:.2f}",
-        "7c": f"补丁5{source_scores['patch5']:.2f};安{safety:.1f}",
+        "7c": f"补丁5{source_scores['patch5']:.2f}；安全边际{safety:.1f}",
     }
     strict_pass = bool(ledger["all_scores_strictly_above_70"])
-    if not strict_pass:
+    decisive_failure = bool(ledger["decisively_not_triggered"])
+    if decisive_failure:
+        reasons["_condition"] = "补全全部缺失证据后仍至少一套不超过70"
+    elif not strict_pass:
         reasons["_condition"] = "三套分数均须严格大于70"
     failed_prerequisites = [key for key, record in ledger["prerequisites"].items() if not bool(record.get("passed"))]
     if failed_prerequisites:
         labels = {
             "core_modules_80pct": "核心分析不足80%",
-            "technology_patch4": "科技股缺补丁4",
+            "technology_patch4": "科技股缺可复算补丁4账本",
             "three_year_financials": "不足3年财报",
             "latest_quote_and_valuation": "缺最新估值",
-            "three_external_reports": "缺3份外部研报",
+            "three_external_reports": "外部研报可获取性预检不足",
+            "external_report_content_verification": "研报正文尚未读取并交叉核验",
             "ten_year_return_and_five_year_valuation": "缺十年回报或估值史",
         }
-        reasons["_missing"] = labels.get(failed_prerequisites[0], "Type7前置证据不足")
-    if ledger["safety_veto"]:
+        reasons["_missing"] = labels.get(failed_prerequisites[0], "优质股权前置证据不足")
+    if ledger["safety_veto"] and not decisive_failure:
         reasons["_veto"] = "补丁5安全边际低于8"
     return (
         _finish(
             "type7",
             scores,
             reasons,
-            veto=bool(ledger["safety_veto"]),
+            veto=bool(ledger["safety_veto"] and not decisive_failure),
             extra_condition=strict_pass,
             evidence_complete=bool(ledger["prerequisites_complete"]),
+            status_override=STATUS_NOT_TRIGGERED if decisive_failure else None,
         ),
         ledger,
     )
@@ -4639,6 +5460,12 @@ def screen_all_types(
     quality_history_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
     quality_history_loader=None,
     quality_history_progress_cb=None,
+    type3_growth_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    type3_growth_loader=None,
+    type3_growth_progress_cb=None,
+    research_report_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    research_report_loader=None,
+    research_report_progress_cb=None,
 ) -> pd.DataFrame:
     """对合格沪深股票评分；输出按代码稳定排序，并提供完整七类结构。
 
@@ -4655,7 +5482,9 @@ def screen_all_types(
     canonical_fin = _canonicalize_mapping(fin_map, "财务")
     normalized_dcf = _canonicalize_mapping(dcf_results, "DCF")
     normalized_coldness = _canonicalize_mapping(market_coldness_evidence or {}, "市场冷度")
-    normalized_quality_history = _canonicalize_mapping(quality_history_evidence or {}, "Type7历史证据")
+    normalized_quality_history = _canonicalize_mapping(quality_history_evidence or {}, "长期市场历史证据")
+    normalized_type3_growth = _canonicalize_mapping(type3_growth_evidence or {}, "可持续增长证据")
+    normalized_research_reports = _canonicalize_mapping(research_report_evidence or {}, "优质股权研报元数据")
     raw_dcf_skips = _canonicalize_mapping(dcf_skip_classifications or {}, "DCF跳过分类")
     normalized_dcf_skips: dict[str, dict[str, str]] = {}
     for code, value in raw_dcf_skips.items():
@@ -4673,13 +5502,28 @@ def screen_all_types(
         if code in quote_lookup:
             raise ValueError(f"行情代码归一化冲突:{code}")
         quote_lookup[code] = quote
+    missing_quotes = sorted(set(canonical_fin) - set(quote_lookup))
+    if missing_quotes:
+        raise ValueError(f"财务全集中的公司缺少行情记录:{missing_quotes[:5]}")
 
     unknown_quality_history = sorted(set(normalized_quality_history) - set(canonical_fin))
     if unknown_quality_history:
-        raise ValueError(f"Type7历史证据包含不在财务全集中的代码:{unknown_quality_history[:5]}")
+        raise ValueError(f"长期市场历史证据包含不在财务全集中的代码:{unknown_quality_history[:5]}")
     for code, evidence in normalized_quality_history.items():
         if not isinstance(evidence, Mapping):
-            raise ValueError(f"Type7历史证据必须为映射:{code}")
+            raise ValueError(f"长期市场历史证据必须为映射:{code}")
+    unknown_type3_growth = sorted(set(normalized_type3_growth) - set(canonical_fin))
+    if unknown_type3_growth:
+        raise ValueError(f"可持续增长证据包含不在财务全集中的代码:{unknown_type3_growth[:5]}")
+    for code, evidence in normalized_type3_growth.items():
+        if not isinstance(evidence, Mapping):
+            raise ValueError(f"可持续增长证据必须为映射:{code}")
+    unknown_research_reports = sorted(set(normalized_research_reports) - set(canonical_fin))
+    if unknown_research_reports:
+        raise ValueError(f"优质股权研报元数据包含不在财务全集中的代码:{unknown_research_reports[:5]}")
+    for code, evidence in normalized_research_reports.items():
+        if not isinstance(evidence, Mapping):
+            raise ValueError(f"优质股权研报元数据必须为映射:{code}")
 
     metrics: list[dict[str, Any]] = []
     codes = sorted(canonical_fin)
@@ -4710,7 +5554,12 @@ def screen_all_types(
             if coldness is not None:
                 if not isinstance(coldness, Mapping):
                     raise ValueError(f"市场冷度记录必须为映射:{code}")
-                score, evidence = _normalise_score_evidence(coldness, "market_coldness_score")
+                score, evidence = _normalise_score_evidence(
+                    coldness,
+                    "market_coldness_score",
+                    expected_code=code,
+                    reference_date=metric.get("source_trade_date"),
+                )
                 if score is None or evidence is None:
                     raise ValueError(f"市场冷度证据无效:{code}")
                 metric["market_coldness_score"] = score
@@ -4718,6 +5567,27 @@ def screen_all_types(
                 components = coldness.get("components")
                 if isinstance(components, Mapping):
                     metric["market_coldness_components"] = dict(components)
+            report_evidence = normalized_research_reports.get(code)
+            if report_evidence is not None:
+                as_of = str(metric.get("source_trade_date") or "")
+                sources, content_verification = _type7_research_sources_from_evidence(
+                    report_evidence,
+                    code=code,
+                    as_of=as_of,
+                )
+                metric["type7_research_sources"] = sources
+                metric["type7_research_content_verification"] = content_verification
+            growth_evidence = normalized_type3_growth.get(code)
+            if growth_evidence is not None:
+                as_of = str(metric.get("source_trade_date") or "")
+                external, segments = _type3_growth_components_from_evidence(
+                    growth_evidence,
+                    code=code,
+                    as_of=as_of,
+                )
+                metric["external_growth_evidence"] = external
+                metric["segment_growth_sources"] = segments
+                metric["_type3_growth_validation_token"] = TYPE3_GROWTH_VALIDATION_TOKEN
             metrics.append(metric)
         if progress_cb:
             progress_cb(index, len(codes))
@@ -4741,63 +5611,178 @@ def screen_all_types(
     )
 
     base_outcomes_by_code: dict[str, dict[str, tuple]] = {}
-    history_requests: list[dict[str, str]] = []
+    preliminary_type7_by_code: dict[str, tuple[tuple, Mapping[str, Any]]] = {}
+    type3_growth_request_by_code: dict[str, dict[str, Any]] = {}
+    research_request_by_code: dict[str, dict[str, str]] = {}
+    metric_by_code = {str(metric["code"]): metric for metric in scored_metrics}
     for m in scored_metrics:
         code = str(m["code"])
+        company_benchmarks = _benchmarks_for_code(benchmarks, code)
         base_outcomes = {
             "type1": score_type1_dcf(
                 m,
                 normalized_dcf.get(code),
-                benchmarks,
+                company_benchmarks,
                 normalized_dcf_skips.get(code),
             ),
-            "type2": score_type2_two_hot_one_cold(m, benchmarks),
-            "type3": score_type3_sustainable_growth(m, benchmarks),
+            "type2": score_type2_two_hot_one_cold(m, company_benchmarks),
+            "type3": score_type3_sustainable_growth(m, company_benchmarks),
             "type4": score_type4_long_runway(
                 m,
-                benchmarks,
+                company_benchmarks,
                 normalized_dcf.get(code),
                 normalized_dcf_skips.get(code),
             ),
-            "type5": score_type5_counter_cyclical(m, benchmarks, normalized_dcf.get(code)),
-            "type6": score_type6_vc(m, benchmarks),
+            "type5": score_type5_counter_cyclical(
+                m,
+                company_benchmarks,
+                normalized_dcf.get(code),
+                normalized_quality_history.get(code),
+            ),
+            "type6": score_type6_vc(m, company_benchmarks),
         }
         base_outcomes_by_code[code] = base_outcomes
-        _preliminary_outcome, preliminary_ledger = score_type7_quality_equity(
+        preliminary_outcome, preliminary_ledger = score_type7_quality_equity(
             m,
             base_outcomes["type1"],
             normalized_quality_history.get(code),
         )
+        preliminary_type7_by_code[code] = (preliminary_outcome, preliminary_ledger)
+        as_of = str(m.get("source_trade_date") or "")
+        if code not in normalized_type3_growth and _type3_growth_request_needed(m, company_benchmarks):
+            growth_request = _type3_growth_request(m)
+            if growth_request is not None:
+                type3_growth_request_by_code[code] = growth_request
+    type3_growth_requests = [type3_growth_request_by_code[code] for code in sorted(type3_growth_request_by_code)]
+    if type3_growth_loader is not None and type3_growth_requests:
+        loaded = type3_growth_loader(type3_growth_requests, progress_cb=type3_growth_progress_cb)
+        if not isinstance(loaded, Mapping):
+            raise TypeError("可持续增长证据加载器必须返回代码映射")
+        normalized_loaded = _canonicalize_mapping(loaded, "可持续增长加载结果")
+        requested_codes = {request["code"] for request in type3_growth_requests}
+        unexpected = sorted(set(normalized_loaded) - requested_codes)
+        if unexpected:
+            raise ValueError(f"可持续增长加载结果包含未请求代码:{unexpected[:5]}")
+        missing = sorted(requested_codes - set(normalized_loaded))
+        if missing:
+            raise ValueError(f"可持续增长加载结果遗漏请求代码:{missing[:5]}")
+        for code, evidence in normalized_loaded.items():
+            metric = metric_by_code[code]
+            as_of = str(metric.get("source_trade_date") or "")
+            external, segments = _type3_growth_components_from_evidence(
+                evidence,
+                code=code,
+                as_of=as_of,
+            )
+            metric["external_growth_evidence"] = external
+            metric["segment_growth_sources"] = segments
+            metric["_type3_growth_validation_token"] = TYPE3_GROWTH_VALIDATION_TOKEN
+            normalized_type3_growth[code] = evidence
+            context = metric.get("_quantitative_peer_context")
+            if not isinstance(context, Mapping):
+                raise ValueError(f"可持续增长同行上下文缺失:{code}")
+            company_benchmarks = _benchmarks_for_code(benchmarks, code)
+            _refresh_type3_quantitative_evidence(metric, context, company_benchmarks)
+            base_outcomes_by_code[code]["type3"] = score_type3_sustainable_growth(
+                metric,
+                company_benchmarks,
+            )
+
+    history_request_by_code: dict[str, dict[str, str]] = {}
+    for m in scored_metrics:
+        code = str(m["code"])
+        _preliminary_outcome, preliminary_ledger = preliminary_type7_by_code[code]
         as_of = str(m.get("source_trade_date") or "")
         if (
-            preliminary_ledger.get("history_request_needed") is True
+            (
+                preliminary_ledger.get("history_request_needed") is True
+                or _type5_history_request_needed(m, base_outcomes_by_code[code]["type5"])
+            )
             and code not in normalized_quality_history
             and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
         ):
-            history_requests.append({"code": code, "as_of": as_of})
-
+            history_request_by_code[code] = {"code": code, "as_of": as_of}
+    history_requests = [history_request_by_code[code] for code in sorted(history_request_by_code)]
+    newly_loaded_history_codes: set[str] = set()
     if quality_history_loader is not None and history_requests:
         loaded = quality_history_loader(history_requests, progress_cb=quality_history_progress_cb)
         if not isinstance(loaded, Mapping):
-            raise TypeError("Type7历史证据加载器必须返回代码映射")
-        normalized_loaded = _canonicalize_mapping(loaded, "Type7历史加载结果")
+            raise TypeError("长期市场历史证据加载器必须返回代码映射")
+        normalized_loaded = _canonicalize_mapping(loaded, "长期市场历史加载结果")
         requested_codes = {request["code"] for request in history_requests}
         unexpected = sorted(set(normalized_loaded) - requested_codes)
         if unexpected:
-            raise ValueError(f"Type7历史加载结果包含未请求代码:{unexpected[:5]}")
+            raise ValueError(f"长期市场历史加载结果包含未请求代码:{unexpected[:5]}")
         for code, evidence in normalized_loaded.items():
             if not isinstance(evidence, Mapping):
-                raise ValueError(f"Type7历史证据必须为映射:{code}")
+                raise ValueError(f"长期市场历史证据必须为映射:{code}")
             normalized_quality_history[code] = evidence
+            newly_loaded_history_codes.add(code)
+
+    # Exact long-horizon history materially changes all three Type 7 ledgers.
+    # Recompute it before deciding whether report metadata is worth requesting;
+    # metadata is never fetched merely because a no-history optimistic ceiling
+    # could pass.
+    for code in sorted(newly_loaded_history_codes):
+        metric = metric_by_code[code]
+        company_benchmarks = _benchmarks_for_code(benchmarks, code)
+        base_outcomes = base_outcomes_by_code[code]
+        base_outcomes["type5"] = score_type5_counter_cyclical(
+            metric,
+            company_benchmarks,
+            normalized_dcf.get(code),
+            normalized_quality_history.get(code),
+        )
+        preliminary_type7_by_code[code] = score_type7_quality_equity(
+            metric,
+            base_outcomes["type1"],
+            normalized_quality_history.get(code),
+        )
+
+    for metric in scored_metrics:
+        code = str(metric["code"])
+        _preliminary_outcome, preliminary_ledger = preliminary_type7_by_code[code]
+        as_of = str(metric.get("source_trade_date") or "")
+        if preliminary_ledger.get("research_request_needed") is True and re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of
+        ):
+            research_request_by_code[code] = {"code": code, "as_of": as_of}
+
+    research_requests = [research_request_by_code[code] for code in sorted(research_request_by_code)]
+    if research_report_loader is not None and research_requests:
+        loaded = research_report_loader(research_requests, progress_cb=research_report_progress_cb)
+        if not isinstance(loaded, Mapping):
+            raise TypeError("优质股权研报元数据加载器必须返回代码映射")
+        normalized_loaded = _canonicalize_mapping(loaded, "优质股权研报元数据加载结果")
+        requested_codes = {request["code"] for request in research_requests}
+        unexpected = sorted(set(normalized_loaded) - requested_codes)
+        if unexpected:
+            raise ValueError(f"优质股权研报元数据加载结果包含未请求代码:{unexpected[:5]}")
+        missing = sorted(requested_codes - set(normalized_loaded))
+        if missing:
+            raise ValueError(f"优质股权研报元数据加载结果遗漏请求代码:{missing[:5]}")
+        for code, evidence in normalized_loaded.items():
+            metric = metric_by_code[code]
+            as_of = str(metric.get("source_trade_date") or "")
+            sources, content_verification = _type7_research_sources_from_evidence(
+                evidence,
+                code=code,
+                as_of=as_of,
+            )
+            metric["type7_research_sources"] = sources
+            metric["type7_research_content_verification"] = content_verification
+            normalized_research_reports[code] = evidence
+            base_outcomes = base_outcomes_by_code[code]
+            preliminary_type7_by_code[code] = score_type7_quality_equity(
+                metric,
+                base_outcomes["type1"],
+                normalized_quality_history.get(code),
+            )
 
     def score_one(m: Mapping[str, Any]) -> dict[str, Any]:
         code = str(m["code"])
         outcomes = dict(base_outcomes_by_code[code])
-        type7_outcome, type7_ledger = score_type7_quality_equity(
-            m,
-            outcomes["type1"],
-            normalized_quality_history.get(code),
-        )
+        type7_outcome, type7_ledger = preliminary_type7_by_code[code]
         outcomes["type7"] = type7_outcome
         market_block = _market_trigger_block_reason(m)
         if market_block:

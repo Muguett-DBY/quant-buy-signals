@@ -114,10 +114,28 @@ _ANALYSIS_GENERATION_STATE_KEYS = (
     "buy_types_dcf_audit_csv",
     "buy_types_analysis_json",
     "buy_types_generation_identity",
+    "buy_types_cache_restore_notice",
 )
 
-_PERSISTED_ANALYSIS_STATE_KEYS = tuple(key for key in _ANALYSIS_GENERATION_STATE_KEYS if key != "leaders_df")
-_ANALYSIS_CACHE_SCHEMA_VERSION = 1
+# These three are presentation exports, not analysis inputs.  The complete
+# JSON export alone can exceed 250MB because it duplicates the full nested
+# evidence tree already held by the score frame and DCF result mapping.  It
+# must never be persisted as part of the start-up cache: the safe cache has a
+# deliberately bounded decompression budget and an oversized export used to
+# make an otherwise valid generation impossible to restore.
+_PERSISTED_ANALYSIS_EXCLUDED_KEYS = {
+    "leaders_df",
+    "buy_types_dcf_audit_frame",
+    "buy_types_dcf_audit_csv",
+    "buy_types_analysis_json",
+    "buy_types_cache_restore_notice",
+}
+_PERSISTED_ANALYSIS_STATE_KEYS = tuple(
+    key for key in _ANALYSIS_GENERATION_STATE_KEYS if key not in _PERSISTED_ANALYSIS_EXCLUDED_KEYS
+)
+_ANALYSIS_CACHE_SCHEMA_VERSION = 2
+_MAX_ANALYSIS_CACHE_ARTIFACT_BYTES = 64 * 1024 * 1024
+_MAX_ANALYSIS_CACHE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 
 
 def _fmt_score(v):
@@ -195,21 +213,38 @@ def _filter_type_selection(
     active_types: list[str],
     *,
     include_no_signal: bool,
+    include_conditional: bool = False,
 ) -> pd.DataFrame:
-    """Keep selected triggers plus truly signal-free rows when requested.
+    """Keep selected triggers and explicitly requested non-buy candidates.
 
     A company triggered only by a deselected framework must not reappear merely
-    because ``include_no_signal`` is enabled.
+    because ``include_no_signal`` is enabled.  A conditional candidate (for
+    example, Type6 without a confirmed position size) remains separate from a
+    buy signal even when it is displayed.
     """
     active = set(active_types)
 
-    def keep(value) -> bool:
+    def keep(row: pd.Series) -> bool:
+        value = row.get("buy_types", [])
         triggered = set(value) if isinstance(value, (list, tuple, set)) else set()
-        return bool(triggered & active) or (include_no_signal and not triggered)
+        conditional = {
+            type_key
+            for type_key in active
+            if isinstance(row.get(type_key), Mapping) and _type_status(row[type_key]) == "conditional"
+        }
+        has_conditional = any(
+            isinstance(row.get(type_key), Mapping) and _type_status(row[type_key]) == "conditional"
+            for type_key in TYPE_ORDER
+        )
+        return (
+            bool(triggered & active)
+            or (include_conditional and bool(conditional))
+            or (include_no_signal and not triggered and not has_conditional)
+        )
 
     if "buy_types" not in frame:
         return frame.copy() if include_no_signal else frame.iloc[0:0].copy()
-    return frame[frame["buy_types"].apply(keep)].copy()
+    return frame[frame.apply(keep, axis=1)].copy()
 
 
 def _current_analysis_generation_identity() -> dict[str, object]:
@@ -275,6 +310,7 @@ def _save_persistent_analysis_state(state: Mapping[str, object]) -> str:
         _persistent_analysis_cache_path(),
         schema_version=_ANALYSIS_CACHE_SCHEMA_VERSION,
         ttl=MAX_STALE_AGE_SECONDS,
+        max_uncompressed_bytes=_MAX_ANALYSIS_CACHE_UNCOMPRESSED_BYTES,
     )
     cache.save(payload)
     return "saved"
@@ -295,10 +331,16 @@ def _restore_persistent_analysis_state() -> tuple[bool, str]:
     if not DEFAULT_SNAPSHOT_PATH.is_file():
         return False, "snapshot_not_found"
     path = _persistent_analysis_cache_path()
+    try:
+        if path.is_file() and path.stat().st_size > _MAX_ANALYSIS_CACHE_ARTIFACT_BYTES:
+            return False, "artifact_size_limit_exceeded"
+    except OSError as exc:
+        return False, f"artifact_stat_error:{type(exc).__name__}"
     cache = SafeFileCache(
         path,
         schema_version=_ANALYSIS_CACHE_SCHEMA_VERSION,
         ttl=MAX_STALE_AGE_SECONDS,
+        max_uncompressed_bytes=_MAX_ANALYSIS_CACHE_UNCOMPRESSED_BYTES,
     )
     loaded = cache.load()
     if not loaded.hit or not isinstance(loaded.value, Mapping):
@@ -346,11 +388,8 @@ def _restore_persistent_analysis_state() -> tuple[bool, str]:
         return False, "stale_data_timestamp"
 
     frame = state.get("buy_types_df")
-    audit_frame = state.get("buy_types_dcf_audit_frame")
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return False, "invalid_score_frame"
-    if not isinstance(audit_frame, pd.DataFrame) or len(audit_frame) != len(frame):
-        return False, "invalid_audit_frame"
     codes = frame["code"].map(_normalise_code) if "code" in frame else pd.Series(dtype=object)
     if len(codes) != len(frame) or codes.eq("").any() or codes.duplicated().any():
         return False, "invalid_score_identities"
@@ -360,16 +399,25 @@ def _restore_persistent_analysis_state() -> tuple[bool, str]:
     invariant_errors = validate_screening_result(frame)
     if invariant_errors:
         return False, f"screening_invariant:{invariant_errors[0]}"
-    if not isinstance(state.get("buy_types_dcf_audit_csv"), bytes) or not isinstance(
-        state.get("buy_types_analysis_json"), bytes
-    ):
-        return False, "invalid_export_artifacts"
-
     restored = dict(state)
     restored["leaders_df"] = frame
-    warning = str(restored.get("buy_types_snapshot_warning") or "").strip()
-    cache_notice = "已从与当前快照和规则严格绑定的上次成功分析缓存恢复。"
-    restored["buy_types_snapshot_warning"] = f"{warning} {cache_notice}".strip()
+    dcf_results = restored.get("buy_types_dcf_results")
+    skip_reasons = restored.get("buy_types_dcf_skip_reasons")
+    skip_classifications = restored.get("buy_types_dcf_skip_classifications")
+    audit_frame = pd.DataFrame(
+        _dcf_audit_rows(
+            frame,
+            dcf_results if isinstance(dcf_results, Mapping) else {},
+            skip_reasons if isinstance(skip_reasons, Mapping) else {},
+            skip_classifications=skip_classifications if isinstance(skip_classifications, Mapping) else {},
+        )
+    )
+    restored["buy_types_dcf_audit_frame"] = audit_frame
+    restored["buy_types_dcf_audit_csv"] = _spreadsheet_safe_csv(audit_frame)
+    # Build the complete JSON only after the user explicitly requests a
+    # download.  It is intentionally absent after a cache restore too.
+    restored["buy_types_analysis_json"] = None
+    restored["buy_types_cache_restore_notice"] = "已从与当前快照和规则严格绑定的上次成功分析缓存恢复。"
     st.session_state.update(restored)
     return True, "hit"
 
@@ -400,6 +448,7 @@ def _reset_buy_type_filters() -> None:
     defaults: dict[str, object] = {
         **{f"cb_{type_key}": True for type_key in TYPE_ORDER},
         "include_no_signal": False,
+        "include_conditional": False,
         "selected_industries": [],
         "score_min": 0.0,
         "score_max": 10.0,
@@ -542,7 +591,11 @@ def _merge_user_evidence(
     as_of: str | None = None,
 ) -> tuple[dict[str, dict], dict[str, dict]]:
     """Validate and overlay traceable qualitative evidence without mutating snapshot data."""
-    from engine.buy_screener import QUALITATIVE_SCORE_KEYS, _normalise_score_evidence
+    from engine.buy_screener import (
+        QUALITATIVE_SCORE_KEYS,
+        _normalise_score_evidence,
+        _normalise_structured_growth_evidence,
+    )
     from engine.quality_equity import normalise_research_sources
 
     canonical: dict[str, dict] = {}
@@ -563,7 +616,15 @@ def _merge_user_evidence(
         raise ValueError("外部证据 JSON 顶层必须是股票代码到证据对象的映射")
     allowed = set(QUALITATIVE_SCORE_KEYS)
     allowed.update(f"{key}_evidence" for key in QUALITATIVE_SCORE_KEYS)
-    allowed.update({"position_size_pct", "type6_portfolio_pct", "type7_research_sources"})
+    allowed.update(
+        {
+            "position_size_pct",
+            "type6_portfolio_pct",
+            "type7_research_sources",
+            "external_growth_evidence",
+            "segment_growth_sources",
+        }
+    )
     normalised: dict[str, dict] = {}
     for raw_code, raw_entry in payload.items():
         code = _normalise_code(raw_code)
@@ -585,13 +646,53 @@ def _merge_user_evidence(
                 continue
             if not score_present or not evidence_present:
                 raise ValueError(f"{code} 的 {key} 必须同时提供分数和证据元数据")
-            score, evidence = _normalise_score_evidence(raw_entry, key)
+            raw_evidence = raw_entry.get(evidence_key)
+            raw_as_of = raw_evidence.get("as_of") if isinstance(raw_evidence, Mapping) else None
+            try:
+                raw_evidence_date = date.fromisoformat(raw_as_of) if isinstance(raw_as_of, str) else None
+            except ValueError:
+                raw_evidence_date = None
+            if raw_evidence_date is not None and raw_evidence_date > evidence_cutoff:
+                raise ValueError(f"{code} 的 {key} 证据晚于行情快照日 {evidence_cutoff.isoformat()}")
+            score, evidence = _normalise_score_evidence(
+                raw_entry,
+                key,
+                expected_code=code,
+                reference_date=evidence_cutoff,
+            )
             if score is None or evidence is None:
-                raise ValueError(f"{code} 的 {key} 无效；分数须为0-10，证据须含source/evidence_id/非未来ISO日期as_of")
+                raise ValueError(
+                    f"{code} 的 {key} 无效；分数须为0-10，证据须含来源、绑定该股票代码的资料编号和不晚于行情日的日期"
+                )
             if date.fromisoformat(evidence["as_of"]) > evidence_cutoff:
                 raise ValueError(f"{code} 的 {key} 证据晚于行情快照日 {evidence_cutoff.isoformat()}")
             clean[key] = score
             clean[evidence_key] = evidence
+        structured_evidence = (
+            (
+                "external_growth_evidence",
+                "完整并购与商誉来源",
+                ("records", "transactions", "acquisitions", "goodwill_records"),
+            ),
+            (
+                "segment_growth_sources",
+                "分产品或分地区收入增长来源",
+                ("segments", "records"),
+            ),
+        )
+        for key, missing_label, content_keys in structured_evidence:
+            if key not in raw_entry:
+                continue
+            value = _normalise_structured_growth_evidence(
+                raw_entry.get(key),
+                expected_code=code,
+                reference_date=evidence_cutoff,
+                missing_label=missing_label,
+                content_keys=content_keys,
+            )
+            if value.get("status") != "complete":
+                raise ValueError(f"{code} 的 {key} 未通过证券代码、日期、来源和明细完整性校验")
+            clean[key] = value
         for key in ("position_size_pct", "type6_portfolio_pct"):
             if key not in raw_entry:
                 continue
@@ -603,6 +704,7 @@ def _merge_user_evidence(
             sources = normalise_research_sources(
                 raw_entry.get("type7_research_sources"),
                 today=evidence_cutoff,
+                security_code=code,
             )
             if not sources:
                 raise ValueError(f"{code} 的 type7_research_sources 不能为空")
@@ -785,10 +887,9 @@ def _build_successful_analysis_state(
         ],
         "buy_types_generation_identity": _current_analysis_generation_identity(),
     }
-    # Streamlit executes closed expander bodies on every rerun.  Building the
-    # ~5k-row audit table and the complete JSON download there made every
-    # checkbox, slider and table selection repeatedly serialize tens of MB.
-    # Freeze all export artefacts once with the successful generation instead.
+    # Streamlit executes closed expander bodies on every rerun.  Build the
+    # compact valuation audit once, but defer the much larger JSON export
+    # until the user explicitly asks for a download.
     audit_frame = pd.DataFrame(
         _dcf_audit_rows(
             scores,
@@ -799,7 +900,7 @@ def _build_successful_analysis_state(
     )
     state["buy_types_dcf_audit_frame"] = audit_frame
     state["buy_types_dcf_audit_csv"] = _spreadsheet_safe_csv(audit_frame)
-    state["buy_types_analysis_json"] = _analysis_export_json(scores, context=state)
+    state["buy_types_analysis_json"] = None
     return state
 
 
@@ -981,6 +1082,54 @@ def _render_global_status(frame: pd.DataFrame) -> None:
         st.caption(f"行情获取时间: {retrieved_text}（距今 {_format_snapshot_age(retrieved)}）")
     st.caption("行情价格已与源交易日期和时刻成对校验；停牌标的仅保留昨收展示，不进入买入分析。")
 
+    coverage_rows = []
+    for type_key in TYPE_ORDER:
+        statuses = Counter()
+        if type_key in frame:
+            for payload in frame[type_key]:
+                if isinstance(payload, Mapping):
+                    statuses[str(payload.get("status") or "invalid")] += 1
+                else:
+                    statuses["invalid"] += 1
+        coverage_rows.append(
+            {
+                "买入情况": TYPE_NAMES[type_key],
+                "已触发": statuses["triggered"],
+                "待仓位/动作确认": statuses["conditional"],
+                "观察": statuses["observe"],
+                "待补证据": statuses["insufficient_evidence"],
+                "已否决": statuses["vetoed"],
+                "不适用": statuses["not_applicable"],
+            }
+        )
+    with st.expander("七类覆盖与待补资料", expanded=False):
+        st.caption(
+            "“待补证据”不是公司不合格；表示当前自动数据不能证明该类规则。"
+            "“待仓位/动作确认”表示公司条件已达标，但下单前仍须完成该类型的风控约束。"
+        )
+        st.dataframe(pd.DataFrame(coverage_rows), width="stretch", hide_index=True)
+        coverage_by_type = {row["买入情况"]: row for row in coverage_rows}
+        type3 = coverage_by_type.get(TYPE_NAMES["type3"], {})
+        type6 = coverage_by_type.get(TYPE_NAMES["type6"], {})
+        type7 = coverage_by_type.get(TYPE_NAMES["type7"], {})
+        explanations: list[str] = []
+        if not type3.get("已触发") and type3.get("待补证据"):
+            explanations.append(
+                "情况三会对仍有可能达标的公司自动读取连续五年的营业收入、商誉和并购现金流汇总代理，"
+                "并读取最多十年的分产品或分地区收入历史。五年只是并购与商誉的评估窗口，不代表公司只有五年历史；"
+                "若仍显示“待补证据”，说明源报表缺关键字段、年份不连续或业务分类无法可靠衔接，程序不会把空值当成0。"
+            )
+        if not type6.get("已触发") and type6.get("待仓位/动作确认"):
+            explanations.append(
+                "情况六的待确认候选需要填写单只仓位和同类组合占比后，才能判断是否可执行；未填写不会被算作买入。"
+            )
+        if not type7.get("已触发") and type7.get("待补证据"):
+            explanations.append(
+                "情况七要求三份独立外部研究资料、五年估值历史和三套账本同时达标；任一缺失都会保留为“待补证据”。"
+            )
+        if explanations:
+            st.info("\n\n".join(explanations))
+
     if isinstance(validation, Mapping):
         current_period = validation.get("expected_interim_report_date")
         comparative_period = validation.get("previous_interim_report_date")
@@ -1050,6 +1199,9 @@ def _render_global_status(frame: pd.DataFrame) -> None:
     snapshot_warning = st.session_state.get("buy_types_snapshot_warning", "")
     if snapshot_warning:
         st.warning(f"本次数据刷新失败，当前展示上一份通过校验的完整快照。原因：{snapshot_warning}")
+    cache_restore_notice = st.session_state.get("buy_types_cache_restore_notice", "")
+    if cache_restore_notice:
+        st.info(cache_restore_notice)
     refresh_error = st.session_state.get("buy_types_refresh_error", "")
     if refresh_error:
         st.error(f"本次分析未替换上一版结果。原因：{refresh_error}")
@@ -1290,15 +1442,24 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
                 "text/csv",
                 key="download_dcf_audit_csv",
             )
-        st.download_button(
-            "下载完整分析资料（JSON）",
-            st.session_state.get("buy_types_analysis_json")
-            if isinstance(st.session_state.get("buy_types_analysis_json"), bytes)
-            else _analysis_export_json(frame),
-            "ds_dcf_analysis.json",
-            "application/json",
-            key="download_full_analysis_json",
-        )
+        analysis_json = st.session_state.get("buy_types_analysis_json")
+        if not isinstance(analysis_json, bytes):
+            st.caption("完整分析资料较大，按需生成，不会占用启动缓存。")
+            if st.button("准备完整分析资料（JSON）", key="prepare_full_analysis_json"):
+                with st.spinner("正在生成完整分析资料…"):
+                    st.session_state["buy_types_analysis_json"] = _analysis_export_json(
+                        frame,
+                        context=st.session_state,
+                    )
+                st.rerun()
+        else:
+            st.download_button(
+                "下载完整分析资料（JSON）",
+                analysis_json,
+                "ds_dcf_analysis.json",
+                "application/json",
+                key="download_full_analysis_json",
+            )
 
 
 def _render_stock_dcf(code: str) -> None:
@@ -1652,8 +1813,10 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     """生成候选快照，完成整条分析后才原子替换最后成功结果。"""
     from data.cache import SafeFileCache
     from data.fetcher import DataFetcher
+    from data.growth_evidence import fetch_growth_evidence_batch
     from data.market_coldness import fetch_market_coldness_snapshot
     from data.quality_history import fetch_quality_history_batch
+    from data.research_reports import fetch_research_reports_batch
     from data.snapshot import (
         DEFAULT_SNAPSHOT_PATH,
         SNAPSHOT_SCHEMA_VERSION,
@@ -1736,6 +1899,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             market_coldness_evidence = build_market_coldness_evidence(
                 coldness_snapshot,
                 as_of_session=as_of_session,
+                listed_quote_codes=tuple(snapshot.quotes["code"]),
                 diagnostics=evidence_diagnostics,
             )
         eligible_coldness = len(set(eligible_codes) & set(market_coldness_evidence))
@@ -1786,6 +1950,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             dcf_status.write(f"估值: {done}/{total}")
 
     score_status = st.status("指标提取与七类型评分中...", expanded=True)
+    growth_status = st.status("可持续高增长型所需的分部与并购资料正在预筛选...", expanded=False)
     history_status = st.status("优质股权型所需的长期资料正在预筛选...", expanded=False)
 
     def score_cb(done, total):
@@ -1795,6 +1960,10 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     def quality_history_cb(done, total):
         if done == total or done % 20 == 0:
             history_status.update(label=f"优质股权型的十年回报与五年估值资料: {done}/{total}", expanded=True)
+
+    def type3_growth_cb(done, total):
+        if done == total or done % 10 == 0:
+            growth_status.update(label=f"可持续高增长型的分部与并购资料: {done}/{total}", expanded=True)
 
     try:
         previous_quality = st.session_state.get("buy_types_analysis_quality")
@@ -1827,6 +1996,12 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             analysis_kwargs["quality_history_loader"] = fetch_quality_history_batch
         if _supports_keyword(run_market_analysis, "quality_history_progress_cb"):
             analysis_kwargs["quality_history_progress_cb"] = quality_history_cb
+        if _supports_keyword(run_market_analysis, "type3_growth_loader"):
+            analysis_kwargs["type3_growth_loader"] = fetch_growth_evidence_batch
+        if _supports_keyword(run_market_analysis, "type3_growth_progress_cb"):
+            analysis_kwargs["type3_growth_progress_cb"] = type3_growth_cb
+        if _supports_keyword(run_market_analysis, "research_report_loader"):
+            analysis_kwargs["research_report_loader"] = fetch_research_reports_batch
         analysis = run_market_analysis(
             analysis_quotes,
             analysis_financials,
@@ -1851,6 +2026,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     except Exception as exc:
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
+        growth_status.update(label="可持续高增长型的深层资料未完成", state="error")
         history_status.update(label="优质股权型的长期资料未完成", state="error")
         message = f"{type(exc).__name__}: {exc}"
         st.session_state["buy_types_refresh_error"] = message
@@ -1901,6 +2077,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     except Exception as exc:
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
+        growth_status.update(label="可持续高增长型的深层资料未完成", state="error")
         st.session_state["buy_types_refresh_error"] = f"{type(exc).__name__}: {exc}"
         return False
 
@@ -1912,6 +2089,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
         state="complete",
     )
     score_status.update(label=f"指标提取与七类型评分完成: {len(analysis.scores)} 只", state="complete")
+    growth_status.update(label="可持续高增长型的深层资料阶段完成（仅核验仍可能达标的公司）", state="complete")
     history_status.update(label="优质股权型的长期资料阶段完成（仅核验仍可能达标的公司）", state="complete")
     st.session_state.pop("buy_types_refresh_error", None)
     st.toast("✅ 分析完成，新一代数据已生效！", icon="🎉")
@@ -1945,17 +2123,17 @@ def show():
         )
         st.code(
             '{"601088":{"type5_cycle_attribute_score":8,'
-            '"type5_cycle_attribute_score_evidence":{"source":"行业协会","evidence_id":"cycle-2025",'
+            '"type5_cycle_attribute_score_evidence":{"source":"行业协会","evidence_id":"cycle:601088:20251231",'
             '"as_of":"2025-12-31","summary":"煤价与产能周期确认"},'
             '"type5_bottom_signal_score":7,"type5_bottom_signal_score_evidence":'
-            '{"source":"行业成本曲线","evidence_id":"bottom-2025","as_of":"2025-12-31",'
+            '{"source":"行业成本曲线","evidence_id":"bottom:601088:20251231","as_of":"2025-12-31",'
             '"summary":"PB分位与库存去化"},"type5_survival_score":8,'
-            '"type5_survival_score_evidence":{"source":"年报和分红公告","evidence_id":"survive-2025",'
+            '"type5_survival_score_evidence":{"source":"年报和分红公告","evidence_id":"survive:601088:20251231",'
             '"as_of":"2025-12-31","summary":"净现金与分红可持续"},'
             '"type5_upside_elasticity_score":7,"type5_upside_elasticity_score_evidence":'
-            '{"source":"供需报告","evidence_id":"upside-2025","as_of":"2025-12-31",'
+            '{"source":"供需报告","evidence_id":"upside:601088:20251231","as_of":"2025-12-31",'
             '"summary":"供需缺口和产能释放"},"type5_normalized_earnings_score":7,'
-            '"type5_normalized_earnings_score_evidence":{"source":"历年财报","evidence_id":"norm-2025",'
+            '"type5_normalized_earnings_score_evidence":{"source":"历年财报","evidence_id":"norm:601088:20251231",'
             '"as_of":"2025-12-31","summary":"十年均利PE低于中位"}}}',
             language="json",
         )
@@ -2038,6 +2216,12 @@ def show():
             key="include_no_signal",
             help="关闭时，只展示至少命中一个已勾选买入类型的股票。",
         )
+        include_conditional = st.checkbox(
+            "包含待确认候选",
+            value=False,
+            key="include_conditional",
+            help="仅展示尚缺仓位或操作确认的候选；它们不是买入信号。",
+        )
 
         st.divider()
         st.subheader("行业")
@@ -2108,7 +2292,7 @@ def show():
 
         st.divider()
         st.subheader("最少命中类型数")
-        min_types = st.slider("≥", 0, 6, 0, key="min_types")
+        min_types = st.slider("≥", 0, len(TYPE_ORDER), 0, key="min_types")
 
     # ── 应用筛选 ──
     display = df.copy()
@@ -2118,6 +2302,7 @@ def show():
         display,
         active_types,
         include_no_signal=include_no_signal,
+        include_conditional=include_conditional,
     )
 
     if selected_industries:

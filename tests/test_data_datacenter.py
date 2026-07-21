@@ -130,6 +130,70 @@ def test_fetch_all_pages_requests_page_one_once_and_returns_page_order(monkeypat
     assert frame["SECURITY_CODE"].tolist() == ["000001", "000002", "000003"]
 
 
+@pytest.mark.parametrize("requested_field", ["GOODWILL", "OBTAIN_SUBSIDIARY_OTHER"])
+def test_fetch_all_pages_rejects_an_omitted_requested_financial_column(
+    monkeypatch,
+    requested_field,
+):
+    monkeypatch.setattr(
+        dc,
+        "_request_page",
+        lambda *_args, **_kwargs: dc._PageResult(
+            1,
+            1,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2025-12-31"}],
+            1,
+        ),
+    )
+
+    with pytest.raises(dc.DataFetchError, match=rf"omitted requested columns.*{requested_field}"):
+        dc._fetch_all_pages(
+            dc.RPT_DETAILED_CASHFLOW,
+            f"SECURITY_CODE,REPORT_DATE,{requested_field}",
+            "(REPORT_DATE='2025-12-31')",
+        )
+
+
+@pytest.mark.parametrize(
+    ("requested_field", "response_field"),
+    [
+        ("GOODWILL", "GOODWILL"),
+        ("OBTAIN_SUBSIDIARY_OTHER", "OBTAIN_SUBSIDIARY_OTHER"),
+        ("BOND_PAYABLE", "BONDS_PAYABLE"),
+    ],
+)
+def test_fetch_all_pages_accepts_requested_nulls_and_legal_aliases(
+    monkeypatch,
+    requested_field,
+    response_field,
+):
+    monkeypatch.setattr(
+        dc,
+        "_request_page",
+        lambda *_args, **_kwargs: dc._PageResult(
+            1,
+            1,
+            [
+                {
+                    "SECURITY_CODE": "000001",
+                    "REPORT_DATE": "2025-12-31",
+                    response_field: None,
+                }
+            ],
+            1,
+        ),
+    )
+
+    frame = dc._fetch_all_pages(
+        dc.RPT_BALANCE,
+        f"SECURITY_CODE,REPORT_DATE,{requested_field}",
+        "(REPORT_DATE='2025-12-31')",
+    )
+
+    assert response_field in frame.columns
+    assert pd.isna(frame.loc[0, response_field])
+
+
 @pytest.mark.parametrize("failure", ["missing_metadata", "empty_page", "changed_pages"])
 def test_fetch_all_pages_rejects_incomplete_snapshots(monkeypatch, failure):
     monkeypatch.setattr(dc.time, "sleep", lambda _seconds: None)
@@ -311,6 +375,78 @@ def test_history_concat_is_chronological_even_if_years_are_descending(monkeypatc
     assert frame["REPORT_DATE"].tolist() == ["2023-12-31", "2024-12-31", "2025-12-31"]
 
 
+def test_single_company_history_pushes_a_safe_code_filter_into_every_period(monkeypatch):
+    calls = []
+
+    def fake_all(report_name, columns, extra_filter, **_kwargs):
+        calls.append((report_name, columns, extra_filter))
+        year = extra_filter.split("'")[1][:4]
+        return pd.DataFrame(
+            [
+                {
+                    "SECURITY_CODE": "600519",
+                    "SECURITY_NAME_ABBR": "贵州茅台",
+                    "TOTAL_OPERATE_INCOME": float(year),
+                    "OPERATE_PROFIT": 1.0,
+                    "PARENT_NETPROFIT": 1.0,
+                    "REPORT_DATE": f"{year}-12-31",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(dc, "_fetch_all_pages", fake_all)
+
+    frame = dc.fetch_income_history([2025, 2024], codes=["600519"])
+
+    assert frame["REPORT_DATE"].tolist() == ["2024-12-31", "2025-12-31"]
+    assert all('(SECURITY_CODE in ("600519"))' in extra_filter for _, _, extra_filter in calls)
+
+
+def test_filtered_history_allows_a_legitimate_prelisting_period_without_a_row(monkeypatch):
+    def fake_all(_report_name, _columns, extra_filter, **_kwargs):
+        year = int(extra_filter.split("'")[1][:4])
+        if year == 2015:
+            return pd.DataFrame()
+        return pd.DataFrame(
+            [
+                {
+                    "SECURITY_CODE": "600519",
+                    "REPORT_DATE": f"{year}-12-31",
+                    "NETCASH_OPERATE": 1.0,
+                    "CONSTRUCT_LONG_ASSET": None,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(dc, "_fetch_all_pages", fake_all)
+
+    frame = dc.fetch_cashflow_history([2016, 2015], codes=["600519"])
+
+    assert frame["REPORT_DATE"].tolist() == ["2016-12-31"]
+
+
+@pytest.mark.parametrize("codes", [["600519;DROP"], [True], "600519"])
+def test_remote_financial_code_filter_rejects_unsafe_inputs(codes):
+    with pytest.raises(ValueError, match="security codes"):
+        dc._security_code_filter(codes)
+
+
+def test_large_code_batch_keeps_full_market_period_completeness_checks():
+    codes = tuple(f"{index:06d}" for index in range(dc._MAX_REMOTE_SECURITY_CODES + 1))
+
+    with pytest.raises(dc.DataFetchError, match="required report queries returned no rows: 2024"):
+        dc._combine_period_frames(
+            [
+                pd.DataFrame([{"SECURITY_CODE": "000001", "REPORT_DATE": "2025-12-31"}]),
+                pd.DataFrame(),
+            ],
+            ["2025", "2024"],
+            codes=codes,
+            requested_columns="SECURITY_CODE,REPORT_DATE",
+            remote_filtered=False,
+        )
+
+
 def test_main_financial_indicator_history_is_auditable_and_chronological(monkeypatch):
     calls = []
 
@@ -380,6 +516,32 @@ def test_annual_financial_refresh_starts_all_four_datasets_in_one_bounded_batch(
     assert started == {"income", "cashflow", "balance", "indicators"}
     assert [frame.loc[0, "dataset"] for frame in frames] == ["income", "cashflow", "balance", "indicators"]
     assert dc._DATACENTER_BATCH_WORKERS * dc._DATACENTER_WORKERS <= dc.CONCURRENCY
+
+
+def test_filtered_annual_refresh_forwards_codes_to_all_four_datasets(monkeypatch):
+    seen = []
+
+    def fake_fetch(label):
+        def fetch(*, codes):
+            seen.append((label, tuple(codes)))
+            return pd.DataFrame([{"dataset": label}])
+
+        return fetch
+
+    monkeypatch.setattr(dc, "fetch_income_history", fake_fetch("income"))
+    monkeypatch.setattr(dc, "fetch_cashflow_history", fake_fetch("cashflow"))
+    monkeypatch.setattr(dc, "fetch_balance_history", fake_fetch("balance"))
+    monkeypatch.setattr(dc, "fetch_main_financial_indicator_history", fake_fetch("indicators"))
+
+    frames = dc.fetch_all_financials_parallel(codes=["600519"])
+
+    assert sorted(seen) == [
+        ("balance", ("600519",)),
+        ("cashflow", ("600519",)),
+        ("income", ("600519",)),
+        ("indicators", ("600519",)),
+    ]
+    assert [frame.loc[0, "dataset"] for frame in frames] == ["income", "cashflow", "balance", "indicators"]
 
 
 def test_annual_financial_refresh_never_returns_a_partial_batch(monkeypatch):
@@ -537,10 +699,10 @@ def test_default_annual_histories_cover_ten_complete_years(monkeypatch, fetch):
 def test_default_balance_history_covers_ten_complete_years_for_every_org_type(monkeypatch):
     calls = []
 
-    def fake_all(report_name, _columns, extra_filter, **_kwargs):
+    def fake_all(report_name, columns, extra_filter, **_kwargs):
         year = int(extra_filter.split("'")[1][:4])
         report_index = list(dc._BALANCE_REPORT_COLUMNS).index(report_name)
-        calls.append((report_name, year))
+        calls.append((report_name, year, columns))
         return pd.DataFrame(
             [
                 {
@@ -566,11 +728,72 @@ def test_default_balance_history_covers_ten_complete_years_for_every_org_type(mo
         dc.RPT_BALANCE_SECURITIES,
     }
     assert len(calls) == dc.ANNUAL_HISTORY_YEARS * len(expected_reports)
+    assert all("GOODWILL" in columns.split(",") for _report, _year, columns in calls)
     for year in range(2016, 2026):
-        assert {report for report, called_year in calls if called_year == year} == expected_reports
+        assert {report for report, called_year, _columns in calls if called_year == year} == expected_reports
     assert sorted(frame["REPORT_DATE"].astype(str).str[:10].unique().tolist()) == [
         f"{year}-12-31" for year in range(2016, 2026)
     ]
+
+
+def test_single_company_balance_stops_after_the_matching_report_type(monkeypatch):
+    calls = []
+
+    def fake_all(report_name, _columns, extra_filter, **_kwargs):
+        calls.append((report_name, extra_filter))
+        assert report_name == dc.RPT_BALANCE
+        year = extra_filter.split("'")[1][:4]
+        return pd.DataFrame(
+            [
+                {
+                    "SECURITY_CODE": "600519",
+                    "REPORT_DATE": f"{year}-12-31",
+                    "TOTAL_ASSETS": 100.0,
+                    "TOTAL_LIABILITIES": 10.0,
+                    "TOTAL_EQUITY": 90.0,
+                    "TOTAL_PARENT_EQUITY": 90.0,
+                    "GOODWILL": None,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(dc, "_fetch_all_pages", fake_all)
+
+    frame = dc.fetch_balance_history([2025, 2024], codes=["600519"])
+
+    assert [report for report, _ in calls] == [dc.RPT_BALANCE, dc.RPT_BALANCE]
+    assert all('(SECURITY_CODE in ("600519"))' in filter_text for _, filter_text in calls)
+    assert frame["REPORT_DATE"].tolist() == ["2024-12-31", "2025-12-31"]
+
+
+def test_single_company_balance_probes_until_its_matching_report_type(monkeypatch):
+    calls = []
+
+    def fake_all(report_name, _columns, extra_filter, **_kwargs):
+        calls.append(report_name)
+        if report_name == dc.RPT_BALANCE:
+            raise dc.DataFetchError("code does not belong to general-company report")
+        assert report_name == dc.RPT_BALANCE_BANK
+        return pd.DataFrame(
+            [
+                {
+                    "SECURITY_CODE": "000001",
+                    "REPORT_DATE": "2025-12-31",
+                    "TOTAL_ASSETS": 100.0,
+                    "TOTAL_LIABILITIES": 10.0,
+                    "TOTAL_EQUITY": 90.0,
+                    "TOTAL_PARENT_EQUITY": 90.0,
+                    "GOODWILL": None,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(dc, "_fetch_all_pages", fake_all)
+
+    frame = dc.fetch_balance_history([2025], codes=["000001"])
+
+    assert calls == [dc.RPT_BALANCE, dc.RPT_BALANCE_BANK]
+    assert frame["SECURITY_CODE"].tolist() == ["000001"]
 
 
 @pytest.mark.parametrize(

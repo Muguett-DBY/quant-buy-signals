@@ -21,7 +21,7 @@ from engine.audit import (
     render_audit_markdown,
     write_audit_artifacts,
 )
-from engine.buy_screener import TYPE_NAMES, TYPE_WEIGHTS, screen_all_types
+from engine.buy_screener import TYPE_NAMES, TYPE_WEIGHTS, _build_bear_case, screen_all_types
 from engine.dcf import ReportingPeriodContract
 from engine.pipeline import PipelineIssue, run_market_analysis, validate_market_analysis_quality
 
@@ -77,11 +77,14 @@ def test_independent_audit_accepts_committed_exchange_filed_zero_capex_evidence(
     )
 
     assert value == 0.0
-    assert _audit_validate_capex_provenance(
-        provenance,
-        expected_value=value,
-        expected_report_date=report_date,
-    ) == "complete"
+    assert (
+        _audit_validate_capex_provenance(
+            provenance,
+            expected_value=value,
+            expected_report_date=report_date,
+        )
+        == "complete"
+    )
 
 
 def _market(count: int = 5):
@@ -550,6 +553,15 @@ def _forced_type2_row(row, score, *, triggered):
         changed["max_score"] = float(score)
         changed["bear_case"] = _audit_bear_case("type2", payload)
     return changed
+
+
+def test_independent_bear_case_rounds_subscores_like_production():
+    payload = {
+        "sub_scores": {"7a": 5.005, "7b": 5.004, "7c": 5.006},
+        "reasons": {"7a": "甲", "7b": "乙", "7c": "丙"},
+    }
+
+    assert _audit_bear_case("type7", payload) == _build_bear_case("type7", payload)
 
 
 def test_independent_audit_rejects_both_low_score_false_positive_and_qualifying_false_negative():

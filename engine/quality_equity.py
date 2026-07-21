@@ -18,12 +18,24 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-MODEL_ID = "patch6-type7-quality-equity-v1"
-SCHEMA_VERSION = 1
+MODEL_ID = "patch6-type7-quality-equity-v4"
+SCHEMA_VERSION = 4
 STRICT_THRESHOLD = 70.0
 PATCH5_SAFETY_VETO = 8.0
 MIN_CORE_COVERAGE = 0.80
 MIN_RESEARCH_SOURCES = 3
+RESEARCH_MAX_AGE_DAYS = 365
+RESEARCH_RECENT_AGE_DAYS = 183
+RESEARCH_EVIDENCE_MODEL_ID = "type7-research-report-content-v4"
+RESEARCH_CONTENT_MODEL_ID = "type7-report-body-crosscheck-v2"
+MIN_RESEARCH_BODY_SOURCES = 3
+MIN_CROSSCHECK_REPORTS = 2
+MIN_RESEARCH_BODY_CHARACTERS = 200
+MAX_RESEARCH_BODY_CHARACTERS = 100_000
+MAX_RESEARCH_BODY_FETCHES = 6
+RESEARCH_FACT_RELATIVE_TOLERANCE = 0.02
+MAX_RESEARCH_FACTS_PER_BODY = 32
+MAX_RESEARCH_FACT_ABS_VALUE = 1_000_000_000.0
 EXPECTED_RETURN_HORIZON_YEARS = 5
 TERMINAL_PROFIT_HORIZON_YEARS = 10
 TERMINAL_GROWTH_RATE = 0.03
@@ -50,12 +62,121 @@ _PATCH5_COMPONENT_WEIGHTS = {
     "p5_industry": {"p5_i1": 8.0, "p5_i2": 6.0, "p5_i3": 6.0},
     "p5_safety": {"p5_s1": 8.0, "p5_s2": 6.0, "p5_s3": 6.0},
 }
+_TEMPLATE1_ITEM_CONTRACTS = {
+    "t1_01": ("未来生命周期", "mean(runway,industry_durability)", ({"runway", "industry"},)),
+    "t1_02": (
+        "成长潜力",
+        "mean(growth_sustainability,runway,revenue_growth)",
+        ({"growth_sustainability", "runway", "revenue_growth"},),
+    ),
+    "t1_03": ("主营收入增长", "piecewise_linear(revenue_CAGR)", ({"rate"},)),
+    "t1_04": ("扣非利润与FCF增长", "mean(profit_CAGR_score,FCF_CAGR_score)", ({"profit_cagr", "fcf_cagr"},)),
+    "t1_05": ("商业模式", "business", ({"score"},)),
+    "t1_06": ("财务健康", "mean(accounting,balance,ROIC_spread)", ({"accounting", "balance", "roic"},)),
+    "t1_07": ("细分产业环境", "industry", ({"score"},)),
+    "t1_08": ("股东权益公平", "shareholder", ({"dilution"},)),
+    "t1_09": ("长期竞争优势", "mean(moat,moat_durability)", ({"moat", "durability"},)),
+    "t1_10": ("文化与员工满意", "culture", ({"management_proxy"},)),
+    "t1_11": ("成本控制", "mean(margin_stability,accounting)", ({"margin", "accounting"},)),
+    "t1_12": ("资产劳动资金强度", "asset_light", ({"asset_turnover", "capex_intensity"},)),
+    "t1_13": ("弱周期属性", "cyclicality", ({"profit_volatility", "growth_consistency"},)),
+    "t1_14": ("垄断性与竞争地位", "mean(moat,industry_structure)", ({"moat", "industry"},)),
+    "t1_15": (
+        "长期财富积累",
+        "mean(moat_durability,growth_sustainability,ROIC_spread)",
+        ({"moat_durability", "growth_sustainability", "roic"},),
+    ),
+    "t1_16": ("奢侈品属性", "luxury", ({"gross_margin", "proxy_cap"},)),
+    "t1_17": ("顶级科技与创新", "technology", ({"score"},)),
+    "t1_18": (
+        "长期预期回报",
+        "expected_return",
+        (
+            {"earnings_growth_rate", "book_value_growth_rate"},
+            {
+                "earnings_growth_rate",
+                "book_value_growth_rate",
+                "horizon_years",
+                "annual_return",
+                "valuation_inputs",
+                "formula",
+            },
+        ),
+    ),
+    "t1_19": (
+        "十年回报与远期利润",
+        "mean(hfq_10y_CAGR_score,market_cap/projected_year10_profit_score)",
+        ({"shareholder_return", "terminal_profit_projection"},),
+    ),
+    "t1_20": ("DCF价格位置", "dcf", ({"type1_1a"},)),
+}
+_TEMPLATE5_ITEM_LABELS = {
+    "t5_i1": "产业大周期",
+    "t5_i2": "产业小周期",
+    "t5_i3": "产业空间与格局",
+    "t5_q1": "商业模式",
+    "t5_q2": "长期护城河",
+    "t5_q3": "治理与股东文化",
+    "t5_q4": "财务健康",
+    "t5_v1": "历史估值分位",
+    "t5_v2": "绝对DCF估值",
+    "t5_v3": "预期回报率",
+}
+_TEMPLATE_EVIDENCE_LEVELS = {
+    "partial",
+    "primary",
+    "derived_proxy",
+    "derived_proxy_capped",
+    "reported_formula",
+    "validated_type1",
+    "historical_valuation_reversion_formula",
+    "independent_market_history",
+    "independent_market_history_plus_fading_growth_projection",
+}
+_PATCH5_SECTION_LABELS = {
+    "p5_business": "商业模式",
+    "p5_moat": "护城河",
+    "p5_culture": "公司文化",
+    "p5_industry": "产业兴衰",
+    "p5_safety": "安全边际",
+}
+_PATCH5_COMPONENT_LABELS = {
+    "p5_b1": "清晰度",
+    "p5_b2": "可扩展性",
+    "p5_b3": "黏性复购",
+    "p5_b4": "资本效率",
+    "p5_m1": "护城河强度",
+    "p5_m2": "定价权",
+    "p5_m3": "进入壁垒",
+    "p5_c1": "管理诚信",
+    "p5_c2": "激励一致",
+    "p5_c3": "创新适应",
+    "p5_c4": "治理透明",
+    "p5_i1": "生命周期",
+    "p5_i2": "竞争格局",
+    "p5_i3": "外部环境",
+    "p5_s1": "估值水平",
+    "p5_s2": "财务稳健",
+    "p5_s3": "下行保护",
+}
+_PATCH5_SOURCE_INPUT_COMPONENTS = {
+    "p5_b1",
+    "p5_b3",
+    "p5_m2",
+    "p5_m3",
+    "p5_c3",
+    "p5_c4",
+    "p5_i3",
+    "p5_s3",
+}
+_PATCH5_SOURCE_LEVELS = {"missing", "primary", "derived_proxy"}
 _PREREQUISITE_KEYS = {
     "core_modules_80pct",
     "technology_patch4",
     "three_year_financials",
     "latest_quote_and_valuation",
     "three_external_reports",
+    "external_report_content_verification",
     "ten_year_return_and_five_year_valuation",
 }
 
@@ -74,10 +195,63 @@ TYPE7_DIRECT_SCORE_KEYS = (
     "downside_protection_score",
 )
 
-RESEARCH_SOURCE_FIELDS = {"title", "publisher", "url", "as_of", "evidence_id"}
+RESEARCH_SOURCE_FIELDS = {
+    "security_code",
+    "company_name",
+    "title",
+    "publisher",
+    "publisher_id",
+    "url",
+    "as_of",
+    "evidence_id",
+}
+RESEARCH_CONTENT_BODY_FIELDS = {
+    "evidence_id",
+    "content_sha256",
+    "content_length",
+    "paragraph_count",
+    "structure_signals",
+    "fact_count",
+    "facts",
+    "identity_checks",
+}
+RESEARCH_CONTENT_FACT_FIELDS = {"fact_key", "period", "metric", "unit", "value"}
+RESEARCH_CONTENT_IDENTITY_CHECKS = {
+    "code_in_body",
+    "name_in_body",
+    "detail_code",
+    "detail_name",
+    "detail_title",
+    "detail_publisher",
+    "detail_date",
+    "dom_json_body",
+}
+RESEARCH_CONTENT_SIGNALS = {
+    "analysis",
+    "event",
+    "forecast",
+    "investment_view",
+    "risk",
+}
+RESEARCH_FACT_METRICS = {
+    "adjusted_net_profit",
+    "eps",
+    "operating_cash_flow",
+    "parent_net_profit",
+    "revenue",
+}
+RESEARCH_FACT_UNITS = {"CNY_100M", "CNY_PER_SHARE"}
+RESEARCH_FACT_UNIT_BY_METRIC = {
+    "adjusted_net_profit": "CNY_100M",
+    "eps": "CNY_PER_SHARE",
+    "operating_cash_flow": "CNY_100M",
+    "parent_net_profit": "CNY_100M",
+    "revenue": "CNY_100M",
+}
 MAX_RESEARCH_SOURCES = 20
 MAX_RESEARCH_TEXT = 300
 _HTTPS = re.compile(r"^https://", re.IGNORECASE)
+_A_SHARE_CODE = re.compile(r"^[036][0-9]{5}$")
 
 
 class QualityEquityError(ValueError):
@@ -165,7 +339,13 @@ def _verified_score(metric: Mapping[str, Any], key: str) -> tuple[float | None, 
     return float(score), True, level
 
 
-def normalise_research_sources(value: Any, *, today: date | None = None) -> list[dict[str, str]]:
+def normalise_research_sources(
+    value: Any,
+    *,
+    today: date | None = None,
+    security_code: str | None = None,
+    max_age_days: int = RESEARCH_MAX_AGE_DAYS,
+) -> list[dict[str, str]]:
     """Validate the Patch 5 three-report prerequisite without fetching prose."""
 
     if value is None:
@@ -175,9 +355,17 @@ def normalise_research_sources(value: Any, *, today: date | None = None) -> list
     if len(value) > MAX_RESEARCH_SOURCES:
         raise QualityEquityError("type7_research_sources exceeds the item limit")
     reference = today or date.today()
+    if not isinstance(reference, date):
+        raise QualityEquityError("Type 7 research reference date is invalid")
+    if isinstance(max_age_days, bool) or not isinstance(max_age_days, int) or not 0 <= max_age_days <= 3_650:
+        raise QualityEquityError("Type 7 research maximum age is invalid")
+    expected_code = None if security_code is None else str(security_code).strip()
+    if expected_code is not None and not _A_SHARE_CODE.fullmatch(expected_code):
+        raise QualityEquityError("Type 7 research expected security code is invalid")
     normalized: list[dict[str, str]] = []
     identities: set[str] = set()
     urls: set[str] = set()
+    security_codes: set[str] = set()
     for raw in value:
         if not isinstance(raw, Mapping) or set(raw) != RESEARCH_SOURCE_FIELDS:
             raise QualityEquityError("each Type 7 research source must use the exact source schema")
@@ -191,20 +379,27 @@ def normalise_research_sources(value: Any, *, today: date | None = None) -> list
             raise QualityEquityError("Type 7 research source text is empty or too long")
         parsed = urlsplit(item["url"])
         try:
-            _ = parsed.port
+            port = parsed.port
         except ValueError as exc:
             raise QualityEquityError("Type 7 research source URL contains an invalid port") from exc
         if (
             not _HTTPS.match(item["url"])
             or not parsed.hostname
+            or port not in (None, 443)
             or parsed.username is not None
             or parsed.password is not None
             or parsed.fragment
         ):
             raise QualityEquityError("Type 7 research source URL must be credential-free HTTPS")
+        if not _A_SHARE_CODE.fullmatch(item["security_code"]):
+            raise QualityEquityError("Type 7 research source security_code is invalid")
+        if expected_code is not None and item["security_code"] != expected_code:
+            raise QualityEquityError("Type 7 research source security_code does not match the company")
         as_of = _parse_evidence_date(item["as_of"])
         if as_of is None or as_of > reference:
             raise QualityEquityError("Type 7 research source as_of is invalid or in the future")
+        if (reference - as_of).days > max_age_days:
+            raise QualityEquityError("Type 7 research source is older than the permitted window")
         identity = item["evidence_id"].casefold()
         if identity in identities:
             raise QualityEquityError("Type 7 research sources contain duplicate evidence_id values")
@@ -213,9 +408,314 @@ def normalise_research_sources(value: Any, *, today: date | None = None) -> list
             raise QualityEquityError("Type 7 research sources contain duplicate report URLs")
         identities.add(identity)
         urls.add(canonical_url)
+        security_codes.add(item["security_code"])
         normalized.append(item)
-    normalized.sort(key=lambda item: (item["as_of"], item["publisher"], item["evidence_id"]))
+    if len(security_codes) > 1:
+        raise QualityEquityError("Type 7 research sources contain multiple security codes")
+    normalized.sort(key=lambda item: (item["as_of"], item["publisher_id"], item["publisher"], item["evidence_id"]))
     return normalized
+
+
+def research_metadata_precheck(
+    sources: Sequence[Mapping[str, str]],
+    *,
+    reference: date,
+) -> dict[str, int | bool]:
+    """Replay the report-metadata availability policy without claiming prose review."""
+
+    if not isinstance(reference, date):
+        raise QualityEquityError("Type 7 research reference date is invalid")
+    if isinstance(sources, (str, bytes)) or not isinstance(sources, Sequence):
+        raise QualityEquityError("Type 7 research sources must be a sequence")
+    publisher_ids: set[str] = set()
+    recent_source_count = 0
+    for source in sources:
+        if not isinstance(source, Mapping):
+            raise QualityEquityError("Type 7 research source is invalid")
+        publisher_id = source.get("publisher_id")
+        published = _parse_evidence_date(source.get("as_of"))
+        if not isinstance(publisher_id, str) or not publisher_id.strip() or published is None:
+            raise QualityEquityError("Type 7 research source metadata is invalid")
+        age_days = (reference - published).days
+        if age_days < 0 or age_days > RESEARCH_MAX_AGE_DAYS:
+            raise QualityEquityError("Type 7 research source is outside the metadata window")
+        publisher_ids.add(publisher_id.casefold())
+        if age_days <= RESEARCH_RECENT_AGE_DAYS:
+            recent_source_count += 1
+    distinct_publishers = len(publisher_ids)
+    return {
+        "passed": bool(
+            len(sources) >= MIN_RESEARCH_SOURCES
+            and distinct_publishers >= MIN_RESEARCH_SOURCES
+            and recent_source_count >= 1
+        ),
+        "source_count": len(sources),
+        "distinct_publishers": distinct_publishers,
+        "recent_source_count": recent_source_count,
+    }
+
+
+def _research_cross_check_from_bodies(bodies: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Recompute the declared consensus solely from bounded atomic facts."""
+
+    grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for body in bodies:
+        evidence_id = str(body["evidence_id"])
+        for fact in body["facts"]:
+            grouped.setdefault((fact["fact_key"], fact["unit"]), []).append((evidence_id, float(fact["value"])))
+    candidates: list[tuple[int, float, str, str, float, list[str]]] = []
+    for (fact_key, unit), observations in grouped.items():
+        ordered = sorted(observations, key=lambda item: (item[1], item[0]))
+        for left in range(len(ordered)):
+            for right in range(left + MIN_CROSSCHECK_REPORTS, len(ordered) + 1):
+                window = ordered[left:right]
+                values = [value for _, value in window]
+                center = math.fsum(values) / len(values)
+                spread = (max(values) - min(values)) / max(abs(center), 1e-12)
+                if spread <= RESEARCH_FACT_RELATIVE_TOLERANCE:
+                    candidates.append(
+                        (
+                            -len(window),
+                            spread,
+                            fact_key,
+                            unit,
+                            center,
+                            sorted(evidence_id for evidence_id, _ in window),
+                        )
+                    )
+    if not candidates:
+        return {
+            "passed": False,
+            "minimum_reports": MIN_CROSSCHECK_REPORTS,
+            "fact_key": None,
+            "fact_unit": None,
+            "consensus_value": None,
+            "supporting_evidence_ids": [],
+            "max_relative_spread": None,
+        }
+    _, spread, fact_key, unit, center, evidence_ids = min(candidates)
+    return {
+        "passed": True,
+        "minimum_reports": MIN_CROSSCHECK_REPORTS,
+        "fact_key": fact_key,
+        "fact_unit": unit,
+        "consensus_value": round(center, 6),
+        "supporting_evidence_ids": evidence_ids,
+        "max_relative_spread": round(spread, 8),
+    }
+
+
+def normalise_research_content_verification(
+    value: Any,
+    *,
+    sources: Sequence[Mapping[str, str]],
+    security_code: str,
+    as_of: str,
+) -> dict[str, Any]:
+    """Validate the bounded body-verification summary without accepting report prose."""
+
+    expected_top_level = {
+        "model_id",
+        "code",
+        "as_of",
+        "passed",
+        "required_bodies",
+        "attempted_bodies",
+        "verified_bodies",
+        "distinct_publishers",
+        "bodies",
+        "cross_check",
+        "reason",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_top_level:
+        raise QualityEquityError("Type 7 report-content verification schema is invalid")
+    if value.get("model_id") != RESEARCH_CONTENT_MODEL_ID:
+        raise QualityEquityError("Type 7 report-content verification model is invalid")
+    if value.get("code") != security_code or value.get("as_of") != as_of:
+        raise QualityEquityError("Type 7 report-content verification identity is invalid")
+    try:
+        reference = date.fromisoformat(as_of)
+    except (TypeError, ValueError) as exc:
+        raise QualityEquityError("Type 7 report-content verification date is invalid") from exc
+    if reference > date.today() or not _A_SHARE_CODE.fullmatch(security_code):
+        raise QualityEquityError("Type 7 report-content verification identity is invalid")
+    if not isinstance(value.get("passed"), bool) or value.get("required_bodies") != MIN_RESEARCH_BODY_SOURCES:
+        raise QualityEquityError("Type 7 report-content verification decision is invalid")
+    counts: dict[str, int] = {}
+    for field in ("attempted_bodies", "verified_bodies", "distinct_publishers"):
+        raw = value.get(field)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            raise QualityEquityError("Type 7 report-content verification count is invalid")
+        counts[field] = raw
+    if (
+        counts["attempted_bodies"] > MAX_RESEARCH_BODY_FETCHES
+        or counts["verified_bodies"] > counts["attempted_bodies"]
+        or counts["distinct_publishers"] > counts["verified_bodies"]
+    ):
+        raise QualityEquityError("Type 7 report-content verification count is inconsistent")
+    reason = value.get("reason")
+    if (
+        not isinstance(reason, str)
+        or len(reason) > MAX_RESEARCH_TEXT
+        or any(ord(character) < 32 for character in reason)
+    ):
+        raise QualityEquityError("Type 7 report-content verification reason is invalid")
+
+    normalized_sources = normalise_research_sources(
+        sources,
+        today=reference,
+        security_code=security_code,
+    )
+    if counts["attempted_bodies"] > len(normalized_sources):
+        raise QualityEquityError("Type 7 report-content attempt count exceeds source count")
+    source_by_id = {source["evidence_id"]: source for source in normalized_sources}
+    bodies = value.get("bodies")
+    if not isinstance(bodies, list) or len(bodies) != counts["verified_bodies"]:
+        raise QualityEquityError("Type 7 report-content body summaries are invalid")
+    normalized_bodies: list[dict[str, Any]] = []
+    body_hashes: set[str] = set()
+    body_ids: set[str] = set()
+    publisher_ids: set[str] = set()
+    for body in bodies:
+        if not isinstance(body, Mapping) or set(body) != RESEARCH_CONTENT_BODY_FIELDS:
+            raise QualityEquityError("Type 7 report-content body summary schema is invalid")
+        evidence_id = body.get("evidence_id")
+        source = source_by_id.get(evidence_id) if isinstance(evidence_id, str) else None
+        digest = body.get("content_sha256")
+        content_length = body.get("content_length")
+        paragraph_count = body.get("paragraph_count")
+        fact_count = body.get("fact_count")
+        facts = body.get("facts")
+        signals = body.get("structure_signals")
+        checks = body.get("identity_checks")
+        if (
+            source is None
+            or evidence_id in body_ids
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or digest in body_hashes
+            or isinstance(content_length, bool)
+            or not isinstance(content_length, int)
+            or not MIN_RESEARCH_BODY_CHARACTERS <= content_length <= MAX_RESEARCH_BODY_CHARACTERS
+            or isinstance(paragraph_count, bool)
+            or not isinstance(paragraph_count, int)
+            or paragraph_count < 2
+            or isinstance(fact_count, bool)
+            or not isinstance(fact_count, int)
+            or not isinstance(facts, list)
+            or fact_count != len(facts)
+            or len(facts) > MAX_RESEARCH_FACTS_PER_BODY
+            or not isinstance(signals, list)
+            or signals != sorted(set(signals))
+            or not set(signals).issubset(RESEARCH_CONTENT_SIGNALS)
+            or not signals
+            or not isinstance(checks, Mapping)
+            or set(checks) != RESEARCH_CONTENT_IDENTITY_CHECKS
+            or any(checks.get(key) is not True for key in RESEARCH_CONTENT_IDENTITY_CHECKS)
+        ):
+            raise QualityEquityError("Type 7 report-content body summary is invalid")
+        normalized_facts: list[dict[str, Any]] = []
+        fact_identities: set[tuple[str, str]] = set()
+        for fact in facts:
+            if not isinstance(fact, Mapping) or set(fact) != RESEARCH_CONTENT_FACT_FIELDS:
+                raise QualityEquityError("Type 7 report-content atomic fact schema is invalid")
+            fact_key = fact.get("fact_key")
+            period = fact.get("period")
+            metric = fact.get("metric")
+            unit = fact.get("unit")
+            raw_fact_value = fact.get("value")
+            fact_value = _finite(raw_fact_value)
+            identity = (str(fact_key), str(unit))
+            if (
+                not isinstance(fact_key, str)
+                or not isinstance(period, str)
+                or re.fullmatch(r"20[0-9]{2}Q[1-4]", period) is None
+                or not isinstance(metric, str)
+                or metric not in RESEARCH_FACT_METRICS
+                or fact_key != f"{period}:{metric}"
+                or not isinstance(unit, str)
+                or unit != RESEARCH_FACT_UNIT_BY_METRIC[metric]
+                or isinstance(raw_fact_value, bool)
+                or not isinstance(raw_fact_value, (int, float))
+                or fact_value is None
+                or abs(fact_value) > MAX_RESEARCH_FACT_ABS_VALUE
+                or fact_value != round(fact_value, 6)
+                or identity in fact_identities
+            ):
+                raise QualityEquityError("Type 7 report-content atomic fact is invalid")
+            fact_identities.add(identity)
+            normalized_facts.append(
+                {
+                    "fact_key": fact_key,
+                    "period": period,
+                    "metric": metric,
+                    "unit": unit,
+                    "value": fact_value,
+                }
+            )
+        normalized_facts.sort(key=lambda fact: (fact["fact_key"], fact["unit"]))
+        if facts != normalized_facts:
+            raise QualityEquityError("Type 7 report-content atomic facts are not canonical")
+        body_ids.add(evidence_id)
+        body_hashes.add(digest)
+        publisher_ids.add(source["publisher_id"].casefold())
+        normalized_bodies.append(
+            {
+                "evidence_id": evidence_id,
+                "content_sha256": digest,
+                "content_length": content_length,
+                "paragraph_count": paragraph_count,
+                "structure_signals": list(signals),
+                "fact_count": fact_count,
+                "facts": normalized_facts,
+                "identity_checks": dict(checks),
+            }
+        )
+    normalized_bodies.sort(key=lambda item: item["evidence_id"])
+    if bodies != normalized_bodies or counts["distinct_publishers"] != len(publisher_ids):
+        raise QualityEquityError("Type 7 report-content body summaries are not canonical")
+
+    cross_check = value.get("cross_check")
+    cross_fields = {
+        "passed",
+        "minimum_reports",
+        "fact_key",
+        "fact_unit",
+        "consensus_value",
+        "supporting_evidence_ids",
+        "max_relative_spread",
+    }
+    if (
+        not isinstance(cross_check, Mapping)
+        or set(cross_check) != cross_fields
+        or not isinstance(cross_check.get("passed"), bool)
+        or cross_check.get("minimum_reports") != MIN_CROSSCHECK_REPORTS
+    ):
+        raise QualityEquityError("Type 7 report-content cross-check schema is invalid")
+    expected_cross_check = _research_cross_check_from_bodies(normalized_bodies)
+    if dict(cross_check) != expected_cross_check:
+        raise QualityEquityError("Type 7 report-content cross-check differs from atomic facts")
+
+    expected_passed = bool(
+        counts["verified_bodies"] >= MIN_RESEARCH_BODY_SOURCES
+        and counts["distinct_publishers"] >= MIN_RESEARCH_BODY_SOURCES
+        and expected_cross_check["passed"]
+    )
+    if value["passed"] is not expected_passed or bool(reason) is expected_passed:
+        raise QualityEquityError("Type 7 report-content verification decision is inconsistent")
+    return {
+        "model_id": RESEARCH_CONTENT_MODEL_ID,
+        "code": security_code,
+        "as_of": as_of,
+        "passed": expected_passed,
+        "required_bodies": MIN_RESEARCH_BODY_SOURCES,
+        "attempted_bodies": counts["attempted_bodies"],
+        "verified_bodies": counts["verified_bodies"],
+        "distinct_publishers": counts["distinct_publishers"],
+        "bodies": normalized_bodies,
+        "cross_check": expected_cross_check,
+        "reason": reason,
+    }
 
 
 def _growth_rate(values: Any, years: Any, *, minimum: int = 3) -> float | None:
@@ -1012,6 +1512,59 @@ def _make_patch5(
     }
 
 
+def decisive_score_upper_bounds(
+    template1: Mapping[str, Any],
+    template5: Mapping[str, Any],
+    patch5: Mapping[str, Any],
+) -> dict[str, float]:
+    """Return score ceilings after replacing every incomplete item with its maximum.
+
+    Unlike ``upper_bounds_without_history``, these ceilings are evidence-agnostic:
+    every incomplete Template 1/5 item and every incomplete Patch 5 component is
+    restored to its own declared maximum.  A ceiling at or below the strict
+    threshold is therefore a conclusive failure, not an absence-of-data result.
+    """
+
+    def template_upper(section: Mapping[str, Any], label: str) -> float:
+        score = _finite(section.get("score"))
+        items = section.get("items")
+        if score is None or not isinstance(items, list):
+            raise QualityEquityError(f"{label} cannot be upper-bounded")
+        terms: list[float] = []
+        for item in items:
+            if not isinstance(item, Mapping) or not isinstance(item.get("complete"), bool):
+                raise QualityEquityError(f"{label} item cannot be upper-bounded")
+            weight = _finite(item.get("weight"))
+            points = _finite(item.get("points"))
+            if weight is None or points is None or weight < 0 or not 0 <= points <= weight:
+                raise QualityEquityError(f"{label} item points are invalid")
+            terms.append(points if item["complete"] else weight)
+        return round(min(100.0, math.fsum(terms)), 2)
+
+    patch_score = _finite(patch5.get("score"))
+    dimensions = patch5.get("dimensions")
+    if patch_score is None or not isinstance(dimensions, list):
+        raise QualityEquityError("Patch 5 cannot be upper-bounded")
+    patch_terms: list[float] = []
+    for dimension in dimensions:
+        components = dimension.get("components") if isinstance(dimension, Mapping) else None
+        if not isinstance(components, list):
+            raise QualityEquityError("Patch 5 component cannot be upper-bounded")
+        for component in components:
+            if not isinstance(component, Mapping) or not isinstance(component.get("complete"), bool):
+                raise QualityEquityError("Patch 5 component cannot be upper-bounded")
+            maximum = _finite(component.get("max_points"))
+            points = _finite(component.get("points"))
+            if maximum is None or points is None or maximum < 0 or not 0 <= points <= maximum:
+                raise QualityEquityError("Patch 5 component points are invalid")
+            patch_terms.append(points if component["complete"] else maximum)
+    return {
+        "template1": template_upper(template1, "Template 1"),
+        "template5": template_upper(template5, "Template 5"),
+        "patch5": round(min(100.0, math.fsum(patch_terms)), 2),
+    }
+
+
 def assess_quality_equity(
     metric: Mapping[str, Any],
     type1_outcome: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
@@ -1032,18 +1585,57 @@ def assess_quality_equity(
     research = normalise_research_sources(
         metric.get("type7_research_sources"),
         today=metric_as_of if quote_date_complete else date.today(),
+        security_code=code,
     )
     validated_history = _history_record(
         history_evidence,
         code,
         str(metric.get("source_trade_date") or "") or None,
     )
-    distinct_publishers = {item["publisher"].casefold() for item in research}
+    metadata_precheck = research_metadata_precheck(
+        research,
+        reference=metric_as_of if metric_as_of is not None else date.today(),
+    )
+    content_as_of = metric_as_of.isoformat() if metric_as_of is not None else "0001-01-01"
+    raw_content_verification = metric.get("type7_research_content_verification")
+    if raw_content_verification is None:
+        raw_content_verification = {
+            "model_id": RESEARCH_CONTENT_MODEL_ID,
+            "code": code,
+            "as_of": content_as_of,
+            "passed": False,
+            "required_bodies": MIN_RESEARCH_BODY_SOURCES,
+            "attempted_bodies": 0,
+            "verified_bodies": 0,
+            "distinct_publishers": 0,
+            "bodies": [],
+            "cross_check": {
+                "passed": False,
+                "minimum_reports": MIN_CROSSCHECK_REPORTS,
+                "fact_key": None,
+                "fact_unit": None,
+                "consensus_value": None,
+                "supporting_evidence_ids": [],
+                "max_relative_spread": None,
+            },
+            "reason": "report_body_verification_not_provided",
+        }
+    content_verification = normalise_research_content_verification(
+        raw_content_verification,
+        sources=research,
+        security_code=code,
+        as_of=content_as_of,
+    )
     financial_years = _consecutive_year_count(metric)
     technology_score = values["technology"][0]
     rd_intensity = _finite(metric.get("rd_intensity"))
     technology_company = bool((rd_intensity is not None and rd_intensity >= 0.05) or technology_score >= 7.0)
-    patch4_score, patch4_complete, _ = _verified_score(metric, "patch4_shareholder_culture_score")
+    # No production Patch 4 ledger/validator exists yet.  A naked 0-10 field,
+    # even with a generic evidence wrapper, cannot prove that Patch 4 was
+    # actually applied.  Technology candidates therefore fail closed until a
+    # structured, independently replayable Patch 4 assessment is introduced.
+    patch4_score = None
+    patch4_complete = False
     history_complete = values["return_10y"][1] and values["historical_valuation"][1]
     valuation_complete = values["dcf"][1]
     core_coverage = template1["coverage"]
@@ -1057,6 +1649,7 @@ def assess_quality_equity(
             "passed": not technology_company or patch4_complete,
             "applicable": technology_company,
             "score": patch4_score,
+            "validation_status": ("missing_validated_patch4_assessment" if technology_company else "not_applicable"),
         },
         "three_year_financials": {"passed": financial_years >= 3, "consecutive_years": financial_years},
         "latest_quote_and_valuation": {
@@ -1065,11 +1658,16 @@ def assess_quality_equity(
             "valuation_complete": valuation_complete,
         },
         "three_external_reports": {
-            "passed": len(research) >= MIN_RESEARCH_SOURCES and len(distinct_publishers) >= MIN_RESEARCH_SOURCES,
-            "source_count": len(research),
-            "distinct_publishers": len(distinct_publishers),
+            "passed": metadata_precheck["passed"],
+            "check_type": "metadata_availability_precheck",
+            "source_count": metadata_precheck["source_count"],
+            "distinct_publishers": metadata_precheck["distinct_publishers"],
+            "recent_source_count": metadata_precheck["recent_source_count"],
+            "max_age_days": RESEARCH_MAX_AGE_DAYS,
+            "recent_age_days": RESEARCH_RECENT_AGE_DAYS,
             "sources": research,
         },
+        "external_report_content_verification": content_verification,
         "ten_year_return_and_five_year_valuation": {
             "passed": history_complete,
             "as_of": str(validated_history.get("as_of")) if validated_history is not None else None,
@@ -1086,6 +1684,8 @@ def assess_quality_equity(
     strict_checks = {key: value > STRICT_THRESHOLD for key, value in scores.items()}
     prerequisites_complete = all(bool(record["passed"]) for record in prerequisites.values())
     safety_veto = bool(patch5["safety_margin_complete"] and float(patch5["safety_margin_score"]) < PATCH5_SAFETY_VETO)
+    decisive_upper_bounds = decisive_score_upper_bounds(template1, template5, patch5)
+    decisively_not_triggered = any(value <= STRICT_THRESHOLD for value in decisive_upper_bounds.values())
 
     # Four template items and one Patch 5 component depend on long market
     # history.  Replace every one with its mathematical maximum; omitting even
@@ -1112,15 +1712,36 @@ def assess_quality_equity(
         "template5": round(template5_upper, 2),
         "patch5": round(patch5_upper, 2),
     }
-    non_history_prerequisites_complete = all(
+    pre_history_prerequisites_complete = all(
         bool(record["passed"])
         for key, record in prerequisites.items()
-        if key != "ten_year_return_and_five_year_valuation"
+        if key
+        not in {
+            "three_external_reports",
+            "external_report_content_verification",
+            "ten_year_return_and_five_year_valuation",
+        }
+    )
+    pre_research_prerequisites_complete = all(
+        bool(record["passed"])
+        for key, record in prerequisites.items()
+        if key not in {"three_external_reports", "external_report_content_verification"}
+    )
+    research_request_needed = bool(
+        (
+            not prerequisites["three_external_reports"]["passed"]
+            or not prerequisites["external_report_content_verification"]["passed"]
+        )
+        and pre_research_prerequisites_complete
+        and not safety_veto
+        and not decisively_not_triggered
     )
     history_request_needed = bool(
         not history_complete
-        and non_history_prerequisites_complete
+        and pre_history_prerequisites_complete
+        and not safety_veto
         and all(value > STRICT_THRESHOLD for value in upper_bounds.values())
+        and not decisively_not_triggered
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1135,6 +1756,9 @@ def assess_quality_equity(
         "prerequisites_complete": prerequisites_complete,
         "safety_veto": safety_veto,
         "triggered": bool(all(strict_checks.values()) and prerequisites_complete and not safety_veto),
+        "decisive_score_upper_bounds": decisive_upper_bounds,
+        "decisively_not_triggered": decisively_not_triggered,
+        "research_request_needed": research_request_needed,
         "history_request_needed": history_request_needed,
         "upper_bounds_without_history": upper_bounds,
         "template1": template1,
@@ -1143,12 +1767,82 @@ def assess_quality_equity(
     }
 
 
-def validate_quality_equity_ledger(ledger: Any) -> list[str]:
+def _template_item_contract(
+    section_key: str,
+    key: str,
+    inputs: Mapping[str, Any],
+) -> tuple[bool, float | None]:
+    """Validate fixed metadata and replay only formulas supported by published inputs."""
+
+    if section_key == "template5":
+        if key not in _TEMPLATE5_ITEM_LABELS or set(inputs) != {"normalized_score"}:
+            return False, None
+        return True, _finite(inputs.get("normalized_score"))
+
+    contract = _TEMPLATE1_ITEM_CONTRACTS.get(key)
+    if contract is None or set(inputs) not in contract[2]:
+        return False, None
+    mean_inputs = {
+        "t1_01": ("runway", "industry"),
+        "t1_02": ("growth_sustainability", "runway", "revenue_growth"),
+        "t1_06": ("accounting", "balance", "roic"),
+        "t1_09": ("moat", "durability"),
+        "t1_11": ("margin", "accounting"),
+        "t1_14": ("moat", "industry"),
+        "t1_15": ("moat_durability", "growth_sustainability", "roic"),
+    }
+    if key in mean_inputs:
+        values = [_finite(inputs.get(field)) for field in mean_inputs[key]]
+        return (False, None) if any(value is None for value in values) else (True, _avg(*values))
+    if key in {"t1_05", "t1_07", "t1_17"}:
+        return True, _finite(inputs.get("score"))
+    if key == "t1_20":
+        return True, _finite(inputs.get("type1_1a"))
+    if key == "t1_03":
+        raw = inputs.get("rate")
+        if raw is not None and _finite(raw) is None:
+            return False, None
+        return True, _growth_score(_finite(raw))
+    if key == "t1_04":
+        raw_values = [inputs.get("profit_cagr"), inputs.get("fcf_cagr")]
+        if any(value is not None and _finite(value) is None for value in raw_values):
+            return False, None
+        return True, _avg(*(_growth_score(_finite(value)) for value in raw_values))
+    if key == "t1_18" and "annual_return" in inputs:
+        return True, _return_score(_finite(inputs.get("annual_return")))
+    return True, None
+
+
+def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
     """Independently replay Type 7 arithmetic and intersection semantics."""
 
     if not isinstance(ledger, Mapping):
         return ["ledger is not a mapping"]
     errors: list[str] = []
+    expected_top_level = {
+        "schema_version",
+        "model_id",
+        "code",
+        "source_rule",
+        "strict_threshold",
+        "scores",
+        "strict_checks",
+        "all_scores_strictly_above_70",
+        "prerequisites",
+        "prerequisites_complete",
+        "safety_veto",
+        "triggered",
+        "decisive_score_upper_bounds",
+        "decisively_not_triggered",
+        "research_request_needed",
+        "history_request_needed",
+        "upper_bounds_without_history",
+        "template1",
+        "template5",
+        "patch5",
+    }
+    if set(ledger) != expected_top_level:
+        errors.append("ledger structure invalid")
 
     def close(actual: Any, expected: float, *, tolerance: float = 1e-9) -> bool:
         value = _finite(actual)
@@ -1164,6 +1858,8 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
             errors.append(f"{section_key} structure invalid")
             return section, {}
         indexed: dict[str, Mapping[str, Any]] = {}
+        point_values: dict[str, float] = {}
+        complete_values: dict[str, bool] = {}
         for item in items:
             required = {
                 "key",
@@ -1185,35 +1881,54 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
                 continue
             score = _finite(item.get("score"))
             weight = _finite(item.get("weight"))
+            points = _finite(item.get("points"))
+            complete = item.get("complete")
+            inputs = item.get("inputs")
+            if section_key == "template1":
+                metadata = _TEMPLATE1_ITEM_CONTRACTS.get(key)
+                expected_label = metadata[0] if metadata is not None else None
+                expected_formula = metadata[1] if metadata is not None else None
+            else:
+                expected_label = _TEMPLATE5_ITEM_LABELS.get(key)
+                expected_formula = "Template5_source_weight*observable_score"
+            input_valid, replayed_score = (
+                _template_item_contract(section_key, key, inputs) if isinstance(inputs, Mapping) else (False, None)
+            )
             if (
                 score is None
                 or not 0 <= score <= 10
                 or weight is None
                 or not close(weight, expected_weights[key])
-                or not close(item.get("points"), round(score * expected_weights[key] / 10.0, 4))
-                or not isinstance(item.get("complete"), bool)
-                or not isinstance(item.get("label"), str)
-                or not item.get("label")
-                or not isinstance(item.get("formula"), str)
-                or not item.get("formula")
-                or not isinstance(item.get("evidence_level"), str)
-                or not item.get("evidence_level")
-                or not isinstance(item.get("inputs"), Mapping)
+                or points is None
+                or not close(points, round(score * expected_weights[key] / 10.0, 4))
+                or not isinstance(complete, bool)
+                or item.get("label") != expected_label
+                or item.get("formula") != expected_formula
+                or item.get("evidence_level") not in _TEMPLATE_EVIDENCE_LEVELS
+                or not input_valid
             ):
                 errors.append(f"{section_key} item arithmetic invalid")
+            if replayed_score is not None and score is not None and not close(score, replayed_score, tolerance=0.0001):
+                errors.append(f"{section_key} item input-score mismatch")
+            if points is not None:
+                point_values[key] = points
+            if isinstance(complete, bool):
+                complete_values[key] = complete
             indexed[key] = item
         if set(indexed) != set(expected_weights):
             errors.append(f"{section_key} item set invalid")
             return section, indexed
-        replay = round(sum(float(item["points"]) for item in indexed.values()), 2)
-        coverage = round(
-            sum(expected_weights[key] for key, item in indexed.items() if item["complete"]) / 100.0,
-            4,
-        )
-        if not close(section.get("score"), replay, tolerance=0.0001):
-            errors.append(f"{section_key} total mismatch")
-        if not close(section.get("coverage"), coverage, tolerance=0.0001):
-            errors.append(f"{section_key} coverage mismatch")
+        if set(point_values) == set(expected_weights):
+            replay = round(math.fsum(point_values.values()), 2)
+            if not close(section.get("score"), replay, tolerance=0.0001):
+                errors.append(f"{section_key} total mismatch")
+        if set(complete_values) == set(expected_weights):
+            coverage = round(
+                math.fsum(expected_weights[key] for key, complete in complete_values.items() if complete) / 100.0,
+                4,
+            )
+            if not close(section.get("coverage"), coverage, tolerance=0.0001):
+                errors.append(f"{section_key} coverage mismatch")
         return section, indexed
 
     if (
@@ -1242,6 +1957,8 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
     elif not isinstance(patch5.get("dimensions"), list) or len(patch5["dimensions"]) != 5:
         errors.append("patch5 structure invalid")
     else:
+        section_point_values: dict[str, float] = {}
+        section_complete_values: dict[str, bool] = {}
         for section in patch5["dimensions"]:
             if not isinstance(section, Mapping) or set(section) != {
                 "key",
@@ -1261,8 +1978,7 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
             components = section.get("components")
             if (
                 not close(section.get("max_points"), 20.0)
-                or not isinstance(section.get("label"), str)
-                or not section.get("label")
+                or section.get("label") != _PATCH5_SECTION_LABELS.get(key)
                 or not isinstance(components, list)
                 or len(components) != len(expected_components)
                 or not isinstance(section.get("complete"), bool)
@@ -1270,6 +1986,8 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
                 errors.append(f"patch5 {key} structure invalid")
                 continue
             indexed_components: dict[str, Mapping[str, Any]] = {}
+            component_point_values: dict[str, float] = {}
+            component_complete_values: dict[str, bool] = {}
             for component in components:
                 if not isinstance(component, Mapping) or set(component) != {
                     "key",
@@ -1292,47 +2010,67 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
                     errors.append(f"patch5 {key} component identity invalid")
                     continue
                 score = _finite(component.get("score"))
+                points = _finite(component.get("points"))
+                complete = component.get("complete")
+                inputs = component.get("inputs")
                 maximum = expected_components[component_key]
+                expected_input_fields = {"source"} if component_key in _PATCH5_SOURCE_INPUT_COMPONENTS else set()
+                inputs_valid = isinstance(inputs, Mapping) and set(inputs) == expected_input_fields
+                if inputs_valid and expected_input_fields:
+                    inputs_valid = inputs.get("source") in _PATCH5_SOURCE_LEVELS
                 if (
                     score is None
                     or not 0 <= score <= 10
                     or not close(component.get("max_points"), maximum)
-                    or not close(component.get("points"), round(score * maximum / 10.0, 4))
-                    or not isinstance(component.get("complete"), bool)
-                    or not isinstance(component.get("label"), str)
-                    or not component.get("label")
+                    or points is None
+                    or not close(points, round(score * maximum / 10.0, 4))
+                    or not isinstance(complete, bool)
+                    or component.get("label") != _PATCH5_COMPONENT_LABELS.get(component_key)
                     or component.get("formula") != f"{maximum:g}*score/10"
-                    or not isinstance(component.get("inputs"), Mapping)
+                    or not inputs_valid
                 ):
                     errors.append(f"patch5 {key} component arithmetic invalid")
+                if points is not None:
+                    component_point_values[component_key] = points
+                if isinstance(complete, bool):
+                    component_complete_values[component_key] = complete
                 indexed_components[component_key] = component
             if set(indexed_components) != set(expected_components):
                 errors.append(f"patch5 {key} component set invalid")
                 continue
-            expected_points = round(sum(float(item["points"]) for item in indexed_components.values()), 4)
-            expected_complete = all(bool(item["complete"]) for item in indexed_components.values())
-            if not close(section.get("points"), expected_points, tolerance=0.0001):
+            section_points = _finite(section.get("points"))
+            if set(component_point_values) == set(expected_components):
+                expected_points = round(math.fsum(component_point_values.values()), 4)
+                if section_points is None or not close(section_points, expected_points, tolerance=0.0001):
+                    errors.append(f"patch5 {key} points mismatch")
+            elif section_points is None:
                 errors.append(f"patch5 {key} points mismatch")
-            if section.get("complete") is not expected_complete:
-                errors.append(f"patch5 {key} completeness mismatch")
+            if set(component_complete_values) == set(expected_components):
+                expected_complete = all(component_complete_values.values())
+                if section.get("complete") is not expected_complete:
+                    errors.append(f"patch5 {key} completeness mismatch")
+            if section_points is not None:
+                section_point_values[key] = section_points
+            if isinstance(section.get("complete"), bool):
+                section_complete_values[key] = section["complete"]
             patch_sections[key] = section
         if set(patch_sections) != set(_PATCH5_COMPONENT_WEIGHTS):
             errors.append("patch5 dimension set invalid")
         else:
-            replay = round(sum(float(section["points"]) for section in patch_sections.values()), 2)
-            coverage = round(
-                sum(20.0 for section in patch_sections.values() if section["complete"]) / 100.0,
-                4,
+            replay = round(math.fsum(section_point_values.values()), 2) if len(section_point_values) == 5 else None
+            coverage = (
+                round(math.fsum(20.0 for complete in section_complete_values.values() if complete) / 100.0, 4)
+                if len(section_complete_values) == 5
+                else None
             )
             safety = patch_sections["p5_safety"]
-            if not close(patch5.get("score"), replay, tolerance=0.0001):
+            safety_points = _finite(safety.get("points"))
+            if replay is None or not close(patch5.get("score"), replay, tolerance=0.0001):
                 errors.append("patch5 total mismatch")
-            if not close(patch5.get("coverage"), coverage, tolerance=0.0001):
+            if coverage is None or not close(patch5.get("coverage"), coverage, tolerance=0.0001):
                 errors.append("patch5 coverage mismatch")
-            if not close(
-                patch5.get("safety_margin_score"),
-                round(float(safety["points"]), 2),
-                tolerance=0.0001,
+            if safety_points is None or not close(
+                patch5.get("safety_margin_score"), round(safety_points, 2), tolerance=0.0001
             ):
                 errors.append("patch5 safety score mismatch")
             if patch5.get("safety_margin_complete") is not safety["complete"]:
@@ -1379,10 +2117,11 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
                 continue
             prerequisite_passes[key] = record["passed"]
         core = prerequisites["core_modules_80pct"]
-        core_actual = _finite(core.get("actual"))
+        core_actual = _finite(core.get("actual")) if isinstance(core, Mapping) else None
         expected_core = _finite(template1.get("coverage")) if isinstance(template1, Mapping) else None
         if (
-            set(core) != {"passed", "actual", "required"}
+            not isinstance(core, Mapping)
+            or set(core) != {"passed", "actual", "required"}
             or core_actual is None
             or expected_core is None
             or not close(core_actual, expected_core, tolerance=0.0001)
@@ -1391,17 +2130,30 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
         ):
             errors.append("core coverage prerequisite mismatch")
         technology = prerequisites["technology_patch4"]
-        technology_score = _finite(technology.get("score"))
+        technology_applicable = technology.get("applicable") if isinstance(technology, Mapping) else None
+        template_technology_score = _finite(template1_items.get("t1_17", {}).get("score"))
+        expected_technology_status = (
+            "missing_validated_patch4_assessment" if technology_applicable is True else "not_applicable"
+        )
         if (
-            set(technology) != {"passed", "applicable", "score"}
-            or not isinstance(technology.get("applicable"), bool)
-            or technology["passed"] is not (not technology["applicable"] or technology_score is not None)
+            not isinstance(technology, Mapping)
+            or set(technology) != {"passed", "applicable", "score", "validation_status"}
+            or not isinstance(technology_applicable, bool)
+            or technology.get("score") is not None
+            or technology.get("validation_status") != expected_technology_status
+            or technology["passed"] is not (technology_applicable is False)
+            or (
+                template_technology_score is not None
+                and template_technology_score >= 7.0
+                and technology_applicable is not True
+            )
         ):
             errors.append("technology prerequisite mismatch")
         financials = prerequisites["three_year_financials"]
-        years = financials.get("consecutive_years")
+        years = financials.get("consecutive_years") if isinstance(financials, Mapping) else None
         if (
-            set(financials) != {"passed", "consecutive_years"}
+            not isinstance(financials, Mapping)
+            or set(financials) != {"passed", "consecutive_years"}
             or isinstance(years, bool)
             or not isinstance(years, int)
             or years < 0
@@ -1409,48 +2161,77 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
         ):
             errors.append("financial history prerequisite mismatch")
         valuation = prerequisites["latest_quote_and_valuation"]
-        valuation_as_of = _parse_evidence_date(valuation.get("as_of"))
-        valuation_complete = valuation.get("valuation_complete")
+        valuation_as_of = _parse_evidence_date(valuation.get("as_of")) if isinstance(valuation, Mapping) else None
+        valuation_complete = valuation.get("valuation_complete") if isinstance(valuation, Mapping) else None
         expected_valuation_complete = bool(template1_items.get("t1_20", {}).get("complete"))
         expected_valuation_passed = bool(
             expected_valuation_complete and valuation_as_of is not None and valuation_as_of <= date.today()
         )
         if (
-            set(valuation) != {"passed", "as_of", "valuation_complete"}
+            not isinstance(valuation, Mapping)
+            or set(valuation) != {"passed", "as_of", "valuation_complete"}
             or not isinstance(valuation_complete, bool)
             or valuation_complete is not expected_valuation_complete
             or valuation["passed"] is not expected_valuation_passed
         ):
             errors.append("valuation prerequisite mismatch")
         reports = prerequisites["three_external_reports"]
-        report_sources = reports.get("sources")
+        report_sources = reports.get("sources") if isinstance(reports, Mapping) else None
         try:
             normalized_sources = normalise_research_sources(
                 report_sources,
                 today=valuation_as_of if valuation_as_of is not None else date.min,
+                security_code=str(ledger.get("code") or ""),
+            )
+            replayed_metadata = research_metadata_precheck(
+                normalized_sources,
+                reference=valuation_as_of if valuation_as_of is not None else date.min,
             )
         except QualityEquityError:
             normalized_sources = None
-        publisher_count = (
-            len({item["publisher"].casefold() for item in report_sources})
-            if isinstance(report_sources, list)
-            and all(isinstance(item, Mapping) and isinstance(item.get("publisher"), str) for item in report_sources)
-            else -1
-        )
-        expected_reports_passed = (
+            replayed_metadata = None
+        expected_reports_passed = bool(
             isinstance(report_sources, list)
             and normalized_sources == report_sources
-            and len(report_sources) >= MIN_RESEARCH_SOURCES
-            and publisher_count >= MIN_RESEARCH_SOURCES
+            and isinstance(replayed_metadata, Mapping)
+            and replayed_metadata.get("passed") is True
         )
         if (
-            set(reports) != {"passed", "source_count", "distinct_publishers", "sources"}
+            not isinstance(reports, Mapping)
+            or set(reports)
+            != {
+                "passed",
+                "check_type",
+                "source_count",
+                "distinct_publishers",
+                "recent_source_count",
+                "max_age_days",
+                "recent_age_days",
+                "sources",
+            }
             or not isinstance(report_sources, list)
-            or reports.get("source_count") != len(report_sources)
-            or reports.get("distinct_publishers") != publisher_count
+            or reports.get("check_type") != "metadata_availability_precheck"
+            or reports.get("max_age_days") != RESEARCH_MAX_AGE_DAYS
+            or reports.get("recent_age_days") != RESEARCH_RECENT_AGE_DAYS
+            or not isinstance(replayed_metadata, Mapping)
+            or reports.get("source_count") != replayed_metadata.get("source_count")
+            or reports.get("distinct_publishers") != replayed_metadata.get("distinct_publishers")
+            or reports.get("recent_source_count") != replayed_metadata.get("recent_source_count")
             or reports["passed"] is not expected_reports_passed
         ):
             errors.append("external reports prerequisite mismatch")
+        content_verification = prerequisites["external_report_content_verification"]
+        try:
+            normalized_content_verification = normalise_research_content_verification(
+                content_verification,
+                sources=normalized_sources if isinstance(normalized_sources, list) else [],
+                security_code=str(ledger.get("code") or ""),
+                as_of=valuation_as_of.isoformat() if valuation_as_of is not None else "0001-01-01",
+            )
+        except QualityEquityError:
+            normalized_content_verification = None
+        if normalized_content_verification != content_verification:
+            errors.append("external report content prerequisite mismatch")
         history = prerequisites["ten_year_return_and_five_year_valuation"]
         t1_history_inputs = template1_items.get("t1_19", {}).get("inputs", {})
         shareholder_input = (
@@ -1461,13 +2242,17 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
             and shareholder_input.get("available") is True
             and template5_items.get("t5_v1", {}).get("complete") is True
         )
-        history_as_of = history.get("as_of")
+        history_as_of = history.get("as_of") if isinstance(history, Mapping) else None
         history_date = _parse_evidence_date(history_as_of)
         if (
-            set(history) != {"passed", "as_of"}
+            not isinstance(history, Mapping)
+            or set(history) != {"passed", "as_of"}
             or history["passed"] is not expected_history
             or (history_as_of is not None and history_date is None)
-            or (history["passed"] and history_as_of != valuation.get("as_of"))
+            or (
+                history["passed"]
+                and history_as_of != (valuation.get("as_of") if isinstance(valuation, Mapping) else None)
+            )
         ):
             errors.append("market history prerequisite mismatch")
 
@@ -1486,6 +2271,32 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
     expected_trigger = expected_intersection and expected_prerequisites_complete and not expected_safety_veto
     if not isinstance(ledger.get("triggered"), bool) or ledger.get("triggered") is not expected_trigger:
         errors.append("trigger decision mismatch")
+
+    expected_decisive_upper: dict[str, float] = {}
+    if isinstance(template1, Mapping) and isinstance(template5, Mapping) and isinstance(patch5, Mapping):
+        try:
+            expected_decisive_upper = decisive_score_upper_bounds(template1, template5, patch5)
+        except QualityEquityError:
+            expected_decisive_upper = {}
+    published_decisive_upper = ledger.get("decisive_score_upper_bounds")
+    if (
+        len(expected_decisive_upper) != 3
+        or not isinstance(published_decisive_upper, Mapping)
+        or set(published_decisive_upper) != set(expected_decisive_upper)
+        or any(
+            not close(published_decisive_upper.get(key), value, tolerance=0.0001)
+            for key, value in expected_decisive_upper.items()
+        )
+    ):
+        errors.append("decisive score upper bounds mismatch")
+    expected_decisive_failure = bool(
+        len(expected_decisive_upper) == 3
+        and any(value <= STRICT_THRESHOLD for value in expected_decisive_upper.values())
+    )
+    if not isinstance(ledger.get("decisively_not_triggered"), bool) or (
+        ledger.get("decisively_not_triggered") is not expected_decisive_failure
+    ):
+        errors.append("decisive failure decision mismatch")
 
     upper_bounds = ledger.get("upper_bounds_without_history")
     expected_upper: dict[str, float] = {}
@@ -1546,31 +2357,90 @@ def validate_quality_equity_ledger(ledger: Any) -> list[str]:
     ):
         errors.append("history upper bounds mismatch")
     history_passed = prerequisite_passes.get("ten_year_return_and_five_year_valuation", False)
-    non_history_passed = len(prerequisite_passes) == len(_PREREQUISITE_KEYS) and all(
-        value for key, value in prerequisite_passes.items() if key != "ten_year_return_and_five_year_valuation"
+    pre_history_passed = len(prerequisite_passes) == len(_PREREQUISITE_KEYS) and all(
+        value
+        for key, value in prerequisite_passes.items()
+        if key
+        not in {
+            "three_external_reports",
+            "external_report_content_verification",
+            "ten_year_return_and_five_year_valuation",
+        }
     )
     expected_request = bool(
         not history_passed
-        and non_history_passed
+        and pre_history_passed
+        and not expected_safety_veto
         and len(expected_upper) == 3
         and all(value > STRICT_THRESHOLD for value in expected_upper.values())
+        and not expected_decisive_failure
     )
     if not isinstance(ledger.get("history_request_needed"), bool) or (
         ledger.get("history_request_needed") is not expected_request
     ):
         errors.append("history request decision mismatch")
+    pre_research_passed = len(prerequisite_passes) == len(_PREREQUISITE_KEYS) and all(
+        value
+        for key, value in prerequisite_passes.items()
+        if key not in {"three_external_reports", "external_report_content_verification"}
+    )
+    expected_research_request = bool(
+        (
+            not prerequisite_passes.get("three_external_reports", False)
+            or not prerequisite_passes.get("external_report_content_verification", False)
+        )
+        and pre_research_passed
+        and not expected_safety_veto
+        and not expected_decisive_failure
+    )
+    if not isinstance(ledger.get("research_request_needed"), bool) or (
+        ledger.get("research_request_needed") is not expected_research_request
+    ):
+        errors.append("research request decision mismatch")
     return errors
 
 
+def validate_quality_equity_ledger(ledger: Any) -> list[str]:
+    """Fail closed for any malformed external ledger value."""
+
+    try:
+        return _validate_quality_equity_ledger_impl(ledger)
+    except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
+        return ["ledger contains malformed values"]
+
+
 __all__ = [
+    "MAX_RESEARCH_SOURCES",
     "MIN_CORE_COVERAGE",
     "MIN_RESEARCH_SOURCES",
     "MODEL_ID",
     "PATCH5_SAFETY_VETO",
+    "RESEARCH_MAX_AGE_DAYS",
+    "RESEARCH_RECENT_AGE_DAYS",
+    "RESEARCH_EVIDENCE_MODEL_ID",
+    "RESEARCH_CONTENT_MODEL_ID",
+    "MIN_RESEARCH_BODY_SOURCES",
+    "MIN_CROSSCHECK_REPORTS",
+    "MIN_RESEARCH_BODY_CHARACTERS",
+    "MAX_RESEARCH_BODY_CHARACTERS",
+    "MAX_RESEARCH_BODY_FETCHES",
+    "MAX_RESEARCH_FACTS_PER_BODY",
+    "MAX_RESEARCH_FACT_ABS_VALUE",
+    "RESEARCH_FACT_RELATIVE_TOLERANCE",
+    "RESEARCH_CONTENT_BODY_FIELDS",
+    "RESEARCH_CONTENT_FACT_FIELDS",
+    "RESEARCH_CONTENT_IDENTITY_CHECKS",
+    "RESEARCH_CONTENT_SIGNALS",
+    "RESEARCH_FACT_METRICS",
+    "RESEARCH_FACT_UNITS",
+    "RESEARCH_FACT_UNIT_BY_METRIC",
     "STRICT_THRESHOLD",
     "TYPE7_DIRECT_SCORE_KEYS",
     "QualityEquityError",
     "assess_quality_equity",
+    "decisive_score_upper_bounds",
     "normalise_research_sources",
+    "normalise_research_content_verification",
+    "research_metadata_precheck",
     "validate_quality_equity_ledger",
 ]

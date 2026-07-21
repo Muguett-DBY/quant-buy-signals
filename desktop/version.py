@@ -1,3 +1,3 @@
 """Single runtime version exposed by source and frozen desktop builds."""
 
-__version__ = "11.1.1"
+__version__ = "11.2.0"

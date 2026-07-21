@@ -40,6 +40,10 @@ EVIDENCE_LEVELS = ("primary", "derived_proxy", "partial", "missing")
 MIN_SECTOR_COMPANIES = 10
 MIN_COMPARABLE_COVERAGE = 0.70
 RUNWAY_TERMINAL_GROWTH = 0.02
+# Object identity, rather than a serializable flag, marks records that passed
+# ``data.growth_evidence.validate_growth_evidence_record`` at the production
+# boundary.  A JSON/CSV/manual fin_map payload cannot forge this token.
+TYPE3_GROWTH_VALIDATION_TOKEN = object()
 
 
 class _SortedFinitePopulation(list[float]):
@@ -389,6 +393,206 @@ def _finite_sequence_count(value: Any) -> int:
 
 def _complete_status(value: Any) -> bool:
     return isinstance(value, Mapping) and value.get("status") == "complete"
+
+
+def _external_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
+    """Return only a reproducible acquisition/goodwill proxy contract.
+
+    A bare ``status=complete`` is deliberately insufficient.  Type 3's growth
+    quality cannot be unlocked by metadata alone.  The automatic adapter must
+    provide a clearly labelled five-year aggregate cash/goodwill proxy.  Exact
+    acquisition-revenue attribution belongs in a separately validated primary
+    score; this fallback never accepts an arbitrary transaction list as proof.
+    """
+
+    if not isinstance(value, Mapping) or value.get("status") != "complete":
+        return None
+    if value.get("contract_scope") != "aggregate_proxy_not_transaction_census":
+        return None
+    coverage_years = value.get("coverage_year_count")
+    if isinstance(coverage_years, bool) or not isinstance(coverage_years, int):
+        return None
+    coverage_count = coverage_years
+    raw_records = value.get("records")
+    if (
+        coverage_count < 5
+        or not isinstance(raw_records, Sequence)
+        or isinstance(raw_records, (str, bytes))
+        or len(raw_records) != coverage_count
+        or not all(isinstance(item, Mapping) for item in raw_records)
+    ):
+        return None
+    years: list[int] = []
+    revenues: list[float] = []
+    goodwill: list[float] = []
+    acquisitions: list[float] = []
+    for record in raw_records:
+        raw_year = record.get("year")
+        revenue = _finite(record.get("revenue"))
+        goodwill_value = _finite(record.get("goodwill"))
+        acquisition = _finite(record.get("acquisition_cash"))
+        if (
+            isinstance(raw_year, bool)
+            or not isinstance(raw_year, int)
+            or revenue is None
+            or revenue <= 0
+            or goodwill_value is None
+            or goodwill_value < 0
+            or acquisition is None
+            or acquisition < 0
+        ):
+            return None
+        years.append(raw_year)
+        revenues.append(revenue)
+        goodwill.append(goodwill_value)
+        acquisitions.append(acquisition)
+    raw_as_of = value.get("as_of")
+    try:
+        as_of = date.fromisoformat(raw_as_of) if isinstance(raw_as_of, str) else None
+    except ValueError:
+        as_of = None
+    if (
+        years != sorted(set(years))
+        or any(current - previous != 1 for previous, current in zip(years, years[1:]))
+        or as_of is None
+        or years[-1] > as_of.year
+    ):
+        return None
+    acquisition_cash_ratio = sum(acquisitions) / sum(revenues)
+    goodwill_ratio = goodwill[-1] / revenues[-1]
+    goodwill_change_ratio = sum(
+        max(current - previous, 0.0) for previous, current in zip(goodwill, goodwill[1:])
+    ) / sum(revenues[1:])
+    reported_acquisition_ratio = _finite(value.get("aggregate_acquisition_cash_to_revenue"))
+    reported_goodwill_ratio = _finite(value.get("goodwill_to_revenue_latest"))
+    reported_goodwill_additions = _finite(value.get("positive_goodwill_additions_to_revenue"))
+    if (
+        reported_acquisition_ratio is None
+        or reported_goodwill_ratio is None
+        or reported_goodwill_additions is None
+        or not math.isclose(reported_acquisition_ratio, acquisition_cash_ratio, rel_tol=1e-10, abs_tol=1e-12)
+        or not math.isclose(reported_goodwill_ratio, goodwill_ratio, rel_tol=1e-10, abs_tol=1e-12)
+        or not math.isclose(reported_goodwill_additions, goodwill_change_ratio, rel_tol=1e-10, abs_tol=1e-12)
+    ):
+        return None
+    return {
+        "acquisition_intensity": acquisition_cash_ratio,
+        "goodwill_to_revenue_latest": goodwill_ratio,
+        "goodwill_change_to_revenue": goodwill_change_ratio,
+    }
+
+
+def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
+    """Return a strict, dated segment-growth summary suitable for Type 3."""
+
+    if not isinstance(value, Mapping) or value.get("status") != "complete":
+        return None
+    raw_years = value.get("history_years")
+    if not isinstance(raw_years, Sequence) or isinstance(raw_years, (str, bytes)):
+        return None
+    years: list[int] = []
+    for raw_year in raw_years:
+        if isinstance(raw_year, bool):
+            return None
+        try:
+            year = int(raw_year)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not 1900 <= year <= 9999:
+            return None
+        years.append(year)
+    raw_as_of = value.get("as_of")
+    try:
+        as_of = date.fromisoformat(raw_as_of) if isinstance(raw_as_of, str) else None
+    except ValueError:
+        as_of = None
+    if (
+        len(years) < 3
+        or years != sorted(set(years))
+        or any(current - previous != 1 for previous, current in zip(years, years[1:]))
+        or as_of is None
+        or years[-1] > as_of.year
+    ):
+        return None
+    raw_source_count = value.get("growth_source_count")
+    if isinstance(raw_source_count, bool) or not isinstance(raw_source_count, int):
+        return None
+    effective_source_count = _finite(value.get("effective_growth_source_count"))
+    positive_growth_share = _finite(value.get("positive_growth_share"))
+    revenue_hhi = _finite(value.get("revenue_hhi"))
+    matched_latest_share = _finite(value.get("matched_latest_share"))
+    raw_segments = value.get("segments")
+    if (
+        raw_source_count < 0
+        or effective_source_count is None
+        or not 0 <= effective_source_count <= max(raw_source_count, 1)
+        or positive_growth_share is None
+        or not 0 <= positive_growth_share <= 1
+        or revenue_hhi is None
+        or not 0 <= revenue_hhi <= 1
+        or matched_latest_share is None
+        or not 0.95 <= matched_latest_share <= 1
+        or not isinstance(raw_segments, Sequence)
+        or isinstance(raw_segments, (str, bytes))
+        or not raw_segments
+        or not all(isinstance(item, Mapping) for item in raw_segments)
+    ):
+        return None
+    segment_shares: list[float] = []
+    growing_share = 0.0
+    reproduced_count = 0
+    growth_contributions: list[float] = []
+    reproduced_matched_share = 0.0
+    for segment in raw_segments:
+        share = _finite(segment.get("latest_revenue_share"))
+        cagr = _finite(segment.get("cagr"))
+        first_revenue = _finite(segment.get("first_revenue"))
+        latest_revenue = _finite(segment.get("latest_revenue"))
+        first_year = segment.get("first_year")
+        latest_year = segment.get("latest_year")
+        if (
+            share is None
+            or not 0 <= share <= 1
+            or latest_revenue is None
+            or latest_revenue < 0
+            or isinstance(latest_year, bool)
+            or not isinstance(latest_year, int)
+            or latest_year != years[-1]
+            or (first_year is not None and (isinstance(first_year, bool) or not isinstance(first_year, int)))
+        ):
+            return None
+        segment_shares.append(share)
+        if first_year is not None:
+            reproduced_matched_share += share
+        if cagr is not None and cagr > 0:
+            reproduced_count += 1
+            growing_share += share
+        if first_revenue is not None and first_revenue > 0 and latest_revenue > first_revenue:
+            growth_contributions.append(latest_revenue - first_revenue)
+    reproduced_hhi = sum(share * share for share in segment_shares)
+    total_contribution = sum(growth_contributions)
+    reproduced_effective_count = (
+        1.0 / sum((contribution / total_contribution) ** 2 for contribution in growth_contributions)
+        if total_contribution > 0
+        else 0.0
+    )
+    if (
+        not math.isclose(sum(segment_shares), 1.0, rel_tol=0.0, abs_tol=1e-8)
+        or raw_source_count != reproduced_count
+        or not math.isclose(effective_source_count, reproduced_effective_count, rel_tol=1e-10, abs_tol=1e-12)
+        or not math.isclose(positive_growth_share, growing_share, rel_tol=1e-10, abs_tol=1e-12)
+        or not math.isclose(revenue_hhi, reproduced_hhi, rel_tol=1e-10, abs_tol=1e-12)
+        or not math.isclose(matched_latest_share, reproduced_matched_share, rel_tol=1e-10, abs_tol=1e-12)
+    ):
+        return None
+    return {
+        "history_years": float(len(years)),
+        "growth_source_count": effective_source_count,
+        "raw_growth_source_count": float(raw_source_count),
+        "positive_growth_share": positive_growth_share,
+        "revenue_hhi": revenue_hhi,
+        "matched_latest_share": matched_latest_share,
+    }
 
 
 def _quality_record(
@@ -1422,20 +1626,51 @@ def _score_growth_quality(metric: Mapping[str, Any], accounting_score: float) ->
         [(-0.20, 0), (-0.10, 2), (-0.03, 4), (0.0, 6), (0.05, 8), (0.15, 10)],
     )
     fcf = _score_fcf_history(metric)
-    score = _round_score(0.30 * accounting_score + 0.25 * dilution + 0.20 * balance + 0.15 * efficiency + 0.10 * fcf)
+    score_before_evidence_cap = _round_score(
+        0.30 * accounting_score + 0.25 * dilution + 0.20 * balance + 0.15 * efficiency + 0.10 * fcf
+    )
+    score = score_before_evidence_cap
     external_growth = metric.get("external_growth_evidence")
-    external_complete = isinstance(external_growth, Mapping) and external_growth.get("status") == "complete"
-    if not external_complete:
+    external_inputs = (
+        _external_growth_proxy_inputs(external_growth)
+        if metric.get("_type3_growth_validation_token") is TYPE3_GROWTH_VALIDATION_TOKEN
+        else None
+    )
+    external_complete = external_inputs is not None
+    external_cap = 10.0
+    if external_inputs is None:
         # Cash, leverage and dilution can diagnose organic funding quality, but
         # they cannot prove the absence of acquisitions or goodwill growth.
         score = min(score, 6.0)
+        external_cap = 6.0
+    else:
+        acquisition_intensity = external_inputs["acquisition_intensity"]
+        goodwill_ratio = external_inputs["goodwill_to_revenue_latest"]
+        goodwill_change = external_inputs["goodwill_change_to_revenue"]
+        # Patch 6's 20%/30% bands are acquisition *revenue* shares.  The
+        # automatic adapter measures cash spending and goodwill in a different
+        # unit; abnormal values can reduce this conservative proxy, but low
+        # values never prove that growth was purely organic.
+        external_cap = 6.0
+        if acquisition_intensity > 0.30 or goodwill_change > 0.30:
+            external_cap = 4.0
+        elif acquisition_intensity > 0.20 or goodwill_change > 0.20:
+            external_cap = 4.5
+        elif acquisition_intensity > 0.10 or goodwill_change > 0.10 or goodwill_ratio > 0.50:
+            external_cap = 5.0
+        elif acquisition_intensity > 0.05 or goodwill_change > 0.05 or goodwill_ratio > 0.30:
+            external_cap = 5.5
+        score = min(score, external_cap)
     return score, {
         "scope": "organic_funding_and_efficiency_proxy_not_ma_transaction_census",
         "revenue_minus_asset_cagr": efficiency_delta,
         "share_dilution_1yr": _finite(metric.get("share_dilution_1yr")),
         "external_growth_evidence_complete": external_complete,
+        "score_before_evidence_cap": score_before_evidence_cap,
+        "external_growth_score_cap": external_cap,
+        "external_growth_proxy": external_inputs,
         "score_cap_without_acquisition_and_goodwill_evidence": 6.0,
-        "claims_not_supported": ["acquisition_revenue_share", "goodwill_growth"],
+        "claims_not_supported": ["exact_acquisition_revenue_share", "complete_transaction_census"],
         "components": {
             "accounting": accounting_score,
             "dilution": dilution,
@@ -1454,24 +1689,57 @@ def _score_growth_sustainability(
     persistence = _score_growth_persistence(metric)
     trend = _score_growth_trend(metric)
     spread_score, spread = _score_roic_spread(metric)
-    score = _round_score(
+    score_before_evidence_cap = _round_score(
         0.25 * persistence + 0.25 * trend + 0.25 * moat_score + 0.15 * industry_score + 0.10 * spread_score
     )
+    score = score_before_evidence_cap
     segment_sources = metric.get("segment_growth_sources")
-    segment_complete = isinstance(segment_sources, Mapping) and segment_sources.get("status") == "complete"
-    if not segment_complete:
+    segment_inputs = (
+        _segment_growth_proxy_inputs(segment_sources)
+        if metric.get("_type3_growth_validation_token") is TYPE3_GROWTH_VALIDATION_TOKEN
+        else None
+    )
+    segment_complete = segment_inputs is not None
+    segment_band_score = None
+    if segment_inputs is None:
         # Aggregate statements cannot identify independent product/region
         # growth sources.  Keep a useful financial persistence diagnostic while
         # preventing it from masquerading as a complete Patch6 3d score.
         score = min(score, 4.0)
+    else:
+        source_count = segment_inputs["growth_source_count"]
+        history_years = int(segment_inputs["history_years"])
+        positive_growth_share = segment_inputs["positive_growth_share"]
+        revenue_hhi = segment_inputs["revenue_hhi"]
+        if source_count >= 4 and history_years >= 10:
+            segment_band_score = 9.5
+        elif source_count >= 3 and history_years >= 5:
+            segment_band_score = 7.5
+        elif source_count >= 2 and history_years >= 3:
+            segment_band_score = 5.5
+        elif source_count >= 1:
+            segment_band_score = 3.5
+        else:
+            segment_band_score = 1.5
+        # The Patch6 source-count/time-depth band is a hard ceiling.  Positive
+        # growth breadth and concentration provide only a bounded within-band
+        # adjustment, and weak aggregate persistence may reduce the result.
+        # This preserves the explicit 3d<=3 veto for zero/one weak source.
+        breadth_adjustment = (positive_growth_share - 0.5) * 1.0
+        concentration_adjustment = (0.5 - revenue_hhi) * 0.5
+        segment_band_score = _round_score(segment_band_score + breadth_adjustment + concentration_adjustment)
+        score = min(score_before_evidence_cap, segment_band_score)
     return score, {
         "scope": "observable_growth_longevity_not_product_level_source_count",
         "trend_growth": _finite(metric.get("trend_growth")),
         "growth_slope": _finite(metric.get("growth_slope")),
         "roic_wacc_spread": spread,
         "segment_growth_sources_complete": segment_complete,
+        "score_before_evidence_cap": score_before_evidence_cap,
+        "segment_band_score": segment_band_score,
+        "segment_growth_proxy": segment_inputs,
         "score_cap_without_segment_revenue_history": 4.0,
-        "claims_not_supported": ["growth_source_count", "segment_revenue_hhi"],
+        "claims_not_supported": ["source_replicability", "unreported_segment_attribution"],
         "components": {
             "persistence": persistence,
             "trend": trend,
@@ -1998,7 +2266,10 @@ def _build_evidence_qualities(
             "balance_sheet_leverage": balance_ready,
             "revenue_asset_history": revenue_asset_ready,
             "free_cash_flow_history": fcf_ready,
-            "acquisition_and_goodwill_census": _complete_status(metric.get("external_growth_evidence")),
+            "acquisition_cash_and_goodwill_history": (
+                metric.get("_type3_growth_validation_token") is TYPE3_GROWTH_VALIDATION_TOKEN
+                and _external_growth_proxy_inputs(metric.get("external_growth_evidence")) is not None
+            ),
         }
     )
     industry_complete = qualities["industry_durability_score"]["level"] == "derived_proxy"
@@ -2010,7 +2281,10 @@ def _build_evidence_qualities(
             "roic_and_wacc": roic_wacc_ready,
             "current_moat_proxy": moat_complete,
             "industry_durability_proxy": industry_complete,
-            "segment_growth_sources": _complete_status(metric.get("segment_growth_sources")),
+            "segment_growth_sources": (
+                metric.get("_type3_growth_validation_token") is TYPE3_GROWTH_VALIDATION_TOKEN
+                and _segment_growth_proxy_inputs(metric.get("segment_growth_sources")) is not None
+            ),
         }
     )
     runway_inputs = {
@@ -2226,7 +2500,13 @@ def enrich_metrics(
         if selected is not None and code not in selected:
             continue
         industry = str(metric.get("industry") or "DEFAULT")
-        benchmark = benchmarks.get(industry, {}) if isinstance(benchmarks, Mapping) else {}
+        company_benchmarks = benchmarks
+        benchmark_selector = getattr(benchmarks, "for_code", None)
+        if callable(benchmark_selector):
+            selected_benchmarks = benchmark_selector(code)
+            if isinstance(selected_benchmarks, Mapping):
+                company_benchmarks = selected_benchmarks
+        benchmark = company_benchmarks.get(industry, {}) if isinstance(company_benchmarks, Mapping) else {}
         fallback_growth = _finite(benchmark.get("median_cagr")) if isinstance(benchmark, Mapping) else None
         context = contexts.get(str(metric.get("code") or ""), {})
         try:

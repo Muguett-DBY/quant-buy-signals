@@ -71,6 +71,8 @@ class MarketAnalysisOutcome:
     quality: Mapping[str, Any] = field(default_factory=dict)
     dcf_skip_classifications: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     quality_history_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    type3_growth_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    research_report_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 def _recompute_dcf_per_share(
@@ -1524,6 +1526,12 @@ def run_market_analysis(
     quality_history_evidence: Mapping[str, Mapping[str, Any]] | None = None,
     quality_history_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
     quality_history_progress_cb: Callable[[int, int], None] | None = None,
+    type3_growth_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    type3_growth_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
+    type3_growth_progress_cb: Callable[[int, int], None] | None = None,
+    research_report_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    research_report_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
+    research_report_progress_cb: Callable[[int, int], None] | None = None,
     reporting_period_contract: ReportingPeriodContract | Mapping[str, Any] | None = None,
 ) -> MarketAnalysisOutcome:
     """Run the supported end-to-end analysis outside Streamlit for testing and audits."""
@@ -1590,6 +1598,46 @@ def run_market_analysis(
                 )
             return loaded
 
+    captured_type3_growth: dict[str, Mapping[str, Any]] = {}
+    if type3_growth_evidence is not None:
+        if not isinstance(type3_growth_evidence, Mapping):
+            raise TypeError("type3_growth_evidence must be a code mapping or None")
+        for code, value in type3_growth_evidence.items():
+            if not isinstance(value, Mapping):
+                raise TypeError(f"type3_growth_evidence record must be a mapping: {_normalise_code(code)}")
+            captured_type3_growth[_normalise_code(code)] = dict(value)
+
+    captured_type3_growth_loader = type3_growth_loader
+    if type3_growth_loader is not None:
+
+        def captured_type3_growth_loader(requests, **kwargs):
+            loaded = type3_growth_loader(requests, **kwargs)
+            if isinstance(loaded, Mapping):
+                captured_type3_growth.update(
+                    {_normalise_code(code): dict(value) for code, value in loaded.items() if isinstance(value, Mapping)}
+                )
+            return loaded
+
+    captured_research_reports: dict[str, Mapping[str, Any]] = {}
+    if research_report_evidence is not None:
+        if not isinstance(research_report_evidence, Mapping):
+            raise TypeError("research_report_evidence must be a code mapping or None")
+        for code, value in research_report_evidence.items():
+            if not isinstance(value, Mapping):
+                raise TypeError(f"research_report_evidence record must be a mapping: {_normalise_code(code)}")
+            captured_research_reports[_normalise_code(code)] = dict(value)
+
+    captured_research_loader = research_report_loader
+    if research_report_loader is not None:
+
+        def captured_research_loader(requests, **kwargs):
+            loaded = research_report_loader(requests, **kwargs)
+            if isinstance(loaded, Mapping):
+                captured_research_reports.update(
+                    {_normalise_code(code): dict(value) for code, value in loaded.items() if isinstance(value, Mapping)}
+                )
+            return loaded
+
     score_kwargs: dict[str, Any] = {
         "dcf_results": dcf.results,
         "progress_cb": score_progress_cb,
@@ -1604,6 +1652,12 @@ def run_market_analysis(
         score_kwargs["quality_history_evidence"] = quality_history_evidence
         score_kwargs["quality_history_loader"] = captured_loader
         score_kwargs["quality_history_progress_cb"] = quality_history_progress_cb
+        score_kwargs["type3_growth_evidence"] = type3_growth_evidence
+        score_kwargs["type3_growth_loader"] = captured_type3_growth_loader
+        score_kwargs["type3_growth_progress_cb"] = type3_growth_progress_cb
+        score_kwargs["research_report_evidence"] = research_report_evidence
+        score_kwargs["research_report_loader"] = captured_research_loader
+        score_kwargs["research_report_progress_cb"] = research_report_progress_cb
     scores = screen_runner(canonical_financials, canonical_quotes, **score_kwargs)
     if not isinstance(scores, pd.DataFrame):
         raise TypeError("screen runner must return a pandas DataFrame")
@@ -1616,6 +1670,8 @@ def run_market_analysis(
         dcf_skip_reasons=dcf.skip_reasons,
         dcf_skip_classifications=dcf.skip_classifications,
         quality_history_evidence=dict(sorted(captured_quality_history.items())),
+        type3_growth_evidence=dict(sorted(captured_type3_growth.items())),
+        research_report_evidence=dict(sorted(captured_research_reports.items())),
     )
     if not enforce_quality:
         return outcome
@@ -1641,4 +1697,6 @@ def run_market_analysis(
         quality=quality,
         dcf_skip_classifications=outcome.dcf_skip_classifications,
         quality_history_evidence=outcome.quality_history_evidence,
+        type3_growth_evidence=outcome.type3_growth_evidence,
+        research_report_evidence=outcome.research_report_evidence,
     )

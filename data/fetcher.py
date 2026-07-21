@@ -16,7 +16,12 @@ import pandas as pd
 import requests
 
 from config import CONCURRENCY, REQUEST_TIMEOUT
-from data.capex_evidence import CAPEX_FIELD, CapexEvidenceConflictError, resolve_capex_evidence
+from data.capex_evidence import (
+    CAPEX_FIELD,
+    NON_CAPEX_OUTFLOW_FIELDS,
+    CapexEvidenceConflictError,
+    resolve_capex_evidence,
+)
 from data.financial_source_evidence import (
     FinancialSourceEvidenceError,
     balance_sheet_evidence,
@@ -72,6 +77,51 @@ _QUOTE_COLUMNS = [
 
 _MIN_LISTING_REFERENCE_COVERAGE = 0.99
 _MIN_LISTING_DATE_COVERAGE = 0.99
+_DETAILED_CASHFLOW_NUMERIC_FIELDS = frozenset(
+    {
+        "TOTAL_INVEST_INFLOW",
+        CAPEX_FIELD,
+        *NON_CAPEX_OUTFLOW_FIELDS,
+        "TOTAL_INVEST_OUTFLOW",
+        "INVEST_NETCASH_OTHER",
+        "INVEST_NETCASH_BALANCE",
+        "NETCASH_INVEST",
+    }
+)
+_BALANCE_NUMERIC_FIELDS = frozenset(
+    {
+        "TOTAL_ASSETS",
+        "TOTAL_LIABILITIES",
+        "TOTAL_EQUITY",
+        "TOTAL_PARENT_EQUITY",
+        "PARENT_EQUITY",
+        "TOTAL_EQUITY_PARENT",
+        "EQUITY_PARENT",
+        "MINORITY_EQUITY",
+        "MINORITY_INTEREST",
+        "GOODWILL",
+        "DEBT_ASSET_RATIO",
+        "MONETARYFUNDS",
+        "SHORT_LOAN",
+        "LONG_LOAN",
+        "LONG_TERM_LOAN",
+        "BONDS_PAYABLE",
+        "BOND_PAYABLE",
+        "NONCURRENT_LIAB_1YEAR",
+        "NONCURRENT_LIABILITY_IN_1YEAR",
+        "CURRENT_PORTION_NONCURRENT_LIAB",
+        "LEASE_LIAB",
+        "LEASE_LIABILITY",
+        "SHORT_BONDS_PAYABLE",
+        "SHORT_BOND_PAYABLE",
+        "BORROW_FUNDS",
+        "BORROW_FUND",
+        "CENTRAL_BANK_BORROWING",
+        "LOAN_PBC",
+        "SUBORDINATED_BONDS_PAYABLE",
+        "SUBBOND_PAYABLE",
+    }
+)
 
 
 class QuoteFetchError(DataFetchError):
@@ -652,6 +702,49 @@ def _finite_float(value: Any) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def _strict_optional_financial_float(
+    value: Any,
+    *,
+    dataset: str,
+    field: str,
+    code: str,
+    report_date: str,
+) -> float | None:
+    """Normalize a source numeric while distinguishing blanks from corruption."""
+    value = _safe_value(value)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise DataFetchError(f"{dataset} {field} contains an invalid numeric value for {code} {report_date}")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DataFetchError(f"{dataset} {field} contains an invalid numeric value for {code} {report_date}") from exc
+    if not math.isfinite(parsed):
+        raise DataFetchError(f"{dataset} {field} contains a non-finite numeric value for {code} {report_date}")
+    return parsed
+
+
+def _normalized_numeric_row(
+    row: pd.Series,
+    fields: set[str] | frozenset[str],
+    *,
+    dataset: str,
+    code: str,
+    report_date: str,
+) -> pd.Series:
+    result = row.copy()
+    for field in fields.intersection(row.index):
+        result[field] = _strict_optional_financial_float(
+            row.get(field),
+            dataset=dataset,
+            field=field,
+            code=code,
+            report_date=report_date,
+        )
+    return result
+
+
 def _same_financial_amount(left: Any, right: Any) -> bool:
     left_number = _finite_float(left)
     right_number = _finite_float(right)
@@ -814,16 +907,39 @@ def _merge_financials(
                 raise DataFetchError("detailed cash-flow mapping contains an empty identity")
             if identity in detailed_by_identity:
                 raise DataFetchError(f"duplicate detailed cash-flow identity during merge: {identity}")
-            detailed_by_identity[identity] = {str(field): _safe_value(value) for field, value in row.to_dict().items()}
+            normalized_row = _normalized_numeric_row(
+                row,
+                _DETAILED_CASHFLOW_NUMERIC_FIELDS,
+                dataset="detailed interim cash-flow",
+                code=identity[0],
+                report_date=identity[1],
+            )
+            detailed_by_identity[identity] = {
+                str(field): _safe_value(value) for field, value in normalized_row.to_dict().items()
+            }
 
     if not cashflow.empty and "SECURITY_CODE" in cashflow.columns:
         for _, row in cashflow.iterrows():
             code = _code(row["SECURITY_CODE"])
             report_date = _report_date(row.get("REPORT_DATE"))
             identity = (code, report_date)
+            netcash_operate = _strict_optional_financial_float(
+                row.get("NETCASH_OPERATE"),
+                dataset="annual cash-flow",
+                field="NETCASH_OPERATE",
+                code=code,
+                report_date=report_date,
+            )
+            reported_capex = _strict_optional_financial_float(
+                row.get(CAPEX_FIELD),
+                dataset="annual cash-flow",
+                field=CAPEX_FIELD,
+                code=code,
+                report_date=report_date,
+            )
             try:
                 capex, capex_provenance = resolve_capex_evidence(
-                    _safe_value(row.get(CAPEX_FIELD)),
+                    reported_capex,
                     None,
                     report_date=report_date,
                     security_code=code,
@@ -835,7 +951,7 @@ def _merge_financials(
                 ) from exc
             result.setdefault(code, {}).setdefault("cashflow", []).append(
                 {
-                    "NETCASH_OPERATE": _safe_value(row.get("NETCASH_OPERATE")),
+                    "NETCASH_OPERATE": netcash_operate,
                     CAPEX_FIELD: capex,
                     "CAPEX_PROVENANCE": capex_provenance,
                     "REPORT_DATE": report_date,
@@ -846,6 +962,13 @@ def _merge_financials(
         for _, row in balance.iterrows():
             code = _code(row["SECURITY_CODE"])
             report_date = _report_date(row.get("REPORT_DATE"))
+            row = _normalized_numeric_row(
+                row,
+                _BALANCE_NUMERIC_FIELDS,
+                dataset="annual balance",
+                code=code,
+                report_date=report_date,
+            )
             parent_equity, reported_parent_equity, parent_equity_source = _canonical_parent_equity(row)
             reported_balance_values = {
                 "TOTAL_ASSETS": _safe_value(row.get("TOTAL_ASSETS")),
@@ -853,6 +976,7 @@ def _merge_financials(
                 "TOTAL_EQUITY": _safe_value(row.get("TOTAL_EQUITY")),
                 "TOTAL_PARENT_EQUITY": reported_parent_equity,
                 "MINORITY_EQUITY": _first_value(row, "MINORITY_EQUITY", "MINORITY_INTEREST"),
+                "GOODWILL": _safe_value(row.get("GOODWILL")),
                 "MONETARYFUNDS": _safe_value(row.get("MONETARYFUNDS")),
                 "SHORT_LOAN": _safe_value(row.get("SHORT_LOAN")),
                 "LONG_LOAN": _first_value(row, "LONG_LOAN", "LONG_TERM_LOAN"),
@@ -895,6 +1019,7 @@ def _merge_financials(
                 "REPORTED_PARENT_EQUITY": reported_parent_equity,
                 "PARENT_EQUITY_SOURCE": parent_equity_source,
                 "MINORITY_EQUITY": balance_values["MINORITY_EQUITY"],
+                "GOODWILL": balance_values["GOODWILL"],
                 "DEBT_ASSET_RATIO": debt_asset_ratio,
                 "MONETARYFUNDS": balance_values["MONETARYFUNDS"],
                 "SHORT_LOAN": balance_values["SHORT_LOAN"],
@@ -925,9 +1050,27 @@ def _merge_financials(
             company.setdefault("income_history", [])
             report_date = _report_date(row.get("REPORT_DATE"))
             covered_income_identities.add((code, report_date))
-            revenue = _safe_value(row.get("TOTAL_OPERATE_INCOME"))
-            net_profit = _safe_value(row.get("PARENT_NETPROFIT"))
-            operate_profit = _safe_value(row.get("OPERATE_PROFIT"))
+            revenue = _strict_optional_financial_float(
+                row.get("TOTAL_OPERATE_INCOME"),
+                dataset="annual income",
+                field="TOTAL_OPERATE_INCOME",
+                code=code,
+                report_date=report_date,
+            )
+            net_profit = _strict_optional_financial_float(
+                row.get("PARENT_NETPROFIT"),
+                dataset="annual income",
+                field="PARENT_NETPROFIT",
+                code=code,
+                report_date=report_date,
+            )
+            operate_profit = _strict_optional_financial_float(
+                row.get("OPERATE_PROFIT"),
+                dataset="annual income",
+                field="OPERATE_PROFIT",
+                code=code,
+                report_date=report_date,
+            )
             income_record: dict[str, Any] = {"REPORT_DATE": report_date}
             for key, value in (
                 ("TOTAL_OPERATE_INCOME", revenue),
@@ -935,17 +1078,9 @@ def _merge_financials(
                 ("OPERATE_PROFIT", operate_profit),
             ):
                 if value is not None:
-                    try:
-                        income_record[key] = float(value)
-                    except (TypeError, ValueError, OverflowError):
-                        pass
+                    income_record[key] = value
             if revenue is not None:
-                try:
-                    company["revenue_history"].append(
-                        {"TOTAL_OPERATE_INCOME": float(revenue), "REPORT_DATE": report_date}
-                    )
-                except (TypeError, ValueError, OverflowError):
-                    pass
+                company["revenue_history"].append({"TOTAL_OPERATE_INCOME": revenue, "REPORT_DATE": report_date})
             if len(income_record) > 1:
                 company["income_history"].append(income_record)
 
@@ -956,8 +1091,20 @@ def _merge_financials(
             code = _code(row["SECURITY_CODE"])
             report_date = _report_date(row.get("REPORT_DATE"))
             record = {
-                "TOTAL_OPERATE_INCOME": _safe_value(row.get("TOTAL_OPERATE_INCOME")),
-                "PARENT_NETPROFIT": _safe_value(row.get("PARENT_NETPROFIT")),
+                "TOTAL_OPERATE_INCOME": _strict_optional_financial_float(
+                    row.get("TOTAL_OPERATE_INCOME"),
+                    dataset="interim income",
+                    field="TOTAL_OPERATE_INCOME",
+                    code=code,
+                    report_date=report_date,
+                ),
+                "PARENT_NETPROFIT": _strict_optional_financial_float(
+                    row.get("PARENT_NETPROFIT"),
+                    dataset="interim income",
+                    field="PARENT_NETPROFIT",
+                    code=code,
+                    report_date=report_date,
+                ),
                 "REPORT_DATE": report_date,
                 "period_end": report_date[5:] if len(report_date) == 10 else "",
             }
@@ -970,9 +1117,23 @@ def _merge_financials(
             code = _code(row["SECURITY_CODE"])
             report_date = _report_date(row.get("REPORT_DATE"))
             identity = (code, report_date)
+            netcash_operate = _strict_optional_financial_float(
+                row.get("NETCASH_OPERATE"),
+                dataset="interim cash-flow",
+                field="NETCASH_OPERATE",
+                code=code,
+                report_date=report_date,
+            )
+            reported_capex = _strict_optional_financial_float(
+                row.get(CAPEX_FIELD),
+                dataset="interim cash-flow",
+                field=CAPEX_FIELD,
+                code=code,
+                report_date=report_date,
+            )
             try:
                 capex, capex_provenance = resolve_capex_evidence(
-                    _safe_value(row.get(CAPEX_FIELD)),
+                    reported_capex,
                     detailed_by_identity.get(identity),
                     report_date=report_date,
                     security_code=code,
@@ -983,9 +1144,15 @@ def _merge_financials(
                     f"official zero-capex evidence conflicts with source: {code} {report_date}"
                 ) from exc
             record = {
-                "NETCASH_OPERATE": _safe_value(row.get("NETCASH_OPERATE")),
+                "NETCASH_OPERATE": netcash_operate,
                 CAPEX_FIELD: capex,
                 "CAPEX_PROVENANCE": capex_provenance,
+                # The detailed F10 cash-flow report is the source of this
+                # line item.  It is reported as evidence only; a current
+                # period cash outflow cannot prove a historical M&A census.
+                "OBTAIN_SUBSIDIARY_OTHER": _safe_value(
+                    detailed_by_identity.get(identity, {}).get("OBTAIN_SUBSIDIARY_OTHER")
+                ),
                 "REPORT_DATE": report_date,
                 "period_end": report_date[5:] if len(report_date) == 10 else "",
             }
@@ -1034,7 +1201,13 @@ def _merge_financials(
                 "SOURCE_REPORT_NAME": str(_safe_value(row.get("SOURCE_REPORT_NAME")) or "").strip(),
             }
             for field in MAIN_FINANCIAL_INDICATOR_METRICS:
-                record[field] = _safe_value(row.get(field))
+                record[field] = _strict_optional_financial_float(
+                    row.get(field),
+                    dataset="annual indicators",
+                    field=field,
+                    code=code,
+                    report_date=report_date,
+                )
             result.setdefault(code, {}).setdefault("indicators", []).append(record)
 
     list_fields = (
@@ -1147,8 +1320,9 @@ class DataFetcher:
         # enforces one process-wide active-request ceiling below the upstream
         # connection-reset threshold.
         with ThreadPoolExecutor(max_workers=2) as executor:
-            annual_future = executor.submit(fetch_all_financials_parallel)
-            interim_future = executor.submit(fetch_interim_financials_parallel)
+            fetch_kwargs = {} if requested_codes is None else {"codes": tuple(sorted(requested_codes))}
+            annual_future = executor.submit(fetch_all_financials_parallel, **fetch_kwargs)
+            interim_future = executor.submit(fetch_interim_financials_parallel, **fetch_kwargs)
             income, cashflow, balance, indicators = annual_future.result()
             income_interim, cashflow_interim, detailed_cashflow_interim = interim_future.result()
 

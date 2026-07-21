@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+import threading
 
 import pytest
 import requests
@@ -82,12 +83,13 @@ class _FakeHttpClient:
         return response
 
 
-def _adapter(client, *, page_size=2, retries=1):
+def _adapter(client, *, page_size=2, retries=1, max_workers=10):
     return EastmoneyMarketColdnessAdapter(
         http_client=client,
         page_size=page_size,
         retries=retries,
         retry_delay=0,
+        max_workers=max_workers,
         clock=lambda: FIXED_TIME,
     )
 
@@ -143,6 +145,34 @@ def test_multi_page_whole_market_fetch_is_complete_provenanced_and_excludes_bj_f
     assert snapshot.coverage.by_metric["change_60d_pct"].missing == 1
     assert snapshot.coverage.by_metric["volume_ratio"].coverage_rate == 1.0
     assert snapshot.coverage.complete_records == 0
+
+
+def test_remaining_pages_are_fetched_concurrently_but_consumed_in_page_order():
+    barrier = threading.Barrier(3, timeout=2)
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    class _ConcurrentClient:
+        def get(self, _url, **kwargs):
+            nonlocal active, peak
+            page = kwargs["params"]["pn"]
+            if page == 1:
+                return _FakeResponse(_page(4, [_row("600000")]))
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                barrier.wait()
+                return _FakeResponse(_page(4, [_row(f"00000{page - 1}", 0)]))
+            finally:
+                with lock:
+                    active -= 1
+
+    batch = _adapter(_ConcurrentClient(), page_size=1, max_workers=3).fetch_all()
+
+    assert peak == 3
+    assert [record.code for record in batch.records] == ["600000", "000001", "000002", "000003"]
 
 
 def test_missing_or_short_page_is_rejected_instead_of_returning_partial_market():
@@ -300,6 +330,31 @@ def test_force_refresh_bypasses_hit_but_preserves_cache_cas(tmp_path):
     assert replay.records == refreshed.records
 
 
+def test_expired_cache_can_be_replayed_explicitly_without_network(tmp_path):
+    cache_path = tmp_path / "coldness.json.gz"
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row()])})),
+        cache_path=cache_path,
+        cache_ttl_seconds=0,
+    )
+
+    class _MustNotFetch:
+        def fetch_all(self):
+            raise AssertionError("explicit historical replay must not call the network")
+
+    replay = fetch_market_coldness_snapshot(
+        adapter=_MustNotFetch(),
+        cache_path=cache_path,
+        cache_ttl_seconds=0,
+        allow_expired_cache=True,
+    )
+
+    assert first.available
+    assert replay.available
+    assert replay.cache_hit
+    assert replay.records == first.records
+
+
 def test_semantically_invalid_checksummed_cache_is_refetched(tmp_path):
     cache_path = tmp_path / "coldness.json.gz"
     first = fetch_market_coldness_snapshot(
@@ -327,5 +382,9 @@ def test_constructor_rejects_invalid_retry_and_page_contract_before_io():
         EastmoneyMarketColdnessAdapter(retries=0)
     with pytest.raises(ValueError, match="page_size"):
         EastmoneyMarketColdnessAdapter(page_size=0)
+    with pytest.raises(ValueError, match="max_workers"):
+        EastmoneyMarketColdnessAdapter(max_workers=0)
     with pytest.raises(ValueError, match="timeout"):
         EastmoneyMarketColdnessAdapter(timeout=True)
+    with pytest.raises(ValueError, match="allow_expired_cache"):
+        fetch_market_coldness_snapshot(use_cache=False, allow_expired_cache=1)

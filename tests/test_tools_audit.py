@@ -101,6 +101,12 @@ def test_non_economic_skip_details_lists_every_data_and_model_exception_only():
 def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_snapshot(monkeypatch):
     snapshot = SimpleNamespace(
         source="network",
+        quotes=pd.DataFrame(
+            [
+                {"code": "000001"},
+                {"code": "000002"},
+            ]
+        ),
         validation={"trading_source_trade_dates": ["2026-07-15"]},
     )
     coverage = SimpleNamespace(to_dict=lambda: {"total_records": 1})
@@ -118,14 +124,14 @@ def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_sn
     )
     calls = []
 
-    def fake_fetch(*, force_refresh):
-        calls.append(("fetch", force_refresh))
+    def fake_fetch(*, force_refresh, allow_expired_cache):
+        calls.append(("fetch", force_refresh, allow_expired_cache))
         return source_snapshot
 
     evidence = {"000001": {"market_coldness_score": 6.0}}
 
-    def fake_build(value, *, as_of_session, diagnostics):
-        calls.append(("build", value, as_of_session))
+    def fake_build(value, *, as_of_session, listed_quote_codes, diagnostics):
+        calls.append(("build", value, as_of_session, listed_quote_codes))
         diagnostics.update({"evidence_available": True, "evidence_reason": "available"})
         return evidence
 
@@ -139,11 +145,78 @@ def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_sn
     )
 
     assert actual is evidence
-    assert calls == [("fetch", False), ("build", source_snapshot, "2026-07-15")]
+    assert calls == [
+        ("fetch", False, True),
+        ("build", source_snapshot, "2026-07-15", ("000001", "000002")),
+    ]
     assert status["available"] is True
     assert status["evidence_available"] is True
     assert status["source"] == "Eastmoney bulk test"
     assert status["eligible_evidence_coverage"] == 1.0
+
+
+def test_fresh_publication_refetches_when_cached_coldness_belongs_to_another_session(monkeypatch):
+    snapshot = SimpleNamespace(
+        source="network",
+        quotes=pd.DataFrame([{"code": "000001"}]),
+        validation={"trading_source_trade_dates": ["2026-07-16"]},
+    )
+    coverage = SimpleNamespace(to_dict=lambda: {"total_records": 1})
+    stale = SimpleNamespace(
+        available=True,
+        source="old",
+        source_url="https://example.test/old",
+        retrieved_at="2026-07-15T08:00:00+00:00",
+        fetched_count=1,
+        total_expected=1,
+        coverage=coverage,
+        cache_hit=True,
+        cache_diagnostic="expired_hit",
+        reason="",
+    )
+    fresh = SimpleNamespace(
+        available=True,
+        source="fresh",
+        source_url="https://example.test/fresh",
+        retrieved_at="2026-07-16T08:00:00+00:00",
+        fetched_count=1,
+        total_expected=1,
+        coverage=coverage,
+        cache_hit=False,
+        cache_diagnostic="forced_refresh",
+        reason="",
+    )
+    calls = []
+
+    def fake_fetch(*, force_refresh, allow_expired_cache):
+        calls.append(("fetch", force_refresh, allow_expired_cache))
+        return fresh if force_refresh else stale
+
+    def fake_build(value, *, as_of_session, listed_quote_codes, diagnostics):
+        calls.append(("build", value.source, as_of_session, listed_quote_codes))
+        if value is stale:
+            diagnostics.update({"evidence_available": False, "evidence_reason": "session_retrieval_mismatch"})
+            return {}
+        diagnostics.update({"evidence_available": True, "evidence_reason": "available"})
+        return {"000001": {"market_coldness_score": 6.0}}
+
+    monkeypatch.setattr(run_full_audit, "fetch_market_coldness_snapshot", fake_fetch)
+    monkeypatch.setattr(run_full_audit, "build_market_coldness_evidence", fake_build)
+
+    evidence, status = run_full_audit._load_market_coldness_evidence(
+        snapshot,
+        ("000001",),
+        force_refresh=True,
+    )
+
+    assert evidence == {"000001": {"market_coldness_score": 6.0}}
+    assert status["source"] == "fresh"
+    assert calls == [
+        ("fetch", False, True),
+        ("build", "old", "2026-07-16", ("000001",)),
+        ("fetch", True, False),
+        ("build", "fresh", "2026-07-16", ("000001",)),
+    ]
 
 
 def test_market_coldness_unavailable_or_unbound_continues_without_invented_values(monkeypatch):
@@ -169,6 +242,7 @@ def test_market_coldness_unavailable_or_unbound_continues_without_invented_value
 
     source_unavailable = SimpleNamespace(
         source="cache",
+        quotes=pd.DataFrame([{"code": "000001"}]),
         validation={"trading_source_trade_dates": ["2026-07-15"]},
     )
     unavailable_snapshot = SimpleNamespace(
@@ -253,7 +327,11 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
             assert expected == "b" * 64
             return b"validated-snapshot"
 
-    monkeypatch.setattr(run_full_audit, "SafeFileCache", lambda *_args, **_kwargs: FakeCache())
+    def fake_cache(*_args, **kwargs):
+        calls["cache_kwargs"] = kwargs
+        return FakeCache()
+
+    monkeypatch.setattr(run_full_audit, "SafeFileCache", fake_cache)
     monkeypatch.setattr(run_full_audit, "DataFetcher", lambda **_kwargs: object())
     monkeypatch.setattr(run_full_audit, "get_market_snapshot", lambda *_args, **_kwargs: snapshot)
     coldness_evidence = {
@@ -326,6 +404,7 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     result = run_full_audit.main(["--sample-size", "1", "--output-dir", str(tmp_path / "audit")])
 
     assert result == 0
+    assert calls["cache_kwargs"]["ttl"] == run_full_audit.MAX_STALE_AGE_SECONDS
     assert calls["analysis_kwargs"]["previous_quality"] == active_quality
     assert calls["analysis_kwargs"]["enforce_quality"] is True
     assert calls["analysis_kwargs"]["expected_companies"] == 1
@@ -333,12 +412,14 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     assert calls["analysis_kwargs"]["reporting_period_contract"] == expected_contract
     assert calls["analysis_kwargs"]["market_coldness_evidence"] is coldness_evidence
     assert calls["analysis_kwargs"]["quality_history_loader"] is run_full_audit.fetch_quality_history_batch
+    assert calls["analysis_kwargs"]["research_report_loader"] is run_full_audit.fetch_research_reports_batch
     assert calls["audit_kwargs"]["provenance"]["full_market_quality"] == quality
     assert calls["audit_kwargs"]["provenance"]["market_coldness"] == coldness_status
     assert calls["audit_kwargs"]["full_market_analysis"] is analysis
     assert calls["audit_kwargs"]["reporting_period_contract"] == expected_contract
     assert calls["audit_kwargs"]["market_coldness_evidence"] is coldness_evidence
     assert calls["audit_kwargs"]["quality_history_evidence"] == {}
+    assert calls["audit_kwargs"]["research_report_evidence"] == {}
     assert len(calls["audit_kwargs"]["snapshot_sha256"]) == 64
     output = capsys.readouterr().out
     assert '"refresh_requested": false' in output

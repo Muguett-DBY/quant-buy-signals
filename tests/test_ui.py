@@ -11,6 +11,7 @@ import pytest
 from ui import buy_types_page
 from ui.buy_types_page import (
     TYPE_DIMENSIONS,
+    _analysis_export_json,
     _bear_case_lines,
     _diagnostic_type_label,
     _display_reason,
@@ -81,6 +82,38 @@ def test_type_filter_keeps_only_selected_signals_plus_true_no_signal_rows():
     assert inclusive["code"].tolist() == ["1", "3"]
 
 
+def test_type_filter_can_show_conditional_candidates_without_calling_them_signals():
+    frame = pd.DataFrame(
+        [
+            {"code": "1", "buy_types": ["type1"], "type1": {"status": "triggered"}},
+            {"code": "2", "buy_types": [], "type6": {"status": "conditional"}},
+            {"code": "3", "buy_types": [], "type6": {"status": "not_triggered"}},
+        ]
+    )
+
+    result = _filter_type_selection(
+        frame,
+        ["type6"],
+        include_no_signal=False,
+        include_conditional=True,
+    )
+
+    assert result["code"].tolist() == ["2"]
+
+
+def test_type_filter_does_not_hide_conditional_candidates_among_no_signal_rows():
+    frame = pd.DataFrame(
+        [
+            {"code": "1", "buy_types": [], "type6": {"status": "conditional"}},
+            {"code": "2", "buy_types": [], "type6": {"status": "not_triggered"}},
+        ]
+    )
+
+    result = _filter_type_selection(frame, ["type1"], include_no_signal=True)
+
+    assert result["code"].tolist() == ["2"]
+
+
 def test_stale_analysis_generation_is_removed_fail_closed(monkeypatch):
     frame = pd.DataFrame([{"code": "600519"}])
     state = {
@@ -126,7 +159,7 @@ def test_persistent_analysis_cache_restores_only_for_exact_snapshot_and_rule_ide
     snapshot_path.write_bytes(b"snapshot-generation-one")
     monkeypatch.setattr(data.snapshot, "DEFAULT_SNAPSHOT_PATH", snapshot_path)
     monkeypatch.setattr(buy_types_page, "_persistent_analysis_cache_enabled", lambda: True)
-    identity = {"snapshot_schema_version": 7, "code_sha256": "a" * 64}
+    identity = {"snapshot_schema_version": 8, "code_sha256": "a" * 64}
     monkeypatch.setattr(buy_types_page, "_current_analysis_generation_identity", lambda: dict(identity))
 
     scores = bs.screen_all_types(
@@ -181,12 +214,31 @@ def test_persistent_analysis_cache_restores_only_for_exact_snapshot_and_rule_ide
     assert buy_types_page._restore_persistent_analysis_state() == (True, "hit")
     assert session["buy_types_df"].iloc[0]["code"] == "000001"
     assert session["leaders_df"].equals(session["buy_types_df"])
+    assert isinstance(session["buy_types_dcf_audit_frame"], pd.DataFrame)
+    assert isinstance(session["buy_types_dcf_audit_csv"], bytes)
+    assert session["buy_types_analysis_json"] is None
+    assert session["buy_types_snapshot_warning"] == ""
+    assert "上次成功分析缓存" in session["buy_types_cache_restore_notice"]
 
     snapshot_path.write_bytes(b"snapshot-generation-two")
     session.clear()
     restored, reason = buy_types_page._restore_persistent_analysis_state()
     assert restored is False
     assert reason == "snapshot_artifact_mismatch"
+
+
+def test_persistent_analysis_cache_rejects_oversized_legacy_artifact_before_decompression(monkeypatch, tmp_path):
+    import data.snapshot
+
+    snapshot_path = tmp_path / "market_snapshot.json.gz"
+    snapshot_path.write_bytes(b"snapshot")
+    analysis_path = tmp_path / "analysis_generation.json.gz"
+    analysis_path.write_bytes(b"not-gzip-but-too-large")
+    monkeypatch.setattr(data.snapshot, "DEFAULT_SNAPSHOT_PATH", snapshot_path)
+    monkeypatch.setattr(buy_types_page, "_persistent_analysis_cache_enabled", lambda: True)
+    monkeypatch.setattr(buy_types_page, "_MAX_ANALYSIS_CACHE_ARTIFACT_BYTES", 8, raising=False)
+
+    assert buy_types_page._restore_persistent_analysis_state() == (False, "artifact_size_limit_exceeded")
 
 
 def test_reset_buy_type_filters_restores_fresh_session_defaults(monkeypatch):
@@ -204,6 +256,7 @@ def test_reset_buy_type_filters_restores_fresh_session_defaults(monkeypatch):
 
     assert all(state[f"cb_{type_key}"] is True for type_key in buy_types_page.TYPE_ORDER)
     assert state["include_no_signal"] is False
+    assert state["include_conditional"] is False
     assert state["selected_industries"] == []
     assert state["score_min"] == 0.0
     assert state["enable_pe_filter"] is False
@@ -272,7 +325,7 @@ def test_external_evidence_overlay_is_strict_traceable_and_non_mutating():
             "technology_score": 8,
             "technology_score_evidence": {
                 "source": "company-announcement",
-                "evidence_id": "ann-001",
+                "evidence_id": "announcement:000001:20251231",
                 "as_of": "2025-12-31",
             },
             "position_size_pct": 3,
@@ -284,7 +337,18 @@ def test_external_evidence_overlay_is_strict_traceable_and_non_mutating():
 
     assert "technology_score" not in original["000001"]
     assert merged["000001"]["technology_score"] == 8.0
-    assert normalised["000001"]["technology_score_evidence"]["evidence_id"] == "ann-001"
+    assert normalised["000001"]["technology_score_evidence"]["evidence_id"] == "announcement:000001:20251231"
+
+    from engine.buy_screener import _normalise_score_evidence
+
+    score, evidence = _normalise_score_evidence(
+        merged["000001"],
+        "technology_score",
+        expected_code="000001",
+        reference_date="2025-12-31",
+    )
+    assert score == 8.0
+    assert evidence == normalised["000001"]["technology_score_evidence"]
 
 
 def test_external_evidence_overlay_rejects_lookahead_after_the_snapshot_date():
@@ -293,13 +357,29 @@ def test_external_evidence_overlay_rejects_lookahead_after_the_snapshot_date():
             "technology_score": 8,
             "technology_score_evidence": {
                 "source": "company-announcement",
-                "evidence_id": "ann-after-snapshot",
+                "evidence_id": "announcement:000001:20260101",
                 "as_of": "2026-01-01",
             },
         }
     }
 
     with pytest.raises(ValueError, match="晚于行情快照日"):
+        _merge_user_evidence({"000001": {}}, payload, as_of="2025-12-31")
+
+
+def test_external_evidence_overlay_rejects_an_identifier_not_bound_to_the_stock():
+    payload = {
+        "000001": {
+            "technology_score": 8,
+            "technology_score_evidence": {
+                "source": "company-announcement",
+                "evidence_id": "announcement-2025",
+                "as_of": "2025-12-31",
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="绑定该股票代码"):
         _merge_user_evidence({"000001": {}}, payload, as_of="2025-12-31")
 
 
@@ -723,13 +803,14 @@ def test_failed_pipeline_keeps_the_complete_previous_ui_generation(monkeypatch):
 def test_network_snapshot_is_promoted_only_after_complete_analysis(monkeypatch):
     import data.fetcher
     import data.snapshot
+    import engine.market_coldness
     import engine.pipeline
 
     state = {}
     _patch_analysis_ui(monkeypatch, state)
     scores = pd.DataFrame([{"code": "000001"}])
     snapshot = SimpleNamespace(
-        quotes=pd.DataFrame([{"code": "000001"}]),
+        quotes=pd.DataFrame([{"code": "000001"}, {"code": "000002"}]),
         financials={"000001": {}},
         source="network",
         data_timestamp=1_000.0,
@@ -753,6 +834,13 @@ def test_network_snapshot_is_promoted_only_after_complete_analysis(monkeypatch):
     monkeypatch.setattr(engine.pipeline, "validate_market_analysis_quality", lambda *_args, **_kwargs: quality)
 
     captured = {}
+    coldness_call = {}
+
+    def build_coldness(*_args, **kwargs):
+        coldness_call.update(kwargs)
+        return {"000001": {}}
+
+    monkeypatch.setattr(engine.market_coldness, "build_market_coldness_evidence", build_coldness)
 
     def analyze(*_args, **kwargs):
         events.append("analysis")
@@ -780,14 +868,15 @@ def test_network_snapshot_is_promoted_only_after_complete_analysis(monkeypatch):
 
     assert isinstance(captured["reporting_period_contract"], ReportingPeriodContract)
     assert captured["eligible_codes"] == ("000001",)
+    assert coldness_call["listed_quote_codes"] == ("000001", "000002")
     assert state["buy_types_df"].loc[0, "code"] == "000001"
     assert state["leaders_df"].loc[0, "code"] == "000001"
     assert state["buy_types_analysis_quality"]["score_coverage"] == 1.0
     assert "000001" in state["buy_types_dcf_results"]
     assert isinstance(state["buy_types_dcf_audit_frame"], pd.DataFrame)
     assert isinstance(state["buy_types_dcf_audit_csv"], bytes)
-    assert isinstance(state["buy_types_analysis_json"], bytes)
-    exported = json.loads(state["buy_types_analysis_json"])
+    assert state["buy_types_analysis_json"] is None
+    exported = json.loads(_analysis_export_json(state["buy_types_df"], context=state))
     assert exported["generated_at"] == state["buy_types_timestamp"]
     assert exported["scores"][0]["code"] == "000001"
 

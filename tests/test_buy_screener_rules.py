@@ -13,12 +13,14 @@ from data.capex_evidence import resolve_capex_evidence
 from data.datacenter import RPT_MAIN_FINANCIAL_INDICATORS
 from engine import buy_screener as bs
 from engine import scenarios
+from engine.quantitative_evidence import MIN_SECTOR_COMPANIES
 
 
-def score_evidence(key: str) -> dict[str, str]:
+def score_evidence(key: str, code: str = "000001") -> dict[str, str]:
+    normalized_code = str(code).zfill(6) if str(code).isdigit() else str(code)
     result = {
         "source": "unit-test-fixture",
-        "evidence_id": f"fixture-{key}",
+        "evidence_id": f"fixture-{key}:{normalized_code}",
         "as_of": "2026-07-15",
     }
     return result
@@ -167,7 +169,7 @@ def base_metrics(**overrides):
         metrics["roic_wacc_basis"] = "NOPAT/平均投入资本代理"
     for key in bs.QUALITATIVE_SCORE_KEYS:
         if metrics.get(key) is not None and f"{key}_evidence" not in overrides:
-            metrics[f"{key}_evidence"] = score_evidence(key)
+            metrics[f"{key}_evidence"] = score_evidence(key, metrics["code"])
     return metrics
 
 
@@ -228,6 +230,162 @@ def benchmarks(**overrides):
     }
     bucket.update(overrides)
     return {"SOFTWARE": bucket, "ALL": dict(bucket)}
+
+
+def type5_history_evidence(
+    *,
+    code="000001",
+    as_of="2026-07-17",
+    pb_percentile=0.08,
+    current_pb=0.95,
+):
+    return {
+        "available": True,
+        "code": code,
+        "as_of": as_of,
+        "model_id": bs.LONG_HORIZON_HISTORY_MODEL_ID,
+        "shareholder_return": {"available": True},
+        "valuation_history": {
+            "available": True,
+            "window_years": 5,
+            "span_days": 1_800,
+            "start_delay_days": 1,
+            "end_date": as_of,
+            "pb_observations": 800,
+            "pb_percentile": pb_percentile,
+            "current_pb_mrq": current_pb,
+            "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+        },
+        "sources": [{"name": "Eastmoney historical valuation", "url": "https://example.test/valuation"}],
+    }
+
+
+def type7_report_evidence(*, code="000001", as_of="2026-07-17"):
+    sources = [
+        {
+            "security_code": code,
+            "company_name": "测试公司",
+            "title": f"研报{index}",
+            "publisher": f"机构{index}",
+            "publisher_id": f"eastmoney-org:{80_000_000 + index}",
+            "url": f"https://data.eastmoney.com/report/info/AP2026071{index}0000000000.html",
+            "as_of": as_of,
+            "evidence_id": f"eastmoney:AP2026071{index}0000000000",
+        }
+        for index in range(1, 4)
+    ]
+    body_ids = sorted(source["evidence_id"] for source in sources)
+    content_verification = {
+        "model_id": "type7-report-body-crosscheck-v2",
+        "code": code,
+        "as_of": as_of,
+        "passed": True,
+        "required_bodies": 3,
+        "attempted_bodies": 3,
+        "verified_bodies": 3,
+        "distinct_publishers": 3,
+        "bodies": [
+            {
+                "evidence_id": evidence_id,
+                "content_sha256": f"{index:064x}",
+                "content_length": 500 + index,
+                "paragraph_count": 3,
+                "structure_signals": ["analysis", "risk"],
+                "fact_count": 2,
+                "facts": [
+                    {
+                        "fact_key": "2026Q1:eps",
+                        "period": "2026Q1",
+                        "metric": "eps",
+                        "unit": "CNY_PER_SHARE",
+                        "value": (1.0, 3.0, 5.0)[index - 1],
+                    },
+                    {
+                        "fact_key": "2026Q1:revenue",
+                        "period": "2026Q1",
+                        "metric": "revenue",
+                        "unit": "CNY_100M",
+                        "value": (35.50, 35.54, 50.0)[index - 1],
+                    },
+                ],
+                "identity_checks": {
+                    "code_in_body": True,
+                    "name_in_body": True,
+                    "detail_code": True,
+                    "detail_name": True,
+                    "detail_title": True,
+                    "detail_publisher": True,
+                    "detail_date": True,
+                    "dom_json_body": True,
+                },
+            }
+            for index, evidence_id in enumerate(body_ids, start=1)
+        ],
+        "cross_check": {
+            "passed": True,
+            "minimum_reports": 2,
+            "fact_key": "2026Q1:revenue",
+            "fact_unit": "CNY_100M",
+            "consensus_value": 35.52,
+            "supporting_evidence_ids": body_ids[:2],
+            "max_relative_spread": 0.00112613,
+        },
+        "reason": "",
+    }
+    return {
+        "available": True,
+        "code": code,
+        "as_of": as_of,
+        "model_id": bs.RESEARCH_EVIDENCE_MODEL_ID,
+        "sources": sources,
+        "distinct_publishers": 3,
+        "content_verification": content_verification,
+        "cache_hit": False,
+        "cache_diagnostic": "disabled",
+        "reason": "",
+    }
+
+
+def type5_coldness_fields(
+    *,
+    code="000001",
+    as_of="2026-07-17",
+    score=8.5,
+    change_60d=-25.0,
+    change_ytd=-30.0,
+):
+    return {
+        "market_coldness_score": score,
+        "market_coldness_score_evidence": {
+            "source": "市场量价历史",
+            "evidence_id": f"market-coldness:{code}:{as_of.replace('-', '')}",
+            "as_of": as_of,
+            "summary": "同日量价冷度",
+        },
+        "market_coldness_components": {
+            "as_of_session": as_of,
+            "raw_values": {
+                "change_60d_pct": change_60d,
+                "change_ytd_pct": change_ytd,
+            },
+        },
+    }
+
+
+def complete_type5_bottom_metrics(**overrides):
+    values = {
+        "industry": "COAL",
+        "source_trade_date": "2026-07-17",
+        "pb": 0.95,
+        "market_cap": 500.0,
+        "net_profit_history": [100.0, 50.0, 20.0, 40.0, 80.0, 120.0, 60.0, 90.0, 50.0, 30.0],
+        "net_profit_years": list(range(2016, 2026)),
+        "gross_margin_history": [0.42, 0.30, 0.18, 0.25, 0.38, 0.45, 0.29, 0.35, 0.23, 0.17],
+        "gross_margin_years": list(range(2016, 2026)),
+        **type5_coldness_fields(),
+    }
+    values.update(overrides)
+    return base_metrics(**values)
 
 
 def complete_dcf_evidence(*, current_price=50.0):
@@ -679,6 +837,120 @@ class TestMetricExtraction(unittest.TestCase):
         self.assertEqual(result["free_cash_flow"], 30.0)
         self.assertEqual(result["fcf_history"], [7.0, 22.0, 30.0])
 
+    def test_growth_review_uses_reported_goodwill_but_keeps_ma_evidence_partial(self):
+        result = bs.extract_metrics(
+            {
+                "balance": [
+                    {"REPORT_DATE": "2024-12-31", "GOODWILL": 0.0},
+                    {"REPORT_DATE": "2025-12-31", "GOODWILL": 12.0},
+                ],
+                "cashflow_interim": [
+                    {"REPORT_DATE": "2026-03-31", "OBTAIN_SUBSIDIARY_OTHER": -5.0},
+                ],
+            },
+            {"code": "1", "name": "样本"},
+            "SOFTWARE",
+        )
+
+        self.assertEqual(result["goodwill_years"], [2024, 2025])
+        self.assertEqual(result["goodwill_history"], [0.0, 12.0])
+        self.assertEqual(result["interim_acquisition_cashflow"], -5.0)
+        self.assertEqual(result["external_growth_evidence"]["status"], "partial")
+        self.assertIn("逐笔并购收入占比", result["external_growth_evidence"]["missing"])
+        self.assertEqual(
+            result["external_growth_evidence"]["goodwill_source_records"][-1],
+            {
+                "report_date": "2025-12-31",
+                "source_dataset": "东方财富年度资产负债表",
+                "source_field": "GOODWILL",
+            },
+        )
+        self.assertEqual(
+            result["external_growth_evidence"]["acquisition_cashflow_source"],
+            {
+                "report_date": "2026-03-31",
+                "source_dataset": "东方财富当期现金流量表",
+                "source_field": "OBTAIN_SUBSIDIARY_OTHER",
+            },
+        )
+
+    def test_growth_source_evidence_survives_metric_extraction_with_source_metadata(self):
+        external_growth = {
+            "status": "complete",
+            "source": "上市公司年报及并购公告",
+            "evidence_id": "acquisition-census:000001:20260718",
+            "as_of": "2026-07-18",
+            "security_code": "000001",
+            "records": [{"report_date": "2025-12-31", "goodwill": 12.0}],
+        }
+        segment_growth = {
+            "status": "complete",
+            "source": "上市公司年报分部信息",
+            "evidence_id": "segment-growth:000001:20260718",
+            "as_of": "2026-07-18",
+            "security_code": "000001",
+            "segments": [{"name": "核心产品", "revenue_growth": 0.20}],
+        }
+
+        result = bs.extract_metrics(
+            {
+                "external_growth_evidence": external_growth,
+                "segment_growth_sources": segment_growth,
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "source_trade_date": "2026-07-18",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertEqual(result["external_growth_evidence"], external_growth)
+        self.assertEqual(result["segment_growth_sources"], segment_growth)
+
+    def test_untraceable_complete_growth_sources_are_not_treated_as_complete(self):
+        result = bs.extract_metrics(
+            {
+                "external_growth_evidence": {"status": "complete"},
+                "segment_growth_sources": {"status": "complete"},
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "source_trade_date": "2026-07-18",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertNotEqual(result["external_growth_evidence"]["status"], "complete")
+        self.assertNotEqual(result["segment_growth_sources"]["status"], "complete")
+
+        metadata_only = bs.extract_metrics(
+            {
+                "external_growth_evidence": {
+                    "status": "complete",
+                    "source": "上市公司公告",
+                    "evidence_id": "acquisition-census:000001:20260718",
+                    "as_of": "2026-07-18",
+                },
+                "segment_growth_sources": {
+                    "status": "complete",
+                    "source": "上市公司年报",
+                    "evidence_id": "segment-growth:000001:20260718",
+                    "as_of": "2026-07-18",
+                },
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "source_trade_date": "2026-07-18",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertNotEqual(metadata_only["external_growth_evidence"]["status"], "complete")
+        self.assertNotEqual(metadata_only["segment_growth_sources"]["status"], "complete")
+
     def test_q1_warning_is_computed_after_assignment_without_fake_yoy(self):
         fin = {
             "revenue_history": [
@@ -840,6 +1112,44 @@ class TestMetricExtraction(unittest.TestCase):
         self.assertEqual(result["fcf_history"][-1], 35.0)
         self.assertEqual(result["ocf_3yr_change"], -0.60)
         self.assertIsNone(result["ocf_np_ratio"])
+
+    def test_ocf_three_year_change_rejects_a_gap_in_the_latest_fiscal_years(self):
+        fin = {
+            "cashflow": [
+                {
+                    "REPORT_DATE": f"{year}-12-31",
+                    "NETCASH_OPERATE": ocf,
+                    "CONSTRUCT_LONG_ASSET": 0,
+                }
+                for year, ocf in ((2021, 100), (2023, 120), (2024, 180))
+            ],
+        }
+
+        result = bs.extract_metrics(fin, {"code": "1", "name": "样本"}, "SOFTWARE")
+
+        self.assertIsNone(result["ocf_3yr_change"])
+
+    def test_margin_trajectory_uses_only_the_validated_recent_consecutive_window(self):
+        fin = {
+            "income_history": [
+                {
+                    "REPORT_DATE": f"{year}-12-31",
+                    "TOTAL_OPERATE_INCOME": 100,
+                    "PARENT_NETPROFIT": profit,
+                }
+                for year, profit in (
+                    (2010, 90),
+                    (2011, 90),
+                    (2023, 10),
+                    (2024, 20),
+                    (2025, 30),
+                )
+            ],
+        }
+
+        result = bs.extract_metrics(fin, {"code": "1", "name": "样本"}, "SOFTWARE")
+
+        self.assertAlmostEqual(result["margin_trajectory"], (0.25 - 0.15) / 0.15)
 
     def test_financial_metrics_do_not_construct_industrial_fcf_or_roic(self):
         fin = {
@@ -1099,6 +1409,35 @@ class TestMetricExtraction(unittest.TestCase):
             score, evidence = bs._normalise_score_evidence(container, "technology_score")
         self.assertIsNone(score)
         self.assertIsNone(evidence)
+
+    def test_qualitative_evidence_is_bound_to_the_security_and_expires(self):
+        container = {
+            "code": "000001",
+            "source_trade_date": "2026-07-18",
+            "technology_score": 9.0,
+            "technology_score_evidence": {
+                "source": "上市公司公告",
+                "evidence_id": "technology:600519:20260718",
+                "as_of": "2026-07-18",
+            },
+        }
+
+        with patch.object(bs, "_shanghai_today", return_value=date(2026, 7, 20)):
+            self.assertIsNone(bs._verified_score(container, "technology_score"))
+
+            container["technology_score_evidence"] = {
+                "source": "上市公司公告",
+                "evidence_id": "technology:000001:20240101",
+                "as_of": "2024-01-01",
+            }
+            self.assertIsNone(bs._verified_score(container, "technology_score"))
+
+            container["technology_score_evidence"] = {
+                "source": "上市公司公告",
+                "evidence_id": "technology:000001:20260718",
+                "as_of": "2026-07-18",
+            }
+            self.assertEqual(bs._verified_score(container, "technology_score"), 9.0)
 
     def test_qualitative_evidence_rejects_unknown_fields_controls_and_oversized_text(self):
         base = score_evidence("technology_score")
@@ -1697,7 +2036,7 @@ class TestTypeRules(unittest.TestCase):
         triggered, _, scores, reasons = bs.score_type3_sustainable_growth(m, benchmarks())
         self.assertFalse(triggered)
         self.assertEqual(scores["3c"], 5.0)
-        self.assertIn("ROIC", reasons["3c"])
+        self.assertIn("投入回报率", reasons["3c"])
         self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertNotIn("_veto", reasons)
         m["roic"], m["wacc"] = 0.20, 0.08
@@ -1712,6 +2051,130 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("口径", reasons["3c"])
         self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertNotIn("_veto", reasons)
+
+    def test_type3_can_trigger_from_complete_traceable_automatic_evidence(self):
+        external_growth = {
+            "status": "complete",
+            "source": "上市公司年报及并购公告",
+            "evidence_id": "acquisition-census:000001:20260718",
+            "as_of": "2026-07-18",
+            "security_code": "000001",
+            "contract_scope": "aggregate_proxy_not_transaction_census",
+            "coverage_year_count": 5,
+            "aggregate_acquisition_cash_to_revenue": 0.0,
+            "positive_goodwill_additions_to_revenue": 0.0,
+            "goodwill_to_revenue_latest": 0.0,
+            "goodwill_change_to_revenue": 0.0,
+            "records": [
+                {
+                    "year": year,
+                    "report_date": f"{year}-12-31",
+                    "revenue": float(100 + (year - 2021) * 20),
+                    "goodwill": 0.0,
+                    "acquisition_cash": 0.0,
+                }
+                for year in range(2021, 2026)
+            ],
+        }
+        segment_growth = {
+            "status": "complete",
+            "source": "上市公司年报分部信息",
+            "evidence_id": "segment-growth:000001:20260718",
+            "as_of": "2026-07-18",
+            "security_code": "000001",
+            "history_years": [2021, 2022, 2023, 2024, 2025],
+            "growth_source_count": 3,
+            "effective_growth_source_count": 3.0,
+            "positive_growth_share": 1.0,
+            "revenue_hhi": 1.0 / 3.0,
+            "matched_latest_share": 1.0,
+            "segments": [
+                {
+                    "item_name": name,
+                    "first_year": 2021,
+                    "latest_year": 2025,
+                    "first_revenue": 10.0,
+                    "latest_revenue": 30.0,
+                    "latest_revenue_share": 1.0 / 3.0,
+                    "cagr": 3**0.25 - 1,
+                }
+                for name in ("核心产品", "海外业务", "新业务")
+            ],
+        }
+        extracted = bs.extract_metrics(
+            {
+                "external_growth_evidence": external_growth,
+                "segment_growth_sources": segment_growth,
+            },
+            {
+                "code": "000001",
+                "name": "目标公司",
+                "source_trade_date": "2026-07-18",
+            },
+            "SOFTWARE",
+        )
+
+        def rich_metric(code):
+            metric = base_metrics(
+                code=code,
+                industry="SOFTWARE",
+                revenue_values=[100.0, 125.0, 156.0, 195.0],
+                revenue_years=[2022, 2023, 2024, 2025],
+                cagr_3yr=0.20,
+                cagr_5yr=0.20,
+                trend_growth=0.20,
+                growth_slope=0.01,
+                growth_consistency=0.10,
+                revenue_latest=195.0,
+                net_profit_history=[20.0, 27.0, 36.0, 48.0],
+                net_profit_years=[2022, 2023, 2024, 2025],
+                net_profit=48.0,
+                total_assets_history=[100.0, 110.0, 120.0, 130.0],
+                total_assets_years=[2022, 2023, 2024, 2025],
+                indicator_roic_history=[0.20, 0.22, 0.24, 0.25],
+                indicator_roic_years=[2022, 2023, 2024, 2025],
+                gross_margin_history=[0.45, 0.46, 0.47, 0.48],
+                gross_margin_years=[2022, 2023, 2024, 2025],
+                gross_margin=0.48,
+                gross_margin_cv=0.03,
+                fcf_history=[15.0, 21.0, 29.0, 40.0],
+                fcf_years=[2022, 2023, 2024, 2025],
+                free_cash_flow=40.0,
+                capex_history=[5.0, 6.0, 7.0, 8.0],
+                capex_years=[2022, 2023, 2024, 2025],
+                capex=8.0,
+                adjusted_profit_ratio=0.98,
+                share_dilution_1yr=0.0,
+                interest_bearing_debt_ratio=0.05,
+                margin_trajectory=0.05,
+                roic=0.25,
+                wacc=0.08,
+                roic_wacc_basis="Eastmoney年度ROIC/公司资本结构WACC",
+                market_coldness_score=8.0,
+                peg=0.8,
+            )
+            metric["financial_indicator_as_of"] = "2025-12-31"
+            metric["source_trade_date"] = "2026-07-18"
+            return metric
+
+        target = rich_metric("000001")
+        target["external_growth_evidence"] = extracted["external_growth_evidence"]
+        target["segment_growth_sources"] = extracted["segment_growth_sources"]
+        target["_type3_growth_validation_token"] = bs.TYPE3_GROWTH_VALIDATION_TOKEN
+        peers = [rich_metric(f"P{index:02d}") for index in range(MIN_SECTOR_COMPANIES)]
+        universe = [*peers, target]
+
+        bs.enrich_metrics(
+            universe,
+            bs.build_sector_benchmarks(universe),
+            target_codes={"000001"},
+        )
+        outcome = bs.score_type3_sustainable_growth(target, bs.build_sector_benchmarks(universe))
+
+        self.assertEqual(target["growth_quality_score_evidence_level"], "derived_proxy")
+        self.assertEqual(target["growth_sustainability_score_evidence_level"], "derived_proxy")
+        self.assertTrue(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_TRIGGERED)
 
     def test_type3_negative_roic_spread_is_a_low_score_not_an_extra_patch6_veto(self):
         triggered, _total, scores, reasons = bs.score_type3_sustainable_growth(
@@ -1974,7 +2437,7 @@ class TestTypeRules(unittest.TestCase):
     def test_bank_type2_uses_sector_cycle_company_reversion_and_independent_coldness(self):
         evidence = {
             "source": "量价模型",
-            "evidence_id": "bank-cold-2025",
+            "evidence_id": "bank-cold:000001:20251231",
             "as_of": "2025-12-31",
             "summary": "独立市场冷度",
         }
@@ -2276,6 +2739,126 @@ class TestTypeRules(unittest.TestCase):
         self.assertTrue(bs._has_cycle_history([100, 60, 30, 45, 70]))
         self.assertFalse(bs._has_cycle_history([10, 20, 30, 45, 70]))
 
+    def test_type5_normalised_pe_never_averages_across_a_year_gap(self):
+        metric = base_metrics(
+            market_cap=100.0,
+            net_profit_history=[100.0] * 5 + [10.0] * 5,
+            net_profit_years=[2011, 2012, 2013, 2014, 2015, 2021, 2022, 2023, 2024, 2025],
+        )
+
+        normalised_pe, years_used = bs._type5_normalised_pe(metric)
+
+        self.assertEqual(years_used, 5)
+        self.assertEqual(normalised_pe, 10.0)
+
+    def test_type5_pb_signal_has_exact_percentile_and_absolute_boundaries(self):
+        cases = (
+            ((0.10, 1.0), 10.0),
+            ((0.100001, 1.0), 8.0),
+            ((0.20, 1.2), 8.0),
+            ((0.200001, 1.2), 6.0),
+            ((0.30, 1.5), 6.0),
+            ((0.300001, 1.5), 4.0),
+            ((0.08, 2.01), 2.0),
+            ((0.80, 0.80), 2.0),
+        )
+        for inputs, expected in cases:
+            with self.subTest(inputs=inputs):
+                self.assertEqual(bs._type5_pb_bottom_score(*inputs), expected)
+        for invalid in ((True, 1.0), (0.1, False), (-0.01, 1.0), (0.1, 0.0)):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(bs._type5_pb_bottom_score(*invalid))
+
+    def test_type5_automatic_bottom_can_trigger_only_with_three_bound_sources(self):
+        metric = complete_type5_bottom_metrics()
+        history = type5_history_evidence()
+        history["available"] = False
+        history["shareholder_return"] = {"available": False, "reason": "insufficient_ten_year_span"}
+
+        triggered, total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=history,
+        )
+
+        self.assertTrue(triggered)
+        self.assertGreaterEqual(total, 7.0)
+        self.assertEqual(scores["5b"], 9.6)
+        self.assertEqual(reasons["_status"], bs.STATUS_TRIGGERED)
+        self.assertEqual(reasons["_evidence"], "complete")
+        self.assertIn("PB8%/0.95", reasons["5b"])
+        self.assertNotIn("成本", reasons["5b"])
+        self.assertNotIn("库存", reasons["5b"])
+
+    def test_type5_missing_coldness_keeps_bottom_evidence_incomplete(self):
+        metric = complete_type5_bottom_metrics(
+            market_coldness_score=None,
+            market_coldness_score_evidence=None,
+            market_coldness_components=None,
+        )
+
+        triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(scores["5b"], 5.0)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(reasons["_evidence"], "incomplete")
+        self.assertIn("冷度", reasons["5b"])
+
+    def test_type5_single_pb_signal_is_capped_without_price_and_financial_resonance(self):
+        metric = complete_type5_bottom_metrics(
+            net_profit_history=[100.0, 50.0, 20.0, 40.0, 80.0, 60.0, 30.0, 50.0, 90.0, 120.0],
+            gross_margin_history=[0.42, 0.30, 0.18, 0.25, 0.38, 0.29, 0.20, 0.28, 0.35, 0.45],
+            **type5_coldness_fields(score=2.0, change_60d=10.0, change_ytd=15.0),
+        )
+
+        triggered, total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+
+        self.assertFalse(triggered)
+        self.assertLess(total, 7.0)
+        self.assertEqual(scores["5b"], 4.0)
+        self.assertEqual(reasons["_evidence"], "complete")
+
+    def test_type5_rejects_history_bound_to_another_security_or_date(self):
+        metric = complete_type5_bottom_metrics()
+        for field, value in (("code", "000002"), ("as_of", "2026-07-16")):
+            history = type5_history_evidence()
+            history[field] = value
+            with self.subTest(field=field):
+                triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+                    metric,
+                    benchmarks(),
+                    history_evidence=history,
+                )
+                self.assertFalse(triggered)
+                self.assertEqual(scores["5b"], 5.0)
+                self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
+    def test_type5_history_preflight_requires_decision_reachability(self):
+        viable = complete_type5_bottom_metrics()
+        viable_outcome = bs.score_type5_counter_cyclical(viable, benchmarks())
+        impossible = complete_type5_bottom_metrics(
+            type5_cycle_attribute_score=7.0,
+            type5_survival_score=0.0,
+            type5_upside_elasticity_score=0.0,
+            type5_normalized_earnings_score=0.0,
+        )
+        impossible_outcome = bs.score_type5_counter_cyclical(impossible, benchmarks())
+        non_cycle = base_metrics(industry="SOFTWARE")
+        non_cycle_outcome = bs.score_type5_counter_cyclical(non_cycle, benchmarks())
+
+        self.assertTrue(bs._type5_history_request_needed(viable, viable_outcome))
+        self.assertFalse(bs._type5_history_request_needed(impossible, impossible_outcome))
+        self.assertFalse(bs._type5_history_request_needed(non_cycle, non_cycle_outcome))
+
     def test_type5_requires_strong_cycle_attributes_and_never_uses_cycle_stage_veto(self):
         m = base_metrics(
             industry="COAL",
@@ -2308,6 +2891,27 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(scores["5c"], 1.0)
         self.assertNotIn("_veto", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_TRIGGERED)
+
+    def test_type5_accepts_complete_financial_history_for_survival_elasticity_and_normalised_earnings(self):
+        profits = [100.0, 50.0, 20.0, 40.0, 80.0, 120.0, 60.0, 30.0, 50.0, 90.0]
+        m = base_metrics(
+            industry="COAL",
+            market_cap=500.0,
+            net_profit_history=profits,
+            net_profit_years=list(range(2016, 2026)),
+            gross_margin_history=[0.42, 0.30, 0.18, 0.25, 0.38, 0.45, 0.29, 0.16, 0.23, 0.35],
+            gross_margin_years=list(range(2016, 2026)),
+            type5_bottom_signal_score=10.0,
+        )
+
+        triggered, total, scores, reasons = bs.score_type5_counter_cyclical(m, benchmarks())
+
+        self.assertTrue(triggered)
+        self.assertGreaterEqual(total, 7.0)
+        self.assertGreaterEqual(scores["5c"], 8.0)
+        self.assertGreaterEqual(scores["5d"], 6.0)
+        self.assertGreaterEqual(scores["5e"], 7.0)
+        self.assertNotIn("_missing", reasons)
 
     def test_type5_rejects_non_cyclical_industry_even_when_company_numbers_look_cyclical(self):
         outcome = bs.score_type5_counter_cyclical(
@@ -2998,6 +3602,12 @@ class TestMarketScreen(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "DCF.*000001"):
             bs.screen_all_types({"1": {}}, quotes, dcf_results={"1": {}, "000001": {}})
 
+    def test_financial_company_without_a_quote_is_rejected_instead_of_silently_dropped(self):
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1}])
+
+        with self.assertRaisesRegex(ValueError, "财务全集.*缺少行情.*000002"):
+            bs.screen_all_types({"1": {}, "2": {}}, quotes)
+
     def test_bulk_market_coldness_evidence_is_injected_before_type2_scoring(self):
         captured = {}
 
@@ -3047,6 +3657,133 @@ class TestMarketScreen(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "市场冷度证据无效"),
         ):
             bs.screen_all_types({"1": {}}, quotes, market_coldness_evidence=invalid)
+
+    def test_type3_preflight_builds_and_loads_deep_evidence_for_a_viable_candidate(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        metric = complete_type3_metrics(
+            code="000001",
+            source_trade_date="2026-07-17",
+            goodwill_history=[0.0, 0.0, 0.0, 0.0, 0.0],
+            goodwill_years=[2021, 2022, 2023, 2024, 2025],
+        )
+        for key in ("growth_quality_score", "growth_sustainability_score"):
+            metric.pop(key, None)
+            metric.pop(f"{key}_evidence", None)
+            metric.pop(f"{key}_evidence_level", None)
+
+        partial_evidence = {
+            "growth_quality_score": {
+                "score": 5.0,
+                "evidence_level": "partial",
+                "evidence": score_evidence("growth_quality_score"),
+                "details": {
+                    "score_before_evidence_cap": 9.0,
+                    "evidence_quality": {
+                        "missing_inputs": ["acquisition_cash_and_goodwill_history"],
+                    },
+                },
+            },
+            "growth_sustainability_score": {
+                "score": 5.0,
+                "evidence_level": "partial",
+                "evidence": score_evidence("growth_sustainability_score"),
+                "details": {
+                    "score_before_evidence_cap": 9.0,
+                    "evidence_quality": {
+                        "missing_inputs": ["segment_growth_sources"],
+                    },
+                },
+            },
+        }
+
+        def fake_enrich(metrics, _benchmarks, *, target_codes):
+            self.assertIsNone(target_codes)
+            metrics[0]["quantitative_evidence"] = copy.deepcopy(partial_evidence)
+            metrics[0]["quantitative_evidence_levels"] = {key: "partial" for key in partial_evidence}
+            return {"000001": {}}, {"000001": copy.deepcopy(partial_evidence)}
+
+        loader_calls = []
+        loaded_record = {"code": "000001", "marker": "deep-growth-loaded"}
+
+        def loader(requests, *, progress_cb):
+            loader_calls.append((requests, progress_cb))
+            return {"000001": loaded_record}
+
+        def accept_loaded_growth(_evidence, *, code, as_of):
+            self.assertEqual((code, as_of), ("000001", "2026-07-17"))
+            return {"status": "complete"}, {"status": "complete"}
+
+        def refresh_growth(metric_, _context, _benchmarks):
+            for key, score in (("growth_quality_score", 8.0), ("growth_sustainability_score", 9.0)):
+                metric_[key] = score
+                metric_[f"{key}_evidence"] = score_evidence(key)
+                metric_[f"{key}_evidence_level"] = "derived_proxy"
+
+        def fake_type7(_metric, _type1, _history):
+            return neutral_outcome("type7"), {
+                "research_request_needed": False,
+                "history_request_needed": False,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        quotes = pd.DataFrame(
+            [
+                {
+                    "code": "1",
+                    "name": "高增长样本",
+                    "price": 50.0,
+                    "source_trade_date": "2026-07-17",
+                }
+            ]
+        )
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "extract_metrics", return_value=copy.deepcopy(metric)),
+            patch.object(bs, "enrich_metrics", side_effect=fake_enrich),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "_type3_growth_components_from_evidence", side_effect=accept_loaded_growth),
+            patch.object(bs, "_refresh_type3_quantitative_evidence", side_effect=refresh_growth),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            result = bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                type3_growth_loader=loader,
+            )
+
+        self.assertEqual(len(loader_calls), 1)
+        requests, progress = loader_calls[0]
+        self.assertIsNone(progress)
+        self.assertEqual(
+            requests,
+            [
+                {
+                    "code": "000001",
+                    "as_of": "2026-07-17",
+                    "revenue_records": [
+                        {"year": year, "value": value}
+                        for year, value in zip(
+                            [2021, 2022, 2023, 2024, 2025],
+                            [100.0, 115.0, 135.0, 160.0, 190.0],
+                        )
+                    ],
+                    "goodwill_records": [{"year": year, "value": 0.0} for year in [2021, 2022, 2023, 2024, 2025]],
+                }
+            ],
+        )
+        self.assertNotEqual(result.iloc[0]["type3"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
 
     def test_type7_history_loader_runs_only_after_preflight_requests_the_candidate(self):
         def neutral_outcome(type_key):
@@ -3098,6 +3835,246 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(type7_calls, [None, history])
         self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
 
+    def test_type7_loads_exact_history_before_report_metadata_and_preserves_both_records(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        history = {"available": True, "code": "000001", "as_of": "2026-07-17"}
+        report = type7_report_evidence()
+        calls = []
+
+        def fake_type7(metric, _type1, history_evidence):
+            report_ready = len(metric.get("type7_research_sources", [])) == 3
+            calls.append((report_ready, history_evidence is history))
+            return neutral_outcome("type7"), {
+                "research_request_needed": history_evidence is history and not report_ready,
+                "history_request_needed": history_evidence is None,
+                "loaded_marker": report_ready and history_evidence is history,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        report_calls = []
+        history_calls = []
+        loader_order = []
+
+        def report_loader(requests, *, progress_cb):
+            loader_order.append("report_metadata")
+            report_calls.append((requests, progress_cb))
+            return {"000001": report}
+
+        def history_loader(requests, *, progress_cb):
+            loader_order.append("market_history")
+            history_calls.append((requests, progress_cb))
+            return {"000001": history}
+
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-17"}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            result = bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                research_report_loader=report_loader,
+                quality_history_loader=history_loader,
+            )
+
+        request = [{"code": "000001", "as_of": "2026-07-17"}]
+        self.assertEqual(report_calls, [(request, None)])
+        self.assertEqual(history_calls, [(request, None)])
+        self.assertEqual(loader_order, ["market_history", "report_metadata"])
+        self.assertEqual(calls, [(False, False), (False, True), (True, True)])
+        self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
+
+    def test_type7_skips_report_metadata_network_when_exact_history_is_decisive(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        history = {"available": True, "code": "000001", "as_of": "2026-07-17"}
+        type7_calls = []
+
+        def fake_type7(_metric, _type1, history_evidence):
+            type7_calls.append(history_evidence)
+            exact_history_loaded = history_evidence is history
+            return neutral_outcome("type7"), {
+                "research_request_needed": False,
+                "history_request_needed": not exact_history_loaded,
+                "decisively_not_triggered": exact_history_loaded,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        history_calls = []
+        report_calls = []
+
+        def history_loader(requests, *, progress_cb):
+            history_calls.append((requests, progress_cb))
+            return {"000001": history}
+
+        def report_loader(requests, *, progress_cb):
+            report_calls.append((requests, progress_cb))
+            raise AssertionError("decisive candidate must not fetch report metadata")
+
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-17"}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                research_report_loader=report_loader,
+                quality_history_loader=history_loader,
+            )
+
+        request = [{"code": "000001", "as_of": "2026-07-17"}]
+        self.assertEqual(history_calls, [(request, None)])
+        self.assertEqual(report_calls, [])
+        self.assertEqual(type7_calls, [None, history])
+
+    def test_type5_shared_history_loader_is_reachable_and_skips_impossible_or_non_cycle_names(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        metrics = {
+            "000001": complete_type5_bottom_metrics(),
+            "000002": complete_type5_bottom_metrics(
+                code="000002",
+                type5_cycle_attribute_score=7.0,
+                type5_survival_score=0.0,
+                type5_upside_elasticity_score=0.0,
+                type5_normalized_earnings_score=0.0,
+                **type5_coldness_fields(code="000002"),
+            ),
+            "000003": complete_type5_bottom_metrics(
+                code="000003",
+                industry="SOFTWARE",
+                **type5_coldness_fields(code="000003"),
+            ),
+        }
+
+        def coldness_record(code):
+            fields = type5_coldness_fields(code=code)
+            return {
+                "market_coldness_score": fields["market_coldness_score"],
+                "market_coldness_score_evidence": fields["market_coldness_score_evidence"],
+                "components": fields["market_coldness_components"],
+            }
+
+        loader_calls = []
+
+        def loader(requests, *, progress_cb):
+            loader_calls.append((requests, progress_cb))
+            return {"000001": type5_history_evidence()}
+
+        def fake_type7(_metric, _type1, _history):
+            return neutral_outcome("type7"), {
+                "history_request_needed": False,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        quotes = pd.DataFrame(
+            [
+                {
+                    "code": code,
+                    "name": f"样本{code}",
+                    "price": 1.0,
+                    "source_trade_date": "2026-07-17",
+                }
+                for code in ("1", "2", "3")
+            ]
+        )
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(
+                bs,
+                "extract_metrics",
+                side_effect=lambda _fin, quote, _industry: copy.deepcopy(metrics[str(quote["code"]).zfill(6)]),
+            ),
+            patch.object(bs, "enrich_metrics", return_value=({}, {})),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            result = bs.screen_all_types(
+                {"1": {}, "2": {}, "3": {}},
+                quotes,
+                market_coldness_evidence={code: coldness_record(code) for code in ("000001", "000002", "000003")},
+                quality_history_loader=loader,
+            )
+
+        self.assertEqual(loader_calls, [([{"code": "000001", "as_of": "2026-07-17"}], None)])
+        by_code = result.set_index("code")
+        self.assertEqual(by_code.loc["000001", "type5"]["status"], bs.STATUS_TRIGGERED)
+        self.assertEqual(by_code.loc["000002", "type5"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(by_code.loc["000003", "type5"]["status"], bs.STATUS_NOT_APPLICABLE)
+
+    def test_type7_is_not_scored_twice_when_preflight_history_does_not_change(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        type7_calls = []
+
+        def fake_type7(_metric, _type1, history_evidence):
+            type7_calls.append(history_evidence)
+            return neutral_outcome("type7"), {
+                "history_request_needed": False,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            bs.screen_all_types({"1": {}}, quotes)
+
+        self.assertEqual(type7_calls, [None])
+
     def test_preloaded_type7_history_rejects_unknown_codes_and_non_mapping_records(self):
         quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0}])
         cases = [
@@ -3145,6 +4122,69 @@ class TestMarketScreen(unittest.TestCase):
         result = bs.build_sector_benchmarks(metrics)
         self.assertEqual(result["A"]["median_pe"], 20.0)
 
+    def test_company_benchmark_view_excludes_its_own_relative_values(self):
+        metrics = [
+            {
+                "code": "000001",
+                "industry": "BANK",
+                "pe": 10.0,
+                "pb": 1.0,
+                "cagr_3yr": 0.10,
+                "net_margin": 0.10,
+                "net_interest_margin_change": 0.001,
+                "nonperforming_loan_ratio_change": -0.003,
+                "capital_adequacy_ratio_change": 0.01,
+                "new_business_value_growth": 0.10,
+                "risk_coverage_ratio_change": 0.001,
+                "profit_1yr_change": 0.10,
+            },
+            {
+                "code": "000002",
+                "industry": "BANK",
+                "pe": 20.0,
+                "pb": 2.0,
+                "cagr_3yr": 0.20,
+                "net_margin": 0.20,
+                "net_interest_margin_change": 0.002,
+                "nonperforming_loan_ratio_change": -0.002,
+                "capital_adequacy_ratio_change": 0.02,
+                "new_business_value_growth": 0.20,
+                "risk_coverage_ratio_change": 0.002,
+                "profit_1yr_change": 0.20,
+            },
+            {
+                "code": "000003",
+                "industry": "BANK",
+                "pe": 100.0,
+                "pb": 10.0,
+                "cagr_3yr": 1.00,
+                "net_margin": 1.00,
+                "net_interest_margin_change": 0.010,
+                "nonperforming_loan_ratio_change": 0.010,
+                "capital_adequacy_ratio_change": 0.10,
+                "new_business_value_growth": 1.00,
+                "risk_coverage_ratio_change": 0.010,
+                "profit_1yr_change": 1.00,
+            },
+        ]
+
+        benchmarks = bs.build_sector_benchmarks(metrics)
+        target_view = bs._benchmarks_for_code(benchmarks, "000003")
+
+        self.assertEqual(benchmarks["BANK"]["median_pe"], 20.0)
+        self.assertEqual(target_view["BANK"]["median_pe"], 15.0)
+        self.assertEqual(target_view["BANK"]["median_pb"], 1.5)
+        self.assertAlmostEqual(target_view["BANK"]["median_cagr"], 0.15)
+        self.assertAlmostEqual(target_view["BANK"]["median_margin"], 0.15)
+        self.assertAlmostEqual(target_view["BANK"]["median_nim_change"], 0.0015)
+        self.assertAlmostEqual(target_view["BANK"]["median_npl_change"], -0.0025)
+        self.assertAlmostEqual(target_view["BANK"]["median_bank_capital_change"], 0.015)
+        self.assertAlmostEqual(target_view["BANK"]["median_nbv_growth"], 0.15)
+        self.assertAlmostEqual(target_view["BANK"]["median_risk_coverage_change"], 0.0015)
+        self.assertAlmostEqual(target_view["BANK"]["median_profit_change"], 0.15)
+        self.assertEqual(target_view["BANK"]["median_pe_count"], 2)
+        self.assertEqual(target_view["ALL"]["median_pe"], 15.0)
+
     def test_empty_input_returns_stable_empty_frame(self):
         result = bs.screen_all_types({}, pd.DataFrame())
         self.assertTrue(result.empty)
@@ -3166,14 +4206,17 @@ class TestMarketScreen(unittest.TestCase):
             benchmark_population_sizes.append(len(metrics))
             return original_build_benchmarks(metrics)
 
+        captured_type2_medians = []
+
         def capture_type2(_metric, _benchmarks):
+            captured_type2_medians.append(_benchmarks["SOFTWARE"]["median_pe"])
             return neutral_outcome("type2")
 
         quotes = pd.DataFrame(
             [
-                {"code": "1", "name": "甲", "price": 1.0},
-                {"code": "2", "name": "乙", "price": 2.0},
-                {"code": "3", "name": "丙", "price": 3.0},
+                {"code": "1", "name": "甲", "price": 1.0, "pe": 10.0},
+                {"code": "2", "name": "乙", "price": 2.0, "pe": 100.0},
+                {"code": "3", "name": "丙", "price": 3.0, "pe": 30.0},
             ]
         )
         with (
@@ -3194,6 +4237,7 @@ class TestMarketScreen(unittest.TestCase):
 
         self.assertEqual(result["code"].tolist(), ["000002"])
         self.assertEqual(benchmark_population_sizes, [3])
+        self.assertEqual(captured_type2_medians, [20.0])
 
         with self.assertRaisesRegex(ValueError, "不在财务全集"):
             bs.screen_all_types({"1": {}}, quotes.iloc[:1], output_codes=["2"])

@@ -185,12 +185,24 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
         quality_history_evidence,
         quality_history_loader,
         quality_history_progress_cb,
+        type3_growth_evidence,
+        type3_growth_loader,
+        type3_growth_progress_cb,
+        research_report_evidence,
+        research_report_loader,
+        research_report_progress_cb,
     ):
         captured["dcf_results"] = dcf_results
         captured["dcf_skip_classifications"] = dcf_skip_classifications
         captured["quality_history_evidence"] = quality_history_evidence
         captured["quality_history_loader"] = quality_history_loader
         captured["quality_history_progress_cb"] = quality_history_progress_cb
+        captured["type3_growth_evidence"] = type3_growth_evidence
+        captured["type3_growth_loader"] = type3_growth_loader
+        captured["type3_growth_progress_cb"] = type3_growth_progress_cb
+        captured["research_report_evidence"] = research_report_evidence
+        captured["research_report_loader"] = research_report_loader
+        captured["research_report_progress_cb"] = research_report_progress_cb
         return pd.DataFrame([{"code": code} for code in financials])
 
     monkeypatch.setattr(buy_screener, "screen_all_types", capture_screen)
@@ -210,6 +222,10 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
     assert outcome.dcf_skip_classifications == expected
     assert captured["dcf_skip_classifications"] == expected
     assert captured["dcf_results"] == {}
+    assert captured["type3_growth_evidence"] is None
+    assert captured["type3_growth_loader"] is None
+    assert captured["research_report_evidence"] is None
+    assert captured["research_report_loader"] is None
 
 
 def test_screen_rejects_malformed_or_conflicting_skip_classifications():

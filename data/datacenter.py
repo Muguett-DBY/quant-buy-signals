@@ -11,6 +11,7 @@ import math
 import re
 import threading
 import time
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -47,7 +48,9 @@ _MAX_DATACENTER_PAGES = 128
 _MAX_DATACENTER_ROWS = 50_000
 _MAX_DATACENTER_RESPONSE_BYTES = 16 * 1024 * 1024
 _RESPONSE_CHUNK_BYTES = 64 * 1024
+_MAX_REMOTE_SECURITY_CODES = 100
 ANNUAL_HISTORY_YEARS = 10
+DETAILED_ANNUAL_HISTORY_YEARS = 5
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 RPT_INCOME = "RPT_DMSK_FN_INCOME"
@@ -146,6 +149,24 @@ _INTERIM_REPORT_LABELS = {
     "06-30": ("中报", "中报"),
     "09-30": ("三季报", "三季报"),
 }
+_REQUESTED_COLUMN_ALIAS_GROUPS = (
+    frozenset({"TOTAL_PARENT_EQUITY", "PARENT_EQUITY", "TOTAL_EQUITY_PARENT", "EQUITY_PARENT"}),
+    frozenset({"MINORITY_EQUITY", "MINORITY_INTEREST"}),
+    frozenset({"LONG_LOAN", "LONG_TERM_LOAN"}),
+    frozenset({"BONDS_PAYABLE", "BOND_PAYABLE"}),
+    frozenset(
+        {
+            "NONCURRENT_LIAB_1YEAR",
+            "NONCURRENT_LIABILITY_IN_1YEAR",
+            "CURRENT_PORTION_NONCURRENT_LIAB",
+        }
+    ),
+    frozenset({"LEASE_LIAB", "LEASE_LIABILITY"}),
+    frozenset({"SHORT_BONDS_PAYABLE", "SHORT_BOND_PAYABLE"}),
+    frozenset({"BORROW_FUNDS", "BORROW_FUND"}),
+    frozenset({"CENTRAL_BANK_BORROWING", "LOAN_PBC"}),
+    frozenset({"SUBORDINATED_BONDS_PAYABLE", "SUBBOND_PAYABLE"}),
+)
 
 
 class DataFetchError(RuntimeError):
@@ -398,6 +419,35 @@ def _validate_filtered_report_date(frame: pd.DataFrame, extra_filter: str) -> No
         raise DataFetchError(f"report date mismatch: expected {expected}, got {examples}")
 
 
+def _validate_requested_columns(
+    frame: pd.DataFrame,
+    columns: str,
+    *,
+    report_name: str,
+) -> None:
+    """Prove that Eastmoney honored every requested field.
+
+    An all-null requested column is valid evidence that the source returned a
+    blank fact.  A column absent from the response is different: accepting it
+    would silently turn an API/schema failure into missing financial data.
+    Known Eastmoney naming variants are accepted as equivalent.
+    """
+    requested = [column.strip() for column in str(columns).split(",") if column.strip()]
+    if not requested or requested == ["ALL"]:
+        return
+    present = set(frame.columns)
+    missing: list[str] = []
+    for requested_column in requested:
+        accepted = {requested_column}
+        for aliases in _REQUESTED_COLUMN_ALIAS_GROUPS:
+            if requested_column in aliases:
+                accepted.update(aliases)
+        if accepted.isdisjoint(present):
+            missing.append(requested_column)
+    if missing:
+        raise DataFetchError(f"{report_name} response omitted requested columns: {sorted(missing)}")
+
+
 def _fetch_all_pages(
     report_name: str,
     columns: str,
@@ -475,6 +525,7 @@ def _fetch_all_pages(
     frame = pd.DataFrame(ordered_rows)
     if "SECURITY_CODE" not in frame.columns:
         raise DataFetchError(f"{report_name} response omitted SECURITY_CODE")
+    _validate_requested_columns(frame, columns, report_name=report_name)
     _validate_filtered_report_date(frame, extra_filter)
     identity_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame]
     if len(identity_columns) == 2 and frame.duplicated(identity_columns, keep=False).any():
@@ -531,16 +582,90 @@ def _required_frames(frames: list[pd.DataFrame], labels: list[str]) -> pd.DataFr
     )
 
 
-def fetch_income_history(years: list[int] | None = None) -> pd.DataFrame:
+def _normalize_security_codes(codes: Collection[str] | None) -> tuple[str, ...] | None:
+    if codes is None:
+        return None
+    if isinstance(codes, (str, bytes)) or not isinstance(codes, Collection):
+        raise ValueError("security codes must be a collection of six-digit strings")
+    normalized: set[str] = set()
+    for code in codes:
+        if isinstance(code, bool) or not isinstance(code, str) or not re.fullmatch(r"\d{6}", code.strip()):
+            raise ValueError("security codes must be a collection of six-digit strings")
+        normalized.add(code.strip())
+    return tuple(sorted(normalized))
+
+
+def _security_code_filter(codes: Collection[str] | None) -> str:
+    """Return a bounded, injection-safe Eastmoney code predicate."""
+    normalized = _normalize_security_codes(codes)
+    if not normalized or len(normalized) > _MAX_REMOTE_SECURITY_CODES:
+        return ""
+    quoted = ",".join(f'"{code}"' for code in normalized)
+    return f"(SECURITY_CODE in ({quoted}))"
+
+
+def _combine_period_frames(
+    frames: list[pd.DataFrame],
+    labels: list[str],
+    *,
+    codes: tuple[str, ...] | None,
+    requested_columns: str,
+    remote_filtered: bool = False,
+) -> pd.DataFrame:
+    if codes is None:
+        return _required_frames(frames, labels)
+
+    if remote_filtered:
+        nonempty = [frame for frame in frames if not frame.empty]
+        if nonempty:
+            result = pd.concat(nonempty, ignore_index=True)
+        else:
+            columns = [column.strip() for column in requested_columns.split(",") if column.strip()]
+            result = pd.DataFrame(columns=list(dict.fromkeys(columns)))
+    else:
+        # Large requested universes intentionally skip the remote predicate to
+        # avoid oversized URLs.  They still represent a full-market query, so
+        # retain the original all-period/all-report completeness requirement
+        # before filtering the returned rows locally.
+        result = _required_frames(frames, labels)
+    if "SECURITY_CODE" not in result.columns:
+        return result
+
+    normalized_rows = result["SECURITY_CODE"].astype(str).str.strip().str.zfill(6)
+    requested = set(codes)
+    if remote_filtered:
+        unexpected = sorted(set(normalized_rows) - requested)
+        if unexpected:
+            raise DataFetchError(f"filtered financial query returned unexpected security codes: {unexpected[:5]}")
+    result = result.loc[normalized_rows.isin(requested)].copy()
+    sort_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in result.columns]
+    if sort_columns:
+        result = result.sort_values(sort_columns, kind="stable").reset_index(drop=True)
+    return result
+
+
+def fetch_income_history(
+    years: list[int] | None = None,
+    *,
+    codes: Collection[str] | None = None,
+) -> pd.DataFrame:
     """Fetch complete annual income history, oldest-to-newest per company."""
     if years is None:
         latest = _latest_completed_annual_year()
         years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
     if not years:
         return pd.DataFrame()
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     columns = "SECURITY_CODE,SECURITY_NAME_ABBR,TOTAL_OPERATE_INCOME,OPERATE_PROFIT,PARENT_NETPROFIT,REPORT_DATE"
-    frames = [_fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{year}-12-31')") for year in years]
-    return _required_frames(frames, [str(year) for year in years])
+    frames = [_fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{year}-12-31'){code_filter}") for year in years]
+    return _combine_period_frames(
+        frames,
+        [str(year) for year in years],
+        codes=normalized_codes,
+        requested_columns=columns,
+        remote_filtered=bool(code_filter),
+    )
 
 
 def fetch_latest_cashflow(year: int | None = None) -> pd.DataFrame:
@@ -552,16 +677,28 @@ def fetch_latest_cashflow(year: int | None = None) -> pd.DataFrame:
     return frame
 
 
-def fetch_cashflow_history(years: list[int] | None = None) -> pd.DataFrame:
+def fetch_cashflow_history(
+    years: list[int] | None = None,
+    *,
+    codes: Collection[str] | None = None,
+) -> pd.DataFrame:
     """Fetch complete annual cash-flow history, oldest-to-newest per company."""
     if years is None:
         latest = _latest_completed_annual_year()
         years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
     if not years:
         return pd.DataFrame()
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
-    frames = [_fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{year}-12-31')") for year in years]
-    return _required_frames(frames, [str(year) for year in years])
+    frames = [_fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{year}-12-31'){code_filter}") for year in years]
+    return _combine_period_frames(
+        frames,
+        [str(year) for year in years],
+        codes=normalized_codes,
+        requested_columns=columns,
+        remote_filtered=bool(code_filter),
+    )
 
 
 def _validate_main_financial_indicator_history(frame: pd.DataFrame, years: list[int]) -> pd.DataFrame:
@@ -572,6 +709,9 @@ def _validate_main_financial_indicator_history(frame: pd.DataFrame, years: list[
         raise DataFetchError(f"{RPT_MAIN_FINANCIAL_INDICATORS} response omitted columns: {missing}")
 
     result = frame.loc[:, [*_MAIN_FINANCIAL_INDICATOR_PROVENANCE, *MAIN_FINANCIAL_INDICATOR_METRICS]].copy()
+    if result.empty:
+        result["SOURCE_REPORT_NAME"] = RPT_MAIN_FINANCIAL_INDICATORS
+        return result
     result["REPORT_DATE"] = result["REPORT_DATE"].astype(str).str.slice(0, 10)
     expected_dates = {f"{year}-12-31" for year in years}
     invalid_dates = ~result["REPORT_DATE"].isin(expected_dates)
@@ -656,7 +796,11 @@ def _validate_main_financial_indicator_history(frame: pd.DataFrame, years: list[
     return result.sort_values(["SECURITY_CODE", "REPORT_DATE"], kind="stable").reset_index(drop=True)
 
 
-def fetch_main_financial_indicator_history(years: list[int] | None = None) -> pd.DataFrame:
+def fetch_main_financial_indicator_history(
+    years: list[int] | None = None,
+    *,
+    codes: Collection[str] | None = None,
+) -> pd.DataFrame:
     """Fetch ten complete annual histories from Eastmoney's main-financial report."""
     if years is None:
         latest = _latest_completed_annual_year()
@@ -667,15 +811,23 @@ def fetch_main_financial_indicator_history(years: list[int] | None = None) -> pd
         raise ValueError("indicator years must be integers")
     if len(set(years)) != len(years):
         raise ValueError("indicator years must not contain duplicates")
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     frames = [
         _fetch_all_pages(
             RPT_MAIN_FINANCIAL_INDICATORS,
             _MAIN_FINANCIAL_INDICATOR_COLUMNS,
-            f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\")",
+            (f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\"){code_filter}"),
         )
         for year in years
     ]
-    frame = _required_frames(frames, [f"main financial indicators {year}" for year in years])
+    frame = _combine_period_frames(
+        frames,
+        [f"main financial indicators {year}" for year in years],
+        codes=normalized_codes,
+        requested_columns=_MAIN_FINANCIAL_INDICATOR_COLUMNS,
+        remote_filtered=bool(code_filter),
+    )
     return _validate_main_financial_indicator_history(frame, years)
 
 
@@ -706,7 +858,7 @@ _BALANCE_CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
 
 _BALANCE_COMMON_COLUMNS = (
     "SECURITY_CODE,SECUCODE,SECURITY_TYPE_CODE,REPORT_DATE,TOTAL_ASSETS,"
-    "TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY,MINORITY_EQUITY"
+    "TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY,MINORITY_EQUITY,GOODWILL"
 )
 _BALANCE_REPORT_COLUMNS = {
     RPT_BALANCE: (
@@ -753,7 +905,11 @@ def _add_canonical_balance_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def fetch_balance_history(years: list[int] | None = None) -> pd.DataFrame:
+def fetch_balance_history(
+    years: list[int] | None = None,
+    *,
+    codes: Collection[str] | None = None,
+) -> pd.DataFrame:
     """Fetch ten complete annual balance snapshots for every A-share org type.
 
     Eastmoney separates general companies, banks, insurers and securities
@@ -765,17 +921,99 @@ def fetch_balance_history(years: list[int] | None = None) -> pd.DataFrame:
         years = list(range(latest, latest - ANNUAL_HISTORY_YEARS, -1))
     if not years:
         return pd.DataFrame()
+    normalized_codes = _normalize_security_codes(codes)
+    all_requested_columns = ",".join(_BALANCE_REPORT_COLUMNS.values())
     yearly_frames: list[pd.DataFrame] = []
-    for year in years:
+    resolved_single_report: str | None = None
+
+    def fetch_full_year(year: int) -> tuple[pd.DataFrame, list[tuple[str, pd.DataFrame]]]:
         report_frames: list[pd.DataFrame] = []
         labels: list[str] = []
-        report_filter = f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"058001001\")"
+        base_filter = f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\")"
+        by_report: list[tuple[str, pd.DataFrame]] = []
         for report_name, columns in _BALANCE_REPORT_COLUMNS.items():
-            report_frames.append(_fetch_all_pages(report_name, columns, report_filter))
+            report_frame = _fetch_all_pages(report_name, columns, base_filter)
+            report_frames.append(report_frame)
+            by_report.append((report_name, report_frame))
             labels.append(f"{report_name}:{year}")
-        yearly_frames.append(_required_frames(report_frames, labels))
+        complete = _required_frames(report_frames, labels)
+        filtered = _combine_period_frames(
+            [complete],
+            [str(year)],
+            codes=normalized_codes,
+            requested_columns=all_requested_columns,
+        )
+        return filtered, by_report
 
-    frame = _required_frames(yearly_frames, [str(year) for year in years])
+    for year in years:
+        if normalized_codes is None or len(normalized_codes) != 1:
+            filtered, _ = fetch_full_year(year)
+            yearly_frames.append(filtered)
+            continue
+
+        code = normalized_codes[0]
+        code_filter = _security_code_filter(normalized_codes)
+        candidate_reports = (
+            [resolved_single_report] if resolved_single_report is not None else list(_BALANCE_REPORT_COLUMNS)
+        )
+        filtered_frame: pd.DataFrame | None = None
+        filtered_errors: list[DataFetchError] = []
+        for report_name in candidate_reports:
+            if report_name is None:
+                continue
+            columns = _BALANCE_REPORT_COLUMNS[report_name]
+            report_filter = (
+                f"(REPORT_DATE='{year}-12-31')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\"){code_filter}"
+            )
+            try:
+                candidate = _fetch_all_pages(report_name, columns, report_filter)
+            except DataFetchError as exc:
+                filtered_errors.append(exc)
+                continue
+            candidate = _combine_period_frames(
+                [candidate],
+                [f"{report_name}:{year}"],
+                codes=normalized_codes,
+                requested_columns=columns,
+                remote_filtered=True,
+            )
+            if not candidate.empty:
+                resolved_single_report = report_name
+                filtered_frame = candidate
+                break
+            if resolved_single_report is not None:
+                filtered_frame = candidate
+                break
+
+        if filtered_frame is None:
+            if filtered_errors:
+                # Some F10 organization-specific reports reject a code that
+                # belongs to another report type.  If no filtered report has
+                # proved the row, fall back to the complete four-report year
+                # rather than mistaking an upstream error for a missing fact.
+                filtered_frame, by_report = fetch_full_year(year)
+                for report_name, report_frame in by_report:
+                    codes_in_report = report_frame["SECURITY_CODE"].astype(str).str.strip().str.zfill(6)
+                    if codes_in_report.eq(code).any():
+                        resolved_single_report = report_name
+                        break
+            else:
+                filtered_frame = _combine_period_frames(
+                    [],
+                    [str(year)],
+                    codes=normalized_codes,
+                    requested_columns=all_requested_columns,
+                    remote_filtered=True,
+                )
+        yearly_frames.append(filtered_frame)
+
+    frame = _combine_period_frames(
+        yearly_frames,
+        [str(year) for year in years],
+        codes=normalized_codes,
+        requested_columns=all_requested_columns,
+        remote_filtered=normalized_codes is not None and len(normalized_codes) == 1,
+    )
     duplicate = frame.duplicated(["SECURITY_CODE", "REPORT_DATE"], keep=False)
     if duplicate.any():
         examples = (
@@ -810,35 +1048,61 @@ def fetch_latest_q1_cashflow(year: int | None = None) -> pd.DataFrame:
 
 def fetch_interim_income_comparables(
     period: tuple[int, str] | None = None,
+    *,
+    codes: Collection[str] | None = None,
 ) -> pd.DataFrame:
     """Fetch the latest filed interim income period and prior-year comparable."""
     year, period_end = _latest_available_interim_period() if period is None else period
     year = int(year)
     if period_end not in {"03-31", "06-30", "09-30"}:
         raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     columns = "SECURITY_CODE,SECURITY_NAME_ABBR,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,REPORT_DATE"
     years = [year - 1, year]
-    frames = [_fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{item}-{period_end}')") for item in years]
-    return _required_frames(frames, [f"income interim {item}-{period_end}" for item in years])
+    frames = [
+        _fetch_all_pages(RPT_INCOME, columns, f"(REPORT_DATE='{item}-{period_end}'){code_filter}") for item in years
+    ]
+    return _combine_period_frames(
+        frames,
+        [f"income interim {item}-{period_end}" for item in years],
+        codes=normalized_codes,
+        requested_columns=columns,
+        remote_filtered=bool(code_filter),
+    )
 
 
 def fetch_interim_cashflow_comparables(
     period: tuple[int, str] | None = None,
+    *,
+    codes: Collection[str] | None = None,
 ) -> pd.DataFrame:
     """Fetch the latest filed interim cash-flow period and prior-year comparable."""
     year, period_end = _latest_available_interim_period() if period is None else period
     year = int(year)
     if period_end not in {"03-31", "06-30", "09-30"}:
         raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     columns = "SECURITY_CODE,NETCASH_OPERATE,CONSTRUCT_LONG_ASSET,REPORT_DATE"
     years = [year - 1, year]
-    frames = [_fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{item}-{period_end}')") for item in years]
-    return _required_frames(frames, [f"cashflow interim {item}-{period_end}" for item in years])
+    frames = [
+        _fetch_all_pages(RPT_CASHFLOW, columns, f"(REPORT_DATE='{item}-{period_end}'){code_filter}") for item in years
+    ]
+    return _combine_period_frames(
+        frames,
+        [f"cashflow interim {item}-{period_end}" for item in years],
+        codes=normalized_codes,
+        requested_columns=columns,
+        remote_filtered=bool(code_filter),
+    )
 
 
 def _validate_detailed_interim_cashflow(
     frame: pd.DataFrame,
     expected_dates: list[str],
+    *,
+    require_all_dates: bool = True,
 ) -> pd.DataFrame:
     """Validate detailed investing-cash evidence without coercing blanks to zero."""
     required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS}
@@ -847,6 +1111,10 @@ def _validate_detailed_interim_cashflow(
         raise DataFetchError(f"{RPT_DETAILED_CASHFLOW} response omitted columns: {missing}")
 
     result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS]].copy()
+    if result.empty:
+        result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
+        result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
+        return result
     result["REPORT_DATE"] = result["REPORT_DATE"].astype(str).str.slice(0, 10)
     expected_set = set(expected_dates)
     actual_dates = set(result["REPORT_DATE"].tolist())
@@ -854,7 +1122,7 @@ def _validate_detailed_interim_cashflow(
         examples = sorted(actual_dates - expected_set)[:5]
         raise DataFetchError(f"detailed interim cash-flow contains unexpected report dates: {examples}")
     absent_dates = [report_date for report_date in expected_dates if report_date not in actual_dates]
-    if absent_dates:
+    if require_all_dates and absent_dates:
         raise DataFetchError(f"detailed interim cash-flow omitted required report dates: {absent_dates}")
 
     expected_type = result["REPORT_DATE"].map(lambda report_date: _INTERIM_REPORT_LABELS[report_date[5:]][0])
@@ -918,36 +1186,191 @@ def _validate_detailed_interim_cashflow(
 
 def fetch_detailed_interim_cashflow_comparables(
     period: tuple[int, str] | None = None,
+    *,
+    codes: Collection[str] | None = None,
 ) -> pd.DataFrame:
     """Fetch detailed current/prior YTD statements used only for capex evidence."""
     year, period_end = _latest_available_interim_period() if period is None else period
     year = int(year)
     if period_end not in _INTERIM_REPORT_LABELS:
         raise ValueError("interim period_end must be 03-31, 06-30, or 09-30")
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
     years = [year - 1, year]
     expected_dates = [f"{item}-{period_end}" for item in years]
     frames = [
         _fetch_all_pages(
             RPT_DETAILED_CASHFLOW,
             _DETAILED_CASHFLOW_COLUMNS,
-            f"(REPORT_DATE='{report_date}')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\")",
+            (f"(REPORT_DATE='{report_date}')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\"){code_filter}"),
         )
         for report_date in expected_dates
     ]
-    frame = _required_frames(
+    frame = _combine_period_frames(
         frames,
         [f"detailed cashflow interim {report_date}" for report_date in expected_dates],
+        codes=normalized_codes,
+        requested_columns=_DETAILED_CASHFLOW_COLUMNS,
+        remote_filtered=bool(code_filter),
     )
-    return _validate_detailed_interim_cashflow(frame, expected_dates)
+    return _validate_detailed_interim_cashflow(
+        frame,
+        expected_dates,
+        require_all_dates=normalized_codes is None,
+    )
 
 
-def fetch_interim_financials_parallel() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _validate_detailed_annual_cashflow(
+    frame: pd.DataFrame,
+    expected_dates: list[str],
+    *,
+    require_all_dates: bool = True,
+) -> pd.DataFrame:
+    """Validate detailed annual investing-cash evidence without imputing blanks."""
+    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise DataFetchError(f"{RPT_DETAILED_CASHFLOW} response omitted columns: {missing}")
+
+    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS]].copy()
+    if result.empty:
+        result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
+        result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
+        return result
+    result["REPORT_DATE"] = result["REPORT_DATE"].astype(str).str.slice(0, 10)
+    expected_set = set(expected_dates)
+    actual_dates = set(result["REPORT_DATE"].tolist())
+    if not actual_dates.issubset(expected_set):
+        examples = sorted(actual_dates - expected_set)[:5]
+        raise DataFetchError(f"detailed annual cash-flow contains unexpected report dates: {examples}")
+    absent_dates = [report_date for report_date in expected_dates if report_date not in actual_dates]
+    if require_all_dates and absent_dates:
+        raise DataFetchError(f"detailed annual cash-flow omitted required report dates: {absent_dates}")
+
+    expected_name = result["REPORT_DATE"].str.slice(0, 4) + "年报"
+    if result["REPORT_TYPE"].astype(str).str.strip().ne("年报").any():
+        raise DataFetchError("detailed annual cash-flow query returned an incompatible REPORT_TYPE")
+    if result["REPORT_DATE_NAME"].astype(str).str.strip().ne(expected_name).any():
+        raise DataFetchError("detailed annual cash-flow REPORT_DATE_NAME differs from its period")
+    if result["SECURITY_TYPE_CODE"].astype(str).str.strip().ne(_A_SHARE_SECURITY_TYPE).any():
+        raise DataFetchError("detailed annual cash-flow query returned a non-A-share security type")
+    if result["CURRENCY"].astype(str).str.strip().ne("CNY").any():
+        raise DataFetchError("detailed annual cash-flow query returned a non-CNY statement")
+
+    identity_source = result[["SECURITY_CODE", "SECURITY_NAME_ABBR", "SECUCODE"]]
+    if identity_source.isna().any(axis=None):
+        raise DataFetchError("detailed annual cash-flow contains an invalid security identity")
+    codes = result["SECURITY_CODE"].astype(str).str.strip()
+    names = result["SECURITY_NAME_ABBR"].astype(str).str.strip()
+    secucodes = result["SECUCODE"].astype(str).str.strip()
+    secucode_parts = secucodes.str.rsplit(".", n=1, expand=True)
+    if (
+        codes.eq("").any()
+        or names.eq("").any()
+        or secucode_parts.shape[1] != 2
+        or secucode_parts[0].ne(codes).any()
+        or not secucode_parts[1].isin({"SH", "SZ", "BJ"}).all()
+    ):
+        raise DataFetchError("detailed annual cash-flow contains an invalid security identity")
+
+    for column in ("NOTICE_DATE", "UPDATE_DATE"):
+        source = result[column]
+        present = source.notna() & source.astype(str).str.strip().ne("")
+        if present.any():
+            parsed = pd.to_datetime(source[present], errors="coerce")
+            if parsed.isna().any():
+                raise DataFetchError(f"detailed annual cash-flow contains an invalid {column}")
+            result.loc[present, column] = source[present].astype(str).str.slice(0, 10)
+
+    for column in _DETAILED_INVESTMENT_FIELDS:
+        source = result[column]
+        numeric = pd.to_numeric(source, errors="coerce")
+        booleans = source.map(lambda value: isinstance(value, bool))
+        invalid = source.notna() & (numeric.isna() | booleans)
+        finite = numeric.dropna().map(lambda value: math.isfinite(float(value)))
+        if invalid.any() or not finite.all():
+            raise DataFetchError(f"detailed annual cash-flow {column} contains a non-finite value")
+        result[column] = numeric
+
+    duplicate = result.duplicated(["SECURITY_CODE", "REPORT_DATE"], keep=False)
+    if duplicate.any():
+        examples = (
+            result.loc[duplicate, ["SECURITY_CODE", "REPORT_DATE"]].drop_duplicates().head(5).to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate detailed annual cash-flow identities: {examples}")
+    result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
+    result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
+    return result.sort_values(["SECURITY_CODE", "REPORT_DATE"], kind="stable").reset_index(drop=True)
+
+
+def fetch_detailed_annual_cashflow_history(
+    years: list[int] | None = None,
+    *,
+    codes: Collection[str] | None = None,
+) -> pd.DataFrame:
+    """Fetch detailed annual investing-cash rows for bounded Type 3 evidence.
+
+    Blank line items remain ``NaN``/``None``.  This function does not infer
+    that an unreported acquisition cash-flow value is zero.
+    """
+    if years is None:
+        latest = _latest_completed_annual_year()
+        years = list(range(latest, latest - DETAILED_ANNUAL_HISTORY_YEARS, -1))
+    if isinstance(years, (str, bytes)) or not isinstance(years, list):
+        raise ValueError("detailed annual years must be a list of integers")
+    latest_completed = _latest_completed_annual_year()
+    if any(
+        isinstance(year, bool) or not isinstance(year, int) or not 1990 <= year <= latest_completed for year in years
+    ):
+        raise ValueError(f"detailed annual years must be integers between 1990 and {latest_completed}")
+    if len(set(years)) != len(years):
+        raise ValueError("detailed annual years must not contain duplicates")
+    if not years:
+        return pd.DataFrame()
+
+    normalized_codes = _normalize_security_codes(codes)
+    code_filter = _security_code_filter(normalized_codes)
+    expected_dates = [f"{year}-12-31" for year in years]
+    frames = [
+        _fetch_all_pages(
+            RPT_DETAILED_CASHFLOW,
+            _DETAILED_CASHFLOW_COLUMNS,
+            (f"(REPORT_DATE='{report_date}')(SECURITY_TYPE_CODE=\"{_A_SHARE_SECURITY_TYPE}\"){code_filter}"),
+        )
+        for report_date in expected_dates
+    ]
+    frame = _combine_period_frames(
+        frames,
+        [f"detailed cashflow annual {report_date}" for report_date in expected_dates],
+        codes=normalized_codes,
+        requested_columns=_DETAILED_CASHFLOW_COLUMNS,
+        remote_filtered=bool(code_filter),
+    )
+    return _validate_detailed_annual_cashflow(
+        frame,
+        expected_dates,
+        require_all_dates=normalized_codes is None,
+    )
+
+
+def fetch_interim_financials_parallel(
+    *,
+    codes: Collection[str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return one coherent income/compact-cashflow/detailed-cashflow batch."""
-    fetchers = {
-        "income_interim": fetch_interim_income_comparables,
-        "cashflow_interim": fetch_interim_cashflow_comparables,
-        "detailed_cashflow_interim": fetch_detailed_interim_cashflow_comparables,
-    }
+    normalized_codes = _normalize_security_codes(codes)
+    if normalized_codes is None:
+        fetchers = {
+            "income_interim": fetch_interim_income_comparables,
+            "cashflow_interim": fetch_interim_cashflow_comparables,
+            "detailed_cashflow_interim": fetch_detailed_interim_cashflow_comparables,
+        }
+    else:
+        fetchers = {
+            "income_interim": lambda: fetch_interim_income_comparables(codes=normalized_codes),
+            "cashflow_interim": lambda: fetch_interim_cashflow_comparables(codes=normalized_codes),
+            "detailed_cashflow_interim": lambda: fetch_detailed_interim_cashflow_comparables(codes=normalized_codes),
+        }
     worker_count = max(1, min(len(fetchers), int(CONCURRENCY) // _DATACENTER_WORKERS))
     results: dict[str, pd.DataFrame] = {}
     parallel_error: DataFetchError | None = None
@@ -978,19 +1401,31 @@ def fetch_interim_financials_parallel() -> tuple[pd.DataFrame, pd.DataFrame, pd.
     )
 
 
-def fetch_all_financials_parallel() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def fetch_all_financials_parallel(
+    *,
+    codes: Collection[str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return one all-or-error annual financial refresh batch.
 
     Income, cash flow, balance sheets and main-financial indicators start in
     the same batch. The outer and page pools share a fixed concurrency budget,
     so nested pagination cannot multiply request pressure beyond CONCURRENCY.
     """
-    fetchers = {
-        "income": fetch_income_history,
-        "cashflow": fetch_cashflow_history,
-        "balance": fetch_balance_history,
-        "indicators": fetch_main_financial_indicator_history,
-    }
+    normalized_codes = _normalize_security_codes(codes)
+    if normalized_codes is None:
+        fetchers = {
+            "income": fetch_income_history,
+            "cashflow": fetch_cashflow_history,
+            "balance": fetch_balance_history,
+            "indicators": fetch_main_financial_indicator_history,
+        }
+    else:
+        fetchers = {
+            "income": lambda: fetch_income_history(codes=normalized_codes),
+            "cashflow": lambda: fetch_cashflow_history(codes=normalized_codes),
+            "balance": lambda: fetch_balance_history(codes=normalized_codes),
+            "indicators": lambda: fetch_main_financial_indicator_history(codes=normalized_codes),
+        }
     results: dict[str, pd.DataFrame] = {}
     parallel_error: DataFetchError | None = None
     with ThreadPoolExecutor(max_workers=_DATACENTER_BATCH_WORKERS) as executor:

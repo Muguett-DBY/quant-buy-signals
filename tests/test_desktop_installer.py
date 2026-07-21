@@ -24,6 +24,18 @@ def _write_bundled_release(root: Path, *, package_url: str | None = None) -> Pat
                 separators=(",", ":"),
             ),
         )
+        archive.writestr(
+            f"{archive_root}/build-provenance.json",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "product": "DS_DCF",
+                    "version": __version__,
+                    "git_sha": "b" * 40,
+                },
+                separators=(",", ":"),
+            ),
+        )
         archive.writestr(f"{archive_root}/_internal/app.py", b"print('app')\n")
     raw = package.read_bytes()
     (root / f"DS_DCF-v{__version__}-update-manifest.json").write_text(

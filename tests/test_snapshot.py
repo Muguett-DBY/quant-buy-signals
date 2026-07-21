@@ -83,6 +83,7 @@ def _financials(count: int = 2) -> dict[str, dict]:
                     "REPORT_DATE": f"{year}-12-31",
                     "TOTAL_ASSETS": 100.0,
                     "TOTAL_PARENT_EQUITY": 70.0,
+                    "GOODWILL": 0.0,
                 }
                 for year in range(2022, 2026)
             ],
@@ -126,8 +127,14 @@ def _financials(count: int = 2) -> dict[str, dict]:
                 },
             ],
             "cashflow_interim": [
-                _cashflow_row("2025-03-31", 0.8, 0.2),
-                _cashflow_row("2026-03-31", 1.0, 0.3),
+                {
+                    **_cashflow_row("2025-03-31", 0.8, 0.2),
+                    "OBTAIN_SUBSIDIARY_OTHER": 0.0,
+                },
+                {
+                    **_cashflow_row("2026-03-31", 1.0, 0.3),
+                    "OBTAIN_SUBSIDIARY_OTHER": 0.0,
+                },
             ],
             "indicators": [
                 {
@@ -173,8 +180,14 @@ def _set_interim_period(
             },
         ]
         company["cashflow_interim"] = [
-            _cashflow_row(previous_report_date, 0.8, 0.2),
-            _cashflow_row(current_report_date, 1.0, 0.3),
+            {
+                **_cashflow_row(previous_report_date, 0.8, 0.2),
+                "OBTAIN_SUBSIDIARY_OTHER": 0.0,
+            },
+            {
+                **_cashflow_row(current_report_date, 1.0, 0.3),
+                "OBTAIN_SUBSIDIARY_OTHER": 0.0,
+            },
         ]
     return updated
 
@@ -817,13 +830,13 @@ def test_snapshot_requires_fresh_parseable_source_quote_date_and_time():
         )
 
 
-def test_snapshot_schema_version_invalidates_schema4_cache_without_ttm_contract(tmp_path):
+def test_snapshot_schema_version_invalidates_schema7_cache_without_type3_fields(tmp_path):
     path = tmp_path / "market.json.gz"
-    SafeFileCache(path, schema_version=4).save({"legacy": True})
+    SafeFileCache(path, schema_version=7).save({"legacy": True})
 
     loaded = SafeFileCache(path, schema_version=SNAPSHOT_SCHEMA_VERSION).load()
 
-    assert SNAPSHOT_SCHEMA_VERSION == 7
+    assert SNAPSHOT_SCHEMA_VERSION == 8
     assert loaded.hit is False
     assert loaded.reason == "schema_version_mismatch"
 
@@ -924,6 +937,21 @@ def test_snapshot_validation_requires_recognized_usable_financial_fields():
     garbage = {code: {"garbage": [None]} for code in _quotes()["code"]}
     with pytest.raises(ValueError, match="coverage"):
         validate_market_snapshot(_quotes(), garbage, min_quotes=2, min_financial_coverage=0.5)
+
+
+def test_optional_acquisition_fields_report_source_column_presence():
+    validation = validate_market_snapshot(
+        _quotes(),
+        _financials(),
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        as_of_timestamp=NOW,
+    )
+
+    assert validation["supplemental_field_coverage"] == {
+        "GOODWILL": 1.0,
+        "OBTAIN_SUBSIDIARY_OTHER": 1.0,
+    }
 
 
 def test_snapshot_requires_each_core_financial_dataset_not_just_one_record_per_code():
@@ -1363,6 +1391,57 @@ def test_valid_cache_hit_avoids_network(tmp_path):
     assert outcome.quotes["code"].tolist() == ["000001", "000002"]
     assert fetcher.quote_calls == 0
     assert outcome.baseline_payload_sha256 == cache.load(allow_expired=True).metadata["payload_sha256"]
+
+
+def test_expired_routine_cache_can_be_replayed_within_hard_stale_limit(tmp_path):
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
+    save_market_snapshot(
+        cache,
+        _quotes(),
+        _financials(),
+        data_timestamp=NOW - 100,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        now=NOW,
+    )
+    fetcher = _Fetcher(error=AssertionError("historical replay must not run the network"))
+
+    outcome = get_market_snapshot(
+        fetcher,
+        cache,
+        allow_expired_cache=True,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        clock=lambda: NOW,
+    )
+
+    assert outcome.source == "cache"
+    assert outcome.data_timestamp == NOW - 100
+    assert fetcher.quote_calls == 0
+
+
+def test_expired_routine_cache_replay_still_enforces_hard_stale_limit(tmp_path):
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
+    old_timestamp = NOW - MAX_STALE_AGE_SECONDS - 1
+    save_market_snapshot(
+        cache,
+        _move_quote_generation(_quotes(), old_timestamp),
+        _financials(),
+        data_timestamp=old_timestamp,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        now=old_timestamp,
+    )
+
+    with pytest.raises(SnapshotUnavailableError, match="upstream down"):
+        get_market_snapshot(
+            _Fetcher(error=RuntimeError("upstream down")),
+            cache,
+            allow_expired_cache=True,
+            min_quotes=2,
+            min_financial_coverage=0.5,
+            clock=lambda: NOW,
+        )
 
 
 def test_schema3_cache_requires_top_level_retrieval_identity(tmp_path):

@@ -154,6 +154,27 @@ def test_enrichment_uses_leave_one_out_peers_for_each_target() -> None:
     assert "TARGET" not in contexts["TARGET"]["revenue"]["cohort_codes"]
 
 
+def test_enrichment_uses_leave_one_out_fallback_benchmark_for_each_target(monkeypatch) -> None:
+    metrics = [
+        _metric("A", cagr_3yr=0.10),
+        _metric("B", cagr_3yr=0.20),
+        _metric("C", cagr_3yr=1.00),
+    ]
+    benchmarks = buy_screener.build_sector_benchmarks(metrics)
+    observed: dict[str, float | None] = {}
+
+    def capture(metric, _context, *, fallback_industry_growth):
+        observed[str(metric["code"])] = fallback_industry_growth
+        return {}
+
+    monkeypatch.setattr(quantitative_evidence, "derive_company_evidence", capture)
+
+    enrich_metrics(metrics, benchmarks)
+
+    assert observed["C"] == pytest.approx(0.15)
+    assert observed["A"] == pytest.approx(0.60)
+
+
 def test_projected_enrichment_uses_full_peer_base_but_only_materializes_requested_targets() -> None:
     peers = [_metric(f"P{index:02d}") for index in range(MIN_SECTOR_COMPANIES)]
     target = _metric("TARGET", revenue_values=[1.0, 2.0, 10.0, 10_000.0], revenue_latest=10_000.0)

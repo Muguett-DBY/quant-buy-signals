@@ -16,6 +16,7 @@ import math
 import re
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any, Protocol
 
 import requests
 
-from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, REQUEST_TIMEOUT
+from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, CONCURRENCY, REQUEST_TIMEOUT
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
 
 
@@ -45,6 +46,8 @@ METRIC_SOURCE_FIELDS: Mapping[str, str] = {
 # larger ``pz`` is requested.  Pinning the effective size makes every page
 # length and the calculated final page independently verifiable.
 DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_WORKERS = 10
+DEFAULT_PAGE_WORKERS = max(1, min(int(CONCURRENCY), MAX_PAGE_WORKERS))
 DEFAULT_MARKET_COLDNESS_CACHE_PATH = CACHE_DIRECTORY / "market_coldness" / "eastmoney_sh_sz_a.json.gz"
 
 _CACHE_SCHEMA_VERSION = 1
@@ -433,6 +436,7 @@ class EastmoneyMarketColdnessAdapter:
         retries: int = 3,
         retry_delay: float = 0.5,
         page_size: int = DEFAULT_PAGE_SIZE,
+        max_workers: int = DEFAULT_PAGE_WORKERS,
         clock: Callable[[], datetime] | None = None,
     ):
         if isinstance(timeout, bool) or not math.isfinite(float(timeout)) or float(timeout) <= 0:
@@ -443,6 +447,12 @@ class EastmoneyMarketColdnessAdapter:
             raise ValueError("retry_delay must be finite and non-negative")
         if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1 or page_size > 5_000:
             raise ValueError("page_size must be an integer between 1 and 5000")
+        if (
+            isinstance(max_workers, bool)
+            or not isinstance(max_workers, int)
+            or not 1 <= max_workers <= MAX_PAGE_WORKERS
+        ):
+            raise ValueError(f"max_workers must be an integer between 1 and {MAX_PAGE_WORKERS}")
         if not isinstance(endpoint, str) or not endpoint.startswith(("https://", "http://")):
             raise ValueError("endpoint must be an HTTP(S) URL")
         self.http_client = http_client
@@ -451,6 +461,7 @@ class EastmoneyMarketColdnessAdapter:
         self.retries = retries
         self.retry_delay = float(retry_delay)
         self.page_size = page_size
+        self.max_workers = max_workers
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _request_page(self, page: int) -> tuple[Mapping[str, Any], int]:
@@ -524,14 +535,26 @@ class EastmoneyMarketColdnessAdapter:
         if page_count > _MAX_PAGES:
             raise _MarketColdnessResourceLimitError(f"Eastmoney page count exceeds limit: {page_count} > {_MAX_PAGES}")
 
+        pages: dict[int, tuple[Mapping[str, Any], int]] = {1: (first, first_bytes)}
+        if page_count > 1:
+            # The upstream hard-caps responses at 100 rows even when a larger
+            # page size is requested.  Fetch the remaining bounded pages in
+            # parallel, then validate and consume them in page order.  This
+            # preserves the all-or-error identity contract while avoiding a
+            # roughly one-request-latency penalty for every listed company
+            # page during the daily post-close refresh.
+            worker_count = min(self.max_workers, page_count - 1)
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {executor.submit(self._request_page, page): page for page in range(2, page_count + 1)}
+                for future in as_completed(futures):
+                    page = futures[future]
+                    pages[page] = future.result()
+
         records: list[MarketColdnessRecord] = []
         seen: set[str] = set()
         response_bytes = 0
         for page in range(1, page_count + 1):
-            if page == 1:
-                data, byte_count = first, first_bytes
-            else:
-                data, byte_count = self._request_page(page)
+            data, byte_count = pages[page]
             response_bytes += byte_count
             if response_bytes > _MAX_ACQUISITION_RESPONSE_BYTES:
                 raise _MarketColdnessResourceLimitError("Eastmoney acquisition exceeds aggregate byte limit")
@@ -752,6 +775,7 @@ def fetch_market_coldness_snapshot(
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     use_cache: bool = True,
     force_refresh: bool = False,
+    allow_expired_cache: bool = False,
 ) -> MarketColdnessSnapshot:
     """Return one complete, cached Shanghai/Shenzhen market snapshot.
 
@@ -764,6 +788,8 @@ def fetch_market_coldness_snapshot(
         raise ValueError("cache_ttl_seconds must be a non-negative integer")
     if not isinstance(force_refresh, bool):
         raise ValueError("force_refresh must be boolean")
+    if not isinstance(allow_expired_cache, bool):
+        raise ValueError("allow_expired_cache must be boolean")
 
     cache: SafeFileCache | None = None
     initial_load = None
@@ -778,7 +804,7 @@ def fetch_market_coldness_snapshot(
         # A forced refresh still reads the existing generation metadata so
         # the subsequent compare-and-swap cannot overwrite a concurrent
         # winner.  It simply does not return the cached value early.
-        initial_load = cache.load(allow_expired=force_refresh)
+        initial_load = cache.load(allow_expired=force_refresh or allow_expired_cache)
         if initial_load.hit and not force_refresh:
             try:
                 return _snapshot_from_cache(initial_load.value)

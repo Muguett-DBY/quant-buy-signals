@@ -43,6 +43,7 @@ _DERIVATION_METHODS = {
     "detailed_outflow_residual_zero",
     "detailed_net_cash_identity_zero",
 }
+_CURRENCY_IDENTITY_TOLERANCE = Decimal("0.10")
 
 
 class CapexEvidenceConflictError(ValueError):
@@ -68,9 +69,11 @@ def _finite_float(value: Any) -> float | None:
 
 
 def _close_decimal(left: Decimal, right: Decimal) -> bool:
-    scale = max(abs(left), abs(right), Decimal(1))
-    tolerance = max(Decimal("0.01"), scale * Decimal("1e-9"))
-    return abs(left - right) <= tolerance
+    # The source reports CNY amounts to fen precision.  With at most nine
+    # component cells, ten fen is a conservative absolute rounding allowance;
+    # a relative tolerance would misclassify tens of yuan as zero for a large
+    # company.
+    return abs(left - right) <= _CURRENCY_IDENTITY_TOLERANCE
 
 
 def _source_query(report_name: str, report_date: str) -> dict[str, str]:

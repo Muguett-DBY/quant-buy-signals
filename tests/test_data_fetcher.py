@@ -464,6 +464,7 @@ def test_financial_merge_sorts_all_series_and_never_deletes_valid_annual_report(
                 "TOTAL_EQUITY": 100,
                 "PARENT_EQUITY": 90,
                 "MINORITY_EQUITY": 10,
+                "GOODWILL": 12,
                 "SHORT_LOAN": 5,
                 "LONG_TERM_LOAN": 7,
                 "BOND_PAYABLE": 9,
@@ -504,6 +505,7 @@ def test_financial_merge_sorts_all_series_and_never_deletes_valid_annual_report(
     ]
     latest = company["balance"][-1]
     assert latest["PARENT_EQUITY"] == 90
+    assert latest["GOODWILL"] == 12
     assert latest["LONG_LOAN"] == 7
     assert latest["BONDS_PAYABLE"] == 9
     assert latest["NONCURRENT_LIAB_1YEAR"] == 3
@@ -512,6 +514,90 @@ def test_financial_merge_sorts_all_series_and_never_deletes_valid_annual_report(
     assert latest["BORROW_FUNDS"] == 6
     assert latest["CENTRAL_BANK_BORROWING"] == 8
     assert latest["SUBORDINATED_BONDS_PAYABLE"] == 10
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("TOTAL_OPERATE_INCOME", "not-a-number"),
+        ("PARENT_NETPROFIT", float("inf")),
+        ("OPERATE_PROFIT", True),
+    ],
+)
+def test_financial_merge_rejects_invalid_annual_income_values(field, value):
+    row = {
+        "SECURITY_CODE": "000001",
+        "TOTAL_OPERATE_INCOME": 100.0,
+        "PARENT_NETPROFIT": 10.0,
+        "OPERATE_PROFIT": 20.0,
+        "REPORT_DATE": "2025-12-31",
+    }
+    row[field] = value
+
+    with pytest.raises(
+        fetcher.DataFetchError,
+        match=rf"annual income {field}.*000001.*2025-12-31",
+    ):
+        fetcher._merge_financials(pd.DataFrame([row]), pd.DataFrame(), pd.DataFrame())
+
+
+def test_financial_merge_keeps_genuine_blank_annual_income_values_missing():
+    company = fetcher._merge_financials(
+        pd.DataFrame(
+            [
+                {
+                    "SECURITY_CODE": "000001",
+                    "TOTAL_OPERATE_INCOME": None,
+                    "PARENT_NETPROFIT": float("nan"),
+                    "OPERATE_PROFIT": "",
+                    "REPORT_DATE": "2025-12-31",
+                }
+            ]
+        ),
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )["000001"]
+
+    assert company["revenue_history"] == []
+    assert company["income_history"] == []
+
+
+def test_financial_merge_rejects_invalid_goodwill():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "GOODWILL": "not-a-number",
+                "REPORT_DATE": "2025-12-31",
+            }
+        ]
+    )
+
+    with pytest.raises(
+        fetcher.DataFetchError,
+        match=r"annual balance GOODWILL.*000001.*2025-12-31",
+    ):
+        fetcher._merge_financials(pd.DataFrame(), pd.DataFrame(), balance)
+
+
+def test_financial_merge_keeps_genuine_blank_goodwill_missing():
+    balance = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "GOODWILL": None,
+                "REPORT_DATE": "2025-12-31",
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        balance,
+    )["000001"]["balance"][0]
+
+    assert row["GOODWILL"] is None
 
 
 def test_financial_merge_fills_only_an_officially_proven_zero_revenue(monkeypatch):
@@ -843,6 +929,108 @@ def test_financial_merge_derives_provenance_bound_zero_capex_from_detailed_ident
     assert row["CAPEX_PROVENANCE"]["derivation_method"] == "detailed_outflow_residual_zero"
 
 
+def test_financial_merge_preserves_acquisition_cashflow_separately_from_capex():
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    detailed = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "REPORT_DATE": "2026-03-31",
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "OBTAIN_SUBSIDIARY_OTHER": -6.0,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cashflow_interim=interim_cashflow,
+        detailed_cashflow_interim=detailed,
+    )["000001"]["cashflow_interim"][0]
+
+    assert row["CONSTRUCT_LONG_ASSET"] == 2.0
+    assert row["OBTAIN_SUBSIDIARY_OTHER"] == -6.0
+
+
+def test_financial_merge_rejects_invalid_acquisition_cashflow():
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    detailed = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "REPORT_DATE": "2026-03-31",
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "OBTAIN_SUBSIDIARY_OTHER": "not-a-number",
+            }
+        ]
+    )
+
+    with pytest.raises(
+        fetcher.DataFetchError,
+        match=r"detailed interim cash-flow OBTAIN_SUBSIDIARY_OTHER.*000001.*2026-03-31",
+    ):
+        fetcher._merge_financials(
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            cashflow_interim=interim_cashflow,
+            detailed_cashflow_interim=detailed,
+        )
+
+
+def test_financial_merge_keeps_genuine_blank_acquisition_cashflow_missing():
+    interim_cashflow = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "NETCASH_OPERATE": 7.0,
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "REPORT_DATE": "2026-03-31",
+            }
+        ]
+    )
+    detailed = pd.DataFrame(
+        [
+            {
+                "SECURITY_CODE": "000001",
+                "REPORT_DATE": "2026-03-31",
+                "CONSTRUCT_LONG_ASSET": 2.0,
+                "OBTAIN_SUBSIDIARY_OTHER": None,
+            }
+        ]
+    )
+
+    row = fetcher._merge_financials(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cashflow_interim=interim_cashflow,
+        detailed_cashflow_interim=detailed,
+    )["000001"]["cashflow_interim"][0]
+
+    assert row["OBTAIN_SUBSIDIARY_OTHER"] is None
+
+
 def test_financial_merge_keeps_unresolved_interim_capex_missing_with_reason():
     interim_cashflow = pd.DataFrame(
         [
@@ -1052,21 +1240,35 @@ def test_financial_merge_rejects_duplicate_indicator_identity():
 def test_get_financials_filters_indicator_batch_to_requested_shanghai_shenzhen_codes(monkeypatch):
     indicators = _indicator_frame("000001", "920002", "600000")
     empty = pd.DataFrame()
+    forwarded = []
+
+    def annual(*, codes):
+        forwarded.append(("annual", tuple(sorted(codes))))
+        return empty.copy(), empty.copy(), empty.copy(), indicators.copy()
+
+    def interim(*, codes):
+        forwarded.append(("interim", tuple(sorted(codes))))
+        return empty.copy(), empty.copy(), empty.copy()
+
     monkeypatch.setattr(
         fetcher,
         "fetch_all_financials_parallel",
-        lambda: (empty.copy(), empty.copy(), empty.copy(), indicators.copy()),
+        annual,
     )
     monkeypatch.setattr(
         fetcher,
         "fetch_interim_financials_parallel",
-        lambda: (empty.copy(), empty.copy(), empty.copy()),
+        interim,
     )
 
     result = fetcher.DataFetcher().get_financials(codes=["000001", "920002"])
 
     assert set(result) == {"000001"}
     assert result["000001"]["indicators"][0]["SOURCE_REPORT_NAME"] == "RPT_F10_FINANCE_MAINFINADATA"
+    assert sorted(forwarded) == [
+        ("annual", ("000001",)),
+        ("interim", ("000001",)),
+    ]
 
 
 def test_get_financials_overlaps_independent_annual_and_interim_generations(monkeypatch):
@@ -1075,11 +1277,11 @@ def test_get_financials_overlaps_independent_annual_and_interim_generations(monk
     rendezvous = Barrier(2, timeout=5)
     empty = pd.DataFrame()
 
-    def annual():
+    def annual(**_kwargs):
         rendezvous.wait()
         return empty.copy(), empty.copy(), empty.copy(), empty.copy()
 
-    def interim():
+    def interim(**_kwargs):
         rendezvous.wait()
         return empty.copy(), empty.copy(), empty.copy()
 

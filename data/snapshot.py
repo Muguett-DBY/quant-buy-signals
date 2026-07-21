@@ -36,7 +36,7 @@ DEFAULT_SNAPSHOT_PATH = CACHE_DIRECTORY / "market_snapshot.json.gz"
 # to every whole-market quote generation.  Older caches cannot distinguish a
 # pre-listing year from a missing financial observation and must be refreshed
 # rather than relabelled.
-SNAPSHOT_SCHEMA_VERSION = 7
+SNAPSHOT_SCHEMA_VERSION = 8
 MIN_MARKET_QUOTES = 3_000
 MIN_FINANCIAL_COVERAGE = 0.90
 MAX_STALE_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -1331,6 +1331,10 @@ def validate_market_snapshot(
     )
     annual_history_years: dict[str, dict[str, tuple[int, ...]]] = {dataset: {} for dataset in _FINANCIAL_DATASET_RULES}
     normalized_financial_keys: set[str] = set()
+    supplemental_field_keys: dict[str, set[str]] = {
+        "GOODWILL": set(),
+        "OBTAIN_SUBSIDIARY_OTHER": set(),
+    }
     for key, company in financials.items():
         if not isinstance(key, str) or not _A_SHARE_CODE.fullmatch(key):
             raise ValueError("financial mapping keys must be canonical six-digit A-share codes")
@@ -1347,6 +1351,20 @@ def validate_market_snapshot(
         if normalized_key in normalized_financial_keys:
             raise ValueError(f"duplicate financial identity: {normalized_key}")
         normalized_financial_keys.add(normalized_key)
+        balance_records = company.get("balance", [])
+        if isinstance(balance_records, Mapping):
+            balance_records = [balance_records]
+        if isinstance(balance_records, (list, tuple)) and any(
+            isinstance(record, Mapping) and "GOODWILL" in record for record in balance_records
+        ):
+            supplemental_field_keys["GOODWILL"].add(normalized_key)
+        interim_cashflow_records = company.get("cashflow_interim", [])
+        if isinstance(interim_cashflow_records, Mapping):
+            interim_cashflow_records = [interim_cashflow_records]
+        if isinstance(interim_cashflow_records, (list, tuple)) and any(
+            isinstance(record, Mapping) and "OBTAIN_SUBSIDIARY_OTHER" in record for record in interim_cashflow_records
+        ):
+            supplemental_field_keys["OBTAIN_SUBSIDIARY_OTHER"].add(normalized_key)
         for dataset, (minimum_records, required_field_groups) in _FINANCIAL_DATASET_RULES.items():
             dates = _validated_usable_financial_dates(
                 company,
@@ -1437,6 +1455,16 @@ def validate_market_snapshot(
             raise ValueError(
                 f"{qualifier}{dataset} coverage {coverage:.1%} is below required {float(min_financial_coverage):.1%}"
             )
+
+    supplemental_field_coverage = {
+        field: len(analysis_quote_codes & keys) / max(len(analysis_quote_codes), 1)
+        for field, keys in supplemental_field_keys.items()
+    }
+    # These fields enrich optional Type3 acquisition evidence.  The provider
+    # can legitimately return a requested column with null values.  Schema 8
+    # records whether the requested columns were present so a schema-7 cache
+    # created before this enrichment cannot silently masquerade as complete
+    # deep-growth input.  A present true-null still remains unknown, never zero.
 
     matched_keys = set(analysis_quote_codes)
     for keys in (*dataset_keys.values(), *interim_current_keys.values()):
@@ -1607,6 +1635,7 @@ def validate_market_snapshot(
         "market_counts": market_counts,
         "dataset_matches": dataset_matches,
         "dataset_coverage": dataset_coverage,
+        "supplemental_field_coverage": supplemental_field_coverage,
         "current_dataset_matches": current_dataset_matches,
         "current_dataset_coverage": current_dataset_coverage,
         "expected_annual_year": expected_annual_year,
@@ -2028,12 +2057,13 @@ def _migrate_schema4_snapshot(
 ) -> MarketSnapshotOutcome | None:
     """Revalidate and atomically promote a legacy schema-4 generation.
 
-    Schema 7 requires the reporting-period gates added by schema 5, capex
-    provenance added by schema 6, and independently sourced listing dates.  A
-    fresh, checksummed schema-4 generation can therefore be reused only in the
-    unusual case where its payload already proves every current invariant.
-    Schemas 5 and 6 are intentionally not auto-migrated because their contracts
-    did not require all current evidence.
+    Schema 8 requires the reporting-period gates added by schema 5, capex
+    provenance added by schema 6, independently sourced listing dates added by
+    schema 7, and explicit Type3 supplemental-field presence.  A fresh,
+    checksummed schema-4 generation can therefore be reused only in the unusual
+    case where its payload already proves every current invariant.  Schemas 5,
+    6 and 7 are intentionally not auto-migrated because their contracts did not
+    require all current evidence.
     """
     probe = active_cache.load(allow_expired=True)
     metadata = probe.metadata if isinstance(probe.metadata, Mapping) else {}
@@ -2057,6 +2087,11 @@ def _migrate_schema4_snapshot(
     )
     if legacy is None or not isinstance(legacy.baseline_payload_sha256, str):
         return None
+    supplemental = legacy.validation.get("supplemental_field_coverage")
+    if not isinstance(supplemental, Mapping) or any(
+        _finite_number(supplemental.get(field)) != 1.0 for field in ("GOODWILL", "OBTAIN_SUBSIDIARY_OTHER")
+    ):
+        return None
     try:
         save_market_snapshot(
             active_cache,
@@ -2076,7 +2111,7 @@ def _migrate_schema4_snapshot(
         active_cache,
         allow_expired=False,
         source="migrated_cache",
-        warning="schema4 cache revalidated and migrated to schema7",
+        warning="schema4 cache revalidated and migrated to schema8",
         now=now,
         enforce_stale_limit=True,
         max_stale_age=max_stale_age,
@@ -2091,6 +2126,7 @@ def get_market_snapshot(
     cache: SafeFileCache | None = None,
     *,
     force_refresh: bool = False,
+    allow_expired_cache: bool = False,
     persist_network: bool = True,
     min_quotes: int = MIN_MARKET_QUOTES,
     min_financial_coverage: float = MIN_FINANCIAL_COVERAGE,
@@ -2104,11 +2140,17 @@ def get_market_snapshot(
     default immediate promotion when validation is their terminal gate.
     """
     active_cache = cache or SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
+    if not isinstance(force_refresh, bool) or not isinstance(allow_expired_cache, bool):
+        raise TypeError("snapshot refresh and cache replay options must be boolean")
     now = float(clock())
     if not force_refresh:
         cached, cache_diagnostic = _cached_outcome(
             active_cache,
-            allow_expired=False,
+            # A release audit may deliberately replay a cache whose routine
+            # acquisition TTL has elapsed.  The embedded market timestamp is
+            # still checked below against ``max_stale_age``, so this cannot
+            # turn an arbitrarily old generation into admissible data.
+            allow_expired=allow_expired_cache,
             source="cache",
             now=now,
             enforce_stale_limit=True,

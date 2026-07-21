@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DS_DCF</string>
+    <string name="screen_title">DS_DCF · 沪深收盘后结果</string>
+    <string name="screen_notice">手机端不计算估值，只读取服务器在收盘后通过完整质量检查的结果。\n“待确认”不是买入信号；投资前仍应核对公告、仓位和风险。</string>
+    <string name="refresh_data">获取最新数据</string>
+    <string name="check_update">检查应用更新</string>
+    <string name="status_loading_cache">正在读取本机已校验缓存…</string>
+    <string name="market_summary_empty">当前还没有可展示的已校验市场数据。</string>
+    <string name="search_hint">按代码、名称或行业搜索</string>
+    <string-array name="display_modes">
+        <item>实际买入信号</item>
+        <item>待确认候选（非买入）</item>
+        <item>全部沪深公司</item>
+    </string-array>
+    <string-array name="type_filters">
+        <item>全部七类</item>
+        <item>1️⃣ 估值买入区</item>
+        <item>2️⃣ 两热一冷</item>
+        <item>3️⃣ 可持续高增长</item>
+        <item>4️⃣ 长坡厚雪</item>
+        <item>5️⃣ 强周期底部</item>
+        <item>6️⃣ 高风险早期/困境型</item>
+        <item>7️⃣ 优质股权型</item>
+    </string-array>
+    <string name="footer_version">版本 %1$s · 数据和安装包均须通过官方加密下载与文件完整性校验</string>
+    <string name="status_cached">已读取本机已校验的市场数据。</string>
+    <string name="status_refreshing">正在下载并校验最新收盘后数据…</string>
+    <string name="status_refreshed">已更新：数据完整性和质量检查均已通过。</string>
+    <string name="status_refresh_failed">未更新，已保留上一份数据：%1$s</string>
+    <string name="status_checking_update">正在检查应用更新…</string>
+    <string name="status_latest_app">当前已是最新已发布的手机应用。</string>
+    <string name="status_update_found">发现 DS_DCF %1$s，下载后会再次核对官方签名。</string>
+    <string name="update_dialog_title">发现应用更新</string>
+    <string name="update_dialog_message">可更新到 %1$s。\n\n下载完成后将检查文件大小、内容完整性和官方签名；Android 系统仍会要求你确认安装。</string>
+    <string name="cancel">取消</string>
+    <string name="download_install">下载并安装</string>
+    <string name="status_no_published_update">尚无已发布的手机应用更新。</string>
+    <string name="status_update_check_failed">无法检查应用更新：%1$s</string>
+    <string name="status_downloading_update">正在下载并验证 DS_DCF %1$s…</string>
+    <string name="status_allow_install">请允许本应用安装更新；返回后会继续打开安装确认页面。</string>
+    <string name="status_update_cancelled">更新已取消：%1$s</string>
+    <string name="status_update_file_missing">已验证的更新文件不存在，请重新检查应用更新。</string>
+    <string name="market_summary">当前展示交易日：%1$s；覆盖 %2$d 家沪深公司；实际买入信号 %3$d 家；待确认候选 %4$d 家（包含同时触发其他类型的公司）。\n%5$s</string>
+    <string name="close">关闭</string>
+    <string name="status_confirm_install">请在 Android 系统页面确认安装。</string>
+</resources>

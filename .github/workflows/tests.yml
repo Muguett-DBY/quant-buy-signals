@@ -2,6 +2,8 @@ name: tests
 
 on:
   push:
+    tags-ignore:
+      - "**"
   pull_request:
 
 permissions:
@@ -48,7 +50,7 @@ jobs:
       - name: Validate line-ending policy
         shell: pwsh
         run: |
-          $lfExtensions = @('.py', '.pyi', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.sh', '.ps1', '.md', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.spec', '.txt', '.xml', '.csv')
+          $lfExtensions = @('.py', '.pyi', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.sh', '.ps1', '.md', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.spec', '.txt', '.xml', '.csv', '.java', '.kt', '.kts', '.properties')
           $lfNames = @('.gitignore', '.gitattributes', 'license')
           $violations = @()
           git ls-files --eol | ForEach-Object {
@@ -90,7 +92,9 @@ jobs:
             $_ -match '(^|/)[^/]+\.egg-info/' -or
             $_ -match '(^|/)\.streamlit/secrets\.toml$' -or
             (($_ -match '(^|/)\.env(?:\..+)?$') -and ($_ -notmatch '\.(example|sample|template)$')) -or
-            $_ -match '\.(pem|key|p12|pfx)$' -or
+            $_ -match '\.(pem|key|der|pk8|pkcs8|p8|ppk|p12|pfx|jks|keystore)$' -or
+            $_ -match '(^|/)[^/]+-(signing-private-key|release-credentials)\.properties$' -or
+            $_ -match '(^|/)android/release\.properties$' -or
             $_ -match '(^|/)id_(rsa|dsa|ecdsa|ed25519)$'
           }
           if ($forbidden) {
@@ -116,8 +120,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: |
           python -m bandit -q -r app.py config.py data desktop engine ui tools --severity-level medium --confidence-level medium
-          python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-lock.txt
-          python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-dev-lock.txt
+          python -m pip_audit --strict --progress-spinner off --require-hashes --disable-pip --timeout 30 -r requirements-dev-lock.txt
           python -m pip check
 
       - name: Build and verify wheel package data
@@ -147,7 +150,10 @@ jobs:
 
       - name: Build and smoke-test Windows desktop release
         if: matrix.python-version == '3.12'
-        run: python -m tools.build_desktop
+        run: >-
+          python -m tools.build_desktop --ci-smoke
+          --output-root build/ci-smoke-output
+          --work-root build/ci-smoke-work
 
       - name: Verify tracked desktop source archive
         if: matrix.python-version == '3.12'
@@ -174,3 +180,54 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP "DS_DCF-v$version.zip"
           Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel Optimal
           python -m tools.verify_release_zip $zip
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle.kts
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/app/*.gradle.kts
+
+      - name: Validate the tracked Gradle wrapper
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Install the pinned Android SDK components
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-35' \
+            'build-tools;35.0.0'
+
+      - name: Compile and lint the Android client
+        working-directory: android
+        run: bash ./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+
+      - name: Verify APK metadata, icon and debug signature
+        shell: bash
+        run: |
+          apk='android/app/build/outputs/apk/debug/app-debug.apk'
+          aapt="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -f "$apk"
+          "$aapt" dump badging "$apk" | tee "$RUNNER_TEMP/android-badging.txt"
+          grep -F "package: name='com.muguett.dsdcf' versionCode='1' versionName='11.2.0'" "$RUNNER_TEMP/android-badging.txt"
+          "$apksigner" verify --verbose "$apk"
+
+      - name: Prove unsigned release builds fail closed
+        working-directory: android
+        shell: bash
+        run: |
+          if bash ./gradlew --no-daemon --console=plain :app:verifyReleaseSigningInputs; then
+            echo 'Unsigned Android release guard unexpectedly passed.' >&2
+            exit 1
+          fi

@@ -32,8 +32,17 @@ data/cache/*
 !.env.template
 *.pem
 *.key
+*.der
+*.pk8
+*.pkcs8
+*.p8
+*.ppk
 *.p12
 *.pfx
+*.jks
+*.keystore
+*-signing-private-key.properties
+*-release-credentials.properties
 id_rsa
 id_dsa
 id_ecdsa
@@ -55,3 +64,11 @@ tmp/
 audit/profile-*/
 audit/*.pstats
 audit/refresh-*/
+
+# Android builds are reproducible from the committed Gradle wrapper.  The SDK
+# location and release-signing material are deliberately local-only.
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+android/release.properties

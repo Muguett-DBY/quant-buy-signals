@@ -1045,6 +1045,147 @@ def test_pipeline_rejects_malformed_preloaded_type7_history(invalid_history):
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_reports",
+    [[], {"000001": "invalid"}],
+)
+def test_pipeline_rejects_malformed_preloaded_type7_reports(invalid_reports):
+    with pytest.raises(TypeError, match="research_report_evidence"):
+        run_market_analysis(
+            _quotes().iloc[[0]],
+            {"000001": {}},
+            dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+            screen_runner=lambda *_args, **_kwargs: pd.DataFrame([{"code": "000001"}]),
+            research_report_evidence=invalid_reports,
+            max_workers=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_growth",
+    [[], {"000001": "invalid"}],
+)
+def test_pipeline_rejects_malformed_preloaded_type3_growth(invalid_growth):
+    with pytest.raises(TypeError, match="type3_growth_evidence"):
+        run_market_analysis(
+            _quotes().iloc[[0]],
+            {"000001": {}},
+            dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+            screen_runner=lambda *_args, **_kwargs: pd.DataFrame([{"code": "000001"}]),
+            type3_growth_evidence=invalid_growth,
+            max_workers=1,
+        )
+
+
+def test_pipeline_captures_type3_growth_loader_results_for_audit_replay(monkeypatch):
+    from engine import buy_screener
+
+    growth = {
+        "available": False,
+        "code": "000001",
+        "as_of": "2026-07-17",
+        "model_id": "type3-growth-evidence-v1",
+        "external_growth_evidence": {"status": "partial"},
+        "segment_growth_sources": {"status": "partial"},
+        "cache_hit": False,
+        "cache_diagnostic": "disabled",
+        "reason": "insufficient_history",
+    }
+    request = {
+        "code": "000001",
+        "as_of": "2026-07-17",
+        "revenue_records": [{"year": year, "value": float(year)} for year in range(2021, 2026)],
+        "goodwill_records": [{"year": year, "value": 0.0} for year in range(2021, 2026)],
+    }
+
+    def loader(requests, *, progress_cb):
+        assert requests == [request]
+        assert progress_cb == "progress"
+        return {"000001": growth}
+
+    def screen(_financials, _quotes_frame, **kwargs):
+        loaded = kwargs["type3_growth_loader"](
+            [request],
+            progress_cb=kwargs["type3_growth_progress_cb"],
+        )
+        assert loaded == {"000001": growth}
+        return pd.DataFrame([{"code": "000001"}])
+
+    monkeypatch.setattr(buy_screener, "screen_all_types", screen)
+    outcome = run_market_analysis(
+        _quotes().iloc[[0]],
+        {"000001": {}},
+        dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+        type3_growth_loader=loader,
+        type3_growth_progress_cb="progress",
+        max_workers=1,
+    )
+
+    assert outcome.type3_growth_evidence == {"000001": growth}
+
+
+def test_pipeline_captures_report_loader_results_for_audit_replay(monkeypatch):
+    from engine import buy_screener
+
+    report = {
+        "available": False,
+        "code": "000001",
+        "as_of": "2026-07-17",
+        "model_id": "type7-research-report-content-v4",
+        "sources": [],
+        "distinct_publishers": 0,
+        "content_verification": {
+            "model_id": "type7-report-body-crosscheck-v2",
+            "code": "000001",
+            "as_of": "2026-07-17",
+            "passed": False,
+            "required_bodies": 3,
+            "attempted_bodies": 0,
+            "verified_bodies": 0,
+            "distinct_publishers": 0,
+            "bodies": [],
+            "cross_check": {
+                "passed": False,
+                "minimum_reports": 2,
+                "fact_key": None,
+                "fact_unit": None,
+                "consensus_value": None,
+                "supporting_evidence_ids": [],
+                "max_relative_spread": None,
+            },
+            "reason": "metadata_prerequisite_failed",
+        },
+        "cache_hit": False,
+        "cache_diagnostic": "disabled",
+        "reason": "insufficient_independent_report_metadata",
+    }
+
+    def loader(requests, *, progress_cb):
+        assert requests == [{"code": "000001", "as_of": "2026-07-17"}]
+        assert progress_cb == "progress"
+        return {"000001": report}
+
+    def screen(_financials, _quotes_frame, **kwargs):
+        loaded = kwargs["research_report_loader"](
+            [{"code": "000001", "as_of": "2026-07-17"}],
+            progress_cb=kwargs["research_report_progress_cb"],
+        )
+        assert loaded == {"000001": report}
+        return pd.DataFrame([{"code": "000001"}])
+
+    monkeypatch.setattr(buy_screener, "screen_all_types", screen)
+    outcome = run_market_analysis(
+        _quotes().iloc[[0]],
+        {"000001": {}},
+        dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+        research_report_loader=loader,
+        research_report_progress_cb="progress",
+        max_workers=1,
+    )
+
+    assert outcome.research_report_evidence == {"000001": report}
+
+
 def test_dcf_skip_reason_distinguishes_unrecovered_mixed_profit_cycle():
     company = {
         "revenue_history": [{"REPORT_DATE": "2025-12-31", "TOTAL_OPERATE_INCOME": 1000.0}],

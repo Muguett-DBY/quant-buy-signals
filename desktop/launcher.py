@@ -239,7 +239,10 @@ class DesktopController:
 
         def worker() -> None:
             try:
-                result = check_for_update(manifest_url)
+                result = check_for_update(
+                    manifest_url,
+                    watermark_path=self.data_root / "update-manifest-watermark.json",
+                )
             except UpdateError as exc:
                 self.logger.warning("update check failed: %s", exc)
                 message = str(exc)
@@ -282,7 +285,11 @@ class DesktopController:
             try:
                 package = self.data_root / "updates" / result.manifest.version / "package.zip"
                 package.parent.mkdir(parents=True, exist_ok=True)
-                download_update_package(result.manifest, package)
+                download_update_package(
+                    result.manifest,
+                    package,
+                    watermark_path=self.data_root / "update-manifest-watermark.json",
+                )
                 installed = install_update_package(package, result.manifest)
             except UpdateError as exc:
                 self.logger.warning("update install failed: %s", exc)
