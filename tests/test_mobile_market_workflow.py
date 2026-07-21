@@ -191,6 +191,24 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
 
+def test_job_level_environment_does_not_reference_runner_context():
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+    jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
+
+    for job_name, job in jobs.items():
+        for key, value in (job.get("env") or {}).items():
+            assert "${{ runner." not in str(value), f"{job_name}.{key} uses a forbidden job-level context"
+
+    assert workflow.count("MOBILE_DATA_DIR=$env:RUNNER_TEMP\\ds-dcf-mobile-market-data-release") == 2
+    for job_name in ("publish", "verify_cleanup"):
+        setup = next(
+            step for step in jobs[job_name]["steps"] if step.get("name") == "Set the private release directory"
+        )
+        assert setup["shell"] == "pwsh"
+        assert "$env:RUNNER_TEMP" in setup["run"]
+        assert "Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append" in setup["run"]
+
+
 def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch():
     workflow = _workflow_text(MOBILE_WORKFLOW)
     parsed = _workflow(MOBILE_WORKFLOW)

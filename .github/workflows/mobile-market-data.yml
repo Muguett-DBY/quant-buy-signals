@@ -337,13 +337,18 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      MOBILE_DATA_DIR: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Set the private release directory
+        shell: pwsh
+        run: |
+          "MOBILE_DATA_DIR=$env:RUNNER_TEMP\ds-dcf-mobile-market-data-release" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download the verified release bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -654,12 +659,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      MOBILE_DATA_DIR: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
       MOBILE_CATALOG_NAME: ${{ needs.publish.outputs.catalogue_name }}
       MOBILE_SIGNALS_NAME: ${{ needs.publish.outputs.signals_name }}
       MOBILE_SIGNATURE_NAME: ${{ needs.publish.outputs.signature_name }}
       MOBILE_PREVIOUS_ASSETS: ${{ needs.publish.outputs.previous_assets }}
     steps:
+      - name: Set the private release directory
+        shell: pwsh
+        run: |
+          "MOBILE_DATA_DIR=$env:RUNNER_TEMP\ds-dcf-mobile-market-data-release" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Download the verified release bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
