@@ -15,6 +15,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from desktop.console_output import write_console_message
 from desktop.updater import (
     UpdateError,
     UpdateManifest,
@@ -115,17 +116,13 @@ def _show_message(title: str, message: str, *, error: bool = False) -> None:
         else:
             messagebox.showinfo(title, message)
     except Exception:
-        stream = sys.stderr if error else sys.stdout
-        if stream is not None:
-            print(f"{title}: {message}", file=stream)
+        write_console_message(f"{title}: {message}", error=error)
 
 
 def _write_cli_message(message: str, *, error: bool = False) -> None:
     """Write a CLI result without assuming a windowed executable has stdio."""
 
-    stream = sys.stderr if error else sys.stdout
-    if stream is not None:
-        print(message, file=stream)
+    write_console_message(message, error=error)
 
 
 def _interactive_install(*, versions_root: Path | None, create_shortcut: bool) -> int:
@@ -171,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_cli_message(f"安装包校验失败：{exc}", error=True)
             return 1
         _write_cli_message(
-            json.dumps({"ok": True, "version": manifest.version, "package": str(package)}, ensure_ascii=False)
+            json.dumps({"ok": True, "version": manifest.version, "package": str(package)}, ensure_ascii=True)
         )
         return 0
     versions_root = args.install_to.resolve() if args.install_to is not None else None
@@ -184,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_cli_message(
             json.dumps(
                 {"ok": True, "version": installed.version, "install_dir": str(installed.install_dir)},
-                ensure_ascii=False,
+                ensure_ascii=True,
             )
         )
         return 0

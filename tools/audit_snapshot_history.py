@@ -397,9 +397,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except (HistoryAuditError, OSError, ValueError) as exc:
         report = {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
-        print(json.dumps(report, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+        print(json.dumps(report, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
         return 2
-    print(json.dumps(report, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    print(json.dumps(report, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
     return 0
 
 

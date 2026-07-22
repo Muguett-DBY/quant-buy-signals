@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
+import sys
 import zipfile
 
 import pytest
@@ -85,14 +87,34 @@ def test_bootstrap_installer_rejects_a_manifest_for_a_different_payload_name(tmp
         installer.load_bundled_manifest(resource_root=bundle)
 
 
-def test_bootstrap_installer_verify_mode_only_checks_the_bundle(tmp_path, monkeypatch, capsys):
-    bundle = tmp_path / "bundle"
-    bundle.mkdir()
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_bootstrap_installer_verify_mode_only_checks_the_bundle(tmp_path, monkeypatch, stdout_encoding):
+    bundle = tmp_path / "安装😀" / "bundle"
+    bundle.mkdir(parents=True)
     _write_bundled_release(bundle)
     monkeypatch.setattr(installer, "_resource_root", lambda: bundle)
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
 
     assert installer.main(["--verify-bundle"]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    stdout.flush()
+    payload = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))
     assert payload["ok"] is True
     assert payload["version"] == __version__
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["bundle"]
+    assert payload["package"].startswith(str(bundle))
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["安装😀"]
+
+
+@pytest.mark.parametrize("stderr_encoding", ["cp1252", "gbk"])
+def test_bootstrap_installer_human_error_is_safe_on_legacy_stderr(monkeypatch, stderr_encoding):
+    stderr_bytes = io.BytesIO()
+    stderr = io.TextIOWrapper(stderr_bytes, encoding=stderr_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stderr", stderr)
+
+    installer._write_cli_message("安装失败😀", error=True)
+
+    stderr.flush()
+    output = stderr_bytes.getvalue().decode(stderr_encoding)
+    assert output.endswith("\n")
+    assert "\\U0001f600" in output

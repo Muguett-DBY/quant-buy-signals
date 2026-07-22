@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import socket
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from desktop import launcher
 
@@ -39,9 +43,11 @@ def test_source_streamlit_command_is_loopback_headless_and_telemetry_free():
     assert "--browser.gatherUsageStats false" in joined
 
 
-def test_desktop_health_check_reports_version_and_resources(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    resources = tmp_path / "frozen-layout"
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_desktop_health_check_reports_version_and_resources(monkeypatch, tmp_path, stdout_encoding):
+    local_app_data = tmp_path / "运行😀"
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    resources = local_app_data / "frozen-layout"
     for relative in launcher._HEALTH_REQUIRED_RESOURCE_FILES:
         path = resources / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,12 +55,17 @@ def test_desktop_health_check_reports_version_and_resources(monkeypatch, tmp_pat
     # PyInstaller stores Python packages in its embedded PYZ archive, not as
     # physical ``engine``/``ui`` directories beside bundled data files.
     monkeypatch.setattr(launcher, "_resource_root", lambda: resources)
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
 
     assert launcher.main(["--health-check"]) == 0
 
-    payload = json.loads(capsys.readouterr().out)
+    stdout.flush()
+    payload = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))
     assert payload["ok"] is True
     assert payload["version"] == launcher.__version__
+    assert payload["cache_dir"].startswith(str(local_app_data))
     assert payload["cache_dir"].endswith("DS_DCF\\cache") or payload["cache_dir"].endswith("DS_DCF/cache")
 
 

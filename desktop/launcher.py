@@ -19,6 +19,7 @@ import time
 import webbrowser
 from pathlib import Path
 
+from desktop.console_output import write_console_message
 from desktop.updater import (
     UpdateError,
     check_for_update,
@@ -185,7 +186,7 @@ def _message_box(title: str, message: str, *, error: bool = False) -> None:
         flags = 0x10 if error else 0x40
         ctypes.windll.user32.MessageBoxW(None, message, title, flags)
     except Exception:
-        print(f"{title}: {message}", file=sys.stderr)
+        write_console_message(f"{title}: {message}", error=True)
 
 
 class DesktopController:
@@ -361,7 +362,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     multiprocessing.freeze_support()
     args = _parser().parse_args(argv)
     if args.version:
-        print(__version__)
+        write_console_message(__version__)
         return 0
     data_root = _configure_runtime_environment()
     if args.health_check:
@@ -373,18 +374,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
         missing_modules = [module for module in _HEALTH_REQUIRED_MODULES if importlib.util.find_spec(module) is None]
         if missing_files or missing_modules:
-            print(
+            write_console_message(
                 json.dumps(
                     {
                         "ok": False,
                         "missing_files": missing_files,
                         "missing_modules": missing_modules,
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                 )
             )
             return 1
-        print(json.dumps({"ok": True, "version": __version__, "cache_dir": os.environ["DS_DCF_CACHE_DIR"]}))
+        write_console_message(
+            json.dumps(
+                {"ok": True, "version": __version__, "cache_dir": os.environ["DS_DCF_CACHE_DIR"]},
+                ensure_ascii=True,
+            )
+        )
         return 0
     logger = _configure_logging(data_root)
     if args.streamlit_child:
@@ -408,7 +414,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _wait_until_healthy(process, port, timeout=SERVER_START_TIMEOUT_SECONDS)
         logger.info("server healthy on 127.0.0.1:%s", port)
         if args.server_smoke_test:
-            print(json.dumps({"ok": True, "version": __version__, "server_health": "ok"}))
+            write_console_message(
+                json.dumps({"ok": True, "version": __version__, "server_health": "ok"}, ensure_ascii=True)
+            )
             return 0
         if not args.no_browser:
             webbrowser.open(_app_url(port), new=2)

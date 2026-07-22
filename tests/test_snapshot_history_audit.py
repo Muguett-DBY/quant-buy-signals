@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
+import sys
 
 import pandas as pd
+import pytest
 
 from data.cache import SafeFileCache
 from tools import audit_snapshot_history
@@ -122,10 +125,15 @@ def test_listing_date_narrows_expectation_without_converting_short_history_to_da
     assert not any("data_loss" in status for status in statuses)
 
 
-def test_safe_cache_cli_is_compact_json_and_does_not_modify_snapshot(tmp_path, capsys):
-    path = tmp_path / "snapshot.json.gz"
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_safe_cache_cli_is_compact_json_and_does_not_modify_snapshot(tmp_path, monkeypatch, stdout_encoding):
+    path = tmp_path / "历史😀" / "snapshot.json.gz"
+    path.parent.mkdir()
     SafeFileCache(path, schema_version=7).save(_payload())
     before = path.read_bytes()
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
 
     exit_code = audit_snapshot_history.main(
         ["--snapshot", str(path), "--schema", "7", "--window-years", "5", "--company", "600519"]
@@ -133,12 +141,14 @@ def test_safe_cache_cli_is_compact_json_and_does_not_modify_snapshot(tmp_path, c
 
     assert exit_code == 0
     assert path.read_bytes() == before
-    output = capsys.readouterr().out
+    stdout.flush()
+    output = stdout_bytes.getvalue().decode(stdout_encoding)
     assert output.endswith("\n")
     assert ": " not in output
     decoded = json.loads(output)
     assert decoded["ok"] is True
     assert decoded["cache"]["schema_version"] == 7
+    assert decoded["cache"]["path"] == str(path.resolve())
     assert decoded["requested_companies"]["600519"]["datasets"]["income_history"]["years"] == [
         2021,
         2022,
@@ -162,6 +172,23 @@ def test_schema_mismatch_returns_compact_json_error_without_traceback(tmp_path, 
     assert decoded["error"]["type"] == "HistoryAuditError"
     assert "schema_version_mismatch" in decoded["error"]["message"]
     assert "Traceback" not in output
+
+
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_invalid_company_error_is_ascii_safe_json(tmp_path, monkeypatch, stdout_encoding):
+    path = tmp_path / "snapshot.json.gz"
+    SafeFileCache(path, schema_version=7).save(_payload())
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    exit_code = audit_snapshot_history.main(["--snapshot", str(path), "--schema", "7", "--company", "😀"])
+
+    stdout.flush()
+    decoded = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))
+    assert exit_code == 2
+    assert decoded["ok"] is False
+    assert "😀" in decoded["error"]["message"]
 
 
 def test_latest_year_falls_back_to_observed_data_and_missing_requested_company_is_explicit():

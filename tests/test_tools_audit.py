@@ -1,5 +1,8 @@
 import hashlib
+import io
+import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pandas as pd
@@ -1036,7 +1039,8 @@ def test_market_coldness_unavailable_or_unbound_continues_without_invented_value
     assert status["unavailable_policy"] == "continue_with_insufficient_evidence"
 
 
-def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatch, tmp_path, stdout_encoding):
     snapshot_path = tmp_path / "market_snapshot.json.gz"
     snapshot_path.write_bytes(b"validated-snapshot")
     quotes = pd.DataFrame([{"code": "000001"}])
@@ -1177,8 +1181,11 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     monkeypatch.setattr(
         run_full_audit,
         "write_audit_artifacts",
-        lambda *_args, **_kwargs: {"json": Path("audit.json")},
+        lambda *_args, **_kwargs: {"json": Path("审计😀.json")},
     )
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
 
     result = run_full_audit.main(["--sample-size", "1", "--output-dir", str(tmp_path / "audit")])
 
@@ -1201,13 +1208,14 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     assert calls["audit_kwargs"]["quality_history_evidence"] == {}
     assert calls["audit_kwargs"]["research_report_evidence"] == {}
     assert len(calls["audit_kwargs"]["snapshot_sha256"]) == 64
-    output = capsys.readouterr().out
-    assert '"refresh_requested": false' in output
-    assert '"refresh_completed": true' in output
-    assert '"snapshot_source": "cache"' in output
-    assert '"snapshot_warning": ""' in output
-    assert '"market_coldness"' in output
-    assert '"eligible_evidence_coverage": 1.0' in output
+    stdout.flush()
+    output = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))
+    assert output["refresh_requested"] is False
+    assert output["refresh_completed"] is True
+    assert output["snapshot_source"] == "cache"
+    assert output["snapshot_warning"] == ""
+    assert output["market_coldness"]["eligible_evidence_coverage"] == 1.0
+    assert output["artifacts"]["json"] == "审计😀.json"
 
     analysis.issues = (SimpleNamespace(code="000001", stage="valuation", message="failed"),)
     assert run_full_audit.main(["--sample-size", "1", "--output-dir", str(tmp_path / "audit")]) == 1
@@ -1308,7 +1316,8 @@ def test_forced_full_audit_preserves_existing_artifacts_when_quotes_fall_back_to
         path.write_bytes(content)
         original[path] = content
 
-    snapshot = SimpleNamespace(source="stale_cache")
+    source_warning = "refresh failed: DataFetchError: Eastmoney page 3 timed out after 3 attempts"
+    snapshot = SimpleNamespace(source="stale_cache", warning=source_warning)
     monkeypatch.setattr(run_full_audit, "SafeFileCache", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(run_full_audit, "DataFetcher", lambda **_kwargs: object())
     monkeypatch.setattr(run_full_audit, "get_market_snapshot", lambda *_args, **_kwargs: snapshot)
@@ -1328,6 +1337,7 @@ def test_forced_full_audit_preserves_existing_artifacts_when_quotes_fall_back_to
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("audit artifacts must not be written")),
     )
 
-    with pytest.raises(RuntimeError, match="existing audit artifacts were preserved"):
+    with pytest.raises(RuntimeError, match="existing audit artifacts were preserved") as exc_info:
         run_full_audit.main(["--refresh", "--output-dir", str(output_dir)])
+    assert source_warning in str(exc_info.value)
     assert {path: path.read_bytes() for path in original} == original

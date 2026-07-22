@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -377,9 +379,10 @@ def test_ci_smoke_configuration_is_github_only_isolated_and_secret_free(monkeypa
 
 
 @pytest.mark.skipif(os.name != "nt", reason="desktop CI delivery is Windows-only")
-def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_path, capsys):
-    root = tmp_path / "repo"
-    root.mkdir()
+@pytest.mark.parametrize("stdout_encoding", ["cp1252", "gbk"])
+def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_path, stdout_encoding):
+    root = tmp_path / "构建😀" / "repo"
+    root.mkdir(parents=True)
     (root / "README.md").write_text("# smoke\n", encoding="utf-8")
     (root / "LICENSE").write_text("test license\n", encoding="utf-8")
     output_root = root / "build" / "ci-smoke-output"
@@ -424,6 +427,9 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
 
     monkeypatch.setattr(build_desktop.subprocess, "run", fake_run)
     monkeypatch.setattr(build_desktop, "_build_installer", fake_build_installer)
+    stdout_bytes = io.BytesIO()
+    stdout = io.TextIOWrapper(stdout_bytes, encoding=stdout_encoding, errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
 
     result = build_desktop.main(
         [
@@ -435,7 +441,8 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
         ]
     )
 
-    summary = json.loads(capsys.readouterr().out)
+    stdout.flush()
+    summary = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))
     assert result == 0
     assert summary["ci_smoke"] is True
     assert summary["release_ready"] is False
@@ -444,6 +451,7 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
     assert installer_manifest["package_url"] == (
         f"https://ci-smoke.invalid/DS_DCF-v{__version__}-windows-x64-portable.zip"
     )
+    assert summary["folder"].startswith(str(root))
     assert not (work_root / f"DS_DCF-v{__version__}-update-manifest.json").exists()
     assert not list(output_root.glob("*update-manifest*"))
     assert not list(output_root.glob("*.sig"))

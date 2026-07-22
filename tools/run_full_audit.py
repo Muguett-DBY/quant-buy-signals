@@ -1261,7 +1261,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         persist_network=False,
     )
     if not _refresh_completed(args.refresh, getattr(snapshot, "source", None)):
-        raise RuntimeError("fresh market refresh did not complete; existing audit artifacts were preserved")
+        warning = " ".join(str(getattr(snapshot, "warning", "") or "").split())
+        warning_detail = f"; source warning: {warning}" if warning else ""
+        raise RuntimeError(
+            "fresh market refresh did not complete; existing audit artifacts were preserved" + warning_detail
+        )
     reporting_period_contract = _snapshot_reporting_period_contract(snapshot)
     eligible = snapshot.eligible_codes
     market_coldness_reference_artifact: dict[str, object] = {}
@@ -1388,7 +1392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "snapshot_payload_sha256": active_payload_sha256,
         "artifacts": {key: str(value) for key, value in paths.items()},
     }
-    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    print(json.dumps(summary, ensure_ascii=True, indent=2, default=str))
     # The production quality gate intentionally tolerates a very small issue
     # rate so the UI can retain a prior good generation during source outages.
     # A release audit is stricter: even an issue outside the sampled 100 rows

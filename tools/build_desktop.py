@@ -602,7 +602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "desktop_shortcut": str(shortcut) if shortcut is not None else None,
             }
         )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(summary, ensure_ascii=True, indent=2))
     return 0
 
 
