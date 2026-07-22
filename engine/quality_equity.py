@@ -18,8 +18,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-MODEL_ID = "patch6-type7-quality-equity-v4"
-SCHEMA_VERSION = 4
+MODEL_ID = "patch6-type7-quality-equity-v5"
+SCHEMA_VERSION = 5
 STRICT_THRESHOLD = 70.0
 PATCH5_SAFETY_VETO = 8.0
 MIN_CORE_COVERAGE = 0.80
@@ -108,7 +108,11 @@ _TEMPLATE1_ITEM_CONTRACTS = {
         "mean(hfq_10y_CAGR_score,market_cap/projected_year10_profit_score)",
         ({"shareholder_return", "terminal_profit_projection"},),
     ),
-    "t1_20": ("DCF价格位置", "dcf", ({"type1_1a"},)),
+    "t1_20": (
+        "DCF价格位置",
+        "dcf",
+        ({"type1_1a", "validation_basis"},),
+    ),
 }
 _TEMPLATE5_ITEM_LABELS = {
     "t5_i1": "产业大周期",
@@ -128,7 +132,7 @@ _TEMPLATE_EVIDENCE_LEVELS = {
     "derived_proxy",
     "derived_proxy_capped",
     "reported_formula",
-    "validated_type1",
+    "validated_nonfinancial_dcf",
     "historical_valuation_reversion_formula",
     "independent_market_history",
     "independent_market_history_plus_fading_growth_projection",
@@ -999,7 +1003,12 @@ def _template_inputs(
     metric: Mapping[str, Any],
     type1: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
     history: Mapping[str, Any] | None,
+    *,
+    valuation_evidence_complete: bool,
 ) -> dict[str, tuple[float, bool, str, Mapping[str, Any]]]:
+    if not isinstance(valuation_evidence_complete, bool):
+        raise QualityEquityError("Type 7 valuation evidence status must be boolean")
+
     def verified(key: str) -> tuple[float, bool, str]:
         score, complete, level = _verified_score(metric, key)
         return (2.0 if score is None else score), complete, level
@@ -1075,14 +1084,9 @@ def _template_inputs(
     )
 
     type1_scores = type1[2] if isinstance(type1[2], Mapping) else {}
-    type1_reasons = type1[3] if isinstance(type1[3], Mapping) else {}
-    valuation_usable = type1_reasons.get("_evidence") == "complete" and type1_reasons.get("_status") not in {
-        "not_applicable",
-        "insufficient_evidence",
-        "blocked",
-    }
     dcf_score = _finite(type1_scores.get("1a"))
-    dcf_score = 0.0 if dcf_score is None else dcf_score
+    valuation_usable = valuation_evidence_complete and dcf_score is not None
+    dcf_score = dcf_score if valuation_usable else 0.0
 
     source_trade_date = str(metric.get("source_trade_date") or "") or None
     history_record = _history_record(history, str(metric.get("code") or ""), source_trade_date)
@@ -1168,7 +1172,15 @@ def _template_inputs(
             {"asset_turnover": asset_turnover, "capex_intensity": capex_intensity},
         ),
         "luxury": (*luxury, {"gross_margin": gross, "proxy_cap": 6.0}),
-        "dcf": (dcf_score, valuation_usable, "validated_type1", {"type1_1a": dcf_score}),
+        "dcf": (
+            dcf_score,
+            valuation_usable,
+            "validated_nonfinancial_dcf",
+            {
+                "type1_1a": dcf_score,
+                "validation_basis": "source_bound_nonfinancial_dcf",
+            },
+        ),
         "expected_return": (
             expected_return,
             expected_return_complete,
@@ -1569,13 +1581,20 @@ def assess_quality_equity(
     metric: Mapping[str, Any],
     type1_outcome: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
     history_evidence: Mapping[str, Any] | None = None,
+    *,
+    valuation_evidence_complete: bool,
 ) -> dict[str, Any]:
     """Build a replayable Type 7 assessment from validated upstream evidence."""
 
     code = str(metric.get("code") or "")
     if not re.fullmatch(r"[036][0-9]{5}", code):
         raise QualityEquityError("Type 7 metric code is invalid")
-    values = _template_inputs(metric, type1_outcome, history_evidence)
+    values = _template_inputs(
+        metric,
+        type1_outcome,
+        history_evidence,
+        valuation_evidence_complete=valuation_evidence_complete,
+    )
     template1 = _make_template1(values)
     template5 = _make_template5(values)
     patch5 = _make_patch5(metric, values)
@@ -1656,6 +1675,7 @@ def assess_quality_equity(
             "passed": valuation_complete and quote_date_complete,
             "as_of": metric_as_of.isoformat() if metric_as_of is not None else None,
             "valuation_complete": valuation_complete,
+            "validation_basis": "source_bound_nonfinancial_dcf",
         },
         "three_external_reports": {
             "passed": metadata_precheck["passed"],
@@ -1797,6 +1817,8 @@ def _template_item_contract(
     if key in {"t1_05", "t1_07", "t1_17"}:
         return True, _finite(inputs.get("score"))
     if key == "t1_20":
+        if inputs.get("validation_basis") != "source_bound_nonfinancial_dcf":
+            return False, None
         return True, _finite(inputs.get("type1_1a"))
     if key == "t1_03":
         raw = inputs.get("rate")
@@ -2169,7 +2191,8 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
         )
         if (
             not isinstance(valuation, Mapping)
-            or set(valuation) != {"passed", "as_of", "valuation_complete"}
+            or set(valuation) != {"passed", "as_of", "valuation_complete", "validation_basis"}
+            or valuation.get("validation_basis") != "source_bound_nonfinancial_dcf"
             or not isinstance(valuation_complete, bool)
             or valuation_complete is not expected_valuation_complete
             or valuation["passed"] is not expected_valuation_passed

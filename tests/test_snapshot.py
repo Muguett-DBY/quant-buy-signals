@@ -452,6 +452,8 @@ def test_snapshot_explicitly_excludes_beijing_market_from_analysis():
     )
 
     assert validation["analysis_markets"] == ["SH", "SZ"]
+    assert validation["analysis_market_codes"] == ["000001"]
+    assert validation["analysis_ineligible_codes"] == []
     assert validation["unsupported_market_codes"] == ["800001"]
     assert "800001" not in validation["eligible_codes"]
     assert validation["analysis_exclusions"]["800001"] == "unsupported_market"
@@ -1183,6 +1185,7 @@ def test_analysis_universe_excludes_suspended_st_and_delisting_without_dropping_
         financials,
         min_quotes=4,
         min_financial_coverage=0.5,
+        min_trading_quote_coverage=0.70,
         as_of_timestamp=NOW,
     )
     outcome = MarketSnapshotOutcome(quotes, financials, NOW, "test", validation=validation)
@@ -1763,7 +1766,7 @@ def test_refresh_rejects_a_large_relative_drop_in_trading_quotes(tmp_path):
     )
 
     assert outcome.source == "stale_cache"
-    assert "trading_quotes" in outcome.warning or "trading_coverage" in outcome.warning
+    assert "trading quote coverage" in outcome.warning
     assert len(outcome.quotes) == 10
 
 

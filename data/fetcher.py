@@ -47,6 +47,8 @@ SINA_CLASSIC_H = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.
 SINA_PAGE_SIZE = 100
 SINA_CLASSIC_BATCH_SIZE = 200
 _MAX_SINA_RESPONSE_BYTES = 8 * 1024 * 1024
+_MAX_SINA_COUNT_RESPONSE_BYTES = 64 * 1024
+_MAX_SINA_COUNT_ACQUISITION_BYTES = 128 * 1024
 _SINA_RESPONSE_CHUNK_BYTES = 64 * 1024
 _MIN_SINA_PRICE_RATIO = 0.5
 _MAX_SINA_PRICE_RATIO = 2.0
@@ -55,7 +57,8 @@ _SINA_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
 _SINA_RECOVERY_RETRIES = 2
 _MAX_SINA_RECOVERY_PAGES = 5
 _RETRYABLE_SINA_HTTP_STATUSES = frozenset({408, 425, 429})
-_SINA_CLASSIC_LINE = re.compile(r'var\s+hq_str_([a-z]{2}\d{5,6})="([^"]*)";')
+_SINA_CLASSIC_LINE = re.compile(r'var\s+hq_str_([a-z]{2}[0-9]{5,6})="([^"]*)";')
+_SINA_BJ_STOCK_CODE = re.compile(r"(?:43|83|87|92)[0-9]{4}")
 
 _QUOTE_COLUMNS = [
     "code",
@@ -81,6 +84,7 @@ _QUOTE_COLUMNS = [
 
 _MIN_LISTING_REFERENCE_COVERAGE = 0.99
 _MIN_LISTING_DATE_COVERAGE = 0.99
+_MIN_ACTIVE_REFERENCE_REVERSE_COVERAGE = 0.99
 _DETAILED_CASHFLOW_NUMERIC_FIELDS = frozenset(
     {
         "TOTAL_INVEST_INFLOW",
@@ -137,7 +141,38 @@ class _SinaResourceLimitError(QuoteFetchError):
 
 
 class _SinaTransientTransportError(QuoteFetchError):
-    """A Sina page exhausted retries because of HTTP or transport failures."""
+    """A Sina request exhausted retries using only recoverable failures."""
+
+
+class _SinaAcquisitionByteBudget:
+    """Sequential response-body budget shared by Sina count probes."""
+
+    def __init__(self, limit: int):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("Sina acquisition byte limit must be a positive integer")
+        self.limit = limit
+        self._consumed = 0
+        self._exhausted = False
+
+    def charge(self, size: int) -> None:
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ValueError("Sina acquisition byte charge must be a non-negative integer")
+        if self._exhausted:
+            raise _SinaResourceLimitError("Sina acquisition response-byte budget is already exhausted")
+        self._consumed += size
+        if self._consumed > self.limit:
+            self._exhausted = True
+            raise _SinaResourceLimitError(
+                f"Sina acquisition attempts exceed byte limit: {self._consumed} > {self.limit}"
+            )
+
+    def raise_if_exhausted(self) -> None:
+        if self._exhausted or self._consumed >= self.limit:
+            self._exhausted = True
+            comparator = ">" if self._consumed > self.limit else ">="
+            raise _SinaResourceLimitError(
+                f"Sina acquisition attempts reached byte limit: {self._consumed} {comparator} {self.limit}"
+            )
 
 
 def _is_transient_sina_transport_error(exc: BaseException | None) -> bool:
@@ -151,19 +186,26 @@ def _is_transient_sina_transport_error(exc: BaseException | None) -> bool:
     return isinstance(status, int) and (status in _RETRYABLE_SINA_HTTP_STATUSES or 500 <= status <= 599)
 
 
-def _bounded_sina_response_text(response: Any) -> str:
+def _bounded_sina_response_text(
+    response: Any,
+    *,
+    max_bytes: int | None = None,
+    acquisition_budget: _SinaAcquisitionByteBudget | None = None,
+) -> str:
     """Read one response without materialising more than the byte budget."""
+    if max_bytes is None:
+        max_bytes = _MAX_SINA_RESPONSE_BYTES
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ValueError("Sina response byte limit must be a positive integer")
     headers = getattr(response, "headers", {}) or {}
     declared = headers.get("Content-Length") if hasattr(headers, "get") else None
     if declared not in (None, ""):
         declared_text = str(declared).strip()
-        if not re.fullmatch(r"0|[1-9]\d*", declared_text):
+        if not re.fullmatch(r"0|[1-9][0-9]*", declared_text):
             raise QuoteFetchError("Sina response contains invalid Content-Length")
         declared_bytes = int(declared_text)
-        if declared_bytes > _MAX_SINA_RESPONSE_BYTES:
-            raise _SinaResourceLimitError(
-                f"Sina response exceeds byte limit: {declared_bytes} > {_MAX_SINA_RESPONSE_BYTES}"
-            )
+        if declared_bytes > max_bytes:
+            raise _SinaResourceLimitError(f"Sina response exceeds byte limit: {declared_bytes} > {max_bytes}")
 
     iter_content = getattr(response, "iter_content", None)
     if callable(iter_content):
@@ -175,10 +217,10 @@ def _bounded_sina_response_text(response: Any) -> str:
             if not isinstance(chunk, bytes):
                 raise QuoteFetchError("Sina response yielded non-byte content")
             received += len(chunk)
-            if received > _MAX_SINA_RESPONSE_BYTES:
-                raise _SinaResourceLimitError(
-                    f"Sina response exceeds byte limit: received more than {_MAX_SINA_RESPONSE_BYTES}"
-                )
+            if acquisition_budget is not None:
+                acquisition_budget.charge(len(chunk))
+            if received > max_bytes:
+                raise _SinaResourceLimitError(f"Sina response exceeds byte limit: received more than {max_bytes}")
             chunks.append(chunk)
         raw = b"".join(chunks)
         encoding = getattr(response, "encoding", None) or "utf-8"
@@ -196,8 +238,10 @@ def _bounded_sina_response_text(response: Any) -> str:
         actual_bytes = len(text.encode(str(encoding)))
     except (LookupError, UnicodeEncodeError) as exc:
         raise QuoteFetchError("Sina response uses invalid or unencodable text encoding") from exc
-    if actual_bytes > _MAX_SINA_RESPONSE_BYTES:
-        raise _SinaResourceLimitError(f"Sina response exceeds byte limit: {actual_bytes} > {_MAX_SINA_RESPONSE_BYTES}")
+    if acquisition_budget is not None:
+        acquisition_budget.charge(actual_bytes)
+    if actual_bytes > max_bytes:
+        raise _SinaResourceLimitError(f"Sina response exceeds byte limit: {actual_bytes} > {max_bytes}")
     return text
 
 
@@ -227,11 +271,53 @@ def _response_retrieved_at(response: Any) -> float:
     return float(time.time())
 
 
-def _sina_count(node: str, *, timeout: int = REQUEST_TIMEOUT, retries: int = 3) -> int:
+def _strict_sina_json_loads(text: str) -> Any:
+    """Decode Sina JSON without accepting duplicate keys or non-finite constants."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise QuoteFetchError(f"Sina JSON contains a duplicate object key: {key}")
+            result[key] = value
+        return result
+
+    def reject_nonfinite_constant(value: str) -> None:
+        raise QuoteFetchError(f"Sina JSON contains a non-finite numeric constant: {value}")
+
+    return _json.loads(
+        text,
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=reject_nonfinite_constant,
+    )
+
+
+def _sina_count(
+    node: str,
+    *,
+    timeout: int = REQUEST_TIMEOUT,
+    retries: int = 3,
+    acquisition_budget: _SinaAcquisitionByteBudget | None = None,
+) -> int:
     """Return Sina's authoritative raw row count for a market node."""
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or float(timeout) <= 0
+        or isinstance(retries, bool)
+        or not isinstance(retries, int)
+        or retries < 1
+    ):
+        raise ValueError("Sina count timeout and retries must be positive")
     last_error: Exception | None = None
+    transient_only = True
+    attempts_used = 0
     for attempt in range(retries):
+        attempts_used = attempt + 1
         try:
+            if acquisition_budget is not None:
+                acquisition_budget.raise_if_exhausted()
             response = requests.get(
                 SINA_COUNT_URL,
                 params={"node": node},
@@ -241,7 +327,13 @@ def _sina_count(node: str, *, timeout: int = REQUEST_TIMEOUT, retries: int = 3) 
             )
             try:
                 response.raise_for_status()
-                payload = _json.loads(_bounded_sina_response_text(response))
+                payload = _strict_sina_json_loads(
+                    _bounded_sina_response_text(
+                        response,
+                        max_bytes=_MAX_SINA_COUNT_RESPONSE_BYTES,
+                        acquisition_budget=acquisition_budget,
+                    )
+                )
             finally:
                 _close_response(response)
             if payload == []:  # Sina's representation for an empty/unsupported optional node
@@ -250,7 +342,7 @@ def _sina_count(node: str, *, timeout: int = REQUEST_TIMEOUT, retries: int = 3) 
                 raise ValueError("boolean count")
             if isinstance(payload, int):
                 count = payload
-            elif isinstance(payload, str) and re.fullmatch(r"0|[1-9]\d*", payload):
+            elif isinstance(payload, str) and re.fullmatch(r"0|[1-9][0-9]*", payload):
                 count = int(payload)
             else:
                 raise ValueError("count is not a canonical non-negative integer")
@@ -259,13 +351,47 @@ def _sina_count(node: str, *, timeout: int = REQUEST_TIMEOUT, retries: int = 3) 
             return count
         except _SinaResourceLimitError:
             raise
-        except (requests.RequestException, _json.JSONDecodeError, QuoteFetchError, TypeError, ValueError) as exc:
+        except (
+            requests.RequestException,
+            _json.JSONDecodeError,
+            QuoteFetchError,
+            RecursionError,
+            TypeError,
+            ValueError,
+        ) as exc:
             last_error = exc
-            if attempt + 1 < retries:
+            transient = _is_transient_sina_transport_error(exc)
+            if not transient:
+                transient_only = False
+            if attempt + 1 < retries and transient:
                 time.sleep(0.5 * (attempt + 1))
-    raise QuoteFetchError(
-        f"failed to fetch Sina {node} row count after {retries} attempts: {last_error}"
+                continue
+            break
+    error_type = (
+        _SinaTransientTransportError
+        if transient_only and _is_transient_sina_transport_error(last_error)
+        else QuoteFetchError
+    )
+    raise error_type(
+        f"failed to fetch Sina {node} row count after {attempts_used} attempts: {last_error}"
     ) from last_error
+
+
+def _sina_count_with_recovery(node: str, acquisition_budget: _SinaAcquisitionByteBudget) -> int:
+    """Fetch one count, extending only a purely transient initial failure."""
+
+    try:
+        return _sina_count(node, acquisition_budget=acquisition_budget)
+    except _SinaTransientTransportError:
+        try:
+            return _sina_count(
+                node,
+                timeout=_SINA_RECOVERY_TIMEOUT,
+                retries=_SINA_RECOVERY_RETRIES,
+                acquisition_budget=acquisition_budget,
+            )
+        except _SinaTransientTransportError as exc:
+            raise QuoteFetchError(f"failed to recover Sina {node} row count: {exc}") from exc
 
 
 def _sina_page(
@@ -304,7 +430,7 @@ def _sina_page(
                 retrieved_at = _response_retrieved_at(response)
             finally:
                 _close_response(response)
-            payload = _json.loads(response_text)
+            payload = _strict_sina_json_loads(response_text)
             if not isinstance(payload, list):
                 raise QuoteFetchError(f"Sina {node} page {page} returned non-list JSON")
             if any(not isinstance(row, dict) for row in payload):
@@ -320,7 +446,7 @@ def _sina_page(
             return payload
         except _SinaResourceLimitError:
             raise
-        except (requests.RequestException, _json.JSONDecodeError, QuoteFetchError) as exc:
+        except (requests.RequestException, _json.JSONDecodeError, QuoteFetchError, RecursionError) as exc:
             last_error = exc
             if not _is_transient_sina_transport_error(exc):
                 transient_only = False
@@ -345,8 +471,14 @@ def _collect_sina_node(
     """Collect exactly the row count advertised by Sina, in page order."""
     if max_workers < 1 or max_pages < 1:
         raise ValueError("max_workers and max_pages must be positive")
-    expected_count = _sina_count(node)
+    count_budget = _SinaAcquisitionByteBudget(_MAX_SINA_COUNT_ACQUISITION_BYTES)
+    expected_count = _sina_count_with_recovery(node, count_budget)
     if expected_count == 0:
+        ending_count = _sina_count_with_recovery(node, count_budget)
+        if ending_count != expected_count:
+            raise QuoteFetchError(
+                f"Sina {node} row count changed during acquisition: {expected_count} -> {ending_count}"
+            )
         if allow_empty:
             return []
         raise QuoteFetchError(f"Sina {node} advertises an empty snapshot")
@@ -408,6 +540,9 @@ def _collect_sina_node(
         rows.extend(current)
     if len(rows) != expected_count:
         raise QuoteFetchError(f"Sina {node} expected {expected_count} rows, received {len(rows)}")
+    ending_count = _sina_count_with_recovery(node, count_budget)
+    if ending_count != expected_count:
+        raise QuoteFetchError(f"Sina {node} row count changed during acquisition: {expected_count} -> {ending_count}")
     return rows
 
 
@@ -429,7 +564,7 @@ def _quotes_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
         raise QuoteFetchError(f"quote snapshot omitted columns: {sorted(missing)}")
     frame["market"] = frame["symbol"].map(_market_from_symbol)
     frame["code"] = frame["code"].astype(str).str.strip()
-    if not frame["code"].map(lambda value: bool(re.fullmatch(r"\d{6}", value))).all():
+    if not frame["code"].map(lambda value: bool(re.fullmatch(r"[0-9]{6}", value))).all():
         raise QuoteFetchError("quote snapshot contains non-canonical stock codes")
     symbols = frame["symbol"].map(lambda value: str(value).strip().lower())
     expected_symbols = frame["market"].str.lower() + frame["code"]
@@ -440,7 +575,10 @@ def _quotes_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     market_code_mismatch = (
         ((frame["market"] == "SH") & ~frame["code"].str.startswith("6"))
         | ((frame["market"] == "SZ") & ~frame["code"].str.startswith(("0", "3")))
-        | ((frame["market"] == "BJ") & ~frame["code"].str.startswith(("8", "9")))
+        | (
+            (frame["market"] == "BJ")
+            & ~frame["code"].map(lambda value: _SINA_BJ_STOCK_CODE.fullmatch(value) is not None)
+        )
     )
     if market_code_mismatch.any():
         examples = frame.loc[market_code_mismatch, ["market", "code", "symbol"]].head(5).to_dict(orient="records")
@@ -456,6 +594,10 @@ def _quotes_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     close_is_positive = frame["settlement"].map(
         lambda value: bool(pd.notna(value) and math.isfinite(float(value)) and float(value) > 0)
     )
+    missing_a_share_price = frame["market"].isin({"SH", "SZ"}) & ~trade_is_positive & ~close_is_positive
+    if missing_a_share_price.any():
+        examples = frame.loc[missing_a_share_price, ["market", "code", "symbol"]].head(5).to_dict(orient="records")
+        raise QuoteFetchError(f"Sina SH/SZ source rows contain no defensible positive price: {examples}")
     frame["reference_price"] = frame["trade_price"].where(trade_is_positive)
     use_previous_close = ~trade_is_positive & close_is_positive
     frame.loc[use_previous_close, "reference_price"] = frame.loc[use_previous_close, "settlement"]
@@ -486,7 +628,8 @@ def _quotes_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     frame["listing_date_retrieved_at"] = None
     frame["market_cap"] = frame["market_cap"] * 10_000
     # Keep zero-trade and suspended securities when the source supplies a
-    # positive previous close.  Only rows with no defensible price are dropped.
+    # positive previous close.  SH/SZ rows without either price have already
+    # failed closed above; this filter applies only to optional quote markets.
     frame = frame[frame["reference_price"].notna() & frame["reference_price"].gt(0)]
     duplicate_identity = frame.duplicated(subset=["market", "code"], keep=False)
     if duplicate_identity.any():
@@ -513,12 +656,49 @@ def _attach_listing_date_evidence(frame: pd.DataFrame, snapshot: Any) -> pd.Data
     if not isinstance(records, tuple):
         raise QuoteFetchError("listing-date reference records have an invalid shape")
 
+    analysis_mask = frame["market"].map(lambda value: str(value).strip().upper()).isin({"SH", "SZ"})
+    if not analysis_mask.any():
+        raise QuoteFetchError("listing-date enrichment requires Shanghai/Shenzhen quote rows")
+    if "source_trade_date" not in frame.columns:
+        raise QuoteFetchError("listing-date enrichment requires a quote source trading session")
+    raw_sessions = frame.loc[analysis_mask, "source_trade_date"].tolist()
+    if any(
+        not isinstance(value, str)
+        or value != value.strip()
+        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value) is None
+        for value in raw_sessions
+    ):
+        raise QuoteFetchError("listing-date enrichment received an invalid quote source trading session")
+    source_sessions = set(raw_sessions)
+    if len(source_sessions) != 1:
+        raise QuoteFetchError("listing-date enrichment received mixed quote source trading sessions")
+    source_session = next(iter(source_sessions))
+    try:
+        source_session_date = datetime.strptime(source_session, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise QuoteFetchError("listing-date enrichment received an invalid quote source trading session") from exc
+
     by_code: dict[str, Any] = {}
+    parsed_listing_dates: dict[str, Any] = {}
     for record in records:
         code = str(getattr(record, "code", "")).strip()
-        if not re.fullmatch(r"\d{6}", code) or code in by_code:
+        if not re.fullmatch(r"[0-9]{6}", code) or not code.startswith(("6", "0", "3")) or code in by_code:
             raise QuoteFetchError("listing-date reference contains an invalid or duplicate identity")
+        raw_listing_date = getattr(record, "listing_date", None)
+        parsed_listing_date = None
+        if raw_listing_date is not None:
+            if (
+                not isinstance(raw_listing_date, str)
+                or raw_listing_date != raw_listing_date.strip()
+                or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", raw_listing_date) is None
+            ):
+                raise QuoteFetchError("listing-date reference contains a non-canonical listing date")
+            try:
+                parsed_listing_date = datetime.strptime(raw_listing_date, "%Y-%m-%d").date()
+            except ValueError as exc:
+                raise QuoteFetchError("listing-date reference contains an invalid listing date") from exc
         by_code[code] = record
+        parsed_listing_dates[code] = parsed_listing_date
 
     result = frame.copy()
     matched = 0
@@ -532,6 +712,8 @@ def _attach_listing_date_evidence(frame: pd.DataFrame, snapshot: Any) -> pd.Data
             continue
         matched += 1
         listing_date = getattr(record, "listing_date", None)
+        if parsed_listing_dates[code] is not None and parsed_listing_dates[code] > source_session_date:
+            raise QuoteFetchError(f"quote identity {code} is bound to a future listing date")
         missing_reasons = getattr(record, "missing_reasons", {})
         if listing_date is None:
             reason = missing_reasons.get("listing_date") if isinstance(missing_reasons, Mapping) else None
@@ -557,6 +739,43 @@ def _attach_listing_date_evidence(frame: pd.DataFrame, snapshot: Any) -> pd.Data
         raise QuoteFetchError(
             f"listing-date coverage {listing_date_coverage:.1%} is below {_MIN_LISTING_DATE_COVERAGE:.1%}"
         )
+
+    # Eastmoney's broad reference universe includes historical delisted
+    # identities.  A positive current turnover rate or volume ratio is the
+    # independently observable signal that a non-future reference row should
+    # also exist in the same-session Sina quote generation.  This reverse
+    # check catches wholesale omissions without pretending stale historical
+    # rows are currently listed securities.
+    active_reference_codes: set[str] = set()
+    for code, record in by_code.items():
+        listing_date = parsed_listing_dates[code]
+        if listing_date is not None and listing_date > source_session_date:
+            continue
+        activity_values: list[float] = []
+        for field in ("turnover_rate_pct", "volume_ratio"):
+            raw_value = getattr(record, field, None)
+            if raw_value is None:
+                continue
+            if isinstance(raw_value, bool):
+                raise QuoteFetchError(f"listing-date reference contains an invalid {field} value")
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise QuoteFetchError(f"listing-date reference contains an invalid {field} value") from exc
+            if not math.isfinite(value) or value < 0:
+                raise QuoteFetchError(f"listing-date reference contains an invalid {field} value")
+            activity_values.append(value)
+        if any(value > 0 for value in activity_values):
+            active_reference_codes.add(code)
+    if not active_reference_codes:
+        raise QuoteFetchError("listing-date reference contains no current active quote identities")
+    quote_codes = set(result.loc[analysis_mask, "code"].map(lambda value: str(value).strip()))
+    reverse_coverage = len(active_reference_codes & quote_codes) / len(active_reference_codes)
+    if reverse_coverage < _MIN_ACTIVE_REFERENCE_REVERSE_COVERAGE:
+        raise QuoteFetchError(
+            f"active listing-reference reverse quote coverage {reverse_coverage:.1%} is below "
+            f"{_MIN_ACTIVE_REFERENCE_REVERSE_COVERAGE:.1%}"
+        )
     return result
 
 
@@ -570,7 +789,7 @@ def _sina_classic_batch(
     expected = tuple(str(symbol).strip().lower() for symbol in symbols)
     if not expected or len(expected) > SINA_CLASSIC_BATCH_SIZE:
         raise ValueError(f"classic Sina batch must contain 1..{SINA_CLASSIC_BATCH_SIZE} symbols")
-    if len(set(expected)) != len(expected) or any(not re.fullmatch(r"[a-z]{2}\d{5,6}", item) for item in expected):
+    if len(set(expected)) != len(expected) or any(not re.fullmatch(r"[a-z]{2}[0-9]{5,6}", item) for item in expected):
         raise ValueError("classic Sina symbols must be unique canonical market symbols")
 
     last_error: Exception | None = None
@@ -661,8 +880,30 @@ def _attach_sina_source_metadata(frame: pd.DataFrame) -> pd.DataFrame:
     metadata = _sina_trade_metadata(symbols)
     enriched = frame.copy()
     old_reference = pd.to_numeric(enriched["reference_price"], errors="coerce")
+    # Reuse the finite-price classification already established by
+    # ``_quotes_frame``; a textual or infinite source value must not be
+    # reinterpreted as an observed trade merely because ``value > 0``.
+    list_trading = enriched["quote_status"].eq("trading")
     trade_prices = pd.Series([metadata[symbol][2] for symbol in symbols], index=enriched.index, dtype=float)
     previous_closes = pd.Series([metadata[symbol][3] for symbol in symbols], index=enriched.index, dtype=float)
+    classic_trading = trade_prices.gt(0)
+    state_conflict = list_trading.ne(classic_trading)
+    if state_conflict.any():
+        examples = [
+            {
+                "symbol": symbol,
+                "list_trading": bool(list_state),
+                "classic_trading": bool(classic_state),
+            }
+            for symbol, list_state, classic_state, conflict in zip(
+                symbols,
+                list_trading,
+                classic_trading,
+                state_conflict,
+            )
+            if conflict
+        ][:5]
+        raise QuoteFetchError(f"Sina list/classic trading states disagree: {examples}")
     new_reference = trade_prices.where(trade_prices.gt(0), previous_closes)
     price_ratio = new_reference / old_reference
     ratio_valid = price_ratio.map(
@@ -695,7 +936,7 @@ def _attach_sina_source_metadata(frame: pd.DataFrame) -> pd.DataFrame:
     enriched["trade_price"] = trade_prices
     enriched["reference_price"] = new_reference
     enriched["price"] = new_reference
-    trading = trade_prices.gt(0)
+    trading = classic_trading
     enriched["price_source"] = trading.map({True: "last_trade", False: "previous_close"})
     enriched["quote_status"] = trading.map({True: "trading", False: "suspended_or_no_trade"})
     enriched["retrieved_at"] = [metadata[symbol][4] for symbol in symbols]
@@ -704,17 +945,56 @@ def _attach_sina_source_metadata(frame: pd.DataFrame) -> pd.DataFrame:
     return enriched
 
 
+def _validated_sina_analysis_rows(source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate the complete hs_a identity generation before excluding BJ rows."""
+
+    source_symbols: list[str] = []
+    source_codes: list[str] = []
+    analysis_rows: list[dict[str, Any]] = []
+    for row in source_rows:
+        raw_symbol = row.get("symbol")
+        raw_code = row.get("code")
+        if not isinstance(raw_code, str) or re.fullmatch(r"[0-9]{6}", raw_code) is None:
+            raise QuoteFetchError("Sina source rows contain a non-canonical ASCII stock code")
+        if not isinstance(raw_symbol, str) or re.fullmatch(r"(?:bj|sh|sz)[0-9]{6}", raw_symbol) is None:
+            raise QuoteFetchError("Sina source rows contain a non-canonical ASCII market symbol")
+        market = raw_symbol[:2]
+        if raw_symbol != f"{market}{raw_code}":
+            if market == "bj":
+                raise QuoteFetchError("Sina Beijing source row has an invalid code/symbol identity")
+            raise QuoteFetchError("Sina SH/SZ source row has an invalid code/symbol identity")
+        if market == "bj":
+            if _SINA_BJ_STOCK_CODE.fullmatch(raw_code) is None:
+                raise QuoteFetchError("Sina Beijing source row has an invalid code/symbol identity")
+        elif market == "sh":
+            if not raw_code.startswith("6"):
+                raise QuoteFetchError("Sina SH/SZ source row has an invalid market/code identity")
+            analysis_rows.append(row)
+        elif market == "sz":
+            if not raw_code.startswith(("0", "3")):
+                raise QuoteFetchError("Sina SH/SZ source row has an invalid market/code identity")
+            analysis_rows.append(row)
+        source_symbols.append(raw_symbol)
+        source_codes.append(raw_code)
+
+    if len(set(source_symbols)) != len(source_symbols) or len(set(source_codes)) != len(source_codes):
+        raise QuoteFetchError("Sina source rows contain duplicate symbol/code identities before market filtering")
+    if source_symbols != sorted(source_symbols):
+        raise QuoteFetchError("Sina source rows are not in the requested global symbol order")
+    return analysis_rows
+
+
 def _get_sina_quotes_parallel(max_workers: int = _SINA_WORKERS) -> pd.DataFrame:
     """Fetch one complete Shanghai/Shenzhen quote snapshot.
 
     Sina's ``hs_a`` node also contains Beijing securities.  Page/count
     validation must still run against the complete source response, but BJ
     rows are outside this product's universe and are removed before row-level
-    quote parsing and classic-Sina metadata enrichment.  A malformed or stale
-    BJ row therefore cannot reject an otherwise valid SH/SZ generation.
+    quote parsing and classic-Sina metadata enrichment.  Their identities are
+    still validated first so a forged ``bj`` prefix cannot hide an SH/SZ row.
     """
     source_rows = _collect_sina_node("hs_a", max_workers=max_workers)
-    analysis_rows = [row for row in source_rows if not str(row.get("symbol") or "").strip().lower().startswith("bj")]
+    analysis_rows = _validated_sina_analysis_rows(source_rows)
     frame = _quotes_frame(analysis_rows)
     if frame.empty:
         raise QuoteFetchError("Sina SH/SZ snapshot contains no positive-price rows")
@@ -859,7 +1139,7 @@ def _code(value: Any) -> str:
 def _is_analysis_financial_code(value: Any) -> bool:
     """Return whether a canonical code belongs to the SH/SZ product scope."""
     code = _code(value)
-    return bool(re.fullmatch(r"\d{6}", code)) and code.startswith(("6", "0", "3"))
+    return bool(re.fullmatch(r"[0-9]{6}", code)) and code.startswith(("6", "0", "3"))
 
 
 def _report_date(value: Any) -> str:

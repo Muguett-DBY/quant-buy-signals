@@ -60,7 +60,7 @@ def test_sina_parallel_collection_keeps_every_lower_page_before_short_tail(monke
         return pages.get(page, [])
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 5)
     rows = fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
     assert [row["code"] for row in rows] == [
         "010000",
@@ -87,7 +87,7 @@ def test_sina_transient_empty_page_is_rechecked_not_treated_as_tail(monkeypatch)
         return []
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 5)
     rows = fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
     assert len(rows) == 5
     assert calls[2] == 2
@@ -104,7 +104,7 @@ def test_sina_persistent_gap_before_nonempty_page_is_an_error(monkeypatch):
         return []
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 5)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 5)
     with pytest.raises(fetcher.QuoteFetchError, match="page 2 expected"):
         fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=6)
 
@@ -122,7 +122,7 @@ def test_sina_parallel_page_failure_gets_one_bounded_sequential_recovery(monkeyp
         return quote_rows(page, 1)
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 3)
 
     rows = fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
 
@@ -141,7 +141,7 @@ def test_sina_resource_limit_failure_is_never_retried(monkeypatch):
         return quote_rows(page, 1)
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 3)
 
     with pytest.raises(fetcher.QuoteFetchError, match="too large"):
         fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
@@ -159,7 +159,7 @@ def test_sina_schema_failure_is_not_retried_by_collection_recovery(monkeypatch):
         return quote_rows(page, 1)
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 3)
 
     with pytest.raises(fetcher.QuoteFetchError, match="invalid page schema"):
         fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
@@ -179,7 +179,7 @@ def test_sina_recovery_schema_failure_is_not_masked(monkeypatch):
         return quote_rows(page, 1)
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 3)
 
     with pytest.raises(fetcher.QuoteFetchError, match="invalid recovery schema"):
         fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
@@ -197,7 +197,7 @@ def test_sina_persistent_transport_recovery_stops_after_bounded_second_phase(mon
         return quote_rows(page, 1)
 
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 3)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 3)
 
     with pytest.raises(fetcher.QuoteFetchError, match="failed to recover Sina hs_a page 2"):
         fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
@@ -214,7 +214,7 @@ def test_sina_systemic_parallel_failure_does_not_amplify_retries(monkeypatch):
 
     page_count = fetcher._MAX_SINA_RECOVERY_PAGES + 1
     monkeypatch.setattr(fetcher, "_sina_page", fake_page)
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: page_count)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: page_count)
 
     with pytest.raises(fetcher.QuoteFetchError, match="above recovery limit"):
         fetcher._collect_sina_node("hs_a", max_workers=page_count, page_size=1, max_pages=page_count)
@@ -424,16 +424,6 @@ def test_complete_sina_snapshot_attaches_paired_source_date_and_time(monkeypatch
 def test_complete_sina_snapshot_drops_beijing_before_quote_parsing_and_metadata(monkeypatch):
     rows = [
         {
-            "code": "000001",
-            "name": "深市样本",
-            "symbol": "sz000001",
-            "trade": "10",
-            "settlement": "9",
-            "per": "12",
-            "pb": "1.5",
-            "mktcap": "100",
-        },
-        {
             # Deliberately malformed quote fields prove that a BJ source row is
             # removed before SH/SZ row-level parsing and metadata enrichment.
             "code": "920002",
@@ -444,6 +434,16 @@ def test_complete_sina_snapshot_drops_beijing_before_quote_parsing_and_metadata(
             "per": "not-a-number",
             "pb": "not-a-number",
             "mktcap": "not-a-number",
+        },
+        {
+            "code": "000001",
+            "name": "深市样本",
+            "symbol": "sz000001",
+            "trade": "10",
+            "settlement": "9",
+            "per": "12",
+            "pb": "1.5",
+            "mktcap": "100",
         },
     ]
     requested_symbols = []
@@ -488,6 +488,40 @@ def test_sina_source_attachment_rejects_mismatched_price_generations(monkeypatch
         fetcher._attach_sina_source_metadata(frame)
 
 
+@pytest.mark.parametrize(
+    ("list_trade", "list_settlement", "classic_trade", "classic_close"),
+    [("10", "9", 0.0, 9.0), ("0", "9", 10.0, 9.0)],
+)
+def test_sina_source_attachment_rejects_conflicting_trading_states(
+    monkeypatch,
+    list_trade,
+    list_settlement,
+    classic_trade,
+    classic_close,
+):
+    frame = fetcher._quotes_frame(
+        [
+            {
+                "code": "000001",
+                "name": "A",
+                "symbol": "sz000001",
+                "trade": list_trade,
+                "settlement": list_settlement,
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "_sina_trade_metadata",
+        lambda _symbols: {
+            "sz000001": ("2026-07-15", "15:00:00", classic_trade, classic_close, 124.0),
+        },
+    )
+
+    with pytest.raises(fetcher.QuoteFetchError, match="trading states disagree"):
+        fetcher._attach_sina_source_metadata(frame)
+
+
 def test_zero_trade_quote_keeps_previous_close_but_is_not_marked_trading():
     rows = [
         {
@@ -499,13 +533,6 @@ def test_zero_trade_quote_keeps_previous_close_but_is_not_marked_trading():
             "ticktime": "09:25:00",
             "_retrieved_at": 123.0,
         },
-        {
-            "code": "000002",
-            "name": "无价格样本",
-            "symbol": "sz000002",
-            "trade": "0",
-            "settlement": "0",
-        },
     ]
 
     frame = fetcher._quotes_frame(rows)
@@ -514,6 +541,21 @@ def test_zero_trade_quote_keeps_previous_close_but_is_not_marked_trading():
     assert frame.loc[0, "price"] == 9.5
     assert frame.loc[0, "price_source"] == "previous_close"
     assert frame.loc[0, "quote_status"] == "suspended_or_no_trade"
+
+
+def test_sh_sz_quote_without_trade_or_previous_close_fails_closed():
+    rows = [
+        {
+            "code": "000002",
+            "name": "无价格样本",
+            "symbol": "sz000002",
+            "trade": "0",
+            "settlement": "0",
+        }
+    ]
+
+    with pytest.raises(fetcher.QuoteFetchError, match="no defensible positive price"):
+        fetcher._quotes_frame(rows)
 
 
 def test_sina_count_is_https_validated_and_retried(monkeypatch):
@@ -533,9 +575,154 @@ def test_sina_count_is_https_validated_and_retried(monkeypatch):
     assert all(kwargs.get("stream") is True for kwargs in request_kwargs)
 
 
+def test_sina_count_gets_one_bounded_long_timeout_recovery_after_pure_timeouts(monkeypatch):
+    outcomes = [
+        requests.ReadTimeout("slow-1"),
+        requests.ReadTimeout("slow-2"),
+        requests.ReadTimeout("slow-3"),
+        FakeResponse('"5528"'),
+    ]
+    timeouts = []
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(*_args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    budget = fetcher._SinaAcquisitionByteBudget(fetcher._MAX_SINA_COUNT_ACQUISITION_BYTES)
+
+    assert fetcher._sina_count_with_recovery("hs_a", budget) == 5528
+    assert timeouts == [
+        fetcher.REQUEST_TIMEOUT,
+        fetcher.REQUEST_TIMEOUT,
+        fetcher.REQUEST_TIMEOUT,
+        fetcher._SINA_RECOVERY_TIMEOUT,
+    ]
+    assert outcomes == []
+
+
+def test_sina_count_persistent_timeout_stops_after_bounded_second_phase(monkeypatch):
+    calls = []
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(*_args, **kwargs):
+        calls.append(kwargs["timeout"])
+        raise requests.ReadTimeout("still slow")
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    budget = fetcher._SinaAcquisitionByteBudget(fetcher._MAX_SINA_COUNT_ACQUISITION_BYTES)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="failed to recover Sina hs_a row count"):
+        fetcher._sina_count_with_recovery("hs_a", budget)
+
+    assert calls == [
+        fetcher.REQUEST_TIMEOUT,
+        fetcher.REQUEST_TIMEOUT,
+        fetcher.REQUEST_TIMEOUT,
+        fetcher._SINA_RECOVERY_TIMEOUT,
+        fetcher._SINA_RECOVERY_TIMEOUT,
+    ]
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        FakeResponse("missing", 404),
+        requests.exceptions.SSLError("certificate rejected"),
+        requests.exceptions.ProxyError("proxy rejected"),
+    ],
+)
+def test_sina_count_permanent_failure_never_enters_long_timeout_recovery(monkeypatch, outcome):
+    calls = []
+
+    def fake_get(*_args, **kwargs):
+        calls.append(kwargs["timeout"])
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    budget = fetcher._SinaAcquisitionByteBudget(fetcher._MAX_SINA_COUNT_ACQUISITION_BYTES)
+
+    with pytest.raises(fetcher.QuoteFetchError) as caught:
+        fetcher._sina_count_with_recovery("hs_a", budget)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+    assert calls == [fetcher.REQUEST_TIMEOUT]
+
+
+def test_sina_count_mixed_transport_and_schema_failure_is_not_recovered(monkeypatch):
+    outcomes = [requests.ReadTimeout("slow"), FakeResponse("not-json")]
+    timeouts = []
+    monkeypatch.setattr(fetcher.time, "sleep", lambda _seconds: None)
+
+    def fake_get(*_args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    budget = fetcher._SinaAcquisitionByteBudget(fetcher._MAX_SINA_COUNT_ACQUISITION_BYTES)
+
+    with pytest.raises(fetcher.QuoteFetchError) as caught:
+        fetcher._sina_count_with_recovery("hs_a", budget)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+    assert timeouts == [fetcher.REQUEST_TIMEOUT, fetcher.REQUEST_TIMEOUT]
+    assert outcomes == []
+
+
+@pytest.mark.parametrize("entrypoint", ["count", "page"])
+def test_sina_deeply_nested_json_is_a_closed_permanent_source_failure(monkeypatch, entrypoint):
+    payload = ("[" * 2_000 + "]" * 2_000).encode("ascii")
+    response = StreamingFakeResponse([payload])
+    calls = []
+
+    def fake_get(*_args, **_kwargs):
+        calls.append(True)
+        return response
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    if entrypoint == "count":
+        budget = fetcher._SinaAcquisitionByteBudget(fetcher._MAX_SINA_COUNT_ACQUISITION_BYTES)
+        with pytest.raises(fetcher.QuoteFetchError) as caught:
+            fetcher._sina_count_with_recovery("hs_a", budget)
+    else:
+        with pytest.raises(fetcher.QuoteFetchError) as caught:
+            fetcher._sina_page(1, retries=1)
+
+    assert not isinstance(caught.value, fetcher._SinaTransientTransportError)
+    assert calls == [True]
+    assert response.closed
+
+
+def test_sina_count_shared_body_budget_blocks_a_new_network_attempt(monkeypatch):
+    calls = []
+    response = FakeResponse('"5"')
+
+    def fake_get(*_args, **_kwargs):
+        calls.append(True)
+        return response
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    budget = fetcher._SinaAcquisitionByteBudget(3)
+
+    assert fetcher._sina_count("hs_a", retries=1, acquisition_budget=budget) == 5
+    with pytest.raises(fetcher._SinaResourceLimitError, match="reached byte limit"):
+        fetcher._sina_count("hs_a", retries=1, acquisition_budget=budget)
+    assert calls == [True]
+
+
 @pytest.mark.parametrize(
     "payload",
-    ["{}", "true", '"-1"', '"not-a-count"', "3.9", '"3.9"', "1e3", '"1e3"', '"05527"'],
+    ["{}", "true", '"-1"', '"not-a-count"', "3.9", '"3.9"', "1e3", '"1e3"', '"05527"', '"5５"'],
 )
 def test_sina_count_rejects_invalid_metadata(monkeypatch, payload):
     monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse(payload))
@@ -547,6 +734,8 @@ def test_sina_count_rejects_invalid_metadata(monkeypatch, payload):
 @pytest.mark.parametrize("mode", ["declared", "streamed"])
 def test_sina_response_body_has_a_hard_byte_limit(monkeypatch, entrypoint, mode):
     monkeypatch.setattr(fetcher, "_MAX_SINA_RESPONSE_BYTES", 8)
+    if entrypoint == "count":
+        monkeypatch.setattr(fetcher, "_MAX_SINA_COUNT_RESPONSE_BYTES", 8)
     if mode == "declared":
         response = FakeResponse("[]", headers={"Content-Length": "9"})
     else:
@@ -581,11 +770,166 @@ def test_sina_page_rejects_non_list_and_missing_schema(monkeypatch):
             fetcher._sina_page(1, retries=1)
 
 
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (
+            '[{"code":"000001","code":"000002","name":"A","symbol":"sz000001","trade":"10"}]',
+            "duplicate object key",
+        ),
+        ('[{"code":"000001","name":"A","symbol":"sz000001","trade":NaN}]', "non-finite"),
+        ('[{"code":"000001","name":"A","symbol":"sz000001","trade":Infinity}]', "non-finite"),
+        ('[{"code":"000001","name":"A","symbol":"sz000001","trade":-Infinity}]', "non-finite"),
+    ],
+)
+def test_sina_page_rejects_ambiguous_or_nonfinite_json(monkeypatch, payload, message):
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse(payload))
+
+    with pytest.raises(fetcher.QuoteFetchError, match=message):
+        fetcher._sina_page(1, retries=1)
+
+
+@pytest.mark.parametrize("payload", ["NaN", "Infinity", "-Infinity"])
+def test_sina_count_rejects_nonfinite_json_constants(monkeypatch, payload):
+    monkeypatch.setattr(fetcher.requests, "get", lambda *_args, **_kwargs: FakeResponse(payload))
+
+    with pytest.raises(fetcher.QuoteFetchError, match="non-finite"):
+        fetcher._sina_count("hs_a", retries=1)
+
+
 def test_sina_safety_limit_raises_instead_of_silently_truncating(monkeypatch):
     monkeypatch.setattr(fetcher, "_sina_page", lambda page, **_kwargs: quote_rows(page, 2))
-    monkeypatch.setattr(fetcher, "_sina_count", lambda _node: 8)
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: 8)
     with pytest.raises(fetcher.QuoteFetchError, match="safety limit"):
         fetcher._collect_sina_node("hs_a", max_workers=2, page_size=2, max_pages=3)
+
+
+def test_sina_collection_rejects_a_count_change_during_page_acquisition(monkeypatch):
+    counts = iter((3, 4))
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: next(counts))
+    monkeypatch.setattr(fetcher, "_sina_page", lambda page, **_kwargs: quote_rows(page, 1))
+
+    with pytest.raises(fetcher.QuoteFetchError, match="row count changed during acquisition: 3 -> 4"):
+        fetcher._collect_sina_node("hs_a", max_workers=3, page_size=1, max_pages=6)
+
+
+def test_optional_sina_node_rechecks_an_initial_zero_count(monkeypatch):
+    counts = iter((0, 1))
+    monkeypatch.setattr(fetcher, "_sina_count", lambda _node, **_kwargs: next(counts))
+
+    with pytest.raises(fetcher.QuoteFetchError, match="row count changed during acquisition: 0 -> 1"):
+        fetcher._collect_sina_node("hk_ggt", allow_empty=True)
+
+
+def test_sina_source_duplicate_is_rejected_before_zero_price_filtering(monkeypatch):
+    rows = [
+        {"code": "600001", "name": "A", "symbol": "sh600001", "trade": "10"},
+        {"code": "600001", "name": "A duplicate", "symbol": "sh600001", "trade": "0", "settlement": "0"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="duplicate symbol/code identities"):
+        fetcher._get_sina_quotes_parallel()
+
+
+def test_sina_duplicate_beijing_source_row_is_rejected_even_when_price_is_zero(monkeypatch):
+    rows = [
+        {"code": "430047", "name": "BJ", "symbol": "bj430047", "trade": "0", "settlement": "0"},
+        {"code": "430047", "name": "BJ duplicate", "symbol": "bj430047", "trade": "0", "settlement": "0"},
+        {"code": "600001", "name": "A", "symbol": "sh600001", "trade": "10"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="duplicate symbol/code identities"):
+        fetcher._get_sina_quotes_parallel()
+
+
+def test_sina_source_must_preserve_requested_symbol_order(monkeypatch):
+    rows = [
+        {"code": "600002", "name": "B", "symbol": "sh600002", "trade": "10"},
+        {"code": "600001", "name": "A", "symbol": "sh600001", "trade": "10"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="requested global symbol order"):
+        fetcher._get_sina_quotes_parallel()
+
+
+def test_sina_global_source_order_is_checked_before_beijing_exclusion(monkeypatch):
+    rows = [
+        {"code": "600001", "name": "A", "symbol": "sh600001", "trade": "10"},
+        {"code": "430047", "name": "BJ", "symbol": "bj430047", "trade": "10"},
+        {"code": "000001", "name": "B", "symbol": "sz000001", "trade": "10"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="requested global symbol order"):
+        fetcher._get_sina_quotes_parallel()
+
+
+def test_sina_beijing_prefix_cannot_hide_a_shanghai_identity(monkeypatch):
+    rows = [
+        {"code": "600001", "name": "mislabeled", "symbol": "bj600001", "trade": "10"},
+        {"code": "000001", "name": "A", "symbol": "sz000001", "trade": "10"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+
+    with pytest.raises(fetcher.QuoteFetchError, match="Beijing source row has an invalid code/symbol identity"):
+        fetcher._get_sina_quotes_parallel()
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"code": "000001", "name": "大写前缀", "symbol": "SZ000001", "trade": "10"},
+        {"code": "000001", "name": "前后空格", "symbol": " sz000001", "trade": "10"},
+        {"code": "０００００１", "name": "非ASCII代码", "symbol": "sz０００００１", "trade": "10"},
+        {"code": "600001", "name": "市场错配", "symbol": "sz600001", "trade": "10"},
+        {"code": "000001", "name": "代码错配", "symbol": "sz000002", "trade": "10"},
+    ],
+)
+def test_sina_complete_source_requires_exact_ascii_code_symbol_identity(monkeypatch, row):
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: [row])
+
+    with pytest.raises(fetcher.QuoteFetchError, match="canonical ASCII|invalid .*identity"):
+        fetcher._get_sina_quotes_parallel()
+
+
+@pytest.mark.parametrize("beijing_code", ["430047", "830832", "870199", "920047"])
+def test_sina_valid_beijing_stock_ranges_are_safely_excluded(monkeypatch, beijing_code):
+    rows = [
+        {"code": beijing_code, "name": "北交所样本", "symbol": f"bj{beijing_code}", "trade": "10"},
+        {"code": "000001", "name": "A", "symbol": "sz000001", "trade": "10"},
+    ]
+    monkeypatch.setattr(fetcher, "_collect_sina_node", lambda *_args, **_kwargs: rows)
+    monkeypatch.setattr(fetcher, "_attach_sina_source_metadata", lambda frame: frame)
+
+    result = fetcher._get_sina_quotes_parallel()
+
+    assert result["code"].tolist() == ["000001"]
+    assert result["market"].tolist() == ["SZ"]
+
+
+@pytest.mark.parametrize("beijing_code", ["000001", "300001", "600001", "880001", "900001"])
+def test_sina_invalid_beijing_stock_ranges_are_rejected(monkeypatch, beijing_code):
+    monkeypatch.setattr(
+        fetcher,
+        "_collect_sina_node",
+        lambda *_args, **_kwargs: [
+            {"code": beijing_code, "name": "伪造北交所", "symbol": f"bj{beijing_code}", "trade": "10"}
+        ],
+    )
+
+    with pytest.raises(fetcher.QuoteFetchError, match="Beijing source row has an invalid code/symbol identity"):
+        fetcher._get_sina_quotes_parallel()
+
+
+def test_quote_frame_uses_the_same_strict_beijing_stock_ranges():
+    valid = fetcher._quotes_frame([{"code": "430047", "name": "历史北交所", "symbol": "bj430047", "trade": "10"}])
+    assert valid[["market", "code"]].to_records(index=False).tolist() == [("BJ", "430047")]
+
+    with pytest.raises(fetcher.QuoteFetchError, match="quote market/code identities disagree"):
+        fetcher._quotes_frame([{"code": "880001", "name": "股转号段", "symbol": "bj880001", "trade": "10"}])
 
 
 def test_quote_identity_is_market_plus_code():
@@ -602,6 +946,7 @@ def test_quote_identity_is_market_plus_code():
     [
         {"code": "600001", "name": "错配", "symbol": "sh600000", "trade": "10"},
         {"code": "1", "name": "非规范", "symbol": "sz000001", "trade": "10"},
+        {"code": "０００００１", "name": "非ASCII数字", "symbol": "sz０００００１", "trade": "10"},
         {"code": "000001", "name": "市场错配", "symbol": "sh000001", "trade": "10"},
     ],
 )
@@ -1548,6 +1893,7 @@ def test_listing_date_evidence_is_bound_with_explicit_missing_status_and_high_co
                 "listing_date_source": None,
                 "listing_date_source_url": None,
                 "listing_date_retrieved_at": None,
+                "source_trade_date": "2026-07-17",
             }
             for index in range(100)
         ]
@@ -1560,6 +1906,8 @@ def test_listing_date_evidence_is_bound_with_explicit_missing_status_and_high_co
             source=EASTMONEY_SOURCE,
             source_url=EASTMONEY_CLIST_ENDPOINT,
             retrieved_at="2026-07-17T00:00:00+00:00",
+            turnover_rate_pct=1.0,
+            volume_ratio=1.0,
         )
         for index in range(100)
     )
@@ -1587,6 +1935,7 @@ def test_listing_date_enrichment_fails_closed_below_declared_date_coverage():
                 "listing_date_source": None,
                 "listing_date_source_url": None,
                 "listing_date_retrieved_at": None,
+                "source_trade_date": "2026-07-17",
             }
         ]
     )
@@ -1597,6 +1946,8 @@ def test_listing_date_enrichment_fails_closed_below_declared_date_coverage():
         source=EASTMONEY_SOURCE,
         source_url=EASTMONEY_CLIST_ENDPOINT,
         retrieved_at="2026-07-17T00:00:00+00:00",
+        turnover_rate_pct=1.0,
+        volume_ratio=1.0,
     )
 
     with pytest.raises(fetcher.QuoteFetchError, match="listing-date coverage"):
@@ -1604,3 +1955,79 @@ def test_listing_date_enrichment_fails_closed_below_declared_date_coverage():
             quotes,
             SimpleNamespace(available=True, records=(record,)),
         )
+
+
+def test_listing_date_enrichment_rejects_low_active_reference_reverse_coverage():
+    quotes = pd.DataFrame(
+        [
+            {
+                "code": f"{600000 + index:06d}",
+                "market": "SH",
+                "source_trade_date": "2026-07-17",
+                "listing_date": None,
+                "listing_date_status": None,
+                "listing_date_source": None,
+                "listing_date_source_url": None,
+                "listing_date_retrieved_at": None,
+            }
+            for index in range(98)
+        ]
+    )
+    records = tuple(
+        SimpleNamespace(
+            code=f"{600000 + index:06d}",
+            listing_date="2000-01-01",
+            missing_reasons={},
+            source="reference",
+            source_url="https://example.test/reference",
+            retrieved_at="2026-07-17T00:00:00+00:00",
+            turnover_rate_pct=1.0,
+            volume_ratio=1.0,
+        )
+        for index in range(100)
+    )
+
+    with pytest.raises(fetcher.QuoteFetchError, match="reverse quote coverage 98.0% is below 99.0%"):
+        fetcher._attach_listing_date_evidence(
+            quotes,
+            SimpleNamespace(available=True, records=records),
+        )
+
+
+def test_listing_date_reverse_coverage_excludes_explicit_future_listings():
+    quotes = pd.DataFrame(
+        [
+            {
+                "code": f"{600000 + index:06d}",
+                "market": "SH",
+                "source_trade_date": "2026-07-17",
+                "listing_date": None,
+                "listing_date_status": None,
+                "listing_date_source": None,
+                "listing_date_source_url": None,
+                "listing_date_retrieved_at": None,
+            }
+            for index in range(99)
+        ]
+    )
+    records = tuple(
+        SimpleNamespace(
+            code=f"{600000 + index:06d}",
+            listing_date="2026-07-18" if index == 99 else "2000-01-01",
+            missing_reasons={},
+            source="reference",
+            source_url="https://example.test/reference",
+            retrieved_at="2026-07-17T00:00:00+00:00",
+            turnover_rate_pct=1.0,
+            volume_ratio=1.0,
+        )
+        for index in range(100)
+    )
+
+    result = fetcher._attach_listing_date_evidence(
+        quotes,
+        SimpleNamespace(available=True, records=records),
+    )
+
+    assert len(result) == 99
+    assert result["listing_date_status"].eq("reported").all()

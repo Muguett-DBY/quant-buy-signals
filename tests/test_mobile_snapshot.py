@@ -83,6 +83,25 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
     )
 
 
+def test_mobile_snapshot_exports_a_chinese_industry_label_and_keeps_the_enum_separate(monkeypatch):
+    scores = _scores()
+    scores.at[0, "code"] = "600519"
+    scores.at[0, "name"] = "贵州茅台"
+    scores.at[0, "industry"] = "ALCOHOL"
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    _manifest, catalogue, _signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-20",
+        data_timestamp_utc="2026-07-20T08:30:00Z",
+        analysis_quality={"ok": True},
+    )
+
+    company = catalogue["companies"][0]
+    assert company["industry"] == "酿酒行业"
+    assert company["industry_code"] == "ALCOHOL"
+
+
 def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeypatch):
     scores = _scores()
     row = scores.iloc[0].copy()
@@ -329,9 +348,15 @@ def test_mobile_snapshot_hides_legacy_model_identifiers_from_all_public_text(mon
     scores = _scores()
     type4 = dict(scores.at[0, "type4"])
     type4.update({"status": "triggered", "triggered": True, "total": 7.1})
+    type4["sub_scores"] = {"4a": 6.0, "4b": 6.0, "4c": 6.0, "4d": 6.0, "4e": 6.0, "4f": 6.0}
     type4["reasons"] = {
         "_condition": "证据:patch6-observable",
-        "4a": "model=patch6-observable-outcomes-v1",
+        "4a": "model_id=patch6-type7-quality-equity-v5",
+        "4b": "schema_version=5",
+        "4c": "derived_proxy",
+        "4d": "reported_formula",
+        "4e": "financial_fade_horizon_not_tam_or_penetration_proof",
+        "4f": "(normalised_roe - g) / (cost_of_equity - g)",
     }
     scores.at[0, "type4"] = type4
     scores.at[0, "buy_types"] = ["type4"]
@@ -345,11 +370,54 @@ def test_mobile_snapshot_hides_legacy_model_identifiers_from_all_public_text(mon
         analysis_quality={"ok": True},
     )
 
-    public_text = json.dumps({"catalogue": catalogue, "signals": signals}, ensure_ascii=False)
+    def _string_values(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for nested in value.values():
+                yield from _string_values(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                yield from _string_values(nested)
+
+    # Public contract keys such as ``schema_version`` are machine-readable and
+    # intentionally stable.  Only reject internal identifiers when they leak
+    # into text that a person can actually see.
+    public_text = " ".join(_string_values({"catalogue": catalogue, "signals": signals}))
     assert "patch6" not in public_text.casefold()
     assert "observable" not in public_text.casefold()
     assert "model=" not in public_text.casefold()
+    assert "model_id" not in public_text.casefold()
+    assert "schema_version" not in public_text.casefold()
+    assert "derived_proxy" not in public_text.casefold()
+    assert "reported_formula" not in public_text.casefold()
+    assert "financial_fade_horizon" not in public_text.casefold()
+    assert "normalised_roe" not in public_text.casefold()
     assert catalogue["companies"][0]["types"]["type4"]["reason"] == "可核验的财务与行业数据"
+
+
+def test_mobile_snapshot_truncates_reasons_to_the_android_utf16_contract(monkeypatch):
+    scores = _scores()
+    type1 = dict(scores.at[0, "type1"])
+    type1.update({"status": "triggered", "triggered": True, "total": 7.1})
+    type1["reasons"] = {"_condition": "😀" + "说明" * 120}
+    scores.at[0, "type1"] = type1
+    scores.at[0, "buy_types"] = ["type1"]
+    scores.at[0, "primary_type"] = "type1"
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _scores: [])
+
+    _manifest, catalogue, signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-20",
+        data_timestamp_utc="2026-07-20T08:30:00Z",
+        analysis_quality={"ok": True},
+    )
+
+    compact_reason = catalogue["companies"][0]["types"]["type1"]["reason"]
+    detail_reason = signals["signals"][0]["type_details"]["type1"]["reasons"]["_condition"]
+    for reason in (compact_reason, detail_reason):
+        assert len(reason.encode("utf-16-le")) // 2 <= mobile_snapshot.MAX_PUBLIC_REASON_UTF16_UNITS
+        assert reason.endswith("…")
 
 
 @pytest.mark.parametrize(

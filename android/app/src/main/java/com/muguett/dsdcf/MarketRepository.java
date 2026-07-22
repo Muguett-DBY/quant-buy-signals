@@ -1028,6 +1028,37 @@ public final class MarketRepository {
         return "not_applicable".equals(status) || "insufficient_evidence".equals(status);
     }
 
+    static String publicReasonText(String value) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty()) {
+            return "";
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        String machineProbe = lower.replace('\r', ' ').replace('\n', ' ');
+        boolean machineText = machineProbe.matches(".*patch[0-9]+[-_].*")
+                || machineProbe.contains("model_id")
+                || machineProbe.contains("schema_version")
+                || machineProbe.contains("formula")
+                || machineProbe.contains("derived_proxy")
+                || machineProbe.contains("validation_status")
+                || machineProbe.contains("evidence_level")
+                || machineProbe.contains("source_rule")
+                || machineProbe.contains("opt_upper_v")
+                || machineProbe.contains("normalised_roe")
+                || machineProbe.contains("normalized_roe")
+                || machineProbe.contains("cost_of_equity")
+                || machineProbe.contains("financial_fade_horizon")
+                || machineProbe.matches(".*\\b[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}\\b.*")
+                || machineProbe.matches(".*\\b[a-z][a-z0-9_]{2,}\\s*=.*");
+        if (!machineText) {
+            return text;
+        }
+        if (lower.contains("type2c") || text.contains("量价") || text.contains("换手")) {
+            return "量价与换手数据";
+        }
+        return "可核验的财务与行业数据";
+    }
+
     private static Map<String, String> parseTypeNames(JSONObject value) {
         Map<String, String> result = new HashMap<>();
         Set<String> uniqueLabels = new HashSet<>();
@@ -1098,7 +1129,7 @@ public final class MarketRepository {
                 }
                 score = rawScore;
             }
-            String reason = type.optString("reason").trim();
+            String reason = publicReasonText(type.optString("reason"));
             if (reason.length() > MAX_PUBLIC_REASON_LENGTH) {
                 throw new IOException("公司记录包含过长的买入情况说明。");
             }
@@ -1529,14 +1560,28 @@ public final class MarketRepository {
                     Map<String, String> typeNames, String detailText) {
             this.code = code;
             this.name = name;
-            this.industry = industry;
+            this.industry = publicIndustryLabel(industry);
             this.price = price;
             this.buyTypes = Collections.unmodifiableList(new ArrayList<>(buyTypes));
             this.conditionalTypes = Collections.unmodifiableList(new ArrayList<>(conditionalTypes));
             this.typeScores = Collections.unmodifiableMap(new HashMap<>(typeScores));
-            this.searchText = (code + " " + name + " " + industry).toLowerCase(Locale.ROOT);
+            this.searchText = (code + " " + name + " " + this.industry).toLowerCase(Locale.ROOT);
             this.typeNames = typeNames;
-            this.detailText = detailText;
+            this.detailText = publicReasonText(detailText);
+        }
+
+        private static String publicIndustryLabel(String value) {
+            String text = value == null ? "" : value.trim();
+            if (text.isEmpty()) {
+                return "行业未知";
+            }
+            // New catalogues provide the Chinese public label.  This guard is
+            // also needed for an older on-device cache so internal enums such
+            // as ALCOHOL can never leak into displayLabel or search results.
+            if (text.matches("[A-Z][A-Z0-9_]*")) {
+                return "未分类行业";
+            }
+            return text;
         }
 
         public boolean hasTriggeredSignal() {
@@ -1628,7 +1673,7 @@ public final class MarketRepository {
             // internal 0.0/0.9 placeholders.  Applicability and evidence state
             // are authoritative: neither state has a user-facing numeric score.
             this.score = isScorelessTypeStatus(status) ? null : score;
-            this.reason = reason;
+            this.reason = publicReasonText(reason);
         }
 
         String describe() {

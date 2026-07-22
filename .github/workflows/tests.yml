@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -205,12 +205,24 @@ jobs:
       - name: Install the pinned Android SDK components
         shell: bash
         run: |
-          set +o pipefail
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            'platforms;android-35' \
-            'build-tools;35.0.0'
-          sdkmanager_status=${PIPESTATUS[1]}
-          set -o pipefail
+          sdkmanager_status=1
+          for attempt in 1 2 3; do
+            set +e
+            set +o pipefail
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              'platforms;android-35' \
+              'build-tools;35.0.0'
+            pipeline_status=("${PIPESTATUS[@]}")
+            set -o pipefail
+            set -e
+            sdkmanager_status=${pipeline_status[1]}
+            if [[ "$sdkmanager_status" -eq 0 ]]; then
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 2))
+            fi
+          done
           exit "$sdkmanager_status"
 
       - name: Compile and lint the Android client

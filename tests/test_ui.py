@@ -13,7 +13,9 @@ from ui.buy_types_page import (
     TYPE_DIMENSIONS,
     _analysis_export_json,
     _bear_case_lines,
+    _cache_diagnostic_rows,
     _diagnostic_type_label,
+    _dcf_parameter_rows,
     _display_reason,
     _dcf_audit_rows,
     _eligible_analysis_inputs,
@@ -28,6 +30,8 @@ from ui.buy_types_page import (
     _market_coldness_status_message,
     _merge_user_evidence,
     _parse_user_evidence_json,
+    _public_failure_message,
+    _public_pipeline_issue_rows,
     _reset_buy_type_filters,
     _render_radar_chart,
     _run_full_analysis,
@@ -35,6 +39,7 @@ from ui.buy_types_page import (
     _spreadsheet_safe_csv,
     _status_icon,
     _type_risk_notice,
+    _type7_ledger_summary,
     _with_diagnostic_fields,
 )
 from ui.leaders_page import _add_business_candidate_columns
@@ -566,6 +571,173 @@ def test_display_reason_hides_legacy_machine_evidence_ids():
     assert _display_reason("PB分位与库存去化") == "PB分位与库存去化"
 
 
+@pytest.mark.parametrize(
+    "machine_text",
+    [
+        "model_id=patch6-type7-quality-equity-v5",
+        "schema_version=5",
+        "derived_proxy",
+        "reported_formula",
+        "financial_fade_horizon_not_tam_or_penetration_proof",
+        "(normalised_roe - g) / (cost_of_equity - g)",
+    ],
+)
+def test_display_reason_has_a_generic_fallback_for_new_machine_identifiers(machine_text):
+    assert _display_reason(machine_text) == "可核验的财务与行业数据"
+
+
+def test_cache_diagnostic_is_reduced_to_a_chinese_summary_without_contract_fields():
+    rows = _cache_diagnostic_rows(
+        {
+            "schema_version": 8,
+            "reason": "miss:hash_mismatch",
+            "active_payload_sha256": "a" * 64,
+        }
+    )
+
+    assert rows == [{"检查项目": "本地数据缓存", "结果": "缓存未通过完整性校验，未采用该缓存"}]
+    public_text = json.dumps(rows, ensure_ascii=False)
+    for marker in ("schema_version", "hash_mismatch", "sha256"):
+        assert marker not in public_text
+
+
+def test_pipeline_issues_are_translated_without_raw_stage_or_exception_details():
+    rows = _public_pipeline_issue_rows(
+        [
+            SimpleNamespace(
+                code="600519",
+                stage="valuation_evidence",
+                message="RuntimeError: model_id mismatch: schema_version=5",
+            )
+        ]
+    )
+
+    assert rows == [
+        {
+            "代码": "600519",
+            "阶段": "估值证据核验",
+            "错误": "估值结果与当前公司源数据不一致",
+        }
+    ]
+    public_text = json.dumps(rows, ensure_ascii=False)
+    for marker in ("valuation_evidence", "RuntimeError", "model_id", "schema_version"):
+        assert marker not in public_text
+
+
+def test_failure_message_rejects_python_types_and_old_internal_cache_reasons():
+    fallback = "本次处理未完成，已保留上一版结果。"
+
+    assert _public_failure_message("RuntimeError: schema_version_mismatch", fallback=fallback) == fallback
+    assert _public_failure_message("网络暂时不可用，请稍后重试。", fallback=fallback) == "网络暂时不可用，请稍后重试。"
+
+
+def test_global_status_never_renders_raw_cache_json():
+    source = inspect.getsource(buy_types_page._render_global_status)
+
+    assert "st.json" not in source
+    assert "_cache_diagnostic_rows" in source
+
+
+def test_dcf_parameters_are_presented_as_a_chinese_summary_without_raw_audit_fields():
+    rows = _dcf_parameter_rows(
+        {
+            "params": {
+                "neutral": {
+                    "growth": 0.05,
+                    "wacc_base": 0.09,
+                    "terminal_g": 0.02,
+                    "margin_retention": 0.8,
+                    "forecast_years": 5,
+                    "model_id": "private-model-v1",
+                    "formula": "internal_formula",
+                    "derived_proxy": True,
+                }
+            }
+        }
+    )
+
+    assert rows == [
+        {
+            "情景": "中性",
+            "预测期收入增长率": "5.00%",
+            "基础折现率": "9.00%",
+            "永续增长率": "2.00%",
+            "利润率保持比例": "80.00%",
+            "显式预测期": "5年",
+        }
+    ]
+    public_text = json.dumps(rows, ensure_ascii=False)
+    for marker in ("model_id", "formula", "derived_proxy", "wacc_base"):
+        assert marker not in public_text
+
+
+def test_type7_ledger_is_presented_as_chinese_scores_and_prerequisites_only():
+    summary = _type7_ledger_summary(
+        {
+            "model_id": "patch6-type7-quality-equity-v5",
+            "schema_version": 5,
+            "scores": {"template1": 69.5, "template5": 72.0, "patch5": 71.0},
+            "strict_checks": {"template1": False, "template5": True, "patch5": True},
+            "prerequisites": {
+                "three_year_financials": {"passed": True, "consecutive_years": 10},
+                "three_external_reports": {
+                    "passed": False,
+                    "source_count": 1,
+                    "distinct_publishers": 1,
+                    "validation_status": "derived_proxy",
+                },
+            },
+            "prerequisites_complete": False,
+            "decisively_not_triggered": True,
+            "derived_proxy": "financial_fade_horizon_not_tam_or_penetration_proof",
+        }
+    )
+
+    assert summary["score_rows"][0] == {
+        "评分体系": "第1模板",
+        "百分制得分": "69.50",
+        "是否严格高于70分": "否",
+    }
+    assert summary["prerequisite_rows"] == [
+        {"前置核验": "至少三年连续财务数据", "结果": "通过", "说明": "已有10年连续财务数据"},
+        {"前置核验": "至少三份外部研究资料", "结果": "未通过", "说明": "已有1份资料，来自1个不同发布方"},
+    ]
+    assert "即使补全当前缺失资料" in summary["conclusion"]
+    public_text = json.dumps(summary, ensure_ascii=False)
+    for marker in ("model_id", "schema_version", "derived_proxy", "validation_status"):
+        assert marker not in public_text
+
+
+def test_ordinary_stock_detail_never_renders_raw_json_ledgers_or_parameters():
+    assert "st.json" not in inspect.getsource(buy_types_page._render_stock_dcf)
+    assert "st.json" not in inspect.getsource(buy_types_page._render_stock_inline)
+
+
+def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_technical_audit():
+    frame = pd.DataFrame(
+        [
+            {
+                "code": "600519",
+                "type7": {
+                    "ledger": {
+                        "model_id": "patch6-type7-quality-equity-v5",
+                        "schema_version": 5,
+                        "derived_proxy": True,
+                    }
+                },
+            }
+        ]
+    )
+    context = {"buy_types_dcf_results": {"600519": {"params": {"neutral": {"formula": "internal_formula"}}}}}
+
+    exported = json.loads(_analysis_export_json(frame, context=context))
+    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v5"
+    assert exported["dcf_results"]["600519"]["params"]["neutral"]["formula"] == "internal_formula"
+    render_source = inspect.getsource(buy_types_page._render_analysis_evidence)
+    assert "供技术审计" in render_source
+    assert "完整原始资料" in render_source
+
+
 def test_diagnostic_selection_excludes_na_and_insufficient_frameworks():
     frame = pd.DataFrame(
         [
@@ -755,8 +927,7 @@ def test_missing_snapshot_reporting_contract_fails_closed_before_pipeline_and_pr
     assert analysis_calls == []
     assert saves == []
     assert state["buy_types_df"] is previous
-    assert "严格TTM报告期契约" in state["buy_types_refresh_error"]
-    assert "拒绝年度数据回退" in state["buy_types_refresh_error"]
+    assert state["buy_types_refresh_error"] == "快照报告期校验未通过，已拒绝使用可能口径不一致的数据。"
 
 
 def test_failed_pipeline_keeps_the_complete_previous_ui_generation(monkeypatch):
@@ -797,6 +968,7 @@ def test_failed_pipeline_keeps_the_complete_previous_ui_generation(monkeypatch):
     assert state["leaders_df"] is previous_leaders
     assert state["buy_types_pipeline_issues"] is previous_issues
     assert state["buy_types_data_source"] == "cache"
+    assert state["buy_types_refresh_error"] == "估值或评分未通过完整性校验，新结果未替换上一版。"
     assert saves == []
 
 
@@ -920,6 +1092,7 @@ def test_analysis_quality_failure_blocks_network_promotion(monkeypatch):
 
     assert _run_full_analysis(force_refresh=True) is False
     assert state["buy_types_df"] is previous
+    assert state["buy_types_refresh_error"] == "估值或评分未通过完整性校验，新结果未替换上一版。"
     assert saves == []
 
 
@@ -978,4 +1151,5 @@ def test_post_analysis_state_construction_failure_blocks_network_promotion(monke
 
     assert _run_full_analysis(force_refresh=True) is False
     assert state["buy_types_df"] is previous
+    assert state["buy_types_refresh_error"] == "新结果保存或切换失败，已保留上一版结果。"
     assert saves == []

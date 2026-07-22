@@ -1,3 +1,6 @@
+from copy import deepcopy
+from functools import lru_cache
+import hashlib
 from types import SimpleNamespace
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -6,7 +9,28 @@ import pandas as pd
 import pytest
 
 from engine.buy_screener import screen_all_types
+from data.market_coldness import (
+    EASTMONEY_CLIST_ENDPOINT,
+    EASTMONEY_SOURCE,
+)
+from engine.market_coldness import MARKET_COLDNESS_MODEL_ID
 from tools import publish_mobile_snapshot as publisher
+from tools.run_full_audit import (
+    _canonical_market_coldness_json,
+    _replay_market_coldness_reference_artifact,
+)
+
+
+@pytest.fixture(autouse=True)
+def _published_source_commit(monkeypatch):
+    """Keep publication tests independent of the developer worktree state."""
+
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setattr(
+        publisher,
+        "archive_market_coldness_session_snapshot",
+        lambda snapshot, _session: snapshot,
+    )
 
 
 def _scores():
@@ -54,9 +78,150 @@ def _after_close(monkeypatch):
     )
 
 
+@lru_cache(maxsize=2)
+def _market_coldness_fixture(as_of_session="2026-07-17"):
+    codes = tuple(f"{index:06d}" for index in range(1, 1_001))
+    retrieved_at = f"{as_of_session}T08:05:00Z"
+    artifact = {
+        "schema_version": 1,
+        "model_id": MARKET_COLDNESS_MODEL_ID,
+        "source": EASTMONEY_SOURCE,
+        "source_url": EASTMONEY_CLIST_ENDPOINT,
+        "retrieved_at": retrieved_at,
+        "as_of_session": as_of_session,
+        "listed_codes": list(codes),
+        "source_record_count": len(codes),
+        "records": [
+            [
+                code,
+                "2020-01-01",
+                round(-30.0 + (index % 101) * 0.5, 2),
+                round(-40.0 + (index % 121) * 0.6, 2),
+                round(0.25 + (index % 80) * 0.1, 2),
+                round(0.4 + (index % 40) * 0.05, 2),
+            ]
+            for index, code in enumerate(codes)
+        ],
+    }
+    replay = _replay_market_coldness_reference_artifact(
+        artifact,
+        eligible_codes=("000001",),
+        as_of_session=as_of_session,
+    )
+    evidence = replay["eligible_evidence"]
+    status = {
+        "available": True,
+        "evidence_available": True,
+        "evidence_reason": "available",
+        "model_id": MARKET_COLDNESS_MODEL_ID,
+        "source": EASTMONEY_SOURCE,
+        "source_url": EASTMONEY_CLIST_ENDPOINT,
+        "retrieved_at": retrieved_at,
+        "as_of_session": as_of_session,
+        "reference_artifact_sha256": hashlib.sha256(_canonical_market_coldness_json(artifact)).hexdigest(),
+        "full_listed_evidence_count": len(replay["full_evidence"]),
+        "eligible_evidence_count": 1,
+        "eligible_evidence_coverage": 1.0,
+        "eligible_applicable_count": 1,
+        "eligible_applicable_evidence_coverage": 1.0,
+        "eligible_not_applicable_count": 0,
+        "eligible_not_applicable_codes_by_reason": {
+            "listed_in_current_year": [],
+            "listing_history_lt_120_days": [],
+        },
+        "eligible_unscored_data_gap_count": 0,
+        "eligible_unscored_data_gap_codes_by_reason": {},
+    }
+    return artifact, evidence, status
+
+
+def _market_coldness_record(code="000001", as_of_session="2026-07-17"):
+    return deepcopy(_market_coldness_fixture(as_of_session)[1][code])
+
+
+def _market_coldness_status(as_of_session="2026-07-17"):
+    return deepcopy(_market_coldness_fixture(as_of_session)[2])
+
+
+def _valid_market_coldness_loader(
+    *_args,
+    reference_artifact_out=None,
+    archive_candidate_out=None,
+    **_kwargs,
+):
+    artifact, evidence, status = deepcopy(_market_coldness_fixture())
+    if reference_artifact_out is not None:
+        reference_artifact_out.update(artifact)
+    if archive_candidate_out is not None:
+        archive_candidate_out.append(SimpleNamespace(available=True))
+    return evidence, status
+
+
+def test_mobile_publisher_console_manifest_is_safe_on_windows_cp1252(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        publisher,
+        "publish_mobile_snapshot",
+        lambda **_kwargs: {"status": "发布成功", "company": "贵州茅台"},
+    )
+
+    assert publisher.main(["--output-dir", str(tmp_path)]) == 0
+
+    output = capsys.readouterr().out
+    output.encode("cp1252")
+    assert "\\u53d1\\u5e03\\u6210\\u529f" in output
+    assert "\\u8d35\\u5dde\\u8305\\u53f0" in output
+
+
+def test_mobile_source_commit_rejects_an_invalid_github_revision(monkeypatch):
+    monkeypatch.setenv("GITHUB_SHA", "not-a-commit")
+
+    with pytest.raises(RuntimeError, match="source Git commit is invalid"):
+        publisher._source_commit()
+
+
+def test_mobile_source_commit_rejects_a_dirty_local_worktree(monkeypatch):
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(publisher.shutil, "which", lambda _name: "git")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(stdout=" M engine/audit.py\n?? unsigned-output.json\n")
+
+    monkeypatch.setattr(publisher.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="requires a clean Git worktree"):
+        publisher._source_commit()
+
+    assert [call[0] for call in calls] == [["git", "status", "--porcelain", "--untracked-files=all"]]
+    assert calls[0][1]["check"] is True
+    assert calls[0][1]["capture_output"] is True
+
+
+def test_mobile_source_commit_uses_head_only_after_a_clean_local_worktree(monkeypatch):
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(publisher.shutil, "which", lambda _name: "git")
+    calls = []
+    outputs = iter(("", "B" * 40 + "\n"))
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(stdout=next(outputs))
+
+    monkeypatch.setattr(publisher.subprocess, "run", fake_run)
+
+    assert publisher._source_commit() == "b" * 40
+    assert [call[0] for call in calls] == [
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        ["git", "rev-parse", "HEAD"],
+    ]
+    assert all(call[1]["cwd"] == publisher.Path(publisher.__file__).resolve().parents[1] for call in calls)
+
+
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path):
     snapshot = _snapshot()
     cache = SimpleNamespace(read_bytes_if_payload=lambda payload: b"verified-" + payload.encode("ascii"))
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
     monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: cache)
     monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
@@ -64,7 +229,9 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     monkeypatch.setattr(publisher, "_snapshot_reporting_period_contract", lambda _snapshot: object())
     monkeypatch.setattr(publisher, "_comparison_quality", lambda _snapshot: {})
     monkeypatch.setattr(
-        publisher, "_load_market_coldness_evidence", lambda *_args, **_kwargs: ({}, {"available": True})
+        publisher,
+        "_load_market_coldness_evidence",
+        _valid_market_coldness_loader,
     )
     monkeypatch.setattr(
         publisher,
@@ -84,6 +251,73 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert (tmp_path / manifest["catalogue"]["filename"]).is_file()
     assert (tmp_path / manifest["signals"]["filename"]).is_file()
     assert manifest["provenance"]["snapshot_source"] == "cache"
+    assert manifest["provenance"]["source_commit"] == "a" * 40
+
+
+def test_mobile_publication_keeps_existing_files_when_coldness_coverage_is_zero(monkeypatch, tmp_path):
+    snapshot = _snapshot()
+    status = {
+        "available": True,
+        "evidence_available": False,
+        "evidence_reason": "session_retrieval_mismatch",
+        "as_of_session": "2026-07-17",
+        "eligible_evidence_count": 0,
+        "eligible_evidence_coverage": 0.0,
+    }
+    marker = tmp_path / "existing.txt"
+    marker.write_text("last-known-good", encoding="utf-8")
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(publisher, "_snapshot_reporting_period_contract", lambda _snapshot: object())
+    monkeypatch.setattr(publisher, "_comparison_quality", lambda _snapshot: {})
+    monkeypatch.setattr(publisher, "_load_market_coldness_evidence", lambda *_args, **_kwargs: ({}, status))
+    monkeypatch.setattr(
+        publisher,
+        "run_market_analysis",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("analysis must not start")),
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable: session_retrieval_mismatch"):
+        publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=False)
+
+    assert marker.read_text(encoding="utf-8") == "last-known-good"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["existing.txt"]
+
+
+def test_mobile_publication_keeps_existing_files_when_declared_coldness_records_are_invalid(
+    monkeypatch,
+    tmp_path,
+):
+    snapshot = _snapshot()
+    record = _market_coldness_record()
+    record["components"].pop("raw_values")
+    status = _market_coldness_status()
+    marker = tmp_path / "existing.txt"
+    marker.write_text("last-known-good", encoding="utf-8")
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(publisher, "_snapshot_reporting_period_contract", lambda _snapshot: object())
+    monkeypatch.setattr(publisher, "_comparison_quality", lambda _snapshot: {})
+    monkeypatch.setattr(
+        publisher,
+        "_load_market_coldness_evidence",
+        lambda *_args, **_kwargs: ({"000001": record}, status),
+    )
+    monkeypatch.setattr(
+        publisher,
+        "run_market_analysis",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("analysis must not start")),
+    )
+
+    with pytest.raises(RuntimeError, match="component provenance is invalid"):
+        publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=False)
+
+    assert marker.read_text(encoding="utf-8") == "last-known-good"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["existing.txt"]
 
 
 def test_publish_mobile_snapshot_refuses_to_replace_daily_data_with_stale_refresh(monkeypatch, tmp_path):
@@ -140,6 +374,7 @@ def test_mobile_publication_refuses_intraday_quotes_replayed_after_close(monkeyp
     snapshot.analysis_quotes = pd.DataFrame(
         [
             {
+                "code": "000001",
                 "market": "SH",
                 "quote_status": "trading",
                 "source_trade_date": "2026-07-20",
@@ -157,3 +392,28 @@ def test_mobile_publication_refuses_intraday_quotes_replayed_after_close(monkeyp
         publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
 
     assert not list(tmp_path.iterdir())
+
+
+def test_post_close_gate_uses_the_complete_eligible_universe_as_its_denominator():
+    codes = tuple(f"{index:06d}" for index in range(100))
+
+    def snapshot(trading_count):
+        return SimpleNamespace(
+            eligible_codes=codes,
+            analysis_quotes=pd.DataFrame(
+                [
+                    {
+                        "code": code,
+                        "market": "SZ",
+                        "quote_status": "trading" if index < trading_count else "suspended_or_no_trade",
+                        "source_trade_date": "2026-07-20",
+                        "quote_tick_time": "15:00:00",
+                    }
+                    for index, code in enumerate(codes)
+                ]
+            ),
+        )
+
+    assert publisher._require_post_close_quotes(snapshot(99), "2026-07-20") == 0.99
+    with pytest.raises(RuntimeError, match="trading quote coverage 98.0%"):
+        publisher._require_post_close_quotes(snapshot(98), "2026-07-20")

@@ -18,10 +18,11 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as datetime_time, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -50,6 +51,8 @@ DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_WORKERS = 10
 DEFAULT_PAGE_WORKERS = max(1, min(int(CONCURRENCY), MAX_PAGE_WORKERS))
 DEFAULT_MARKET_COLDNESS_CACHE_PATH = CACHE_DIRECTORY / "market_coldness" / "eastmoney_sh_sz_a.json.gz"
+DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY = CACHE_DIRECTORY / "market_coldness" / "sessions"
+_SESSION_ARCHIVE_READY_TIME = datetime_time(15, 15)
 _RECOVERY_TIMEOUT_FLOOR_SECONDS = 30.0
 _RECOVERY_RETRIES = 2
 _MAX_RECOVERY_PAGES = 5
@@ -992,9 +995,119 @@ def fetch_market_coldness_snapshot(
         return replace(snapshot, cache_diagnostic=f"{cache_diagnostic};write_failed:{_error_label(exc)}")
 
 
+def market_coldness_session_cache_path(
+    as_of_session: date | str,
+    *,
+    directory: str | Path = DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY,
+) -> Path:
+    """Return the immutable cache path for one canonical Shanghai session."""
+
+    if isinstance(as_of_session, datetime):
+        raise ValueError("market-coldness session must be a date")
+    if isinstance(as_of_session, date):
+        session = as_of_session
+    elif isinstance(as_of_session, str):
+        try:
+            session = date.fromisoformat(as_of_session)
+        except ValueError as exc:
+            raise ValueError("market-coldness session must be an ISO date") from exc
+        if session.isoformat() != as_of_session:
+            raise ValueError("market-coldness session must be an ISO date")
+    else:
+        raise ValueError("market-coldness session must be a date")
+    return Path(directory) / f"eastmoney_sh_sz_a_{session.isoformat()}.json.gz"
+
+
+def load_market_coldness_session_snapshot(
+    as_of_session: date | str,
+    *,
+    directory: str | Path = DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY,
+) -> MarketColdnessSnapshot | None:
+    """Load one immutable session generation without contacting the network."""
+
+    path = market_coldness_session_cache_path(as_of_session, directory=directory)
+    cache = SafeFileCache(
+        path,
+        schema_version=_CACHE_SCHEMA_VERSION,
+        ttl=CACHE_TTL_SECONDS,
+        max_uncompressed_bytes=_MAX_CACHE_UNCOMPRESSED_BYTES,
+    )
+    loaded = cache.load(allow_expired=True)
+    if not loaded.hit:
+        if path.exists():
+            raise MarketColdnessError(f"invalid immutable market-coldness session cache: {loaded.reason}")
+        return None
+    snapshot = _snapshot_from_cache(loaded.value)
+    if snapshot.retrieved_at is None:
+        raise MarketColdnessError("immutable market-coldness session cache has no retrieval timestamp")
+    session = as_of_session if isinstance(as_of_session, date) else date.fromisoformat(as_of_session)
+    try:
+        retrieved = datetime.fromisoformat(snapshot.retrieved_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MarketColdnessError("immutable market-coldness session cache has an invalid timestamp") from exc
+    if retrieved.tzinfo is None or retrieved.utcoffset() is None:
+        raise MarketColdnessError("immutable market-coldness session cache timestamp lacks a timezone")
+    retrieved_shanghai = retrieved.astimezone(ZoneInfo("Asia/Shanghai"))
+    if retrieved_shanghai.date() != session:
+        raise MarketColdnessError("immutable market-coldness session cache is bound to another session")
+    if retrieved_shanghai.time().replace(tzinfo=None) < _SESSION_ARCHIVE_READY_TIME:
+        raise MarketColdnessError("immutable market-coldness session cache was acquired before the session close")
+    return replace(snapshot, cache_hit=True, cache_diagnostic="immutable_session_hit")
+
+
+def archive_market_coldness_session_snapshot(
+    snapshot: MarketColdnessSnapshot,
+    as_of_session: date | str,
+    *,
+    directory: str | Path = DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY,
+) -> MarketColdnessSnapshot:
+    """Persist one complete generation once; a differing rewrite is rejected."""
+
+    if not snapshot.available or snapshot.retrieved_at is None:
+        raise MarketColdnessError("cannot archive an unavailable market-coldness snapshot")
+    path = market_coldness_session_cache_path(as_of_session, directory=directory)
+    session = as_of_session if isinstance(as_of_session, date) else date.fromisoformat(as_of_session)
+    try:
+        retrieved = datetime.fromisoformat(snapshot.retrieved_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MarketColdnessError("market-coldness retrieval timestamp is invalid") from exc
+    if retrieved.tzinfo is None or retrieved.utcoffset() is None:
+        raise MarketColdnessError("market-coldness retrieval timestamp lacks a timezone")
+    retrieved_shanghai = retrieved.astimezone(ZoneInfo("Asia/Shanghai"))
+    if retrieved_shanghai.date() != session:
+        raise MarketColdnessError("market-coldness snapshot is bound to another session")
+    if retrieved_shanghai.time().replace(tzinfo=None) < _SESSION_ARCHIVE_READY_TIME:
+        raise MarketColdnessError("market-coldness snapshot was acquired before the session close")
+
+    cache = SafeFileCache(
+        path,
+        schema_version=_CACHE_SCHEMA_VERSION,
+        ttl=CACHE_TTL_SECONDS,
+        max_uncompressed_bytes=_MAX_CACHE_UNCOMPRESSED_BYTES,
+    )
+    payload = _snapshot_cache_value(snapshot)
+    loaded = cache.load(allow_expired=True)
+    if loaded.hit:
+        existing = _snapshot_from_cache(loaded.value)
+        if _snapshot_cache_value(existing) != payload:
+            raise MarketColdnessError("immutable market-coldness session cache already has a different generation")
+        return replace(existing, cache_hit=True, cache_diagnostic="immutable_session_existing")
+    if path.exists():
+        raise MarketColdnessError(f"invalid immutable market-coldness session cache: {loaded.reason}")
+    try:
+        cache.compare_and_swap(payload, expected_payload_sha256=None, allow_replace_invalid=False)
+    except SafeCacheConflict as exc:
+        winner = load_market_coldness_session_snapshot(session, directory=directory)
+        if winner is None or _snapshot_cache_value(winner) != payload:
+            raise MarketColdnessError("immutable market-coldness session cache write conflict") from exc
+        return winner
+    return replace(snapshot, cache_hit=False, cache_diagnostic="immutable_session_saved")
+
+
 __all__ = [
     "DEFAULT_MARKET_COLDNESS_CACHE_PATH",
     "DEFAULT_PAGE_SIZE",
+    "DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY",
     "EASTMONEY_CLIST_ENDPOINT",
     "EASTMONEY_FIELDS",
     "EASTMONEY_SOURCE",
@@ -1007,5 +1120,8 @@ __all__ = [
     "MarketColdnessRecord",
     "MarketColdnessSnapshot",
     "MetricCoverage",
+    "archive_market_coldness_session_snapshot",
     "fetch_market_coldness_snapshot",
+    "load_market_coldness_session_snapshot",
+    "market_coldness_session_cache_path",
 ]

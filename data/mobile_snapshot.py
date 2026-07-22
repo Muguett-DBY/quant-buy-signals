@@ -25,12 +25,14 @@ from typing import Any
 
 import pandas as pd
 
+from data.public_presentation import public_industry_name, public_reason_text
 from engine.buy_screener import TYPE_NAMES, validate_screening_result
 
 
 SNAPSHOT_SCHEMA_VERSION = 1
 MAX_COMPRESSED_ASSET_BYTES = 8_000_000
 MAX_UNCOMPRESSED_ASSET_BYTES = 16_000_000
+MAX_PUBLIC_REASON_UTF16_UNITS = 200
 CATALOG_FILENAME = "catalog-{generation}.json.gz"
 SIGNALS_FILENAME = "signals-{generation}.json.gz"
 SIGNATURE_FILENAME = "manifest-{generation}.sig"
@@ -99,23 +101,24 @@ def _normalise_code(value: Any) -> str:
 
 
 def _public_reason_text(value: Any) -> str:
-    """Hide legacy model identifiers from every mobile-facing explanation."""
-    text = str(value or "").strip()
-    lowered = text.casefold()
-    if any(
-        marker in lowered
-        for marker in (
-            "patch6-observable",
-            "patch6-type2c",
-            "evidence_level=",
-            "model=",
-            "opt_upper_v",
-        )
-    ):
-        if "type2c" in lowered or "量价" in text:
-            return "量价与换手数据"
-        return "可核验的财务与行业数据"
-    return text
+    """Apply the shared plain-language boundary to mobile explanations."""
+    text = public_reason_text(value)
+    if len(text.encode("utf-16-le")) // 2 <= MAX_PUBLIC_REASON_UTF16_UNITS:
+        return text
+
+    # Android's String.length() counts UTF-16 code units rather than Unicode
+    # code points.  Truncate on code-point boundaries and reserve one unit for
+    # a visible ellipsis so every generated reason satisfies the exact client
+    # contract, including text containing non-BMP emoji.
+    remaining = MAX_PUBLIC_REASON_UTF16_UNITS - 1
+    output: list[str] = []
+    for character in text:
+        units = len(character.encode("utf-16-le")) // 2
+        if units > remaining:
+            break
+        output.append(character)
+        remaining -= units
+    return "".join(output).rstrip() + "…"
 
 
 def _compact_type(payload: Any) -> dict[str, Any]:
@@ -207,10 +210,15 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
     diagnostic_score = _finite(row.get("diagnostic_score"))
     if diagnostic_score is None:
         diagnostic_score = _finite(row.get("max_score"))
+    raw_industry = str(row.get("industry_code") or row.get("industry") or "").strip()
     return {
         "code": _normalise_code(row.get("code")),
         "name": str(row.get("name") or ""),
-        "industry": str(row.get("industry") or ""),
+        # ``industry`` is the public display contract consumed by existing
+        # Android clients.  Keep the model enum separately for diagnostics so
+        # values such as ``ALCOHOL`` never become an end-user label.
+        "industry": public_industry_name(row.get("industry"), explicit_name=row.get("industry_cn")),
+        "industry_code": raw_industry,
         "price": _finite(row.get("price")),
         "pe": _finite(row.get("pe")),
         "pb": _finite(row.get("pb")),

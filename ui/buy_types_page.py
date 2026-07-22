@@ -3,11 +3,12 @@
 按钮触发数据加载 · 全部公司展示 · 展开看维度得分
 """
 
-import inspect
 import hashlib
+import inspect
 import json
 import math
 import os
+import re
 import time
 from collections import Counter
 from collections.abc import Mapping
@@ -16,6 +17,8 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+
+from data.public_presentation import public_reason_text
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -158,23 +161,245 @@ def _format_metric(value, *, digits: int = 1, scale: float = 1.0, suffix: str = 
 
 
 def _display_reason(value: object) -> str:
-    """Defensively hide old cache/model identifiers from all user-facing text."""
-    text = str(value or "").strip()
-    lowered = text.lower()
-    if any(
-        marker in lowered
-        for marker in (
-            "patch6-observable",
-            "patch6-type2c",
-            "evidence_level=",
-            "model=",
-            "opt_upper_v",
-        )
-    ):
-        if "type2c" in lowered or "量价" in text:
-            return "量价与换手数据"
-        return "可核验的财务与行业数据"
+    """Defensively hide machine identifiers from all user-facing text."""
+    return public_reason_text(value)
+
+
+_FAILURE_MACHINE_TEXT = re.compile(
+    r"(?:[A-Za-z]{3,}|[A-Za-z]:[\\/]|[A-Za-z0-9]+_[A-Za-z0-9_]+)",
+)
+_PIPELINE_STAGE_LABELS = {
+    "identity": "标的身份校验",
+    "input": "基础数据校验",
+    "dcf": "估值计算",
+    "valuation_evidence": "估值证据核验",
+}
+_PIPELINE_STAGE_MESSAGES = {
+    "identity": "股票代码或记录身份存在冲突，已排除该条数据",
+    "input": "价格、市值或财务输入不完整或无效",
+    "dcf": "估值计算未能生成有效结果",
+    "valuation_evidence": "估值结果与当前公司源数据不一致",
+}
+
+
+def _public_failure_message(value: object, *, fallback: str) -> str:
+    """Keep exception internals and old-cache machine text out of ordinary UI."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return fallback
+    display = _display_reason(text)
+    if display != text or len(text) > 240 or _FAILURE_MACHINE_TEXT.search(text):
+        return fallback
     return text
+
+
+def _public_pipeline_issue_rows(issues: object) -> list[dict[str, str]]:
+    """Translate pipeline diagnostics without exposing stages or exception text."""
+    if not isinstance(issues, (list, tuple)):
+        return []
+    rows: list[dict[str, str]] = []
+    stage_labels = set(_PIPELINE_STAGE_LABELS.values())
+    for issue in issues:
+        if isinstance(issue, Mapping):
+            raw_code = issue.get("code", issue.get("代码"))
+            raw_stage = issue.get("stage", issue.get("阶段"))
+        else:
+            raw_code = getattr(issue, "code", "")
+            raw_stage = getattr(issue, "stage", "")
+        code = _normalise_code(raw_code)
+        stage = str(raw_stage or "").strip()
+        if stage in stage_labels:
+            stage_key = next(key for key, label in _PIPELINE_STAGE_LABELS.items() if label == stage)
+        else:
+            stage_key = stage
+        rows.append(
+            {
+                "代码": code if re.fullmatch(r"[0-9]{6}", code) else "未知标的",
+                "阶段": _PIPELINE_STAGE_LABELS.get(stage_key, "分析处理"),
+                "错误": _PIPELINE_STAGE_MESSAGES.get(stage_key, "该条数据未完成可靠分析，已排除本次结果"),
+            }
+        )
+    return rows
+
+
+def _cache_diagnostic_rows(value: object) -> list[dict[str, str]]:
+    """Summarise a cache diagnostic without displaying its internal contract."""
+    if not isinstance(value, Mapping) or not value:
+        return []
+    diagnostic = json.dumps(value, ensure_ascii=True, default=str).lower()
+    if any(marker in diagnostic for marker in ("error", "failed", "invalid", "mismatch", "corrupt", "rejected")):
+        result = "缓存未通过完整性校验，未采用该缓存"
+    elif any(marker in diagnostic for marker in ("stale", "expired")):
+        result = "缓存已过期，未作为最新数据使用"
+    elif any(marker in diagnostic for marker in ("miss", "not_found", "not found")):
+        result = "未找到可用缓存，已尝试重新获取数据"
+    elif any(marker in diagnostic for marker in ("hit", "fresh", "saved", "valid")):
+        result = "已读取并校验本地缓存"
+    else:
+        result = "已完成本地缓存状态检查"
+    return [{"检查项目": "本地数据缓存", "结果": result}]
+
+
+_SCENARIO_DISPLAY_NAMES = {
+    "pessimistic": "悲观",
+    "neutral": "中性",
+    "optimistic": "乐观",
+}
+_TYPE7_SCORE_DISPLAY_NAMES = {
+    "template1": "第1模板",
+    "template5": "第5模板",
+    "patch5": "补丁5",
+}
+_TYPE7_PREREQUISITE_DISPLAY_NAMES = {
+    "core_modules_80pct": "核心模块证据覆盖达到80%",
+    "technology_patch4": "技术类公司补充核验",
+    "three_year_financials": "至少三年连续财务数据",
+    "latest_quote_and_valuation": "最新行情与估值",
+    "three_external_reports": "至少三份外部研究资料",
+    "external_report_content_verification": "外部资料内容交叉核验",
+    "ten_year_return_and_five_year_valuation": "十年回报与五年估值历史",
+}
+
+
+def _percentage_text(value: object, *, digits: int = 2) -> str:
+    number = _fmt_score(value)
+    return "暂无数据" if number is None else f"{number * 100:.{digits}f}%"
+
+
+def _plain_number_text(value: object, *, digits: int = 2) -> str:
+    number = _fmt_score(value)
+    return "暂无数据" if number is None else f"{number:.{digits}f}"
+
+
+def _dcf_parameter_rows(result: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Build a Chinese, business-level view of valuation parameters.
+
+    The exact machine ledger remains available in the explicitly labelled
+    technical-audit download.  Ordinary stock detail deliberately exposes
+    only inputs that a reader can interpret without knowing implementation
+    field names or formulas.
+    """
+    params = result.get("params")
+    if not isinstance(params, Mapping):
+        return []
+    financial_model = bool(result.get("_pb_valuation"))
+    rows: list[dict[str, str]] = []
+    for scenario, label in _SCENARIO_DISPLAY_NAMES.items():
+        values = params.get(scenario)
+        if not isinstance(values, Mapping):
+            continue
+        if financial_model:
+            years = values.get("roe_years")
+            year_text = (
+                "、".join(str(year) for year in years) if isinstance(years, (list, tuple)) and years else "暂无数据"
+            )
+            rows.append(
+                {
+                    "情景": label,
+                    "长期增长率": _percentage_text(values.get("growth")),
+                    "情景净资产收益率": _percentage_text(values.get("scenario_roe")),
+                    "股权成本": _percentage_text(values.get("cost_of_equity", values.get("wacc_base"))),
+                    "每股净资产": _plain_number_text(values.get("bvps")),
+                    "合理市净率区间": (
+                        f"{_plain_number_text(values.get('pb_lower'))} 至 {_plain_number_text(values.get('pb_upper'))}"
+                    ),
+                    "净资产收益率取样年份": year_text,
+                }
+            )
+        else:
+            years = _fmt_score(values.get("forecast_years"))
+            rows.append(
+                {
+                    "情景": label,
+                    "预测期收入增长率": _percentage_text(values.get("growth")),
+                    "基础折现率": _percentage_text(values.get("wacc_base")),
+                    "永续增长率": _percentage_text(values.get("terminal_g")),
+                    "利润率保持比例": _percentage_text(values.get("margin_retention")),
+                    "显式预测期": "暂无数据" if years is None else f"{int(years)}年",
+                }
+            )
+    return rows
+
+
+def _type7_prerequisite_detail(key: str, record: Mapping[str, Any]) -> str:
+    if key == "core_modules_80pct":
+        actual = _fmt_score(record.get("actual"))
+        required = _fmt_score(record.get("required"))
+        if actual is not None and required is not None:
+            return f"当前覆盖{actual * 100:.1f}%，要求至少{required * 100:.0f}%"
+    elif key == "technology_patch4":
+        if record.get("applicable") is False:
+            return "该公司不需要此项补充核验"
+        score = _fmt_score(record.get("score"))
+        return "等待补充经过核验的技术评估" if score is None else f"核验得分{score:.1f}分"
+    elif key == "three_year_financials":
+        years = _fmt_score(record.get("consecutive_years"))
+        if years is not None:
+            return f"已有{int(years)}年连续财务数据"
+    elif key == "latest_quote_and_valuation":
+        as_of = str(record.get("as_of") or "").strip()
+        if as_of:
+            return f"数据日期{as_of}"
+    elif key == "three_external_reports":
+        sources = _fmt_score(record.get("source_count"))
+        publishers = _fmt_score(record.get("distinct_publishers"))
+        if sources is not None and publishers is not None:
+            return f"已有{int(sources)}份资料，来自{int(publishers)}个不同发布方"
+    elif key == "ten_year_return_and_five_year_valuation":
+        as_of = str(record.get("as_of") or "").strip()
+        if as_of:
+            return f"历史数据截至{as_of}"
+    return "已满足" if record.get("passed") is True else "尚未满足"
+
+
+def _type7_ledger_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the readable subset of a Type-7 audit ledger."""
+    scores = ledger.get("scores")
+    checks = ledger.get("strict_checks")
+    score_rows: list[dict[str, str]] = []
+    for key, label in _TYPE7_SCORE_DISPLAY_NAMES.items():
+        score = _fmt_score(scores.get(key)) if isinstance(scores, Mapping) else None
+        passed = checks.get(key) if isinstance(checks, Mapping) else None
+        if not isinstance(passed, bool) and score is not None:
+            passed = score > 70.0
+        score_rows.append(
+            {
+                "评分体系": label,
+                "百分制得分": "暂无数据" if score is None else f"{score:.2f}",
+                "是否严格高于70分": "是" if passed is True else "否" if passed is False else "暂无数据",
+            }
+        )
+
+    prerequisites = ledger.get("prerequisites")
+    prerequisite_rows: list[dict[str, str]] = []
+    if isinstance(prerequisites, Mapping):
+        for key, label in _TYPE7_PREREQUISITE_DISPLAY_NAMES.items():
+            record = prerequisites.get(key)
+            if not isinstance(record, Mapping):
+                continue
+            prerequisite_rows.append(
+                {
+                    "前置核验": label,
+                    "结果": "通过" if record.get("passed") is True else "未通过",
+                    "说明": _type7_prerequisite_detail(key, record),
+                }
+            )
+
+    if ledger.get("triggered") is True:
+        conclusion = "三套评分与全部前置核验均已通过。"
+    elif ledger.get("safety_veto") is True:
+        conclusion = "安全边际未达到最低要求，本类型不触发。"
+    elif ledger.get("decisively_not_triggered") is True:
+        conclusion = "即使补全当前缺失资料，至少一套评分仍无法严格超过70分。"
+    elif ledger.get("prerequisites_complete") is False:
+        conclusion = "三套评分之外仍有前置核验未通过，本类型暂不触发。"
+    else:
+        conclusion = "当前结果未满足三套评分均严格超过70分的触发条件。"
+    return {
+        "score_rows": score_rows,
+        "prerequisite_rows": prerequisite_rows,
+        "conclusion": conclusion,
+    }
 
 
 def _filter_stock_search(frame: pd.DataFrame, term: str) -> pd.DataFrame:
@@ -430,8 +655,8 @@ def _invalidate_stale_analysis_state() -> bool:
     stored = st.session_state.get("buy_types_generation_identity")
     try:
         current = _current_analysis_generation_identity()
-    except Exception as exc:
-        reason = f"无法验证当前分析规则身份：{type(exc).__name__}: {exc}"
+    except Exception:
+        reason = "无法验证当前分析规则身份，请重新启动程序后再试。"
     else:
         if isinstance(stored, Mapping) and dict(stored) == current:
             return False
@@ -857,7 +1082,7 @@ def _build_successful_analysis_state(
         "not_eligible": "未通过自动分析边界",
     }
     exclusions = {
-        _normalise_code(code): exclusion_labels.get(str(reason), str(reason or "未通过自动分析边界"))
+        _normalise_code(code): exclusion_labels.get(str(reason), "未通过自动分析边界")
         for code, reason in raw_exclusions.items()
     }
     raw_ineligible = getattr(snapshot, "ineligible_codes", ()) or validation.get("ineligible_codes", ())
@@ -872,7 +1097,14 @@ def _build_successful_analysis_state(
         "buy_types_retrieved_at": getattr(snapshot, "retrieved_at", None),
         "buy_types_data_source": snapshot.source,
         "buy_types_snapshot_validation": dict(snapshot.validation),
-        "buy_types_snapshot_warning": snapshot.warning,
+        "buy_types_snapshot_warning": (
+            _public_failure_message(
+                snapshot.warning,
+                fallback="数据刷新未完成，已使用上一份通过校验的完整快照。",
+            )
+            if snapshot.warning
+            else ""
+        ),
         "buy_types_cache_diagnostic": cache_diagnostic,
         "buy_types_analysis_quality": quality,
         "buy_types_dcf_results": dict(dcf_results),
@@ -882,9 +1114,7 @@ def _build_successful_analysis_state(
         "buy_types_analysis_exclusions": exclusions,
         "buy_types_user_evidence": dict(user_evidence or {}),
         "buy_types_market_coldness_status": dict(market_coldness_status or {}),
-        "buy_types_pipeline_issues": [
-            {"代码": issue.code, "阶段": issue.stage, "错误": issue.message} for issue in analysis.issues
-        ],
+        "buy_types_pipeline_issues": _public_pipeline_issue_rows(analysis.issues),
         "buy_types_generation_identity": _current_analysis_generation_identity(),
     }
     # Streamlit executes closed expander bodies on every rerun.  Build the
@@ -1053,7 +1283,7 @@ def _render_global_status(frame: pd.DataFrame) -> None:
         "cache": "完整缓存",
         "network": "新抓取并通过校验的数据",
         "stale_cache": "上一份完整快照",
-    }.get(source, str(source or "未知"))
+    }.get(source, "未知来源")
     validation = st.session_state.get("buy_types_snapshot_validation", {})
     coverage_text = "财报覆盖率未知"
     if isinstance(validation, dict):
@@ -1198,23 +1428,32 @@ def _render_global_status(frame: pd.DataFrame) -> None:
 
     snapshot_warning = st.session_state.get("buy_types_snapshot_warning", "")
     if snapshot_warning:
-        st.warning(f"本次数据刷新失败，当前展示上一份通过校验的完整快照。原因：{snapshot_warning}")
+        warning_detail = _public_failure_message(
+            snapshot_warning,
+            fallback="数据刷新未完成，已使用上一份通过校验的完整快照。",
+        )
+        st.warning(f"本次数据刷新失败，当前展示上一份通过校验的完整快照。原因：{warning_detail}")
     cache_restore_notice = st.session_state.get("buy_types_cache_restore_notice", "")
     if cache_restore_notice:
         st.info(cache_restore_notice)
     refresh_error = st.session_state.get("buy_types_refresh_error", "")
     if refresh_error:
-        st.error(f"本次分析未替换上一版结果。原因：{refresh_error}")
-    pipeline_issues = st.session_state.get("buy_types_pipeline_issues", [])
+        error_detail = _public_failure_message(
+            refresh_error,
+            fallback="本次处理未完成，已保留上一版结果。",
+        )
+        st.error(f"本次分析未替换上一版结果。原因：{error_detail}")
+    pipeline_issues = _public_pipeline_issue_rows(st.session_state.get("buy_types_pipeline_issues", []))
     if pipeline_issues:
-        st.warning(f"{len(pipeline_issues)} 只标的发生可追踪估值错误，未被静默忽略。")
-        with st.expander("估值错误明细"):
+        st.warning(f"{len(pipeline_issues)} 条标的记录未完成可靠分析，均已明确排除。")
+        with st.expander("分析排除明细"):
             st.dataframe(pd.DataFrame(pipeline_issues), width="stretch", hide_index=True)
 
     cache_diagnostic = st.session_state.get("buy_types_cache_diagnostic", {})
-    if isinstance(cache_diagnostic, Mapping) and cache_diagnostic:
+    cache_rows = _cache_diagnostic_rows(cache_diagnostic)
+    if cache_rows:
         with st.expander("缓存诊断", expanded=False):
-            st.json(_json_safe(cache_diagnostic), expanded=False)
+            st.dataframe(pd.DataFrame(cache_rows), width="stretch", hide_index=True)
 
     exclusions = st.session_state.get("buy_types_analysis_exclusions", {})
     if isinstance(exclusions, Mapping) and exclusions:
@@ -1335,24 +1574,24 @@ def _market_coldness_status_message(status: object) -> tuple[str, str] | None:
     count = status.get("eligible_evidence_count")
     total = status.get("eligible_companies")
     coverage = _fmt_score(status.get("eligible_evidence_coverage"))
-    if reason == "intraday_before_close":
+    if reason in {"intraday_before_close", "retrieval_before_close"}:
         return (
             "warning",
             "本代在交易日15:15前完成，盘中换手率/量比尚未成为可决策证据；"
-            "Type2（两热一冷）统一显示证据不足。当前“有买入信号”数量不包含可能依赖收盘冷度的公司，"
+            "情况二（两热一冷）统一显示证据不足。当前“有买入信号”数量不包含可能依赖收盘冷度的公司，"
             "不代表全市场最终只有这些公司；请在15:15后刷新。",
         )
     if not evidence_available:
         detail = f"（{count}/{total}）" if isinstance(count, int) and isinstance(total, int) else ""
         return (
             "warning",
-            f"本代Type2量价冷度证据不可用于自动触发{detail}，相关公司保留为“证据不足”而不是0分。"
+            f"本代情况二量价冷度证据不可用于自动触发{detail}，相关公司保留为“证据不足”而不是0分。"
             "当前“有买入信号”数量因此不是七类证据全部齐备时的最终数量。",
         )
     if coverage is not None and coverage < 1.0:
         return (
             "caption",
-            f"Type2量价冷度证据覆盖率为{coverage:.1%}；未覆盖公司保持证据不足，不按0分处理。",
+            f"情况二量价冷度证据覆盖率为{coverage:.1%}；未覆盖公司保持证据不足，不按0分处理。",
         )
     return None
 
@@ -1444,9 +1683,12 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
             )
         analysis_json = st.session_state.get("buy_types_analysis_json")
         if not isinstance(analysis_json, bytes):
-            st.caption("完整分析资料较大，按需生成，不会占用启动缓存。")
-            if st.button("准备完整分析资料（JSON）", key="prepare_full_analysis_json"):
-                with st.spinner("正在生成完整分析资料…"):
+            st.caption(
+                "供技术审计的完整原始资料包含内部字段、模型标识和复算参数，仅用于核验；"
+                "文件较大，按需生成，不会占用启动缓存。"
+            )
+            if st.button("准备供技术审计的完整原始资料（JSON）", key="prepare_full_analysis_json"):
+                with st.spinner("正在生成技术审计资料…"):
                     st.session_state["buy_types_analysis_json"] = _analysis_export_json(
                         frame,
                         context=st.session_state,
@@ -1454,7 +1696,7 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
                 st.rerun()
         else:
             st.download_button(
-                "下载完整分析资料（JSON）",
+                "下载供技术审计的完整原始资料（JSON）",
                 analysis_json,
                 "ds_dcf_analysis.json",
                 "application/json",
@@ -1472,7 +1714,7 @@ def _render_stock_dcf(code: str) -> None:
         st.caption(f"估值：未产生有效结果。原因：{reason or '未返回结构化原因'}")
         return
     model = "金融公司净资产收益估值" if bool(result.get("_pb_valuation")) else "非金融公司现金流估值"
-    with st.expander(f"{model}：三种情景的估值区间与参数", expanded=False):
+    with st.expander(f"{model}：三种情景的估值区间与主要参数", expanded=False):
         points = result.get("dcf_points", {})
         rows = []
         for scenario, label in (("pessimistic", "悲观"), ("neutral", "中性"), ("optimistic", "乐观")):
@@ -1485,7 +1727,11 @@ def _render_stock_dcf(code: str) -> None:
                 }
             )
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-        st.json(_json_safe(result.get("params", {})), expanded=False)
+        parameter_rows = _dcf_parameter_rows(result)
+        if parameter_rows:
+            st.caption("主要估值参数（已换算为便于阅读的中文口径）")
+            st.dataframe(pd.DataFrame(parameter_rows), width="stretch", hide_index=True)
+        st.caption("完整复算参数仅保留在“供技术审计”的原始资料下载中。")
 
 
 def _render_type6_global_notice() -> None:
@@ -1806,7 +2052,17 @@ def _render_stock_inline(row):
             st.caption("  \n".join(lines))
             if t == "type7" and isinstance(td.get("ledger"), Mapping):
                 st.caption("优质股权型的原始规则：第1模板、第5模板、补丁5三套百分制分数都必须严格大于70。")
-                st.json(td["ledger"], expanded=False)
+                summary = _type7_ledger_summary(td["ledger"])
+                st.dataframe(pd.DataFrame(summary["score_rows"]), width="stretch", hide_index=True)
+                st.caption(summary["conclusion"])
+                if summary["prerequisite_rows"]:
+                    with st.expander("查看前置证据核验", expanded=False):
+                        st.dataframe(
+                            pd.DataFrame(summary["prerequisite_rows"]),
+                            width="stretch",
+                            hide_index=True,
+                        )
+                st.caption("完整规则账本仅保留在“供技术审计”的原始资料下载中。")
 
 
 def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = None) -> bool:
@@ -1837,20 +2093,18 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
                 force_refresh=force_refresh,
                 persist_network=False,
             )
-    except SnapshotUnavailableError as exc:
-        message = f"数据刷新失败：{exc}"
-        st.session_state["buy_types_refresh_error"] = message
+    except SnapshotUnavailableError:
+        st.session_state["buy_types_refresh_error"] = "数据刷新失败，请稍后重试；已保留上一份通过校验的结果。"
         return False
-    except Exception as exc:
-        message = f"数据加载异常：{type(exc).__name__}: {exc}"
-        st.session_state["buy_types_refresh_error"] = message
+    except Exception:
+        st.session_state["buy_types_refresh_error"] = "数据加载失败，请稍后重试。"
         return False
 
     source_label = {
         "cache": "完整缓存",
         "network": "待提升的新抓取数据",
         "stale_cache": "上一份完整快照",
-    }.get(snapshot.source, snapshot.source)
+    }.get(snapshot.source, "未知来源")
 
     analysis_quotes, analysis_financials, eligible_codes = _eligible_analysis_inputs(snapshot)
     source_trade_dates = (
@@ -1861,8 +2115,8 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     )
     try:
         reporting_period_contract = _snapshot_reporting_period_contract(snapshot)
-    except (TypeError, ValueError) as exc:
-        st.session_state["buy_types_refresh_error"] = f"快照报告期校验失败：{exc}"
+    except (TypeError, ValueError):
+        st.session_state["buy_types_refresh_error"] = "快照报告期校验未通过，已拒绝使用可能口径不一致的数据。"
         return False
     if user_evidence_payload is not None and as_of_session is None:
         st.session_state["buy_types_refresh_error"] = "外部证据无法绑定到唯一行情快照日，已拒绝分析"
@@ -1873,8 +2127,8 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             user_evidence_payload,
             as_of=as_of_session,
         )
-    except ValueError as exc:
-        st.session_state["buy_types_refresh_error"] = f"外部证据校验失败：{exc}"
+    except ValueError:
+        st.session_state["buy_types_refresh_error"] = "外部证据格式或日期校验未通过，未采用本次补充资料。"
         return False
     expected_companies = len(eligible_codes)
     if expected_companies < 1:
@@ -1931,10 +2185,10 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
         if notice is not None:
             _level, message = notice
             st.warning(message)
-    except Exception as exc:
+    except Exception:
         market_coldness_status = {
             "available": False,
-            "reason": f"{type(exc).__name__}: {exc}",
+            "reason": "量价冷度资料未通过校验",
             "eligible_evidence_count": 0,
             "eligible_companies": expected_companies,
             "eligible_evidence_coverage": 0.0,
@@ -2023,13 +2277,12 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
         if isinstance(pipeline_quality, Mapping):
             quality.update(pipeline_quality)
 
-    except Exception as exc:
+    except Exception:
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
         growth_status.update(label="可持续高增长型的深层资料未完成", state="error")
         history_status.update(label="优质股权型的长期资料未完成", state="error")
-        message = f"{type(exc).__name__}: {exc}"
-        st.session_state["buy_types_refresh_error"] = message
+        st.session_state["buy_types_refresh_error"] = "估值或评分未通过完整性校验，新结果未替换上一版。"
         return False
 
     try:
@@ -2068,17 +2321,20 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             persistent_cache_status = _save_persistent_analysis_state(successful_state)
         except Exception as cache_exc:
             persistent_cache_status = f"write_failed:{type(cache_exc).__name__}:{cache_exc}"
-            warning = str(successful_state.get("buy_types_snapshot_warning") or "").strip()
+            warning = _public_failure_message(
+                successful_state.get("buy_types_snapshot_warning"),
+                fallback="",
+            )
             successful_state["buy_types_snapshot_warning"] = (
                 f"{warning} 分析结果可正常使用，但本地快速启动缓存写入失败。".strip()
             )
         st.session_state["buy_types_analysis_cache_diagnostic"] = persistent_cache_status
         st.session_state.update(successful_state)
-    except Exception as exc:
+    except Exception:
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
         growth_status.update(label="可持续高增长型的深层资料未完成", state="error")
-        st.session_state["buy_types_refresh_error"] = f"{type(exc).__name__}: {exc}"
+        st.session_state["buy_types_refresh_error"] = "新结果保存或切换失败，已保留上一版结果。"
         return False
 
     dcf_status.update(
@@ -2168,7 +2424,10 @@ def show():
 
     if force_refresh or manual_analysis:
         if evidence_input_error:
-            st.session_state["buy_types_refresh_error"] = f"外部证据校验失败：{evidence_input_error}"
+            st.session_state["buy_types_refresh_error"] = _public_failure_message(
+                evidence_input_error,
+                fallback="外部证据格式或日期校验未通过，未采用本次补充资料。",
+            )
         elif _run_full_analysis(
             force_refresh=force_refresh,
             user_evidence_payload=user_evidence_payload,

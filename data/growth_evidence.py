@@ -912,7 +912,8 @@ def _prepare_financial_records(
         if year in prepared:
             raise ValueError(f"{label} contains duplicate years")
         parsed = _finite_decimal(record.get("value"), field=f"{label}.value")
-        assert parsed is not None
+        if parsed is None:  # Defensive if the decimal parser contract changes.
+            raise GrowthEvidenceError(f"{label}.value is missing")
         if nonnegative and parsed < 0:
             raise ValueError(f"{label} value must be non-negative")
         if label == "revenue_records" and parsed <= 0:
@@ -935,7 +936,8 @@ def _cashflow_decimal(row: Mapping[str, Any], field: str) -> Decimal | None:
     if raw is None or raw == "" or (isinstance(raw, float) and math.isnan(raw)):
         return None
     parsed = _finite_decimal(raw, field=field)
-    assert parsed is not None
+    if parsed is None:  # Defensive if the decimal parser contract changes.
+        raise GrowthEvidenceError(f"{field} is missing")
     return parsed
 
 
@@ -1388,7 +1390,8 @@ def _validate_derivation(
             derivation.get("reported_value"),
             field="reported acquisition value",
         )
-        assert reported is not None
+        if reported is None:
+            raise GrowthEvidenceError("reported acquisition provenance value is missing")
         if not _close_decimal(reported, Decimal(str(acquisition_cash))):
             raise GrowthEvidenceError("reported acquisition provenance value mismatch")
         return {"reported_value": float(reported)}
@@ -1412,7 +1415,8 @@ def _validate_derivation(
     total = _finite_decimal(derivation.get("total_invest_outflow"), field="total investment outflow")
     known = _finite_decimal(derivation.get("known_component_sum"), field="known component sum")
     residual = _finite_decimal(derivation.get("identity_residual"), field="identity residual")
-    assert total is not None and known is not None and residual is not None
+    if total is None or known is None or residual is None:
+        raise GrowthEvidenceError("derived acquisition provenance identity is incomplete")
     if total < 0 or known < 0 or residual < 0 or not _close_decimal(total - known, residual):
         raise GrowthEvidenceError("derived acquisition provenance identity does not close")
     total_basis = derivation.get("total_basis")
@@ -1437,7 +1441,8 @@ def _validate_derivation(
             component_values[field] = None
             continue
         parsed = _finite_decimal(raw_value, field=f"derived component {field}")
-        assert parsed is not None
+        if parsed is None:
+            raise GrowthEvidenceError("derived acquisition component is missing")
         if parsed < 0:
             raise GrowthEvidenceError("derived acquisition component is negative")
         component_values[field] = parsed
@@ -1459,7 +1464,8 @@ def _validate_derivation(
         net_components: dict[str, Decimal] = {}
         for field in _NET_OUTFLOW_IDENTITY_FIELDS:
             parsed = _finite_decimal(raw_net_components.get(field), field=f"net identity {field}")
-            assert parsed is not None
+            if parsed is None:
+                raise GrowthEvidenceError("derived total outflow net component is missing")
             net_components[field] = parsed
         reproduced_total = (
             net_components["TOTAL_INVEST_INFLOW"]
@@ -1524,7 +1530,8 @@ def _normalise_external_record(
         value.get("acquisition_cash_to_revenue"),
         field="external acquisition/revenue ratio",
     )
-    assert revenue is not None and goodwill is not None and acquisition is not None and ratio is not None
+    if revenue is None or goodwill is None or acquisition is None or ratio is None:
+        raise GrowthEvidenceError("external growth record contains an incomplete numeric value")
     if revenue <= 0 or goodwill < 0 or acquisition < 0:
         raise GrowthEvidenceError("external growth record contains an invalid signed value")
     calculated_ratio = acquisition / revenue

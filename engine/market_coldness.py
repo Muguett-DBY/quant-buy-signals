@@ -21,12 +21,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from data.market_coldness import MarketColdnessRecord, MarketColdnessSnapshot
+from data.trading_calendar import a_share_trading_days_ytd
 
 
 MARKET_COLDNESS_MODEL_ID = "patch6-type2c-quantity-price-v1"
+MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION = 1
 MAX_COLDNESS_SCORE = 8.0
 MAX_SCORE_WITHOUT_VOLUME_RATIO = 7.5
 MIN_LISTING_AGE_DAYS = 120
+MARKET_COLDNESS_DECISION_READY_TIME = time(15, 15)
 MAX_RETRIEVAL_AGE_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_AGE_DAYS = 10
 MAX_FUTURE_SKEW_SECONDS = 5 * 60
@@ -89,6 +92,17 @@ _BASE_WEIGHTS: Mapping[str, float] = {
     "volume_ratio": 0.10,
 }
 _REQUIRED_METRICS = ("change_60d_pct", "change_ytd_pct", "turnover_rate_pct")
+_MODEL_NOT_APPLICABLE_REASONS = (
+    "listing_history_lt_120_days",
+    "listed_in_current_year",
+)
+_DATA_MISSING_REASONS = (
+    "missing_listing_date",
+    "missing_required_metric",
+    "missing_source_record",
+    "insufficient_reference_cross_section",
+)
+_UNSCORED_REASONS = (*_MODEL_NOT_APPLICABLE_REASONS, *_DATA_MISSING_REASONS)
 
 
 class MarketColdnessScoringError(ValueError):
@@ -245,15 +259,6 @@ def _bounded_code_diagnostics(
     }
 
 
-def _business_days_ytd(session: date) -> int:
-    current = date(session.year, 1, 1)
-    result = 0
-    while current <= session:
-        result += current.weekday() < 5
-        current = current.fromordinal(current.toordinal() + 1)
-    return result
-
-
 def _source_metric_coverage(snapshot: MarketColdnessSnapshot, metric: str) -> float | None:
     coverage = snapshot.coverage.by_metric.get(metric)
     return _finite_number(coverage.coverage_rate) if coverage is not None else None
@@ -273,6 +278,73 @@ def _validated_values(record: MarketColdnessRecord) -> dict[str, float | None]:
     if turnover is not None and turnover < 0 or volume is not None and volume < 0:
         raise MarketColdnessScoringError(f"negative activity metric for {record.code}")
     return values
+
+
+def _record_unscored_reason(
+    *,
+    listed: date | None,
+    values: Mapping[str, float | None],
+    session: date,
+) -> str | None:
+    """Return one stable, mutually exclusive reason why a bound row is not scored."""
+
+    if listed is None:
+        return "missing_listing_date"
+    # A current-year listing is intentionally outside this cycle model even
+    # when fewer than 120 calendar days have elapsed.  Keeping this policy
+    # reason first makes the diagnostic partition stable as time advances.
+    if listed.year == session.year:
+        return "listed_in_current_year"
+    if (session - listed).days < MIN_LISTING_AGE_DAYS:
+        return "listing_history_lt_120_days"
+    if any(values[metric] is None for metric in _REQUIRED_METRICS):
+        return "missing_required_metric"
+    return None
+
+
+def _unscored_diagnostics(
+    codes_by_reason: Mapping[str, Iterable[str]],
+    *,
+    missing_required_metrics_by_code: Mapping[str, Iterable[str]],
+) -> dict[str, Any]:
+    """Build the complete deterministic unscored-code audit contract."""
+
+    normalized: dict[str, dict[str, Any]] = {}
+    all_codes: list[str] = []
+    model_not_applicable_codes: list[str] = []
+    data_missing_codes: list[str] = []
+    for reason in _UNSCORED_REASONS:
+        codes = sorted(codes_by_reason.get(reason, ()))
+        classification = "model_not_applicable" if reason in _MODEL_NOT_APPLICABLE_REASONS else "data_missing"
+        normalized[reason] = {
+            "classification": classification,
+            "count": len(codes),
+            "codes": codes,
+        }
+        all_codes.extend(codes)
+        if classification == "model_not_applicable":
+            model_not_applicable_codes.extend(codes)
+        else:
+            data_missing_codes.extend(codes)
+
+    sorted_all_codes = sorted(all_codes)
+    if len(sorted_all_codes) != len(set(sorted_all_codes)):
+        raise MarketColdnessScoringError("a market-coldness code has multiple unscored reasons")
+    missing_metric_details = {
+        code: [metric for metric in _REQUIRED_METRICS if metric in set(metrics)]
+        for code, metrics in sorted(missing_required_metrics_by_code.items())
+    }
+    return {
+        "diagnostics_schema_version": MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION,
+        "unscored_code_count": len(sorted_all_codes),
+        "unscored_codes": sorted_all_codes,
+        "unscored_codes_by_reason": normalized,
+        "model_not_applicable_code_count": len(model_not_applicable_codes),
+        "model_not_applicable_codes": sorted(model_not_applicable_codes),
+        "data_missing_code_count": len(data_missing_codes),
+        "data_missing_codes": sorted(data_missing_codes),
+        "missing_required_metrics_by_code": missing_metric_details,
+    }
 
 
 def build_market_coldness_evidence(
@@ -360,18 +432,24 @@ def build_market_coldness_evidence(
         )
     if session > current_shanghai.date() or (current_shanghai.date() - session).days > MAX_SESSION_AGE_DAYS:
         return unavailable("session_current_date_mismatch")
-    # Intraday f8/f10 are incomplete.  A same-day snapshot can be diagnostic,
-    # but it must not create an automatic Patch-6 trigger before the close.
-    if session == current_shanghai.date() and current_shanghai.time() < time(15, 15):
+    # Intraday f8/f10 are incomplete.  Decision eligibility is a property of
+    # the acquired batch, not of the later wall clock: a 09:00 cache must never
+    # become closing evidence merely because it is replayed after 15:15.
+    if retrieved_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME:
         return unavailable(
-            "intraday_before_close",
-            decision_eligible_after="15:15:00 Asia/Shanghai",
+            "retrieval_before_close",
+            retrieval_time_shanghai=retrieved_shanghai.time().isoformat(),
+            decision_eligible_after=f"{MARKET_COLDNESS_DECISION_READY_TIME.isoformat()} Asia/Shanghai",
         )
 
     records_by_code: dict[str, tuple[MarketColdnessRecord, date | None, dict[str, float | None]]] = {}
     reference_records: list[tuple[MarketColdnessRecord, dict[str, float | None]]] = []
     isolated_future_listing_codes: list[str] = []
     excluded_unbound_source_codes: list[str] = []
+    unscored_codes_by_reason: dict[str, list[str]] = {reason: [] for reason in _UNSCORED_REASONS}
+    missing_required_metrics_by_code: dict[str, tuple[str, ...]] = {}
+    if bound_codes is not None:
+        unscored_codes_by_reason["missing_source_record"].extend(sorted(bound_codes - seen_source_codes))
     for record in snapshot.records:
         listed = _listing_date(record)
         if listed is not None and listed > session:
@@ -384,22 +462,34 @@ def build_market_coldness_evidence(
             continue
         values = _validated_values(record)
         records_by_code[record.code] = (record, listed, values)
-        if (
-            listed is None
-            or (session - listed).days < MIN_LISTING_AGE_DAYS
-            or listed.year == session.year
-            or any(values[metric] is None for metric in _REQUIRED_METRICS)
-            or values["turnover_rate_pct"] == 0
-            or (values["volume_ratio"] == 0 and values["turnover_rate_pct"] == 0)
-        ):
+        unscored_reason = _record_unscored_reason(listed=listed, values=values, session=session)
+        if unscored_reason is not None:
+            unscored_codes_by_reason[unscored_reason].append(record.code)
+            if unscored_reason == "missing_required_metric":
+                missing_required_metrics_by_code[record.code] = tuple(
+                    metric for metric in _REQUIRED_METRICS if values[metric] is None
+                )
             continue
         reference_records.append((record, values))
 
     if len(reference_records) < min_cross_section_records:
+        unscored_codes_by_reason["insufficient_reference_cross_section"].extend(
+            record.code for record, _values in reference_records
+        )
+        unscored_details = _unscored_diagnostics(
+            unscored_codes_by_reason,
+            missing_required_metrics_by_code=missing_required_metrics_by_code,
+        )
+        eligible_candidate_codes = bound_codes if bound_codes is not None else frozenset(records_by_code)
+        if set(unscored_details["unscored_codes"]) != eligible_candidate_codes:
+            raise MarketColdnessScoringError("market-coldness unscored candidate partition mismatch")
         return unavailable(
             "insufficient_reference_cross_section",
+            evidence_count=0,
             reference_records=len(reference_records),
             minimum_reference_records=min_cross_section_records,
+            eligible_candidate_count=len(eligible_candidate_codes),
+            **unscored_details,
             **_bounded_code_diagnostics(
                 bound_codes,
                 isolated_future_listing_codes,
@@ -422,18 +512,12 @@ def build_market_coldness_evidence(
             if _board(record.code) == board and (value := values["turnover_rate_pct"]) is not None
         )
 
-    ytd_reliability = min(1.0, _business_days_ytd(session) / 60.0)
+    ytd_reliability = min(1.0, a_share_trading_days_ytd(session) / 60.0)
     weights = dict(_BASE_WEIGHTS)
     weights["change_ytd_pct"] *= ytd_reliability
     result: dict[str, dict[str, Any]] = {}
     for code, (_record, listed, values) in records_by_code.items():
-        if (
-            listed is None
-            or (session - listed).days < MIN_LISTING_AGE_DAYS
-            or listed.year == session.year
-            or any(values[metric] is None for metric in _REQUIRED_METRICS)
-            or values["turnover_rate_pct"] == 0
-        ):
+        if _record_unscored_reason(listed=listed, values=values, session=session) is not None:
             continue
         available_metrics = [metric for metric, value in values.items() if value is not None]
         absolute_components = {
@@ -525,12 +609,22 @@ def build_market_coldness_evidence(
                 "source_url": snapshot.source_url,
             },
         }
+    unscored_details = _unscored_diagnostics(
+        unscored_codes_by_reason,
+        missing_required_metrics_by_code=missing_required_metrics_by_code,
+    )
+    eligible_candidate_codes = bound_codes if bound_codes is not None else frozenset(records_by_code)
+    partition_codes = set(result) | set(unscored_details["unscored_codes"])
+    if partition_codes != eligible_candidate_codes or set(result) & set(unscored_details["unscored_codes"]):
+        raise MarketColdnessScoringError("market-coldness scored/unscored candidate partition mismatch")
     if diagnostics is not None:
         diagnostics.update(
             {
                 "evidence_available": bool(result),
                 "evidence_reason": "available" if result else "no_eligible_records",
                 "evidence_count": len(result),
+                "eligible_candidate_count": len(eligible_candidate_codes),
+                **unscored_details,
                 **_bounded_code_diagnostics(
                     bound_codes,
                     isolated_future_listing_codes,
@@ -542,9 +636,11 @@ def build_market_coldness_evidence(
 
 
 __all__ = [
+    "MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION",
     "MARKET_COLDNESS_MODEL_ID",
     "MAX_COLDNESS_SCORE",
     "MAX_SCORE_WITHOUT_VOLUME_RATIO",
+    "MARKET_COLDNESS_DECISION_READY_TIME",
     "MarketColdnessScoringError",
     "build_market_coldness_evidence",
 ]

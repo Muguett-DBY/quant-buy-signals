@@ -9,20 +9,42 @@ from engine.audit import _audit_type7_ledger
 from engine.buy_screener import (
     STATUS_INSUFFICIENT_EVIDENCE,
     STATUS_NOT_TRIGGERED,
-    score_type7_quality_equity,
+    score_type7_quality_equity as _score_type7_quality_equity,
 )
 from engine.quality_equity import (
     RESEARCH_MAX_AGE_DAYS,
     RESEARCH_RECENT_AGE_DAYS,
     TYPE7_DIRECT_SCORE_KEYS,
     QualityEquityError,
-    assess_quality_equity,
+    assess_quality_equity as _assess_quality_equity,
     decisive_score_upper_bounds,
     normalise_research_sources,
     research_metadata_precheck,
     validate_quality_equity_ledger,
 )
 from tools.verify_release_zip import _audit_type7_ledger_valid
+
+
+def assess_quality_equity(metric, type1_outcome, history_evidence):
+    """Ledger tests inject the already-validated valuation boundary explicitly."""
+
+    return _assess_quality_equity(
+        metric,
+        type1_outcome,
+        history_evidence,
+        valuation_evidence_complete=True,
+    )
+
+
+def score_type7_quality_equity(metric, type1_outcome, history_evidence):
+    """Exercise Type 7 arithmetic independently from the DCF validator tests."""
+
+    return _score_type7_quality_equity(
+        metric,
+        type1_outcome,
+        history_evidence,
+        valuation_evidence_complete=True,
+    )
 
 
 def _evidence(key, score=9.0):
@@ -258,6 +280,76 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
     assert validate_quality_equity_ledger(ledger) == []
     assert _audit_type7_ledger("600519", ledger, "triggered") == []
     assert _audit_type7_ledger_valid("600519", ledger, "triggered")
+
+
+def test_type7_valid_valuation_is_independent_from_partial_type1_catalyst_evidence():
+    metric = _metric()
+    metric.pop("catalyst_score_evidence")
+    metric.pop("catalyst_score_evidence_level")
+    type1_with_partial_catalyst = (
+        False,
+        7.0,
+        {"1a": 9.0, "1b": 9.0, "1c": 8.0, "1d": 2.0},
+        {"_status": "insufficient_evidence", "_evidence": "incomplete"},
+    )
+
+    valid = _assess_quality_equity(
+        metric,
+        type1_with_partial_catalyst,
+        _history(),
+        valuation_evidence_complete=True,
+    )
+    missing = _assess_quality_equity(
+        metric,
+        _type1(),
+        _history(),
+        valuation_evidence_complete=False,
+    )
+
+    valid_t1_items = {item["key"]: item for item in valid["template1"]["items"]}
+    valid_t5_items = {item["key"]: item for item in valid["template5"]["items"]}
+    missing_t1_items = {item["key"]: item for item in missing["template1"]["items"]}
+    assert valid_t1_items["t1_20"]["complete"] is True
+    assert valid_t1_items["t1_20"]["evidence_level"] == "validated_nonfinancial_dcf"
+    assert valid["prerequisites"]["latest_quote_and_valuation"]["passed"] is True
+    assert valid_t5_items["t5_i2"]["complete"] is False
+    assert missing_t1_items["t1_20"]["complete"] is False
+    assert missing_t1_items["t1_20"]["score"] == 0.0
+    assert missing["prerequisites"]["latest_quote_and_valuation"]["passed"] is False
+    assert validate_quality_equity_ledger(valid) == []
+    assert validate_quality_equity_ledger(missing) == []
+
+
+def test_type7_valuation_evidence_boundary_rejects_non_boolean_values():
+    with pytest.raises(QualityEquityError, match="must be boolean"):
+        _assess_quality_equity(
+            _metric(),
+            _type1(),
+            _history(),
+            valuation_evidence_complete=1,
+        )
+
+
+@pytest.mark.parametrize("industry", ["BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"])
+def test_type7_is_explicitly_not_applicable_to_financial_industries(industry):
+    metric = _metric()
+    metric["industry"] = industry
+
+    outcome, ledger = _score_type7_quality_equity(
+        metric,
+        _type1(),
+        _history(),
+        valuation_evidence_complete=True,
+    )
+
+    assert outcome[3]["_status"] == "not_applicable"
+    assert ledger == {
+        "schema_version": 5,
+        "model_id": "patch6-type7-quality-equity-v5",
+        "code": "600519",
+        "applicable": False,
+        "reason": "金融需专属优质股权模型",
+    }
 
 
 def test_type7_without_history_requests_only_candidates_whose_safe_upper_bound_can_pass():

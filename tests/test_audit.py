@@ -323,6 +323,7 @@ def test_audit_artifacts_include_machine_and_human_readable_outputs(tmp_path):
     )
     assert "dcf_results" in payload
     assert "dcf_skip_reasons" in payload
+    assert "dcf_skip_classifications" in payload
     csv = pd.read_csv(paths["csv"], dtype={"代码": str})
     assert {"1a子分", "1a依据", "DCF状态", "DCF参数JSON"} <= set(csv.columns)
 
@@ -555,6 +556,36 @@ def _forced_type2_row(row, score, *, triggered):
     return changed
 
 
+def test_independent_audit_binds_type7_valuation_to_the_actual_dcf_partition():
+    quotes, financials = _market()
+    audit = audit_random_sample(
+        quotes,
+        financials,
+        eligible_codes=financials,
+        seed=1,
+        sample_size=5,
+        max_workers=1,
+    )
+    code = next(
+        code
+        for code in sorted(audit.dcf_results)
+        if "template1" in audit.scores.loc[audit.scores["code"] == code].iloc[0]["type7"]["ledger"]
+    )
+    row = audit.scores.loc[audit.scores["code"] == code].iloc[0].to_dict()
+
+    errors = _independent_checks(
+        pd.DataFrame([row]),
+        (code,),
+        {},
+        {code: "fixture_removed_dcf"},
+        quotes=quotes,
+        financials=financials,
+        reporting_period_contract=_reporting_period_contract(),
+    )
+
+    assert any("valuation prerequisite is not bound to validated DCF" in error for error in errors)
+
+
 def test_independent_bear_case_rounds_subscores_like_production():
     payload = {
         "sub_scores": {"7a": 5.005, "7b": 5.004, "7c": 5.006},
@@ -685,6 +716,66 @@ def test_independent_audit_accepts_explicit_no_applicable_framework_label():
     errors = _single_company_independent_errors(row, audit, quotes, financials)
 
     assert not any("diagnostic_label" in error for error in errors)
+
+
+def test_independent_audit_rejects_valid_valuation_hidden_as_type1_not_applicable():
+    quotes, financials = _market()
+    audit = audit_random_sample(quotes, financials, eligible_codes=financials, seed=1, sample_size=5, max_workers=1)
+    code = next(iter(audit.dcf_results))
+    row = deepcopy(audit.scores.loc[audit.scores["code"] == code].iloc[0].to_dict())
+    type1 = row["type1"]
+    type1.update(
+        triggered=False,
+        veto=False,
+        status="not_applicable",
+        applicable=False,
+        evidence_complete=True,
+    )
+    type1["reasons"].pop("_veto", None)
+    type1["reasons"].update(_status="not_applicable", _applicable="no", _evidence="complete")
+
+    errors = _single_company_independent_errors(row, audit, quotes, financials)
+
+    assert any("valid valuation cannot be hidden as not applicable" in error for error in errors)
+
+
+def test_independent_audit_rejects_triggered_type1_after_structured_valuation_skip():
+    quotes, financials = _market()
+    audit = audit_random_sample(quotes, financials, eligible_codes=financials, seed=1, sample_size=5, max_workers=1)
+    code = next(iter(audit.dcf_results))
+    row = deepcopy(audit.scores.loc[audit.scores["code"] == code].iloc[0].to_dict())
+    type1 = row["type1"]
+    type1.update(
+        triggered=True,
+        total=10.0,
+        sub_scores={key: 10.0 for key in TYPE_WEIGHTS["type1"]},
+        veto=False,
+        status="triggered",
+        applicable=True,
+        evidence_complete=True,
+    )
+    type1["reasons"] = {
+        **{key: "伪造完整证据" for key in TYPE_WEIGHTS["type1"]},
+        "_status": "triggered",
+        "_applicable": "yes",
+        "_evidence": "complete",
+    }
+
+    errors = _independent_checks(
+        pd.DataFrame([row]),
+        (code,),
+        {},
+        {code: "fixture_missing"},
+        skip_classifications={
+            code: {"category": "source_missing", "reason": "fixture_missing"},
+        },
+        quotes=quotes,
+        financials=financials,
+        reporting_period_contract=_reporting_period_contract(),
+    )
+
+    assert any("skipped valuation must have zero sub-scores" in error for error in errors)
+    assert any("skipped valuation cannot trigger" in error for error in errors)
 
 
 @pytest.mark.parametrize(

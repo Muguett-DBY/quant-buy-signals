@@ -2777,7 +2777,7 @@ def _valid_financial_pb_evidence(m: Mapping[str, Any], result: Any) -> bool:
 def _prepare_dcf_validation_cache(m: dict[str, Any], result: Any) -> None:
     """Validate each DCF surface once for the three Patch 6 consumers.
 
-    Type 1, Type 4 and Type 5 all consume the same source-bound valuation.
+    Type 1, Type 4, Type 5 and Type 7 all consume the same source-bound valuation.
     Replaying strict TTM reconstruction and all six long-horizon DCF bands in
     every framework multiplied the dominant full-market CPU cost.  This cache
     is transient, bound to the exact metric/result objects and never exported.
@@ -5133,6 +5133,8 @@ def score_type7_quality_equity(
     m: Mapping[str, Any],
     type1_outcome: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
     history_evidence: Mapping[str, Any] | None = None,
+    *,
+    valuation_evidence_complete: bool,
 ) -> tuple[tuple[bool, float, dict, dict], dict[str, Any]]:
     """情况七：第1模板、第5模板、补丁5三套分数必须分别严格超过70。"""
 
@@ -5147,7 +5149,12 @@ def score_type7_quality_equity(
             "reason": reason,
         }
 
-    ledger = assess_quality_equity(m, type1_outcome, history_evidence)
+    ledger = assess_quality_equity(
+        m,
+        type1_outcome,
+        history_evidence,
+        valuation_evidence_complete=valuation_evidence_complete,
+    )
     ledger_errors = validate_quality_equity_ledger(ledger)
     if ledger_errors:
         raise AssertionError("情况七量化账本不变量失败:" + ";".join(ledger_errors[:3]))
@@ -5612,6 +5619,7 @@ def screen_all_types(
 
     base_outcomes_by_code: dict[str, dict[str, tuple]] = {}
     preliminary_type7_by_code: dict[str, tuple[tuple, Mapping[str, Any]]] = {}
+    type7_valuation_evidence_by_code: dict[str, bool] = {}
     type3_growth_request_by_code: dict[str, dict[str, Any]] = {}
     research_request_by_code: dict[str, dict[str, str]] = {}
     metric_by_code = {str(metric["code"]): metric for metric in scored_metrics}
@@ -5642,10 +5650,15 @@ def screen_all_types(
             "type6": score_type6_vc(m, company_benchmarks),
         }
         base_outcomes_by_code[code] = base_outcomes
+        type7_valuation_evidence_by_code[code] = bool(
+            str(m.get("industry") or "") not in FINANCIAL_INDUSTRIES
+            and _valid_nonfinancial_dcf_evidence(m, normalized_dcf.get(code))
+        )
         preliminary_outcome, preliminary_ledger = score_type7_quality_equity(
             m,
             base_outcomes["type1"],
             normalized_quality_history.get(code),
+            valuation_evidence_complete=type7_valuation_evidence_by_code[code],
         )
         preliminary_type7_by_code[code] = (preliminary_outcome, preliminary_ledger)
         as_of = str(m.get("source_trade_date") or "")
@@ -5737,6 +5750,7 @@ def screen_all_types(
             metric,
             base_outcomes["type1"],
             normalized_quality_history.get(code),
+            valuation_evidence_complete=type7_valuation_evidence_by_code[code],
         )
 
     for metric in scored_metrics:
@@ -5777,6 +5791,7 @@ def screen_all_types(
                 metric,
                 base_outcomes["type1"],
                 normalized_quality_history.get(code),
+                valuation_evidence_complete=type7_valuation_evidence_by_code[code],
             )
 
     def score_one(m: Mapping[str, Any]) -> dict[str, Any]:
@@ -5789,6 +5804,18 @@ def screen_all_types(
             gated: dict[str, tuple] = {}
             for key, (_triggered, total, sub_scores, raw_reasons) in outcomes.items():
                 reasons = dict(raw_reasons)
+                # A market-wide actionability block must not rewrite a model
+                # that was already N/A, missing evidence, vetoed or blocked.
+                # In particular, missing valuation data must remain missing
+                # instead of being disguised as a company-level veto.
+                if reasons.get("_status") in {
+                    STATUS_NOT_APPLICABLE,
+                    STATUS_INSUFFICIENT_EVIDENCE,
+                    STATUS_VETOED,
+                    STATUS_BLOCKED,
+                }:
+                    gated[key] = (False, total, sub_scores, reasons)
+                    continue
                 reasons["_veto"] = _compact_reason(market_block)
                 reasons["_status"] = STATUS_BLOCKED
                 gated[key] = (False, total, sub_scores, reasons)

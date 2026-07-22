@@ -655,6 +655,24 @@ def _series(metric: Mapping[str, Any], values_key: str, years_key: str) -> dict[
     return result
 
 
+def _latest_consecutive_years(years: Collection[int]) -> list[int]:
+    """Return the fully consecutive suffix ending at the newest valid year."""
+
+    ordered = sorted(set(years))
+    if not ordered:
+        return []
+    start = len(ordered) - 1
+    while start > 0:
+        if ordered[start] - ordered[start - 1] != 1:
+            break
+        start -= 1
+    return ordered[start:]
+
+
+def _latest_consecutive_year_count(years: Collection[int]) -> int:
+    return len(_latest_consecutive_years(years))
+
+
 def _cagr(first: float | None, last: float | None, elapsed: int) -> float | None:
     if first is None or last is None or first <= 0 or last <= 0 or elapsed <= 0:
         return None
@@ -1363,9 +1381,9 @@ def _score_roic_spread(metric: Mapping[str, Any]) -> tuple[float, float | None]:
 
 
 def _score_historical_roic_spread(metric: Mapping[str, Any]) -> tuple[float, dict[str, Any]]:
-    history = [
-        value for value in (_finite(item) for item in metric.get("indicator_roic_history", [])) if value is not None
-    ][-5:]
+    roic_history = _series(metric, "indicator_roic_history", "indicator_roic_years")
+    recent_years = _latest_consecutive_years(set(roic_history))[-5:]
+    history = [roic_history[year] for year in recent_years]
     wacc = _finite(metric.get("wacc"))
     spreads = [value - wacc for value in history] if wacc is not None else []
     spread_median = _median(spreads)
@@ -1379,6 +1397,7 @@ def _score_historical_roic_spread(metric: Mapping[str, Any]) -> tuple[float, dic
     return score, {
         "roic_wacc_spread_median": spread_median,
         "recent_roic_spread_history_count": len(spreads),
+        "recent_roic_spread_history_years": recent_years,
         "recent_roic_spread_window_years": 5,
         "positive_spread_count": positive_count,
         "wacc": wacc,
@@ -1503,9 +1522,9 @@ def _score_moat(
     accounting_score: float,
 ) -> tuple[float, dict[str, Any]]:
     spread_score, spread_details = _score_historical_roic_spread(metric)
-    gross_history = [
-        value for value in (_finite(item) for item in metric.get("gross_margin_history", [])) if value is not None
-    ][-5:]
+    gross_history_by_year = _series(metric, "gross_margin_history", "gross_margin_years")
+    recent_gross_years = _latest_consecutive_years(set(gross_history_by_year))[-5:]
+    gross_history = [gross_history_by_year[year] for year in recent_gross_years]
     gross = _median(gross_history)
     peer_gross = _median(context.get("gross_margin_median_population", []))
     gross_advantage = gross - peer_gross if gross is not None and peer_gross is not None else None
@@ -1542,8 +1561,10 @@ def _score_moat(
         relative_share_change = None
     score = _round_score(0.35 * spread_score + 0.25 * margin_power + 0.20 * cash_outcome + 0.20 * share_score)
     recent_operating_evidence_years = min(
-        len(gross_history),
-        int(spread_details.get("recent_roic_spread_history_count") or 0),
+        5,
+        _latest_consecutive_year_count(
+            set(gross_history_by_year) & set(_series(metric, "indicator_roic_history", "indicator_roic_years"))
+        ),
     )
     if recent_operating_evidence_years < 5:
         score = min(score, 6.0)
@@ -1559,6 +1580,7 @@ def _score_moat(
         "listed_peer_relative_share_change": relative_share_change,
         "listed_peer_revenue_percentile": revenue_percentile,
         "recent_gross_margin_history_count": len(gross_history),
+        "recent_gross_margin_history_years": recent_gross_years,
         "recent_operating_evidence_years": recent_operating_evidence_years,
         "recent_operating_window_years": 5,
         "components": {
@@ -1572,6 +1594,7 @@ def _score_moat(
 
 def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tuple[float, dict[str, Any]]:
     roic_history = _series(metric, "indicator_roic_history", "indicator_roic_years")
+    gross_history = _series(metric, "gross_margin_history", "gross_margin_years")
     roic_positive = _positive_share(list(roic_history.values()))
     roic_history_score = _round_score(10.0 * roic_positive) if roic_positive is not None else 3.0
     margin_stability = _linear_score(
@@ -1580,11 +1603,8 @@ def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tupl
     )
     persistence = _score_growth_persistence(metric)
     score = _round_score(0.65 * moat_score + 0.15 * roic_history_score + 0.10 * margin_stability + 0.10 * persistence)
-    roic_count = len(roic_history)
-    gross_count = len(
-        [value for value in (_finite(item) for item in metric.get("gross_margin_history", [])) if value is not None]
-    )
-    history_count = min(roic_count, gross_count)
+    common_history_years = set(roic_history) & set(gross_history)
+    history_count = _latest_consecutive_year_count(common_history_years)
     if history_count < 3:
         score = min(score, 2.0)
     elif history_count <= 5:
@@ -1597,6 +1617,7 @@ def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tupl
         "gross_margin_cv": _finite(metric.get("gross_margin_cv")),
         "durability_history_years": history_count,
         "history_count": history_count,
+        "common_history_years": sorted(common_history_years),
         "history_cap": 2.0 if history_count < 3 else 4.0 if history_count <= 5 else 6.0 if history_count <= 9 else 10.0,
         "components": {
             "current_moat": moat_score,
@@ -1786,10 +1807,8 @@ def _score_runway(
     if tam_years is not None:
         years = min(years, max(0.0, tam_years))
     score = _runway_band_score(years)
-    revenue_years = {
-        int(year) for year in metric.get("revenue_years", []) if not isinstance(year, bool) and str(year).isdigit()
-    }
-    history_count = len(revenue_years)
+    revenue_history = _series(metric, "revenue_values", "revenue_years")
+    history_count = _latest_consecutive_year_count(set(revenue_history))
     evidence_cap = 10.0
     if tam_years is None and history_count < 10:
         evidence_cap = 6.0
@@ -1813,6 +1832,7 @@ def _score_runway(
         "observable_runway_years": years,
         "tam_runway_years": tam_years,
         "financial_history_years": history_count,
+        "financial_history_periods": sorted(revenue_history),
         "evidence_cap": evidence_cap,
         "claims_not_supported": ["tam", "market_penetration"] if tam_years is None else [],
     }
@@ -2191,10 +2211,12 @@ def _build_evidence_qualities(
     revenue_history = _series(metric, "revenue_values", "revenue_years")
     profit_history = _series(metric, "net_profit_history", "net_profit_years")
     roic_history = _series(metric, "indicator_roic_history", "indicator_roic_years")
-    gross_history_count = _finite_sequence_count(metric.get("gross_margin_history"))
+    gross_history = _series(metric, "gross_margin_history", "gross_margin_years")
+    gross_history_count = _latest_consecutive_year_count(set(gross_history))
+    common_roic_gross_history_count = _latest_consecutive_year_count(set(roic_history) & set(gross_history))
     balance_ready = finite("interest_bearing_debt_ratio") or finite("debt_ratio")
     roic_wacc_ready = finite("roic") and finite("wacc")
-    historical_roic_ready = len(roic_history) >= 3 and finite("wacc")
+    historical_roic_ready = _latest_consecutive_year_count(set(roic_history)) >= 3 and finite("wacc")
     revenue_asset_ready = _has_common_consecutive_history(
         metric,
         "revenue_values",
@@ -2253,10 +2275,9 @@ def _build_evidence_qualities(
     qualities["moat_durability_score"] = _quality_record(
         {
             "current_moat_proxy": moat_complete,
-            "roic_history": len(roic_history) >= 3,
-            "gross_margin_history": gross_history_count >= 3,
+            "roic_and_gross_margin_common_history": common_roic_gross_history_count >= 3,
             "gross_margin_stability": finite("gross_margin_cv"),
-            "revenue_growth_history": len(_growth_rates(revenue_history)) >= 2,
+            "revenue_growth_history": _latest_consecutive_year_count(set(revenue_history)) >= 3,
         }
     )
     qualities["growth_quality_score"] = _quality_record(

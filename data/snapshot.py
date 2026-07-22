@@ -53,7 +53,10 @@ MAX_QUOTE_RETRIEVAL_SPAN_SECONDS = 5 * 60
 # must never become a fresh generation merely because HTTP retrieval is fresh.
 MAX_SOURCE_QUOTE_AGE_SECONDS = 10 * 24 * 60 * 60
 MIN_RELATIVE_QUOTE_RATIO = 0.90
-MIN_TRADING_QUOTE_COVERAGE = 0.70
+# A normal A-share session has only a very small suspended population.  A 70%
+# threshold allowed a damaged feed to replace almost one third of the market
+# with previous-close prices while still passing the production snapshot gate.
+MIN_TRADING_QUOTE_COVERAGE = 0.99
 MIN_ANALYSIS_ELIGIBLE_COVERAGE = 0.80
 MIN_RELATIVE_TRADING_RATIO = 0.90
 MIN_RELATIVE_FINANCIAL_RATIO = 0.90
@@ -1067,6 +1070,7 @@ def validate_market_snapshot(
     min_market_cap_coverage: float = MIN_MARKET_CAP_COVERAGE,
     min_pe_coverage: float = MIN_PE_COVERAGE,
     min_pb_coverage: float = MIN_PB_COVERAGE,
+    min_trading_quote_coverage: float = MIN_TRADING_QUOTE_COVERAGE,
     min_market_counts: Mapping[str, int] | None = None,
     as_of_timestamp: float | None = None,
     retrieval_reference_timestamp: float | None = None,
@@ -1152,9 +1156,16 @@ def validate_market_snapshot(
     trading_coverage = trading_quotes / max(analysis_market_quotes, 1)
     analysis_trading_quotes = trading_quotes
     analysis_trading_coverage = analysis_trading_quotes / max(analysis_market_quotes, 1)
-    if trading_coverage < MIN_TRADING_QUOTE_COVERAGE:
+    if (
+        isinstance(min_trading_quote_coverage, bool)
+        or not isinstance(min_trading_quote_coverage, (int, float))
+        or not math.isfinite(float(min_trading_quote_coverage))
+        or not 0.0 <= float(min_trading_quote_coverage) <= 1.0
+    ):
+        raise ValueError("min_trading_quote_coverage must be between 0 and 1")
+    if trading_coverage < min_trading_quote_coverage:
         raise ValueError(
-            f"SH/SZ trading quote coverage {trading_coverage:.1%} is below required {MIN_TRADING_QUOTE_COVERAGE:.1%}"
+            f"SH/SZ trading quote coverage {trading_coverage:.1%} is below required {min_trading_quote_coverage:.1%}"
         )
 
     retrieved_values = pd.to_numeric(quotes["retrieved_at"], errors="coerce")
@@ -1576,6 +1587,14 @@ def validate_market_snapshot(
             f"SH/SZ eligible analysis coverage {analysis_eligible_coverage:.1%} is below required "
             f"{MIN_ANALYSIS_ELIGIBLE_COVERAGE:.1%}"
         )
+    eligible_quote_mask = codes.isin(eligible_keys)
+    eligible_trading_quotes = int((eligible_quote_mask & statuses.eq("trading")).sum())
+    eligible_trading_coverage = eligible_trading_quotes / max(eligible_companies, 1)
+    if eligible_trading_coverage < float(min_trading_quote_coverage):
+        raise ValueError(
+            f"eligible SH/SZ trading quote coverage {eligible_trading_coverage:.1%} is below required "
+            f"{float(min_trading_quote_coverage):.1%}"
+        )
     analysis_exclusions: dict[str, str] = {}
     for code in sorted(quote_codes - eligible_keys):
         if code in risk_exclusions:
@@ -1622,6 +1641,8 @@ def validate_market_snapshot(
         "analysis_trading_coverage": analysis_trading_coverage,
         "eligible_companies": eligible_companies,
         "analysis_eligible_coverage": analysis_eligible_coverage,
+        "eligible_trading_quotes": eligible_trading_quotes,
+        "eligible_trading_coverage": eligible_trading_coverage,
         "retrieval_time_coverage": retrieval_time_coverage,
         "retrieval_time_oldest": retrieval_oldest,
         "retrieval_time_latest": retrieval_latest,
@@ -1651,9 +1672,11 @@ def validate_market_snapshot(
         "structurally_matched_financial_codes": sorted(matched_keys),
         "invalid_market_cap_codes": sorted(quote_codes - valid_market_cap_codes),
         "analysis_markets": sorted(_ANALYSIS_MARKETS),
+        "analysis_market_codes": sorted(analysis_market_codes),
         "unsupported_market_codes": sorted(unsupported_market_codes),
         "unclassified_industry_codes": sorted(unclassified_industry_codes),
         "eligible_codes": sorted(eligible_keys),
+        "analysis_ineligible_codes": sorted(analysis_market_codes - eligible_keys),
         "ineligible_codes": sorted(quote_codes - eligible_keys),
         "reference_priced_codes": reference_priced_codes,
         "unpriced_codes": unpriced_codes,
@@ -1751,6 +1774,7 @@ def _validate_relative_generation(candidate: Mapping[str, Any], previous: Mappin
         "pb_coverage",
         "trading_coverage",
         "analysis_trading_coverage",
+        "eligible_trading_coverage",
         "analysis_eligible_coverage",
         "retrieval_time_coverage",
     ):

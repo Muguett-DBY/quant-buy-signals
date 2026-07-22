@@ -39,7 +39,14 @@ from engine.pipeline import (
     run_market_analysis,
     validate_market_analysis_quality,
 )
-from engine.valuation_status import normalize_dcf_skip_classification
+from engine.valuation_status import (
+    DCF_SKIP_ECONOMIC_NOT_APPLICABLE,
+    DCF_SKIP_INCONSISTENT_SOURCE,
+    DCF_SKIP_INTERNAL_ERROR,
+    DCF_SKIP_MODEL_UNSUPPORTED,
+    DCF_SKIP_SOURCE_MISSING,
+    normalize_dcf_skip_classification,
+)
 
 
 def _normalise_code(value: Any) -> str:
@@ -112,8 +119,8 @@ _AUDIT_TYPE_STATUSES = {
     "blocked",
 }
 _AUDIT_NON_DIAGNOSTIC_STATUSES = {"not_applicable", "insufficient_evidence"}
-_AUDIT_TYPE7_SCHEMA_VERSION = 4
-_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v4"
+_AUDIT_TYPE7_SCHEMA_VERSION = 5
+_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v5"
 _AUDIT_TYPE7_RESEARCH_MODEL_ID = "type7-research-report-content-v4"
 _AUDIT_TYPE7_CONTENT_MODEL_ID = "type7-report-body-crosscheck-v2"
 _AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS = 365
@@ -220,7 +227,11 @@ _AUDIT_TYPE7_TEMPLATE1_CONTRACTS = {
         "mean(hfq_10y_CAGR_score,market_cap/projected_year10_profit_score)",
         ({"shareholder_return", "terminal_profit_projection"},),
     ),
-    "t1_20": ("DCF价格位置", "dcf", ({"type1_1a"},)),
+    "t1_20": (
+        "DCF价格位置",
+        "dcf",
+        ({"type1_1a", "validation_basis"},),
+    ),
 }
 _AUDIT_TYPE7_TEMPLATE5_LABELS = {
     "t5_i1": "产业大周期",
@@ -240,7 +251,7 @@ _AUDIT_TYPE7_EVIDENCE_LEVELS = {
     "derived_proxy",
     "derived_proxy_capped",
     "reported_formula",
-    "validated_type1",
+    "validated_nonfinancial_dcf",
     "historical_valuation_reversion_formula",
     "independent_market_history",
     "independent_market_history_plus_fading_growth_projection",
@@ -330,6 +341,8 @@ _RULE_FILES = (
     _ROOT / "data" / "market_history.py",
     _ROOT / "data" / "quality_history.py",
     _ROOT / "data" / "research_reports.py",
+    _ROOT / "data" / "trading_calendar.py",
+    _ROOT / "tools" / "china_a_share_trading_calendar.json",
 )
 _INDUSTRY_FILES = (
     _ROOT / "data" / "industry.py",
@@ -691,6 +704,7 @@ def _type3_growth_evidence_provenance(
 _AUDIT_SCENARIOS = ("pessimistic", "neutral", "optimistic")
 _AUDIT_WACC_SHIFT = {"pessimistic": 0.010, "neutral": 0.0, "optimistic": -0.005}
 _AUDIT_FINANCIAL_INDUSTRIES = {"BANK", "INSURANCE", "SECURITIES"}
+_AUDIT_TYPE7_FINANCIAL_INDUSTRIES = _AUDIT_FINANCIAL_INDUSTRIES | {"FINANCIAL_OTHER"}
 _AUDIT_PARENT_EQUITY_KEYS = (
     "PARENT_EQUITY",
     "TOTAL_PARENT_EQUITY",
@@ -783,6 +797,8 @@ def _audit_type7_template_input_score(
     if key in {"t1_05", "t1_07", "t1_17"}:
         return True, _finite(inputs.get("score"))
     if key == "t1_20":
+        if inputs.get("validation_basis") != "source_bound_nonfinancial_dcf":
+            return False, None
         return True, _finite(inputs.get("type1_1a"))
     if key == "t1_03":
         raw = inputs.get("rate")
@@ -1446,7 +1462,8 @@ def _audit_type7_ledger_impl(code: str, ledger: Any, status: Any) -> list[str]:
                 expected_valuation_complete and quote_as_of is not None and quote_as_of <= date.today()
             )
             if (
-                set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete"}
+                set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete", "validation_basis"}
+                or valuation_prerequisite.get("validation_basis") != "source_bound_nonfinancial_dcf"
                 or valuation_prerequisite.get("valuation_complete") is not expected_valuation_complete
                 or valuation_prerequisite.get("passed") is not expected_valuation_passed
             ):
@@ -2844,7 +2861,9 @@ def _valuation_contract_errors(
         return errors
 
     is_financial = result.get("_pb_valuation") is True
-    if is_financial != (industry in _AUDIT_FINANCIAL_INDUSTRIES):
+    if industry == "FINANCIAL_OTHER":
+        errors.append(f"{code}: unsupported financial industry cannot have a valuation result")
+    elif is_financial != (industry in _AUDIT_FINANCIAL_INDUSTRIES):
         errors.append(f"{code}: valuation model is inconsistent with industry")
     expected_tax_source = (
         "financial_operating_liabilities_excluded" if is_financial else "taxable_profit_evidence_unavailable"
@@ -3318,6 +3337,157 @@ def _valuation_contract_errors(
     return errors
 
 
+def _type1_valuation_binding_errors(
+    code: str,
+    row: Mapping[str, Any],
+    *,
+    expected_type1_1a: float | None,
+    skip_classification: Mapping[str, str] | None,
+) -> list[str]:
+    """Bind Type 1 to either a valid valuation or its structured skip."""
+
+    payload = row.get("type1")
+    if not isinstance(payload, Mapping):
+        return [f"{code}:type1: valuation binding payload missing"]
+    sub_scores = payload.get("sub_scores")
+    reasons = payload.get("reasons")
+    if not isinstance(sub_scores, Mapping) or not isinstance(reasons, Mapping):
+        return [f"{code}:type1: valuation binding scores or reasons missing"]
+    score_1a = _finite(sub_scores.get("1a"))
+    total = _finite(payload.get("total"))
+    triggered = _strict_bool(payload.get("triggered"))
+    veto = _strict_bool(payload.get("veto"))
+    applicable = _strict_bool(payload.get("applicable"))
+    evidence_complete = _strict_bool(payload.get("evidence_complete"))
+    status = payload.get("status")
+
+    if expected_type1_1a is not None:
+        errors: list[str] = []
+        if skip_classification is not None:
+            errors.append(f"{code}:type1: valid valuation also has a skip classification")
+        if applicable is not True or status == "not_applicable":
+            errors.append(f"{code}:type1: valid valuation cannot be hidden as not applicable")
+        if score_1a is None or not _close(score_1a, expected_type1_1a, rel_tol=0.0):
+            errors.append(f"{code}:type1: 1a differs from independently replayed valuation position")
+        if expected_type1_1a <= 2.0 and (veto is not True or status not in {"vetoed", "blocked"}):
+            errors.append(f"{code}:type1: price-depth veto is missing")
+        return errors
+
+    classification = normalize_dcf_skip_classification(skip_classification)
+    if classification is None:
+        return [f"{code}:type1: no valid valuation or structured skip classification"]
+    scores = [_finite(sub_scores.get(key)) for key in ("1a", "1b", "1c", "1d")]
+    errors = []
+    if any(score is None or not _close(score, 0.0, rel_tol=0.0) for score in scores):
+        errors.append(f"{code}:type1: skipped valuation must have zero sub-scores")
+    if total is None or not _close(total, 0.0, rel_tol=0.0):
+        errors.append(f"{code}:type1: skipped valuation must have zero total")
+    if triggered is not False:
+        errors.append(f"{code}:type1: skipped valuation cannot trigger")
+
+    category = classification["category"]
+    if category in {DCF_SKIP_MODEL_UNSUPPORTED, DCF_SKIP_ECONOMIC_NOT_APPLICABLE}:
+        expected = ("not_applicable", False, True, False)
+    elif category in {DCF_SKIP_SOURCE_MISSING, DCF_SKIP_INCONSISTENT_SOURCE}:
+        expected = ("insufficient_evidence", True, False, False)
+    elif category == DCF_SKIP_INTERNAL_ERROR:
+        expected = ("blocked", True, False, False)
+        if not str(reasons.get("_blocked") or "").strip():
+            errors.append(f"{code}:type1: internal valuation error lacks a blocked reason")
+    else:  # pragma: no cover - normalize_dcf_skip_classification already rejects this.
+        raise AssertionError(f"unhandled DCF skip category: {category}")
+    expected_status, expected_applicable, expected_evidence, expected_veto = expected
+    if (
+        status != expected_status
+        or applicable is not expected_applicable
+        or evidence_complete is not expected_evidence
+        or veto is not expected_veto
+    ):
+        errors.append(f"{code}:type1: state does not match structured valuation skip classification")
+    return errors
+
+
+def _type7_valuation_binding_errors(
+    code: str,
+    row: Mapping[str, Any],
+    *,
+    expected_type1_1a: float | None,
+) -> list[str]:
+    """Bind Type 7's DCF claim to this company's independently checked result."""
+
+    errors: list[str] = []
+    industry = str(row.get("industry") or "")
+    payload = row.get("type7")
+    if not isinstance(payload, Mapping):
+        return [f"{code}:type7: valuation binding payload missing"]
+    status = payload.get("status")
+    applicable = _strict_bool(payload.get("applicable"))
+    ledger = payload.get("ledger")
+    is_financial = industry in _AUDIT_TYPE7_FINANCIAL_INDUSTRIES
+    if is_financial:
+        if status != "not_applicable" or applicable is not False:
+            errors.append(f"{code}:type7: financial industry must be not applicable")
+        if not isinstance(ledger, Mapping) or ledger.get("applicable") is not False:
+            errors.append(f"{code}:type7: financial not-applicable ledger mismatch")
+        return errors
+    if status == "not_applicable" or applicable is not True:
+        return [f"{code}:type7: non-financial industry cannot be not applicable"]
+    if not isinstance(ledger, Mapping):
+        return [f"{code}:type7: valuation binding ledger missing"]
+
+    validated_nonfinancial_dcf = expected_type1_1a is not None
+    prerequisites = ledger.get("prerequisites")
+    valuation = prerequisites.get("latest_quote_and_valuation") if isinstance(prerequisites, Mapping) else None
+    template1 = ledger.get("template1")
+    items = template1.get("items") if isinstance(template1, Mapping) else None
+    t1_20 = None
+    if isinstance(items, list):
+        matching = [item for item in items if isinstance(item, Mapping) and item.get("key") == "t1_20"]
+        if len(matching) == 1:
+            t1_20 = matching[0]
+    type1 = row.get("type1")
+    type1_scores = type1.get("sub_scores") if isinstance(type1, Mapping) else None
+    type1_1a = _finite(type1_scores.get("1a")) if isinstance(type1_scores, Mapping) else None
+    if not isinstance(valuation, Mapping) or valuation.get("valuation_complete") is not validated_nonfinancial_dcf:
+        errors.append(f"{code}:type7: valuation prerequisite is not bound to validated DCF")
+    if not isinstance(t1_20, Mapping):
+        errors.append(f"{code}:type7: t1_20 valuation item missing")
+        return errors
+    inputs = t1_20.get("inputs")
+    item_score = _finite(t1_20.get("score"))
+    input_score = _finite(inputs.get("type1_1a")) if isinstance(inputs, Mapping) else None
+    if t1_20.get("complete") is not validated_nonfinancial_dcf:
+        errors.append(f"{code}:type7: t1_20 completeness is not bound to validated DCF")
+    expected_level = "validated_nonfinancial_dcf" if validated_nonfinancial_dcf else "partial"
+    if t1_20.get("evidence_level") != expected_level:
+        errors.append(f"{code}:type7: t1_20 evidence level is not bound to validated DCF")
+    expected_score = expected_type1_1a if expected_type1_1a is not None else 0.0
+    if any(
+        value is None or not _close(value, expected_score, rel_tol=0.0) for value in (type1_1a, input_score, item_score)
+    ):
+        errors.append(f"{code}:type7: Type 1 1a and t1_20 differ from independently replayed DCF position")
+    return errors
+
+
+def _expected_type1_1a_from_dcf(result: Mapping[str, Any]) -> float | None:
+    """Replay Type 1's price-position bucket from a validated DCF result."""
+
+    price = _finite(result.get("current_price"))
+    buy_upper = _finite(result.get("buy_zone_upper"))
+    if price is None or price <= 0 or buy_upper is None or buy_upper <= 0:
+        return None
+    depth = (buy_upper - price) / buy_upper
+    if depth > 0.20:
+        return 9.5
+    if depth >= 0.10:
+        return 7.5
+    if depth >= 0:
+        return 5.5
+    if depth >= -0.10:
+        return 3.5
+    return 1.5
+
+
 def _independent_checks(
     scores: pd.DataFrame,
     sampled: tuple[str, ...],
@@ -3518,6 +3688,8 @@ def _independent_checks(
                 errors.append(f"{code}:{type_key}: conditional status lacks its required condition")
             if status == "vetoed" and not reason_veto:
                 errors.append(f"{code}:{type_key}: vetoed status lacks veto reason")
+            if status == "blocked" and not (reason_veto or str(reasons.get("_blocked") or "").strip()):
+                errors.append(f"{code}:{type_key}: blocked status lacks a block reason")
             if status == "observe" and not (5.0 <= actual_total < _AUDIT_QUALIFY_THRESHOLD) and not reason_veto:
                 errors.append(f"{code}:{type_key}: observe status is outside its score band")
             type7_decisive_failure = bool(
@@ -3626,6 +3798,8 @@ def _independent_checks(
     for code in set(normalized_skip_classifications) & set(normalized_skips):
         if normalized_skip_classifications[code]["reason"] != normalized_skips[code]:
             errors.append(f"{code}: structured skip reason differs from legacy skip reason")
+    expected_type1_1a: dict[str, float] = {}
+    expected_nonfinancial_type1_1a: dict[str, float] = {}
     for code in sampled:
         result = normalized_results.get(code)
         if result is None:
@@ -3641,14 +3815,40 @@ def _independent_checks(
             errors.append(f"{code}: sampled company is absent from quote evidence")
         if financials is not None and code not in financial_index:
             errors.append(f"{code}: sampled company is absent from financial evidence")
+        valuation_errors = _valuation_contract_errors(
+            code,
+            matches.iloc[0],
+            result,
+            quote=quote_index.get(code),
+            financial=financial_index.get(code),
+            reporting_period_contract=reporting_period_contract,
+        )
+        errors.extend(valuation_errors)
+        if not valuation_errors:
+            expected_score = _expected_type1_1a_from_dcf(result)
+            if expected_score is None:
+                errors.append(f"{code}: cannot replay Type 1 1a from validated DCF")
+            else:
+                expected_type1_1a[code] = expected_score
+                if result.get("_pb_valuation") is not True:
+                    expected_nonfinancial_type1_1a[code] = expected_score
+    for _row_index, row in scores.iterrows():
+        code = _normalise_code(row.get("code"))
         errors.extend(
-            _valuation_contract_errors(
+            _type1_valuation_binding_errors(
                 code,
-                matches.iloc[0],
-                result,
-                quote=quote_index.get(code),
-                financial=financial_index.get(code),
-                reporting_period_contract=reporting_period_contract,
+                row,
+                expected_type1_1a=expected_type1_1a.get(code),
+                skip_classification=(
+                    normalized_skip_classifications.get(code) if code not in expected_type1_1a else None
+                ),
+            )
+        )
+        errors.extend(
+            _type7_valuation_binding_errors(
+                code,
+                row,
+                expected_type1_1a=expected_nonfinancial_type1_1a.get(code),
             )
         )
     return tuple(errors)

@@ -23,6 +23,12 @@ from typing import Any
 import unicodedata
 from urllib.parse import urlsplit
 from zipfile import BadZipFile, ZipFile
+from zoneinfo import ZoneInfo
+
+from tools.run_full_audit import (
+    _canonical_market_coldness_json,
+    _replay_market_coldness_reference_artifact,
+)
 
 
 _FORBIDDEN_PATH = re.compile(
@@ -103,6 +109,7 @@ _REQUIRED_FILES = {
     "data/quality_history.py",
     "data/research_reports.py",
     "data/snapshot.py",
+    "data/trading_calendar.py",
     "engine/audit.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
@@ -118,6 +125,7 @@ _REQUIRED_FILES = {
     "tools/__init__.py",
     "tools/build_official_industry_source.py",
     "tools/build_desktop.py",
+    "tools/china_a_share_trading_calendar.json",
     "tools/run_full_audit.py",
     "tools/sign_desktop_update_manifest.ps1",
     "tools/verify_release_zip.py",
@@ -192,6 +200,15 @@ _AUDIT_TYPE_NAMES = {
     "type6": "6️⃣ 高风险早期/困境型",
     "type7": "7️⃣ 优质股权型",
 }
+_AUDIT_DCF_SKIP_CATEGORIES = frozenset(
+    {
+        "source_missing",
+        "model_unsupported",
+        "economic_not_applicable",
+        "inconsistent_source",
+        "internal_error",
+    }
+)
 
 
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -228,8 +245,9 @@ _AUDIT_TYPE_STATUSES = {
     "blocked",
 }
 _AUDIT_NON_DIAGNOSTIC_STATUSES = {"not_applicable", "insufficient_evidence"}
-_AUDIT_TYPE7_SCHEMA_VERSION = 4
-_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v4"
+_AUDIT_TYPE7_FINANCIAL_INDUSTRIES = {"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"}
+_AUDIT_TYPE7_SCHEMA_VERSION = 5
+_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v5"
 _AUDIT_TYPE7_CONTENT_MODEL_ID = "type7-report-body-crosscheck-v2"
 _AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS = 365
 _AUDIT_TYPE7_RESEARCH_RECENT_AGE_DAYS = 183
@@ -335,7 +353,11 @@ _AUDIT_TYPE7_TEMPLATE1_CONTRACTS = {
         "mean(hfq_10y_CAGR_score,market_cap/projected_year10_profit_score)",
         ({"shareholder_return", "terminal_profit_projection"},),
     ),
-    "t1_20": ("DCF价格位置", "dcf", ({"type1_1a"},)),
+    "t1_20": (
+        "DCF价格位置",
+        "dcf",
+        ({"type1_1a", "validation_basis"},),
+    ),
 }
 _AUDIT_TYPE7_TEMPLATE5_LABELS = {
     "t5_i1": "产业大周期",
@@ -355,7 +377,7 @@ _AUDIT_TYPE7_EVIDENCE_LEVELS = {
     "derived_proxy",
     "derived_proxy_capped",
     "reported_formula",
-    "validated_type1",
+    "validated_nonfinancial_dcf",
     "historical_valuation_reversion_formula",
     "independent_market_history",
     "independent_market_history_plus_fading_growth_projection",
@@ -413,6 +435,13 @@ _MIN_RELEASE_LISTING_REFERENCE_COVERAGE = 0.99
 _MIN_RELEASE_LISTING_DATE_COVERAGE = 0.99
 _LISTING_DATE_SOURCE = "Eastmoney push2 clist"
 _LISTING_DATE_SOURCE_URL = "https://push2delay.eastmoney.com/api/qt/clist/get"
+_MARKET_COLDNESS_MODEL_ID = "patch6-type2c-quantity-price-v1"
+_MARKET_COLDNESS_NOT_APPLICABLE_REASONS = {
+    "listed_in_current_year",
+    "listing_history_lt_120_days",
+}
+_MIN_RELEASE_TRADING_QUOTE_COVERAGE = 0.99
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 _TTM_PERIOD_BASIS = "FY_plus_current_YTD_minus_prior_YTD"
 _TTM_FCFF_FORMULA_VERSION = "ttm_cfo_less_capex_v2"
 _TTM_REVENUE_FORMULA_VERSION = "ttm_revenue_v1"
@@ -472,6 +501,8 @@ _RULE_FILES = {
     "data/market_history.py",
     "data/quality_history.py",
     "data/research_reports.py",
+    "data/trading_calendar.py",
+    "tools/china_a_share_trading_calendar.json",
     "engine/buy_screener.py",
     "engine/dcf.py",
     "engine/market_coldness.py",
@@ -734,6 +765,8 @@ def _type7_template_input_score(
     if key in {"t1_05", "t1_07", "t1_17"}:
         return True, _finite_number(inputs.get("score"))
     if key == "t1_20":
+        if inputs.get("validation_basis") != "source_bound_nonfinancial_dcf":
+            return False, None
         return True, _finite_number(inputs.get("type1_1a"))
     if key == "t1_03":
         raw = inputs.get("rate")
@@ -1295,7 +1328,8 @@ def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
         expected_valuation_complete and quote_as_of is not None and quote_as_of <= date.today()
     )
     if (
-        set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete"}
+        set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete", "validation_basis"}
+        or valuation_prerequisite.get("validation_basis") != "source_bound_nonfinancial_dcf"
         or valuation_prerequisite.get("valuation_complete") is not expected_valuation_complete
         or valuation_prerequisite.get("passed") is not expected_valuation_passed
     ):
@@ -1738,7 +1772,9 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
                 return None
             if status == "conditional" and (total < _AUDIT_QUALIFY_THRESHOLD or reason_veto or not condition):
                 return None
-            if status in {"vetoed", "blocked"} and not reason_veto:
+            if status == "vetoed" and not reason_veto:
+                return None
+            if status == "blocked" and not (reason_veto or str(reasons.get("_blocked") or "").strip()):
                 return None
             if status == "observe" and (reason_veto or not 5.0 <= total < _AUDIT_QUALIFY_THRESHOLD):
                 return None
@@ -1823,6 +1859,165 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
             return None
         codes.append(code)
     return codes
+
+
+def _audit_type1_valuation_binding_valid(
+    company: Mapping[str, Any],
+    *,
+    expected_type1_1a: float | None,
+    skip_classification: Mapping[str, str] | None,
+) -> bool:
+    """Bind Type 1 to a checked valuation result or exact skip semantics."""
+
+    payload = company.get("type1")
+    if not isinstance(payload, Mapping):
+        return False
+    sub_scores = payload.get("sub_scores")
+    reasons = payload.get("reasons")
+    if not isinstance(sub_scores, Mapping) or not isinstance(reasons, Mapping):
+        return False
+    score_1a = _finite_number(sub_scores.get("1a"))
+    total = _finite_number(payload.get("total"))
+    status = payload.get("status")
+    applicable = payload.get("applicable")
+    evidence_complete = payload.get("evidence_complete")
+    triggered = payload.get("triggered")
+    veto = payload.get("veto")
+
+    if expected_type1_1a is not None:
+        return bool(
+            skip_classification is None
+            and applicable is True
+            and status != "not_applicable"
+            and score_1a is not None
+            and math.isclose(score_1a, expected_type1_1a, rel_tol=0.0, abs_tol=1e-9)
+            and (expected_type1_1a > 2.0 or (veto is True and status in {"vetoed", "blocked"}))
+        )
+
+    if (
+        not isinstance(skip_classification, Mapping)
+        or set(skip_classification) != {"category", "reason"}
+        or not isinstance(skip_classification.get("category"), str)
+        or skip_classification.get("category") not in _AUDIT_DCF_SKIP_CATEGORIES
+        or not str(skip_classification.get("reason") or "").strip()
+    ):
+        return False
+    scores = [_finite_number(sub_scores.get(key)) for key in ("1a", "1b", "1c", "1d")]
+    if (
+        any(score is None or not math.isclose(score, 0.0, rel_tol=0.0, abs_tol=1e-9) for score in scores)
+        or total is None
+        or not math.isclose(total, 0.0, rel_tol=0.0, abs_tol=1e-9)
+        or triggered is not False
+    ):
+        return False
+    category = skip_classification["category"]
+    if category in {"model_unsupported", "economic_not_applicable"}:
+        expected = ("not_applicable", False, True, False)
+    elif category in {"source_missing", "inconsistent_source"}:
+        expected = ("insufficient_evidence", True, False, False)
+    else:
+        expected = ("blocked", True, False, False)
+        if not str(reasons.get("_blocked") or "").strip():
+            return False
+    return (status, applicable, evidence_complete, veto) == expected
+
+
+def _audit_valuation_bindings_valid(
+    companies: Any,
+    *,
+    expected_type1_1a: Mapping[str, float],
+    expected_nonfinancial_type1_1a: Mapping[str, float],
+    skip_classifications: Mapping[str, Mapping[str, str]],
+    financial_codes: set[str],
+) -> bool:
+    """Cross-check Type 1 and Type 7 claims against independent valuations."""
+
+    if not isinstance(companies, list):
+        return False
+    for company in companies:
+        if not isinstance(company, Mapping):
+            return False
+        code = str(company.get("code") or "")
+        industry = str(company.get("industry") or "")
+        if not _audit_type1_valuation_binding_valid(
+            company,
+            expected_type1_1a=expected_type1_1a.get(code),
+            skip_classification=(skip_classifications.get(code) if code not in expected_type1_1a else None),
+        ):
+            return False
+        type7 = company.get("type7")
+        if not isinstance(type7, Mapping):
+            return False
+        status = type7.get("status")
+        applicable = type7.get("applicable")
+        ledger = type7.get("ledger")
+        is_financial = industry in _AUDIT_TYPE7_FINANCIAL_INDUSTRIES
+        if is_financial != (code in financial_codes):
+            return False
+        if is_financial:
+            if (
+                status != "not_applicable"
+                or applicable is not False
+                or not isinstance(ledger, Mapping)
+                or ledger.get("applicable") is not False
+            ):
+                return False
+            continue
+        if status == "not_applicable" or applicable is not True or not isinstance(ledger, Mapping):
+            return False
+
+        prerequisites = ledger.get("prerequisites")
+        valuation = prerequisites.get("latest_quote_and_valuation") if isinstance(prerequisites, Mapping) else None
+        template1 = ledger.get("template1")
+        items = template1.get("items") if isinstance(template1, Mapping) else None
+        if not isinstance(items, list):
+            return False
+        matching = [item for item in items if isinstance(item, Mapping) and item.get("key") == "t1_20"]
+        if len(matching) != 1 or not isinstance(valuation, Mapping):
+            return False
+        t1_20 = matching[0]
+        type1 = company.get("type1")
+        type1_scores = type1.get("sub_scores") if isinstance(type1, Mapping) else None
+        inputs = t1_20.get("inputs")
+        type1_1a = _finite_number(type1_scores.get("1a")) if isinstance(type1_scores, Mapping) else None
+        input_score = _finite_number(inputs.get("type1_1a")) if isinstance(inputs, Mapping) else None
+        item_score = _finite_number(t1_20.get("score"))
+        expected_nonfinancial_score = expected_nonfinancial_type1_1a.get(code)
+        expected_complete = expected_nonfinancial_score is not None
+        expected_level = "validated_nonfinancial_dcf" if expected_complete else "partial"
+        expected_score = expected_nonfinancial_score if expected_nonfinancial_score is not None else 0.0
+        if (
+            valuation.get("valuation_complete") is not expected_complete
+            or t1_20.get("complete") is not expected_complete
+            or t1_20.get("evidence_level") != expected_level
+            or type1_1a is None
+            or input_score is None
+            or item_score is None
+            or not math.isclose(type1_1a, expected_score, rel_tol=0.0, abs_tol=1e-9)
+            or not math.isclose(input_score, expected_score, rel_tol=0.0, abs_tol=1e-9)
+            or not math.isclose(item_score, expected_score, rel_tol=0.0, abs_tol=1e-9)
+        ):
+            return False
+    return True
+
+
+def _expected_type1_1a_from_dcf(result: Mapping[str, Any]) -> float | None:
+    """Replay Type 1's price-position bucket from a validated DCF result."""
+
+    price = _finite_number(result.get("current_price"))
+    buy_upper = _finite_number(result.get("buy_zone_upper"))
+    if price is None or price <= 0 or buy_upper is None or buy_upper <= 0:
+        return None
+    depth = (buy_upper - price) / buy_upper
+    if depth > 0.20:
+        return 9.5
+    if depth >= 0.10:
+        return 7.5
+    if depth >= 0:
+        return 5.5
+    if depth >= -0.10:
+        return 3.5
+    return 1.5
 
 
 def _audit_csv_rows(content: bytes) -> list[dict[str, str]] | None:
@@ -2153,11 +2348,184 @@ def _valid_optional_evidence_provenance(value: object, eligible_universe_size: o
     )
 
 
-def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
-    """Validate the schema-8 non-financial SH/SZ TTM population ledger."""
+def _valid_release_quote_session(validation: Mapping[str, Any]) -> str | None:
+    sessions = validation.get("trading_source_trade_dates")
+    analysis_quotes = validation.get("analysis_market_quotes")
+    trading_quotes = validation.get("analysis_trading_quotes")
+    source_trading_quotes = validation.get("trading_quotes")
+    coverage = _finite_number(validation.get("analysis_trading_coverage"))
+    source_coverage = _finite_number(validation.get("trading_coverage"))
+    eligible_companies = validation.get("eligible_companies")
+    eligible_trading_quotes = validation.get("eligible_trading_quotes")
+    eligible_trading_coverage = _finite_number(validation.get("eligible_trading_coverage"))
+    if (
+        not isinstance(sessions, list)
+        or len(sessions) != 1
+        or not isinstance(sessions[0], str)
+        or isinstance(analysis_quotes, bool)
+        or not isinstance(analysis_quotes, int)
+        or analysis_quotes <= 0
+        or isinstance(trading_quotes, bool)
+        or not isinstance(trading_quotes, int)
+        or not 0 < trading_quotes <= analysis_quotes
+        or source_trading_quotes != trading_quotes
+        or coverage is None
+        or source_coverage is None
+        or not math.isclose(coverage, trading_quotes / analysis_quotes, rel_tol=0.0, abs_tol=1e-12)
+        or not math.isclose(source_coverage, coverage, rel_tol=0.0, abs_tol=1e-12)
+        or coverage < _MIN_RELEASE_TRADING_QUOTE_COVERAGE
+        or isinstance(eligible_companies, bool)
+        or not isinstance(eligible_companies, int)
+        or eligible_companies <= 0
+        or isinstance(eligible_trading_quotes, bool)
+        or not isinstance(eligible_trading_quotes, int)
+        or not 0 < eligible_trading_quotes <= eligible_companies
+        or eligible_trading_coverage is None
+        or not math.isclose(
+            eligible_trading_coverage,
+            eligible_trading_quotes / eligible_companies,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or eligible_trading_coverage < _MIN_RELEASE_TRADING_QUOTE_COVERAGE
+    ):
+        return None
+    try:
+        session = date.fromisoformat(sessions[0])
+    except ValueError:
+        return None
+    return sessions[0] if session.isoformat() == sessions[0] else None
+
+
+def _valid_market_coldness_provenance(
+    summary: object,
+    status: object,
+    reference_artifact: object,
+    *,
+    eligible_codes: Sequence[str],
+    trade_session: str,
+    validation: Mapping[str, Any],
+) -> bool:
+    summary_fields = {
+        "provided",
+        "evidence_count",
+        "eligible_evidence_count",
+        "eligible_evidence_coverage",
+        "evidence_sha256",
+        "sources",
+        "as_of_sessions",
+    }
+    if not isinstance(summary, Mapping) or set(summary) != summary_fields or not isinstance(status, Mapping):
+        return False
+    eligible = set(eligible_codes)
+    if not eligible or len(eligible) != len(eligible_codes):
+        return False
+    analysis_population = _strict_ttm_analysis_population(validation)
+    if analysis_population is None or validation.get("eligible_codes") != list(eligible_codes):
+        return False
+    listed_codes = sorted(analysis_population)
+    if (
+        len(listed_codes) != validation.get("analysis_market_quotes")
+        or not isinstance(reference_artifact, Mapping)
+        or reference_artifact.get("listed_codes") != listed_codes
+    ):
+        return False
+    try:
+        replay = _replay_market_coldness_reference_artifact(
+            reference_artifact,
+            eligible_codes=eligible_codes,
+            as_of_session=trade_session,
+        )
+    except (RuntimeError, TypeError, ValueError, OverflowError):
+        return False
+    expected_evidence = replay.get("eligible_evidence")
+    full_evidence = replay.get("full_evidence")
+    if not isinstance(expected_evidence, Mapping) or not isinstance(full_evidence, Mapping):
+        return False
+    evidence_count = summary.get("evidence_count")
+    eligible_evidence_count = summary.get("eligible_evidence_count")
+    evidence_coverage = _finite_number(summary.get("eligible_evidence_coverage"))
+    evidence_hash = summary.get("evidence_sha256")
+    expected_source = f"{_LISTING_DATE_SOURCE}; {_LISTING_DATE_SOURCE_URL}"
+    if (
+        summary.get("provided") is not True
+        or isinstance(evidence_count, bool)
+        or not isinstance(evidence_count, int)
+        or evidence_count <= 0
+        or eligible_evidence_count != evidence_count
+        or evidence_count > len(eligible)
+        or evidence_coverage is None
+        or not math.isclose(evidence_coverage, evidence_count / len(eligible), rel_tol=0.0, abs_tol=1e-12)
+        or not isinstance(evidence_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", evidence_hash) is None
+        or len(set(evidence_hash)) < 8
+        or evidence_hash != hashlib.sha256(_canonical_market_coldness_json(expected_evidence)).hexdigest()
+        or summary.get("sources") != [expected_source]
+        or summary.get("as_of_sessions") != [trade_session]
+    ):
+        return False
+
+    retrieved_at = status.get("retrieved_at")
+    parsed_retrieval = _parse_aware_utc(retrieved_at)
+    if (
+        status.get("available") is not True
+        or status.get("evidence_available") is not True
+        or status.get("evidence_reason") != "available"
+        or status.get("model_id") != _MARKET_COLDNESS_MODEL_ID
+        or status.get("source") != _LISTING_DATE_SOURCE
+        or status.get("source_url") != _LISTING_DATE_SOURCE_URL
+        or status.get("as_of_session") != trade_session
+        or parsed_retrieval is None
+        or parsed_retrieval.astimezone(_SHANGHAI).date().isoformat() != trade_session
+        or status.get("eligible_evidence_count") != evidence_count
+        or not _close_number(status.get("eligible_evidence_coverage"), evidence_coverage, rel_tol=0.0, abs_tol=1e-12)
+        or status.get("reference_artifact_sha256")
+        != hashlib.sha256(_canonical_market_coldness_json(reference_artifact)).hexdigest()
+        or status.get("full_listed_evidence_count") != len(full_evidence)
+    ):
+        return False
+
+    not_applicable = status.get("eligible_not_applicable_codes_by_reason")
+    data_gaps = status.get("eligible_unscored_data_gap_codes_by_reason")
+    if (
+        not isinstance(not_applicable, Mapping)
+        or set(not_applicable) != _MARKET_COLDNESS_NOT_APPLICABLE_REASONS
+        or not_applicable != replay.get("eligible_not_applicable_codes_by_reason")
+        or data_gaps != {}
+        or data_gaps != replay.get("eligible_unscored_data_gap_codes_by_reason")
+        or status.get("eligible_unscored_data_gap_count") != 0
+    ):
+        return False
+    not_applicable_codes: set[str] = set()
+    for reason in sorted(_MARKET_COLDNESS_NOT_APPLICABLE_REASONS):
+        raw_codes = not_applicable.get(reason)
+        if not isinstance(raw_codes, list) or raw_codes != sorted(set(raw_codes)):
+            return False
+        for code in raw_codes:
+            if not isinstance(code, str) or code not in eligible or code in not_applicable_codes:
+                return False
+            not_applicable_codes.add(code)
+    applicable_count = len(eligible) - len(not_applicable_codes)
+    if (
+        status.get("eligible_not_applicable_count") != len(not_applicable_codes)
+        or status.get("eligible_applicable_count") != applicable_count
+        or evidence_count != applicable_count
+        or not _close_number(
+            status.get("eligible_applicable_evidence_coverage"),
+            1.0,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        return False
+    return True
+
+
+def _strict_ttm_analysis_population(validation: Mapping[str, Any]) -> set[str] | None:
+    """Return the independently reconstructed SH/SZ population, if valid."""
     coverage = validation.get("strict_ttm_source_coverage")
     if not isinstance(coverage, Mapping):
-        return False
+        return None
     denominator = coverage.get("denominator")
     excluded = coverage.get("excluded_financial_codes")
     analysis_quotes = validation.get("analysis_market_quotes")
@@ -2174,7 +2542,7 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
         or any(re.fullmatch(r"[036][0-9]{5}", str(code)) is None for code in excluded)
         or denominator + len(excluded) != analysis_quotes
     ):
-        return False
+        return None
 
     allowed_statuses = {
         "complete",
@@ -2189,7 +2557,7 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
     for metric in ("revenue", "fcff"):
         metric_coverage = coverage.get(metric)
         if not isinstance(metric_coverage, Mapping):
-            return False
+            return None
         complete = metric_coverage.get("complete")
         missing = metric_coverage.get("missing")
         ratio = _finite_number(metric_coverage.get("coverage"))
@@ -2211,7 +2579,7 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
             or not isinstance(complete_codes, list)
             or not isinstance(missing_by_status, Mapping)
         ):
-            return False
+            return None
         if (
             set(status_counts) - allowed_statuses
             or status_counts.get("complete") != complete
@@ -2223,12 +2591,12 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
             or len(complete_codes) != complete
             or any(re.fullmatch(r"[036][0-9]{5}", str(code)) is None for code in complete_codes)
         ):
-            return False
+            return None
         expected_missing_statuses = {
             status for status, count in status_counts.items() if status != "complete" and count
         }
         if set(missing_by_status) != expected_missing_statuses:
-            return False
+            return None
         missing_codes: list[str] = []
         for status, codes in missing_by_status.items():
             if (
@@ -2238,7 +2606,7 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
                 or len(codes) != status_counts.get(status)
                 or any(re.fullmatch(r"[036][0-9]{5}", str(code)) is None for code in codes)
             ):
-                return False
+                return None
             missing_codes.extend(str(code) for code in codes)
         complete_set = {str(code) for code in complete_codes}
         missing_set = set(missing_codes)
@@ -2249,15 +2617,31 @@ def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
             or (complete_set | missing_set) & set(excluded)
             or len(complete_set | missing_set) != denominator
         ):
-            return False
+            return None
         population_sets.append(complete_set | missing_set)
     if population_sets[0] != population_sets[1]:
-        return False
+        return None
     eligible_codes = validation.get("eligible_codes")
     if not isinstance(eligible_codes, list):
-        return False
+        return None
     analysis_population = population_sets[0] | {str(code) for code in excluded}
-    return all(str(code) in analysis_population for code in eligible_codes)
+    analysis_market_codes = validation.get("analysis_market_codes")
+    analysis_ineligible_codes = validation.get("analysis_ineligible_codes")
+    normalized_eligible = [str(code) for code in eligible_codes]
+    if (
+        analysis_market_codes != sorted(analysis_population)
+        or normalized_eligible != sorted(set(normalized_eligible))
+        or not set(normalized_eligible).issubset(analysis_population)
+        or analysis_ineligible_codes != sorted(analysis_population - set(normalized_eligible))
+    ):
+        return None
+    return analysis_population
+
+
+def _valid_strict_ttm_source_coverage(validation: Mapping[str, Any]) -> bool:
+    """Validate the schema-8 non-financial SH/SZ TTM population ledger."""
+
+    return _strict_ttm_analysis_population(validation) is not None
 
 
 def _valid_listing_date_evidence(validation: Mapping[str, Any]) -> bool:
@@ -3219,6 +3603,9 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                         errors.append("snapshot schema-8 supplemental field coverage ledger is missing or invalid")
                     if not _valid_listing_date_evidence(validation):
                         errors.append("snapshot listing-date provenance ledger is missing or invalid")
+                    trade_session = _valid_release_quote_session(validation)
+                    if trade_session is None:
+                        errors.append("snapshot does not prove at least 99% same-session trading quote coverage")
                     strict_ttm_coverage_valid = _valid_strict_ttm_source_coverage(validation)
                     if not strict_ttm_coverage_valid:
                         errors.append("snapshot strict TTM source coverage ledger is missing or invalid")
@@ -3272,31 +3659,83 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     )
                     dcf_results = payload.get("dcf_results")
                     dcf_skip_reasons = payload.get("dcf_skip_reasons")
-                    if not isinstance(dcf_results, Mapping) or not isinstance(dcf_skip_reasons, Mapping):
-                        errors.append("audit valuation results and skip reasons are missing")
+                    dcf_skip_classifications = payload.get("dcf_skip_classifications")
+                    if (
+                        not isinstance(dcf_results, Mapping)
+                        or not isinstance(dcf_skip_reasons, Mapping)
+                        or not isinstance(dcf_skip_classifications, Mapping)
+                    ):
+                        errors.append("audit valuation results, skip reasons, or skip classifications are missing")
                     else:
                         result_codes = {str(code) for code in dcf_results}
                         skip_codes = {str(code) for code in dcf_skip_reasons}
+                        normalized_skip_classifications: dict[str, Mapping[str, str]] = {}
+                        skip_classifications_valid = True
+                        for raw_code, classification in dcf_skip_classifications.items():
+                            code = str(raw_code)
+                            if (
+                                code in normalized_skip_classifications
+                                or not isinstance(classification, Mapping)
+                                or set(classification) != {"category", "reason"}
+                                or not isinstance(classification.get("category"), str)
+                                or classification.get("category") not in _AUDIT_DCF_SKIP_CATEGORIES
+                                or not isinstance(classification.get("reason"), str)
+                                or not classification["reason"].strip()
+                            ):
+                                skip_classifications_valid = False
+                                continue
+                            normalized_skip_classifications[code] = {
+                                "category": classification["category"],
+                                "reason": classification["reason"],
+                            }
+                        expected_type1_1a: dict[str, float] = {}
+                        expected_nonfinancial_type1_1a: dict[str, float] = {}
+                        valuation_results_valid = True
+                        for raw_code, result in dcf_results.items():
+                            code = str(raw_code)
+                            valid = code in company_by_code and _valid_valuation_result(
+                                code,
+                                result,
+                                company_by_code[code],
+                                reporting_period_contract=reporting_period_contract,
+                                excluded_financial_codes=excluded_financial_codes,
+                            )
+                            valuation_results_valid = valuation_results_valid and valid
+                            if valid and isinstance(result, Mapping):
+                                expected_score = _expected_type1_1a_from_dcf(result)
+                                if expected_score is None:
+                                    valuation_results_valid = False
+                                else:
+                                    expected_type1_1a[code] = expected_score
+                                    if result.get("_pb_valuation") is not True:
+                                        expected_nonfinancial_type1_1a[code] = expected_score
+                        classification_codes = set(normalized_skip_classifications)
                         valuation_partition_valid = (
                             not (result_codes & skip_codes)
                             and result_codes | skip_codes == set(sample_codes)
+                            and classification_codes == skip_codes
                             and payload.get("dcf_valid") == len(result_codes)
-                            and all(
-                                code in company_by_code
-                                and _valid_valuation_result(
-                                    code,
-                                    result,
-                                    company_by_code[code],
-                                    reporting_period_contract=reporting_period_contract,
-                                    excluded_financial_codes=excluded_financial_codes,
-                                )
-                                for code, result in dcf_results.items()
-                            )
+                            and valuation_results_valid
+                            and skip_classifications_valid
                             and all(str(reason or "").strip() for reason in dcf_skip_reasons.values())
+                            and all(
+                                normalized_skip_classifications[code]["reason"] == str(dcf_skip_reasons[code])
+                                for code in classification_codes
+                            )
                         )
                         if not valuation_partition_valid:
                             errors.append(
-                                "audit does not provide one complete valuation result or skip reason per company"
+                                "audit does not provide one complete valuation result or structured skip per company"
+                            )
+                        if not _audit_valuation_bindings_valid(
+                            companies,
+                            expected_type1_1a=expected_type1_1a,
+                            expected_nonfinancial_type1_1a=expected_nonfinancial_type1_1a,
+                            skip_classifications=normalized_skip_classifications,
+                            financial_codes=excluded_financial_codes,
+                        ):
+                            errors.append(
+                                "audit Type 1 or Type 7 evidence is not bound to validated valuation outcomes"
                             )
 
                     eligible_codes_raw = validation.get("eligible_codes")
@@ -3369,8 +3808,32 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                             "audit sample does not match the fixed-seed draw from the complete eligible universe"
                         )
 
+                    if (
+                        trade_session is not None
+                        and eligible_identity_valid
+                        and not _valid_market_coldness_provenance(
+                            provenance.get("market_coldness_evidence"),
+                            caller.get("market_coldness"),
+                            caller.get("market_coldness_reference_artifact"),
+                            eligible_codes=eligible_codes,
+                            trade_session=trade_session,
+                            validation=validation,
+                        )
+                    ):
+                        errors.append(
+                            "audit market-coldness provenance is missing, incomplete, or bound to another session"
+                        )
+
                     generated_at = _parse_aware_utc(provenance.get("generated_at_utc"))
                     data_timestamp = _parse_aware_utc(payload.get("data_timestamp_utc"))
+                    trade_date = date.fromisoformat(trade_session) if trade_session is not None else None
+                    data_shanghai_date = data_timestamp.astimezone(_SHANGHAI).date() if data_timestamp else None
+                    generated_shanghai_date = generated_at.astimezone(_SHANGHAI).date() if generated_at else None
+                    generation_delay = (
+                        (generated_at - data_timestamp).total_seconds()
+                        if generated_at is not None and data_timestamp is not None
+                        else None
+                    )
                     snapshot_hashes = (
                         str(provenance.get("snapshot_content_sha256", "")).lower(),
                         str(provenance.get("snapshot_artifact_sha256", "")).lower(),
@@ -3382,10 +3845,17 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                         and all(len(set(value)) >= 8 for value in snapshot_hashes)
                         and isinstance(caller.get("snapshot_artifact_bytes"), int)
                         and caller.get("snapshot_artifact_bytes") > 0
-                        and caller.get("snapshot_source") in {"network", "cache"}
+                        and caller.get("snapshot_source") == "network"
                         and generated_at is not None
                         and data_timestamp is not None
                         and data_timestamp <= generated_at
+                        and trade_date is not None
+                        and data_shanghai_date is not None
+                        and generated_shanghai_date is not None
+                        and 0 <= (data_shanghai_date - trade_date).days <= 10
+                        and generated_shanghai_date == data_shanghai_date
+                        and generation_delay is not None
+                        and 0 <= generation_delay <= 6 * 60 * 60
                     )
                     if not snapshot_identity_valid:
                         errors.append("audit is not bound to an identified, time-consistent market snapshot")

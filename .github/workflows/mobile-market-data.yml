@@ -3,8 +3,8 @@ name: publish mobile market data
 on:
   schedule:
     # Primary run at 16:17 Asia/Shanghai plus two same-day recovery windows.
-    # The publisher is generation-safe and fail-closed, so a later run may
-    # replace the stable manifest only after its entire signed payload passes.
+    # Recovery windows become successful no-ops after one complete signed
+    # generation is live; they retry only when the prior run did not publish.
     - cron: "17 8 * * 1-5"
     - cron: "47 8 * * 1-5"
     - cron: "17 9 * * 1-5"
@@ -16,10 +16,48 @@ permissions:
 concurrency:
   group: mobile-market-data
   cancel-in-progress: false
+  queue: max
 
 jobs:
-  build:
+  preflight:
     if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+      reason: ${{ steps.guard.outputs.reason }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Skip closed markets and an already published signed generation
+        id: guard
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $remoteMain = @(git ls-remote --exit-code origin refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $remoteMain.Count -ne 1) {
+            throw 'Could not resolve the current remote main revision.'
+          }
+          $remoteMainSha = [string](($remoteMain[0] -split '\s+', 2)[0])
+          if ($remoteMainSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'The current remote main revision is invalid.'
+          }
+          if ($remoteMainSha -cne $env:GITHUB_SHA) {
+            Write-Host 'This workflow run belongs to an older main revision; publication is a successful no-op.'
+            'should_run=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            'reason=stale_main_workflow_run' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
+          & .\tools\mobile_market_workflow_guard.ps1 -EventName '${{ github.event_name }}'
+
+  build:
+    if: github.ref == 'refs/heads/main' && needs.preflight.outputs.should_run == 'true'
+    needs: preflight
     runs-on: windows-latest
     timeout-minutes: 90
     environment: mobile-production
@@ -143,6 +181,9 @@ jobs:
           if ($manifest.analysis_quality.ok -ne $true) {
             throw 'The mobile manifest did not retain a passing analysis quality gate.'
           }
+          if ([string]$manifest.provenance.source_commit -cne $env:GITHUB_SHA) {
+            throw 'The mobile manifest is not bound to the checked-out main source revision.'
+          }
           $shanghaiZone = [TimeZoneInfo]::FindSystemTimeZoneById('China Standard Time')
           $nowShanghai = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $shanghaiZone)
           $marketDate = [DateTime]::ParseExact(
@@ -219,7 +260,7 @@ jobs:
           $manifest = Join-Path $env:MOBILE_DATA_DIR 'manifest.json'
           $signature = Join-Path $env:MOBILE_DATA_DIR $env:MOBILE_SIGNATURE_NAME
           & .\tools\sign_mobile_manifest.ps1 -Manifest $manifest -Output $signature
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $signature -PathType Leaf)) {
+          if (-not (Test-Path -LiteralPath $signature -PathType Leaf)) {
             throw 'Could not sign the mobile market manifest.'
           }
           $signatureSize = (Get-Item -LiteralPath $signature).Length
@@ -303,11 +344,12 @@ jobs:
       - name: Upload the verified bundle between jobs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-market-data-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mobile-market-data-build-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release/*
           if-no-files-found: error
           retention-days: 2
           compression-level: 0
+          overwrite: true
 
       - name: Save the validated data baseline
         continue-on-error: true
@@ -330,10 +372,12 @@ jobs:
     permissions:
       contents: write
     outputs:
+      published: ${{ steps.release.outputs.published }}
       catalogue_name: ${{ steps.release.outputs.catalogue_name }}
       signals_name: ${{ steps.release.outputs.signals_name }}
       signature_name: ${{ steps.release.outputs.signature_name }}
       previous_assets: ${{ steps.release.outputs.previous_assets }}
+      previous_manifest_state: ${{ steps.release.outputs.previous_manifest_state }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -353,7 +397,7 @@ jobs:
       - name: Download the verified release bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: mobile-market-data-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mobile-market-data-build-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
       - name: Reverify the transferred release bundle
@@ -375,6 +419,9 @@ jobs:
             [string]$manifest.signature.algorithm -cne 'ECDSA_P256_SHA256'
           ) {
             throw 'Transferred bundle does not use one signed generation.'
+          }
+          if ([string]$manifest.provenance.source_commit -cne $env:GITHUB_SHA) {
+            throw 'Transferred manifest is not bound to this main source revision.'
           }
           $expected = @('manifest.json', $catalogueName, $signalsName, $signatureName) | Sort-Object
           $actual = @(Get-ChildItem -LiteralPath $env:MOBILE_DATA_DIR -File | Select-Object -ExpandProperty Name | Sort-Object)
@@ -432,12 +479,54 @@ jobs:
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          $remoteMain = @(git ls-remote --exit-code origin refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $remoteMain.Count -ne 1) {
+            throw 'Could not resolve the current remote main revision immediately before publication.'
+          }
+          $remoteMainSha = [string](($remoteMain[0] -split '\s+', 2)[0])
+          if ($remoteMainSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'The current remote main revision is invalid.'
+          }
+          if ($remoteMainSha -cne $env:GITHUB_SHA) {
+            Write-Warning 'Main advanced while this run was building; the old analysis will not be published.'
+            'published=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
           $tag = 'mobile-market-data'
-          gh release view $tag --repo $env:GH_REPO 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF mobile market data' --notes 'Automated post-close market snapshot for the DS_DCF mobile client.'
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Could not create the mobile data prerelease.'
+          $releaseExists = $false
+          $releaseCreated = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            gh release view $tag --repo $env:GH_REPO 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $releaseExists = $true
+              break
+            }
+            if ($attempt -lt 3) {
+              Start-Sleep -Seconds (2 * $attempt)
+            }
+          }
+          if (-not $releaseExists) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF mobile market data' --notes 'Automated post-close market snapshot for the DS_DCF mobile client.'
+              if ($LASTEXITCODE -eq 0) {
+                $releaseCreated = $true
+                $releaseExists = $true
+                break
+              }
+              gh release view $tag --repo $env:GH_REPO 2>$null
+              if ($LASTEXITCODE -eq 0) {
+                # The release may have predated this run, or the create response
+                # may have been lost.  Treat it as existing for conservative
+                # first-publication cleanup classification.
+                $releaseExists = $true
+                break
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            if (-not $releaseExists) {
+              throw 'Could not create or confirm the mobile data prerelease after three attempts.'
             }
           }
 
@@ -462,15 +551,59 @@ jobs:
             }
           }
 
+          function Get-ReleaseAssetsJson {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              $output = gh release view $tag --repo $env:GH_REPO --json assets
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
+                return ($output -join [Environment]::NewLine)
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw 'Could not inspect the mobile data prerelease after three attempts.'
+          }
+
+          function Receive-ReleaseAsset([string]$name, [string]$directory) {
+            $destination = Join-Path $directory $name
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+              gh release download $tag --repo $env:GH_REPO --pattern $name --dir $directory --clobber
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $destination -PathType Leaf)) {
+                return $destination
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw "Release asset $name remained unavailable after three attempts."
+          }
+
           function Publish-ImmutableAsset([string]$name) {
             $path = Join-Path $env:MOBILE_DATA_DIR $name
             $item = Get-Item -LiteralPath $path
             $digest = 'sha256:' + (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            $releaseJson = gh release view $tag --repo $env:GH_REPO --json assets
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Could not inspect the mobile data prerelease.'
-            }
+            $releaseJson = Get-ReleaseAssetsJson
             $existing = @((ConvertFrom-Json $releaseJson).assets | Where-Object { $_.name -ceq $name })
+            $incomplete = @($existing | Where-Object { [string]$_.state -ceq 'starter' -or [long]$_.size -eq 0 })
+            foreach ($asset in $incomplete) {
+              $assetApiUrl = [string]$asset.apiUrl
+              if ($assetApiUrl -notmatch '^https://api\.github\.com/repos/(?<repository>[^/]+/[^/]+)/releases/assets/(?<assetId>[0-9]+)$') {
+                throw "Incomplete release asset $name has no valid GitHub asset API URL."
+              }
+              if ([string]$Matches.repository -ine $env:GH_REPO) {
+                throw "Incomplete release asset $name belongs to another repository."
+              }
+              $assetId = [string]$Matches.assetId
+              Write-Warning "Removing incomplete GitHub release asset $name before retrying publication."
+              gh api --method DELETE "repos/$env:GH_REPO/releases/assets/$assetId"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not remove incomplete GitHub release asset $name."
+              }
+            }
+            if ($incomplete.Count -gt 0) {
+              $existing = @((ConvertFrom-Json (Get-ReleaseAssetsJson)).assets | Where-Object { $_.name -ceq $name })
+            }
             if ($existing.Count -gt 1) {
               throw "The mobile data prerelease contains duplicate asset name $name."
             }
@@ -482,30 +615,75 @@ jobs:
               if ($name -ceq $env:MOBILE_SIGNATURE_NAME) {
                 $existingDirectory = Join-Path $env:RUNNER_TEMP 'existing-mobile-signature'
                 New-Item -ItemType Directory -Force -Path $existingDirectory | Out-Null
-                gh release download $tag --repo $env:GH_REPO --pattern $name --dir $existingDirectory --clobber
-                $existingPath = Join-Path $existingDirectory $name
+                $existingPath = Receive-ReleaseAsset $name $existingDirectory
                 $manifestPath = Join-Path $env:MOBILE_DATA_DIR 'manifest.json'
-                if ($LASTEXITCODE -eq 0 -and (Test-DetachedSignature $manifestPath $existingPath)) {
+                if (Test-DetachedSignature $manifestPath $existingPath) {
                   Write-Host 'Reusing an existing valid ECDSA signature for this immutable manifest.'
                   # ECDSA signatures are intentionally non-deterministic.  The
-                  # later public-asset verification compares the local bytes,
-                  # so make the already-published valid signature canonical
-                  # for the remainder of this rerun.
+                  # downstream verification compares the local bytes, so make
+                  # the already-published valid signature canonical before the
+                  # published-bundle artifact is uploaded below.
                   Copy-Item -LiteralPath $existingPath -Destination $path -Force
                   return
                 }
               }
               throw "Immutable release asset $name already exists with different bytes."
             }
-            gh release upload $tag "$path#$name" --repo $env:GH_REPO
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not upload immutable release asset $name."
+            $uploaded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              gh release upload $tag "$path#$name" --repo $env:GH_REPO
+              $uploadExitCode = $LASTEXITCODE
+              $afterFailure = $null
+              try {
+                $afterFailure = @((ConvertFrom-Json (Get-ReleaseAssetsJson)).assets | Where-Object { $_.name -ceq $name })
+              } catch {
+                Write-Warning "Could not query immutable asset $name after upload attempt $attempt."
+              }
+              if ($null -ne $afterFailure) {
+                if (
+                  $afterFailure.Count -eq 1 -and
+                  [long]$afterFailure[0].size -eq $item.Length -and
+                  [string]$afterFailure[0].digest -ceq $digest
+                ) {
+                  $uploaded = $true
+                  break
+                }
+                $incompleteAfterFailure = @(
+                  $afterFailure | Where-Object { [string]$_.state -ceq 'starter' -or [long]$_.size -eq 0 }
+                )
+                foreach ($asset in $incompleteAfterFailure) {
+                  $assetApiUrl = [string]$asset.apiUrl
+                  if ($assetApiUrl -notmatch '^https://api\.github\.com/repos/(?<repository>[^/]+/[^/]+)/releases/assets/(?<assetId>[0-9]+)$') {
+                    throw "Incomplete release asset $name has no valid GitHub asset API URL."
+                  }
+                  if ([string]$Matches.repository -ine $env:GH_REPO) {
+                    throw "Incomplete release asset $name belongs to another repository."
+                  }
+                  $assetId = [string]$Matches.assetId
+                  Write-Warning "Removing incomplete GitHub release asset $name after upload attempt $attempt."
+                  gh api --method DELETE "repos/$env:GH_REPO/releases/assets/$assetId"
+                  if ($LASTEXITCODE -ne 0) {
+                    throw "Could not remove incomplete GitHub release asset $name."
+                  }
+                }
+              }
+              if ($uploadExitCode -eq 0) {
+                Write-Warning "GitHub accepted upload attempt $attempt for $name but the exact asset was not visible yet."
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            if (-not $uploaded) {
+              throw "Could not upload immutable release asset $name after three attempts."
             }
             $published = @()
             for ($attempt = 1; $attempt -le 5; $attempt++) {
-              $releaseJson = gh release view $tag --repo $env:GH_REPO --json assets
-              if ($LASTEXITCODE -eq 0) {
+              try {
+                $releaseJson = Get-ReleaseAssetsJson
                 $published = @((ConvertFrom-Json $releaseJson).assets | Where-Object { $_.name -ceq $name })
+              } catch {
+                $published = @()
               }
               if (
                 $published.Count -eq 1 -and
@@ -514,7 +692,9 @@ jobs:
               ) {
                 return
               }
-              Start-Sleep -Seconds (3 * $attempt)
+              if ($attempt -lt 5) {
+                Start-Sleep -Seconds (3 * $attempt)
+              }
             }
             throw "Immutable release asset $name was not published with the expected digest."
           }
@@ -524,12 +704,44 @@ jobs:
           Publish-ImmutableAsset $env:MOBILE_SIGNATURE_NAME
 
           $previousNames = @()
+          $previousManifestState = 'error'
           $previousDirectory = Join-Path $env:RUNNER_TEMP 'previous-mobile-generation'
           New-Item -ItemType Directory -Force -Path $previousDirectory | Out-Null
           $previousManifest = Join-Path $previousDirectory 'manifest.json'
-          try {
-            $previousUrl = "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json?before_run=$env:GITHUB_RUN_ID"
-            Invoke-WebRequest -Uri $previousUrl -OutFile $previousManifest -MaximumRedirection 10
+          $previousFetched = $false
+          $allPreviousFetchesWereNotFound = $true
+          $previousFetchFailure = $null
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+              Remove-Item -LiteralPath $previousManifest -Force -ErrorAction SilentlyContinue
+              $previousUrl = "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json?before_run=$env:GITHUB_RUN_ID&fetch_attempt=$attempt"
+              Invoke-WebRequest `
+                -Uri $previousUrl `
+                -OutFile $previousManifest `
+                -MaximumRedirection 10 `
+                -TimeoutSec 45
+              $previousFetched = $true
+              break
+            } catch {
+              $previousFetchFailure = $_
+              $statusCode = $null
+              try {
+                if ($null -ne $previousFetchFailure.Exception.Response) {
+                  $statusCode = [int]$previousFetchFailure.Exception.Response.StatusCode
+                }
+              } catch {
+                $statusCode = $null
+              }
+              if ($statusCode -ne 404) {
+                $allPreviousFetchesWereNotFound = $false
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+          }
+          if ($previousFetched) {
+            try {
             $previous = Get-Content -LiteralPath $previousManifest -Raw -Encoding utf8 | ConvertFrom-Json
             $previousCatalogue = [string]$previous.catalogue.filename
             $previousSignals = [string]$previous.signals.filename
@@ -546,10 +758,7 @@ jobs:
               throw 'Previous manifest does not bind one generation.'
             }
             foreach ($name in @($previousCatalogue, $previousSignals, $previousSignature)) {
-              gh release download $tag --repo $env:GH_REPO --pattern $name --dir $previousDirectory --clobber
-              if ($LASTEXITCODE -ne 0) {
-                throw "Previous asset $name is unavailable."
-              }
+              [void](Receive-ReleaseAsset $name $previousDirectory)
             }
             if (-not (Test-DetachedSignature $previousManifest (Join-Path $previousDirectory $previousSignature))) {
               throw 'Previous manifest signature is invalid.'
@@ -566,17 +775,39 @@ jobs:
               }
             }
             $previousNames = @($previousCatalogue, $previousSignals, $previousSignature)
-          } catch {
-            Write-Host "No complete signed previous mobile generation will be retained: $($_.Exception.Message)"
+            $previousManifestState = 'found'
+            } catch {
+              $previousManifestState = 'error'
+              Write-Warning "Previous generation could not be validated; retention cleanup will be skipped: $($_.Exception.Message)"
+            }
+          } elseif ($allPreviousFetchesWereNotFound -and $releaseCreated) {
+            $previousManifestState = 'missing'
+            Write-Host 'No release or stable manifest existed before this run; this is a verified first publication.'
+          } else {
+            $previousManifestState = 'error'
+            Write-Warning "Previous stable manifest could not be fetched safely; retention cleanup will be skipped: $($previousFetchFailure.Exception.Message)"
           }
 
           "catalogue_name=$env:MOBILE_CATALOG_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "signals_name=$env:MOBILE_SIGNALS_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "signature_name=$env:MOBILE_SIGNATURE_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "previous_assets=$($previousNames -join '|')" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "previous_manifest_state=$previousManifestState" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          'published=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload the canonical published bundle for downstream jobs
+        if: steps.release.outputs.published == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mobile-market-data-published-${{ github.run_id }}
+          path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release/*
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+          overwrite: true
 
   prepare_pages:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -587,7 +818,7 @@ jobs:
       - name: Download the signed manifest
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: mobile-market-data-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mobile-market-data-published-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
       - name: Prepare the atomic Pages deployment
@@ -648,7 +879,7 @@ jobs:
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
   verify_cleanup:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'
     needs:
       - publish
       - deploy_pages
@@ -663,6 +894,7 @@ jobs:
       MOBILE_SIGNALS_NAME: ${{ needs.publish.outputs.signals_name }}
       MOBILE_SIGNATURE_NAME: ${{ needs.publish.outputs.signature_name }}
       MOBILE_PREVIOUS_ASSETS: ${{ needs.publish.outputs.previous_assets }}
+      MOBILE_PREVIOUS_MANIFEST_STATE: ${{ needs.publish.outputs.previous_manifest_state }}
     steps:
       - name: Set the private release directory
         shell: pwsh
@@ -673,7 +905,7 @@ jobs:
       - name: Download the verified release bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: mobile-market-data-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mobile-market-data-published-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
       - name: Verify the public Pages switch and immutable downloads
@@ -687,7 +919,7 @@ jobs:
           for ($attempt = 1; $attempt -le 6; $attempt++) {
             try {
               $url = "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
-              Invoke-WebRequest -Uri $url -OutFile $publishedManifest -MaximumRedirection 10
+              Invoke-WebRequest -Uri $url -OutFile $publishedManifest -MaximumRedirection 10 -TimeoutSec 45
               $actualHash = (Get-FileHash -LiteralPath $publishedManifest -Algorithm SHA256).Hash.ToLowerInvariant()
               if ($actualHash -ceq $expectedHash) {
                 $verified = $true
@@ -696,7 +928,9 @@ jobs:
             } catch {
               Write-Warning "Stable manifest verification attempt $attempt failed."
             }
-            Start-Sleep -Seconds (5 * $attempt)
+            if ($attempt -lt 6) {
+              Start-Sleep -Seconds (5 * $attempt)
+            }
           }
           if (-not $verified) {
             throw 'GitHub Pages did not retain the exact newly signed stable manifest.'
@@ -708,12 +942,28 @@ jobs:
           )) {
             $expected = Join-Path $env:MOBILE_DATA_DIR $name
             $downloaded = Join-Path $env:RUNNER_TEMP "public-$name"
-            $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/$name?run_id=$env:GITHUB_RUN_ID"
-            Invoke-WebRequest -Uri $url -OutFile $downloaded -MaximumRedirection 10
             $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
-            $downloadedAssetHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
-            if ($downloadedAssetHash -cne $expectedAssetHash) {
-              throw "Public immutable asset $name differs from the verified build artifact."
+            $assetVerified = $false
+            for ($attempt = 1; $attempt -le 4; $attempt++) {
+              try {
+                Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
+                $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/$name?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
+                Invoke-WebRequest -Uri $url -OutFile $downloaded -MaximumRedirection 10 -TimeoutSec 45
+                $downloadedAssetHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
+                if ($downloadedAssetHash -cne $expectedAssetHash) {
+                  throw "Public immutable asset $name differs from the verified build artifact."
+                }
+                $assetVerified = $true
+                break
+              } catch {
+                Write-Warning "Public immutable asset $name verification attempt $attempt failed."
+              }
+              if ($attempt -lt 4) {
+                Start-Sleep -Seconds (3 * $attempt)
+              }
+            }
+            if (-not $assetVerified) {
+              throw "Public immutable asset $name could not be verified after four attempts."
             }
           }
 
@@ -724,7 +974,46 @@ jobs:
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          if ($env:MOBILE_PREVIOUS_MANIFEST_STATE -ceq 'error') {
+            Write-Warning 'Skipping retention cleanup because the previous stable generation could not be validated.'
+            exit 0
+          }
+          if ($env:MOBILE_PREVIOUS_MANIFEST_STATE -cnotin @('found', 'missing')) {
+            throw "Invalid previous manifest state: $env:MOBILE_PREVIOUS_MANIFEST_STATE"
+          }
           $tag = 'mobile-market-data'
+          function Get-MobileRelease {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              $output = gh release view $tag --repo $env:GH_REPO --json assets
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
+                return (($output -join [Environment]::NewLine) | ConvertFrom-Json)
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw 'Could not inspect mobile assets for retention cleanup after three attempts.'
+          }
+          function Remove-MobileReleaseAsset([string]$name) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              gh release delete-asset $tag $name --repo $env:GH_REPO --yes
+              if ($LASTEXITCODE -eq 0) {
+                return
+              }
+              try {
+                $probe = Get-MobileRelease
+                if (@($probe.assets | Where-Object { $_.name -ceq $name }).Count -eq 0) {
+                  return
+                }
+              } catch {
+                Write-Warning "Could not confirm failed deletion attempt $attempt for $name."
+              }
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw "Could not delete obsolete mobile asset $name after three attempts."
+          }
           $retained = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
           foreach ($name in @(
             $env:MOBILE_CATALOG_NAME,
@@ -736,21 +1025,15 @@ jobs:
           foreach ($name in ([string]$env:MOBILE_PREVIOUS_ASSETS -split '\|' | Where-Object { $_ })) {
             [void]$retained.Add($name)
           }
-          $release = gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Could not inspect mobile assets for retention cleanup.'
-          }
+          $release = Get-MobileRelease
           $managedPattern = '^(?:manifest\.json|catalog-[0-9a-f]{16}\.json\.gz|signals-[0-9a-f]{16}\.json\.gz|manifest-[0-9a-f]{16}\.sig|catalog\.json\.gz|signals\.json\.gz)$'
           foreach ($asset in @($release.assets)) {
             $name = [string]$asset.name
             if ($name -match $managedPattern -and -not $retained.Contains($name)) {
-              gh release delete-asset $tag $name --repo $env:GH_REPO --yes
-              if ($LASTEXITCODE -ne 0) {
-                throw "Could not delete obsolete mobile asset $name."
-              }
+              Remove-MobileReleaseAsset $name
             }
           }
-          $remaining = @((gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json).assets.name)
+          $remaining = @((Get-MobileRelease).assets.name)
           foreach ($required in @(
             $env:MOBILE_CATALOG_NAME,
             $env:MOBILE_SIGNALS_NAME,
@@ -782,6 +1065,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ ${attempt} -lt 3 ]]; then
+                sleep $((2 * attempt))
+              fi
+            done
+            return 1
+          }
           if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
             echo "The data audit branch may be prepared only by a main-branch run." >&2
             exit 1
@@ -791,16 +1086,26 @@ jobs:
             exit 1
           fi
 
-          set +e
-          remote_line="$(git ls-remote --exit-code --heads origin refs/heads/mobile-data)"
-          lookup_status=$?
-          set -e
+          remote_line=""
+          lookup_status=1
+          for attempt in 1 2 3; do
+            set +e
+            remote_line="$(git ls-remote --exit-code --heads origin refs/heads/mobile-data)"
+            lookup_status=$?
+            set -e
+            if [[ ${lookup_status} -eq 0 || ( ${lookup_status} -eq 2 && -z "${remote_line}" ) ]]; then
+              break
+            fi
+            if [[ ${attempt} -lt 3 ]]; then
+              sleep $((2 * attempt))
+            fi
+          done
           if [[ ${lookup_status} -eq 0 ]]; then
             if [[ ! "${remote_line}" =~ ^[0-9a-f]{40}[[:space:]]refs/heads/mobile-data$ ]]; then
               echo "The remote data audit branch identity is ambiguous." >&2
               exit 1
             fi
-            git fetch --no-tags --depth=1 origin refs/heads/mobile-data
+            retry git fetch --no-tags --depth=1 origin refs/heads/mobile-data
             git switch --create mobile-data FETCH_HEAD
           elif [[ ${lookup_status} -eq 2 && -z "${remote_line}" ]]; then
             # The first archive begins at the exact main revision whose data
@@ -818,13 +1123,25 @@ jobs:
       - name: Download the verified manifest
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: mobile-market-data-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mobile-market-data-published-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
       - name: Record the signed generation without changing main
         shell: bash
         run: |
           set -euo pipefail
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ ${attempt} -lt 3 ]]; then
+                sleep $((2 * attempt))
+              fi
+            done
+            return 1
+          }
           source_dir="${RUNNER_TEMP}/ds-dcf-mobile-market-data-release"
           manifest="${source_dir}/manifest.json"
           signature_name="$(jq -er '.signature.filename' "${manifest}")"
@@ -832,11 +1149,16 @@ jobs:
             echo "The archived manifest signature name is invalid." >&2
             exit 1
           fi
+          source_commit="$(jq -er '.provenance.source_commit' "${manifest}")"
+          if [[ ! "${source_commit}" =~ ^[0-9a-f]{40}$ || "${source_commit}" != "${GITHUB_SHA}" ]]; then
+            echo "The archived manifest is not bound to this main source revision." >&2
+            exit 1
+          fi
 
           mkdir -p latest
           cp "${manifest}" latest/manifest.json
           find latest -maxdepth 1 -type f -name 'manifest-*.sig' ! -name "${signature_name}" -delete
-          gh release download mobile-market-data \
+          retry gh release download mobile-market-data \
             --repo "${GH_REPO}" \
             --pattern "${signature_name}" \
             --dir latest \
@@ -855,4 +1177,4 @@ jobs:
           fi
           market_as_of="$(jq -er '.market_as_of' latest/manifest.json)"
           git commit -m "data: publish ${market_as_of} signed generation [skip ci]"
-          git push origin HEAD:mobile-data
+          retry git push origin HEAD:mobile-data

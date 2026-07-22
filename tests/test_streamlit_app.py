@@ -245,7 +245,7 @@ def test_industry_candidate_page_repeats_global_status_and_uses_accurate_name():
     assert [element.label for element in at.tabs] == ["🏆 行业买入候选", "🔍 个股查询"]
     assert any("财报覆盖 2/2 (100.0%)" in element.value for element in at.caption)
     warnings = [element.value for element in at.warning]
-    assert any("1 只标的发生可追踪估值错误" in value for value in warnings)
+    assert any("1 条标的记录未完成可靠分析，均已明确排除" in value for value in warnings)
     assert any(
         "类型6全局风控" in value and "技术突破或商业模式创新" in value and "不会据此给出买入信号" in value
         for value in warnings

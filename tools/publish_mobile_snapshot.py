@@ -12,7 +12,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, time, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 from zoneinfo import ZoneInfo
 
 from data.cache import SafeFileCache
@@ -22,12 +26,14 @@ from data.quality_history import fetch_quality_history_batch
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import DEFAULT_SNAPSHOT_PATH, SNAPSHOT_SCHEMA_VERSION, get_market_snapshot, save_market_snapshot
 from data.mobile_snapshot import write_mobile_snapshot
+from data.market_coldness import archive_market_coldness_session_snapshot
 from engine.audit import audit_state_hashes
 from engine.pipeline import run_market_analysis
 from tools.run_full_audit import (
     _comparison_quality,
     _load_market_coldness_evidence,
     _refresh_completed,
+    _require_market_coldness_release_evidence,
     _snapshot_reporting_period_contract,
 )
 
@@ -72,16 +78,68 @@ def _shanghai_today() -> str:
     return _shanghai_now().date().isoformat()
 
 
+def _source_commit() -> str:
+    """Return the exact checked-out main revision bound into the signed manifest."""
+
+    candidate = os.environ.get("GITHUB_SHA", "").strip().lower()
+    if not candidate:
+        git_executable = shutil.which("git")
+        if git_executable is None:
+            raise RuntimeError("mobile publication cannot determine its source Git commit")
+        repository_root = Path(__file__).resolve().parents[1]
+        try:
+            worktree = subprocess.run(
+                [git_executable, "status", "--porcelain", "--untracked-files=all"],
+                cwd=repository_root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if worktree.stdout.strip():
+                raise RuntimeError(
+                    "local mobile publication requires a clean Git worktree so its signed source commit is exact"
+                )
+            completed = subprocess.run(
+                [git_executable, "rev-parse", "HEAD"],  # nosec B603 - fixed local Git query
+                cwd=repository_root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("mobile publication cannot determine its source Git commit") from exc
+        candidate = completed.stdout.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{40}", candidate) is None:
+        raise RuntimeError("mobile publication source Git commit is invalid")
+    return candidate
+
+
 def _require_post_close_quotes(snapshot: object, market_as_of: str) -> float:
     quotes = getattr(snapshot, "analysis_quotes", None)
-    required_columns = {"quote_status", "source_trade_date", "quote_tick_time"}
+    required_columns = {"code", "market", "quote_status", "source_trade_date", "quote_tick_time"}
     if quotes is None or not required_columns.issubset(getattr(quotes, "columns", ())):
         raise RuntimeError("fresh snapshot has no verifiable post-close quote timestamps")
-    trading = quotes.loc[quotes["quote_status"].astype(str).eq("trading")]
-    if "market" in trading.columns:
-        trading = trading.loc[trading["market"].astype(str).isin({"SH", "SZ"})]
-    if trading.empty:
-        raise RuntimeError("fresh snapshot has no verifiable post-close trading quotes")
+    eligible_codes = tuple(getattr(snapshot, "eligible_codes", ()))
+    codes = [str(code).strip() for code in quotes["code"]]
+    if (
+        not eligible_codes
+        or len(codes) != len(set(codes))
+        or set(codes) != set(eligible_codes)
+        or not quotes["market"].astype(str).isin({"SH", "SZ"}).all()
+    ):
+        raise RuntimeError("fresh snapshot post-close rows do not match the eligible SH/SZ universe")
+    statuses = quotes["quote_status"].astype(str)
+    if not statuses.isin({"trading", "suspended_or_no_trade"}).all():
+        raise RuntimeError("fresh snapshot has invalid quote trading states")
+    trading = quotes.loc[statuses.eq("trading")]
+    trading_coverage = len(trading) / len(quotes)
+    if trading.empty or trading_coverage < 0.99:
+        raise RuntimeError(
+            f"trading quote coverage {trading_coverage:.1%} is below required 99.0%; "
+            "too many companies may be using previous-close prices"
+        )
     verified = 0
     for source_date, tick_value in zip(trading["source_trade_date"], trading["quote_tick_time"]):
         try:
@@ -90,7 +148,10 @@ def _require_post_close_quotes(snapshot: object, market_as_of: str) -> float:
             continue
         if str(source_date).strip() == market_as_of and tick >= time(15, 0):
             verified += 1
-    coverage = verified / len(trading)
+    # Use the complete eligible universe as the denominator.  Otherwise a
+    # corrupted feed could label a large fraction as suspended and make its
+    # remaining trading subset look perfectly post-close.
+    coverage = verified / len(quotes)
     if coverage < 0.99:
         raise RuntimeError(
             f"post-close quote coverage {coverage:.1%} is below required 99.0%; "
@@ -103,6 +164,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     """Run production analysis and atomically write a client-ready snapshot."""
     if refresh and _shanghai_now().time() < time(16, 0):
         raise RuntimeError("post-close mobile publication is not allowed before 16:00 Asia/Shanghai")
+    source_commit = _source_commit()
     starting_state = audit_state_hashes()
     cache = SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
     snapshot = get_market_snapshot(
@@ -123,11 +185,25 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     eligible_codes = tuple(getattr(snapshot, "eligible_codes", ()))
     if not eligible_codes:
         raise RuntimeError("validated snapshot has no eligible Shanghai/Shenzhen companies")
+    coldness_reference_artifact: dict[str, object] = {}
+    coldness_archive_candidates: list[object] = []
     coldness_evidence, coldness_status = _load_market_coldness_evidence(
         snapshot,
         eligible_codes,
         force_refresh=refresh,
+        reference_artifact_out=coldness_reference_artifact,
+        archive_candidate_out=coldness_archive_candidates,
     )
+    _require_market_coldness_release_evidence(
+        coldness_evidence,
+        coldness_status,
+        reference_artifact=coldness_reference_artifact,
+        eligible_codes=eligible_codes,
+        as_of_session=market_as_of,
+    )
+    if len(coldness_archive_candidates) != 1:
+        raise RuntimeError("validated market-coldness evidence has no unique archive candidate")
+    archive_market_coldness_session_snapshot(coldness_archive_candidates[0], market_as_of)
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -174,6 +250,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         analysis_quality=analysis.quality,
         dcf_results=analysis.dcf_results,
         provenance={
+            "source_commit": source_commit,
             "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
             "snapshot_source": snapshot.source,
             "snapshot_payload_sha256": active_payload_sha256,
@@ -190,7 +267,10 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     manifest = publish_mobile_snapshot(output_dir=args.output_dir, refresh=bool(args.refresh))
-    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    # GitHub's Windows runner may expose a cp1252 stdout even though the files
+    # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful
+    # publication cannot be turned into a failed job by Chinese display text.
+    print(json.dumps(manifest, ensure_ascii=True, indent=2))
     return 0
 
 

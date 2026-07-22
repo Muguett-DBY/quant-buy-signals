@@ -12,6 +12,7 @@ from data.market_coldness import (
     MetricCoverage,
 )
 from engine.market_coldness import (
+    MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION,
     MARKET_COLDNESS_MODEL_ID,
     MAX_COLDNESS_SCORE,
     MAX_SCORE_WITHOUT_VOLUME_RATIO,
@@ -440,7 +441,7 @@ def test_price_heat_guard_cannot_be_overridden_by_low_turnover_or_volume():
     assert "60d_hot_cap=3.0" in result["components"]["caps"]
 
 
-def test_missing_listing_date_and_zero_turnover_never_become_cold_signals():
+def test_missing_listing_date_is_unscored_but_numeric_zero_turnover_is_valid_coldness_evidence():
     missing_listing = _snapshot(
         _record(
             "600001",
@@ -451,20 +452,228 @@ def test_missing_listing_date_and_zero_turnover_never_become_cold_signals():
             listing_date=None,
         )
     )
-    zero_trade = _snapshot(
-        _record("600001", change_60d_pct=-30, change_ytd_pct=-30, turnover_rate_pct=0, volume_ratio=0)
+    zero_turnover = _snapshot(
+        _record("600001", change_60d_pct=-30, change_ytd_pct=-30, turnover_rate_pct=0, volume_ratio=None)
     )
 
-    for snapshot in (missing_listing, zero_trade):
-        assert (
-            build_market_coldness_evidence(
-                snapshot,
-                as_of_session="2026-07-15",
-                now=NOW,
-                min_cross_section_records=1,
-            )
-            == {}
+    assert (
+        build_market_coldness_evidence(
+            missing_listing,
+            as_of_session="2026-07-15",
+            now=NOW,
+            min_cross_section_records=1,
         )
+        == {}
+    )
+    evidence = build_market_coldness_evidence(
+        zero_turnover,
+        as_of_session="2026-07-15",
+        now=NOW,
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+    )["600001"]
+    assert evidence["components"]["raw_values"]["turnover_rate_pct"] == 0.0
+    assert evidence["market_coldness_score"] <= MAX_SCORE_WITHOUT_VOLUME_RATIO
+
+
+def test_unscored_diagnostics_are_a_complete_sorted_candidate_partition():
+    records = (
+        *(
+            _record(
+                f"{600001 + index:06d}",
+                change_60d_pct=-20,
+                change_ytd_pct=-20,
+                turnover_rate_pct=1.0,
+                volume_ratio=0.8,
+            )
+            for index in range(6)
+        ),
+        _record(
+            "600007",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            listing_date=None,
+        ),
+        _record(
+            "600008",
+            change_60d_pct=None,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+        ),
+        _record(
+            "600009",
+            change_60d_pct=-20,
+            change_ytd_pct=None,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+        ),
+        _record(
+            "600010",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=None,
+            volume_ratio=0.8,
+        ),
+        _record(
+            "600011",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=0,
+            volume_ratio=0,
+        ),
+        _record(
+            "600012",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            listing_date="2026-01-02",
+        ),
+    )
+    bound_codes = tuple(record.code for record in records) + ("600099",)
+    diagnostics = {}
+
+    evidence = build_market_coldness_evidence(
+        _snapshot(*reversed(records)),
+        as_of_session="2026-07-15",
+        listed_quote_codes=reversed(bound_codes),
+        now=NOW,
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+        diagnostics=diagnostics,
+    )
+
+    assert set(evidence) == {f"{600001 + index:06d}" for index in range(6)} | {"600011"}
+    assert diagnostics["diagnostics_schema_version"] == MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION
+    assert diagnostics["eligible_candidate_count"] == 13
+    assert diagnostics["evidence_count"] == 7
+    assert diagnostics["unscored_code_count"] == 6
+    assert diagnostics["unscored_codes"] == [
+        "600007",
+        "600008",
+        "600009",
+        "600010",
+        "600012",
+        "600099",
+    ]
+    reasons = diagnostics["unscored_codes_by_reason"]
+    assert list(reasons) == [
+        "listing_history_lt_120_days",
+        "listed_in_current_year",
+        "missing_listing_date",
+        "missing_required_metric",
+        "missing_source_record",
+        "insufficient_reference_cross_section",
+    ]
+    assert reasons["listed_in_current_year"] == {
+        "classification": "model_not_applicable",
+        "count": 1,
+        "codes": ["600012"],
+    }
+    assert reasons["missing_listing_date"] == {
+        "classification": "data_missing",
+        "count": 1,
+        "codes": ["600007"],
+    }
+    assert reasons["missing_required_metric"] == {
+        "classification": "data_missing",
+        "count": 3,
+        "codes": ["600008", "600009", "600010"],
+    }
+    assert reasons["missing_source_record"] == {
+        "classification": "data_missing",
+        "count": 1,
+        "codes": ["600099"],
+    }
+    assert diagnostics["model_not_applicable_code_count"] == 1
+    assert diagnostics["model_not_applicable_codes"] == ["600012"]
+    assert diagnostics["data_missing_code_count"] == 5
+    assert diagnostics["data_missing_codes"] == ["600007", "600008", "600009", "600010", "600099"]
+    assert diagnostics["missing_required_metrics_by_code"] == {
+        "600008": ["change_60d_pct"],
+        "600009": ["change_ytd_pct"],
+        "600010": ["turnover_rate_pct"],
+    }
+
+
+def test_listing_age_and_current_year_reasons_are_distinct_non_applicable_categories():
+    retrieved = "2026-01-15T08:00:00+00:00"
+    old = _record(
+        "600001",
+        change_60d_pct=-20,
+        change_ytd_pct=-20,
+        turnover_rate_pct=1.0,
+        volume_ratio=0.8,
+        retrieved_at=retrieved,
+    )
+    current_year = _record(
+        "600002",
+        change_60d_pct=-20,
+        change_ytd_pct=-20,
+        turnover_rate_pct=1.0,
+        volume_ratio=0.8,
+        listing_date="2026-01-01",
+        retrieved_at=retrieved,
+    )
+    prior_year_recent = _record(
+        "600003",
+        change_60d_pct=-20,
+        change_ytd_pct=-20,
+        turnover_rate_pct=1.0,
+        volume_ratio=0.8,
+        listing_date="2025-12-31",
+        retrieved_at=retrieved,
+    )
+    diagnostics = {}
+
+    evidence = build_market_coldness_evidence(
+        _snapshot(old, current_year, prior_year_recent),
+        as_of_session="2026-01-15",
+        listed_quote_codes=("600003", "600002", "600001"),
+        now=datetime(2026, 1, 16, 2, 0, tzinfo=timezone.utc),
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+        diagnostics=diagnostics,
+    )
+
+    assert set(evidence) == {"600001"}
+    reasons = diagnostics["unscored_codes_by_reason"]
+    assert reasons["listing_history_lt_120_days"]["codes"] == ["600003"]
+    assert reasons["listed_in_current_year"]["codes"] == ["600002"]
+    assert diagnostics["model_not_applicable_codes"] == ["600002", "600003"]
+    assert diagnostics["data_missing_code_count"] == 0
+
+
+def test_insufficient_reference_cross_section_accounts_for_every_otherwise_scorable_code():
+    records = (
+        _record("600002", change_60d_pct=-20, change_ytd_pct=-20, turnover_rate_pct=1.0, volume_ratio=0.8),
+        _record("600001", change_60d_pct=-20, change_ytd_pct=-20, turnover_rate_pct=1.0, volume_ratio=0.8),
+    )
+    diagnostics = {}
+
+    assert (
+        build_market_coldness_evidence(
+            _snapshot(*records),
+            as_of_session="2026-07-15",
+            listed_quote_codes=("600001", "600002"),
+            now=NOW,
+            min_cross_section_records=3,
+            diagnostics=diagnostics,
+        )
+        == {}
+    )
+    assert diagnostics["eligible_candidate_count"] == 2
+    assert diagnostics["evidence_count"] == 0
+    assert diagnostics["unscored_code_count"] == 2
+    assert diagnostics["data_missing_codes"] == ["600001", "600002"]
+    assert diagnostics["unscored_codes_by_reason"]["insufficient_reference_cross_section"] == {
+        "classification": "data_missing",
+        "count": 2,
+        "codes": ["600001", "600002"],
+    }
 
 
 def test_same_session_intraday_evidence_is_provisional_and_not_decision_eligible():
@@ -494,9 +703,37 @@ def test_same_session_intraday_evidence_is_provisional_and_not_decision_eligible
     )
     assert diagnostics == {
         "evidence_available": False,
-        "evidence_reason": "intraday_before_close",
+        "evidence_reason": "retrieval_before_close",
+        "retrieval_time_shanghai": "09:00:00",
         "decision_eligible_after": "15:15:00 Asia/Shanghai",
     }
+
+
+def test_preclose_retrieval_never_becomes_decision_eligible_after_the_close():
+    retrieved = "2026-07-16T01:00:00+00:00"
+    snapshot = _snapshot(
+        _record(
+            "600001",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            retrieved_at=retrieved,
+        )
+    )
+    diagnostics = {}
+
+    assert (
+        build_market_coldness_evidence(
+            snapshot,
+            as_of_session="2026-07-16",
+            now=datetime(2026, 7, 16, 8, 30, tzinfo=timezone.utc),
+            min_cross_section_records=1,
+            diagnostics=diagnostics,
+        )
+        == {}
+    )
+    assert diagnostics["evidence_reason"] == "retrieval_before_close"
 
 
 def test_different_session_trading_activity_is_never_rebound_to_the_snapshot():

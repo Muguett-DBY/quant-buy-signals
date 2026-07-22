@@ -37,6 +37,7 @@ def _metric(code: str, **overrides: object) -> dict[str, object]:
         "net_profit_history": [9.0, 10.0, 11.0, 12.0],
         "indicator_roic_years": [2022, 2023, 2024, 2025],
         "indicator_roic_history": [0.15, 0.16, 0.17, 0.18],
+        "gross_margin_years": [2022, 2023, 2024, 2025],
         "gross_margin_history": [0.43, 0.44, 0.45, 0.45],
         "margin_history": [0.10, 0.105, 0.108, 0.11],
         "fcf_history": [7.0, 8.0, 9.0, 10.0],
@@ -203,6 +204,7 @@ def test_recent_moat_window_is_not_reported_as_total_company_history() -> None:
         revenue_values=[100.0 * 1.05**index for index in range(10)],
         indicator_roic_years=years,
         indicator_roic_history=[0.18] * 10,
+        gross_margin_years=years,
         gross_margin_history=[0.60] * 10,
     )
     evidence = derive_company_evidence(target, _context())
@@ -216,6 +218,52 @@ def test_recent_moat_window_is_not_reported_as_total_company_history() -> None:
     assert durability["durability_history_years"] == 10
     assert durability["history_count"] == 10
     assert durability["history_cap"] == 10.0
+
+
+def test_durability_and_runway_history_use_the_latest_consecutive_common_suffix() -> None:
+    years = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2024, 2025]
+    target = _metric(
+        "TARGET",
+        revenue_years=years,
+        revenue_values=[100.0 + index for index in range(len(years))],
+        indicator_roic_years=years,
+        indicator_roic_history=[0.18] * len(years),
+        gross_margin_years=years,
+        gross_margin_history=[0.60] * len(years),
+    )
+
+    evidence = derive_company_evidence(target, _context())
+    moat = evidence["moat_score"]["details"]
+    durability = evidence["moat_durability_score"]["details"]
+    runway = evidence["runway_score"]["details"]
+
+    assert moat["recent_roic_spread_history_years"] == [2024, 2025]
+    assert moat["recent_gross_margin_history_years"] == [2024, 2025]
+    assert moat["recent_operating_evidence_years"] == 2
+    assert durability["common_history_years"] == years
+    assert durability["durability_history_years"] == 2
+    assert durability["history_cap"] == 2.0
+    assert runway["financial_history_periods"] == years
+    assert runway["financial_history_years"] == 2
+    assert runway["evidence_cap"] == 6.0
+
+
+def test_durability_history_requires_roic_and_gross_margin_in_the_same_latest_years() -> None:
+    roic_years = list(range(2016, 2026))
+    gross_years = [*range(2016, 2024), 2025]
+    target = _metric(
+        "TARGET",
+        indicator_roic_years=roic_years,
+        indicator_roic_history=[0.18] * len(roic_years),
+        gross_margin_years=gross_years,
+        gross_margin_history=[0.60] * len(gross_years),
+    )
+
+    durability = derive_company_evidence(target, _context())["moat_durability_score"]["details"]
+
+    assert durability["common_history_years"] == gross_years
+    assert durability["durability_history_years"] == 1
+    assert durability["history_cap"] == 2.0
 
 
 def test_sorted_population_view_matches_materialised_list_with_duplicate_removal_and_mutation() -> None:

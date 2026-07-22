@@ -71,6 +71,13 @@ def _bash_executable() -> str | None:
     return None
 
 
+def _pwsh_executable() -> str:
+    executable = shutil.which("pwsh")
+    if executable is None:
+        pytest.skip("PowerShell 7 is not installed on this test host")
+    return executable
+
+
 def test_mobile_publication_uses_immutable_release_assets_and_an_atomic_pages_manifest():
     workflow = _workflow_text(MOBILE_WORKFLOW)
 
@@ -87,6 +94,51 @@ def test_mobile_publication_uses_immutable_release_assets_and_an_atomic_pages_ma
     assert "manifest-$generation.sig" in workflow
     assert "Test-DetachedSignature" in workflow
     assert "previous_assets=" in workflow
+    assert "previous_manifest_state=" in workflow
+
+
+def test_mobile_publication_artifacts_survive_failed_job_and_full_workflow_reruns():
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+    jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
+
+    assert "github.run_attempt" not in workflow
+    build_upload = next(
+        step for step in jobs["build"]["steps"] if step.get("name") == "Upload the verified bundle between jobs"
+    )
+    assert build_upload["with"]["name"] == "mobile-market-data-build-${{ github.run_id }}"
+    assert build_upload["with"]["overwrite"] is True
+    publish_download = next(
+        step for step in jobs["publish"]["steps"] if step.get("name") == "Download the verified release bundle"
+    )
+    assert publish_download["with"]["name"] == build_upload["with"]["name"]
+
+    canonical_upload = next(
+        step
+        for step in jobs["publish"]["steps"]
+        if step.get("name") == "Upload the canonical published bundle for downstream jobs"
+    )
+    assert canonical_upload["with"]["name"] == "mobile-market-data-published-${{ github.run_id }}"
+    assert canonical_upload["with"]["overwrite"] is True
+    assert canonical_upload["if"] == "steps.release.outputs.published == 'true'"
+    for job_name in ("prepare_pages", "verify_cleanup", "archive_manifest"):
+        download = next(
+            step for step in jobs[job_name]["steps"] if str(step.get("name", "")).startswith("Download the")
+        )
+        assert download["with"]["name"] == canonical_upload["with"]["name"]
+
+
+def test_mobile_publication_removes_only_incomplete_starter_assets_before_retry():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    release = next(step for step in parsed["jobs"]["publish"]["steps"] if step.get("id") == "release")["run"]
+
+    assert release.count("[string]$_.state -ceq 'starter'") == 2
+    assert release.count("[long]$_.size -eq 0") == 2
+    assert release.count("[string]$asset.apiUrl") == 2
+    assert release.count("api\\.github\\.com/repos/") == 2
+    assert release.count("[string]$Matches.repository -ine $env:GH_REPO") == 2
+    assert release.count('gh api --method DELETE "repos/$env:GH_REPO/releases/assets/$assetId"') == 2
+    assert "already exists with different bytes" in release
+    assert "Removing incomplete GitHub release asset" in release
 
 
 def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_path):
@@ -135,6 +187,7 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
 
 def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file_set():
     workflow = _workflow_text(MOBILE_WORKFLOW)
+    parsed = _workflow(MOBILE_WORKFLOW)
 
     assert "retrieval_time_oldest" in workflow
     assert "source_quote_timestamp_latest" in workflow
@@ -147,6 +200,13 @@ def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file
     assert "Previous manifest signature is invalid" in workflow
     assert "Previous asset $($entry[1]) is incomplete" in workflow
     assert "Public immutable asset $name differs from the verified build artifact" in workflow
+    signing = next(
+        step
+        for step in parsed["jobs"]["build"]["steps"]
+        if step.get("name") == "Sign the exact market manifest and verify the app-pinned key"
+    )
+    assert "sign_mobile_manifest.ps1" in signing["run"]
+    assert "$LASTEXITCODE" not in signing["run"]
 
 
 def test_mobile_publication_does_not_rename_or_rewrite_the_signed_generation():
@@ -167,6 +227,7 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     jobs = parsed["jobs"]
 
     assert set(jobs) == {
+        "preflight",
         "build",
         "publish",
         "prepare_pages",
@@ -174,7 +235,13 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
         "verify_cleanup",
         "archive_manifest",
     }
-    assert all(job.get("if") == "github.ref == 'refs/heads/main'" for job in jobs.values())
+    assert jobs["preflight"]["if"] == "github.ref == 'refs/heads/main'"
+    assert jobs["build"]["if"] == ("github.ref == 'refs/heads/main' && needs.preflight.outputs.should_run == 'true'")
+    for name in ("publish", "deploy_pages", "archive_manifest"):
+        assert jobs[name]["if"] == "github.ref == 'refs/heads/main'"
+    for name in ("prepare_pages", "verify_cleanup"):
+        assert jobs[name]["if"] == "github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'"
+    assert jobs["preflight"]["permissions"] == {"contents": "read"}
     assert jobs["build"]["permissions"] == {"contents": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert jobs["prepare_pages"]["permissions"] == {"contents": "read", "pages": "write"}
@@ -182,6 +249,12 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert jobs["verify_cleanup"]["permissions"] == {"contents": "write"}
     assert jobs["archive_manifest"]["permissions"] == {"contents": "write"}
     assert jobs["archive_manifest"]["needs"] == "verify_cleanup"
+    assert jobs["build"]["needs"] == "preflight"
+    assert parsed["concurrency"] == {
+        "group": "mobile-market-data",
+        "cancel-in-progress": False,
+        "queue": "max",
+    }
     assert jobs["build"]["environment"] == "mobile-production"
     assert jobs["deploy_pages"]["environment"]["name"] == "github-pages"
     assert "requirements-dev-lock.txt" not in workflow
@@ -189,6 +262,24 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert workflow.count("continue-on-error: true") == 2
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
+
+
+def test_old_main_reruns_are_noops_before_build_and_immediately_before_publication():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    jobs = parsed["jobs"]
+    guard = next(step for step in jobs["preflight"]["steps"] if step.get("id") == "guard")["run"]
+    release_step = next(step for step in jobs["publish"]["steps"] if step.get("id") == "release")
+    release = release_step["run"]
+
+    for script in (guard, release):
+        assert "git ls-remote --exit-code origin refs/heads/main" in script
+        assert "$remoteMainSha -cne $env:GITHUB_SHA" in script
+    assert guard.index("$remoteMainSha -cne $env:GITHUB_SHA") < guard.index("mobile_market_workflow_guard.ps1")
+    assert "reason=stale_main_workflow_run" in guard
+    assert release.index("$remoteMainSha -cne $env:GITHUB_SHA") < release.index("$tag = 'mobile-market-data'")
+    assert "'published=false'" in release
+    assert "'published=true'" in release
+    assert jobs["publish"]["outputs"]["published"] == "${{ steps.release.outputs.published }}"
 
 
 def test_job_level_environment_does_not_reference_runner_context():
@@ -232,6 +323,9 @@ def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch()
     assert "latest/manifest.json" in workflow
     assert "SHA256SUMS.txt" in workflow
     assert "gh release download mobile-market-data" in workflow
+    assert "source_commit=\"$(jq -er '.provenance.source_commit'" in workflow
+    assert "retry gh release download mobile-market-data" in workflow
+    assert "retry git push origin HEAD:mobile-data" in workflow
     assert "git push origin HEAD:mobile-data" in workflow
     assert "git push --force" not in workflow
     assert "git push -f" not in workflow
@@ -250,6 +344,16 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         {"cron": "47 8 * * 1-5"},
         {"cron": "17 9 * * 1-5"},
     ]
+    preflight = parsed["jobs"]["preflight"]
+    guard = next(step for step in preflight["steps"] if step.get("id") == "guard")
+    assert "mobile_market_workflow_guard.ps1" in guard["run"]
+    assert "${{ github.event_name }}" in guard["run"]
+    guard_invocation = guard["run"].index("mobile_market_workflow_guard.ps1")
+    assert "$LASTEXITCODE" not in guard["run"][guard_invocation:]
+    assert preflight["outputs"] == {
+        "should_run": "${{ steps.guard.outputs.should_run }}",
+        "reason": "${{ steps.guard.outputs.reason }}",
+    }
     for path in (
         "data/cache/market_snapshot.json.gz",
         "data/cache/market_coldness",
@@ -323,18 +427,80 @@ def test_pages_action_revisions_and_release_patterns_are_pinned_and_bounded():
     assert re.search(r"actions/deploy-pages@[0-9a-f]{40}", workflow)
     assert "$attempt -le 6" in workflow
     assert "Start-Sleep -Seconds (5 * $attempt)" in workflow
+    assert "Public immutable asset $name could not be verified after four attempts" in workflow
     assert "gh release delete-asset $tag $name --repo $env:GH_REPO --yes" in workflow
     assert "manifest\\.json" in workflow
 
 
+def test_previous_manifest_errors_skip_cleanup_and_only_verified_first_publication_allows_cleanup():
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+    parsed = _workflow(MOBILE_WORKFLOW)
+    publish = parsed["jobs"]["publish"]
+    release_step = next(step for step in publish["steps"] if step.get("id") == "release")
+    release_script = release_step["run"]
+
+    assert "$previousManifestState = 'error'" in release_script
+    assert "$previousManifestState = 'found'" in release_script
+    assert "$allPreviousFetchesWereNotFound = $true" in release_script
+    assert "if ($statusCode -ne 404)" in release_script
+    assert "$allPreviousFetchesWereNotFound -and $releaseCreated" in release_script
+    assert "$attempt -le 3" in release_script
+    assert "$previousManifestState = 'missing'" in release_script
+    assert "retention cleanup will be skipped" in release_script
+    assert "previous_manifest_state=$previousManifestState" in release_script
+    assert publish["outputs"]["previous_manifest_state"] == "${{ steps.release.outputs.previous_manifest_state }}"
+
+    cleanup = next(
+        step
+        for step in parsed["jobs"]["verify_cleanup"]["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )["run"]
+    guard_index = cleanup.index("MOBILE_PREVIOUS_MANIFEST_STATE -ceq 'error'")
+    deletion_index = cleanup.index("gh release delete-asset")
+    assert guard_index < deletion_index
+    assert "exit 0" in cleanup[guard_index:deletion_index]
+    assert "MOBILE_PREVIOUS_MANIFEST_STATE -cnotin @('found', 'missing')" in cleanup
+    assert workflow.count("previous_manifest_state") >= 3
+
+
+def test_cleanup_runtime_never_invokes_github_when_previous_manifest_validation_failed(tmp_path):
+    parsed = _workflow(MOBILE_WORKFLOW)
+    cleanup = next(
+        step
+        for step in parsed["jobs"]["verify_cleanup"]["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )["run"]
+    script = tmp_path / "cleanup-error.ps1"
+    script.write_text(
+        "function gh { throw 'gh must not run when previous manifest state is error' }\n" + cleanup,
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["MOBILE_PREVIOUS_MANIFEST_STATE"] = "error"
+
+    result = subprocess.run(
+        [_pwsh_executable(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Skipping retention cleanup" in result.stdout + result.stderr
+
+
 def test_ci_workflow_runs_on_every_branch_push_and_supports_manual_reverification():
     workflow = _workflow_text(TEST_WORKFLOW)
+    parsed = _workflow(TEST_WORKFLOW)
 
     push_section = workflow[workflow.index("  push:") : workflow.index("  pull_request:")]
     assert "branches:" in push_section
     assert '- "**"' in push_section
     assert "tags-ignore:" not in push_section
     assert "  workflow_dispatch:" in workflow
+    assert parsed["jobs"]["verify"]["timeout-minutes"] >= 45
 
 
 def _locked_versions(path: Path) -> dict[str, str]:
@@ -373,7 +539,10 @@ def test_android_sdk_install_reports_sdkmanager_status_instead_of_yes_broken_pip
     workflow = _workflow_text(TEST_WORKFLOW)
 
     assert "set +o pipefail" in workflow
-    assert "sdkmanager_status=${PIPESTATUS[1]}" in workflow
+    assert 'pipeline_status=("${PIPESTATUS[@]}")' in workflow
+    assert "sdkmanager_status=${pipeline_status[1]}" in workflow
+    assert "for attempt in 1 2 3" in workflow
+    assert "sleep $((attempt * 2))" in workflow
     assert 'exit "$sdkmanager_status"' in workflow
 
 

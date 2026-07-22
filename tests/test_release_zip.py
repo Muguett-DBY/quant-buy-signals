@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
+from functools import lru_cache
 import hashlib
 import io
 import json
@@ -14,7 +16,12 @@ import pytest
 
 from engine.audit import _RULE_FILES as _AUDIT_RULE_FILES
 from engine.buy_screener import STATUS_INSUFFICIENT_EVIDENCE, score_type7_quality_equity
+from engine.market_coldness import MARKET_COLDNESS_MODEL_ID
 from engine.quality_equity import TYPE7_DIRECT_SCORE_KEYS
+from tools.run_full_audit import (
+    _canonical_market_coldness_json,
+    _replay_market_coldness_reference_artifact,
+)
 from tools.verify_release_zip import (
     _REQUIRED_FILES,
     _RULE_FILES as _RELEASE_RULE_FILES,
@@ -40,6 +47,7 @@ _EXPECTED_RULE_FILES = {
     "data/market_history.py",
     "data/quality_history.py",
     "data/research_reports.py",
+    "data/trading_calendar.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
     "engine/market_coldness.py",
@@ -48,6 +56,7 @@ _EXPECTED_RULE_FILES = {
     "engine/risk.py",
     "engine/scenarios.py",
     "engine/valuation_status.py",
+    "tools/china_a_share_trading_calendar.json",
 }
 _LICENSE_BYTES = (Path(__file__).resolve().parents[1] / "LICENSE").read_bytes()
 
@@ -68,6 +77,70 @@ def _hash_files(files, selected):
 
 def _eligible_codes():
     return [f"{code:06d}" for code in range(1, 2201)] + [f"{code:06d}" for code in range(600001, 602001)]
+
+
+@lru_cache(maxsize=1)
+def _market_coldness_audit_fixture(analysis_codes: tuple[str, ...], eligible_codes: tuple[str, ...]):
+    retrieved_at = "2026-07-15T08:05:00Z"
+    artifact = {
+        "schema_version": 1,
+        "model_id": MARKET_COLDNESS_MODEL_ID,
+        "source": "Eastmoney push2 clist",
+        "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
+        "retrieved_at": retrieved_at,
+        "as_of_session": "2026-07-15",
+        "listed_codes": list(analysis_codes),
+        "source_record_count": len(analysis_codes),
+        "records": [
+            [
+                code,
+                "2010-01-01",
+                round(-30.0 + (index % 101) * 0.5, 2),
+                round(-40.0 + (index % 121) * 0.6, 2),
+                round(0.25 + (index % 80) * 0.1, 2),
+                round(0.4 + (index % 40) * 0.05, 2),
+            ]
+            for index, code in enumerate(analysis_codes)
+        ],
+    }
+    replay = _replay_market_coldness_reference_artifact(
+        artifact,
+        eligible_codes=eligible_codes,
+        as_of_session="2026-07-15",
+    )
+    evidence = replay["eligible_evidence"]
+    not_applicable = replay["eligible_not_applicable_codes_by_reason"]
+    data_gaps = replay["eligible_unscored_data_gap_codes_by_reason"]
+    summary = {
+        "provided": True,
+        "evidence_count": len(evidence),
+        "eligible_evidence_count": len(evidence),
+        "eligible_evidence_coverage": len(evidence) / len(eligible_codes),
+        "evidence_sha256": hashlib.sha256(_canonical_market_coldness_json(evidence)).hexdigest(),
+        "sources": ["Eastmoney push2 clist; https://push2delay.eastmoney.com/api/qt/clist/get"],
+        "as_of_sessions": ["2026-07-15"],
+    }
+    status = {
+        "available": True,
+        "evidence_available": True,
+        "evidence_reason": "available",
+        "model_id": MARKET_COLDNESS_MODEL_ID,
+        "source": "Eastmoney push2 clist",
+        "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
+        "retrieved_at": retrieved_at,
+        "as_of_session": "2026-07-15",
+        "reference_artifact_sha256": hashlib.sha256(_canonical_market_coldness_json(artifact)).hexdigest(),
+        "full_listed_evidence_count": len(replay["full_evidence"]),
+        "eligible_evidence_count": len(evidence),
+        "eligible_evidence_coverage": len(evidence) / len(eligible_codes),
+        "eligible_applicable_count": len(evidence),
+        "eligible_applicable_evidence_coverage": 1.0,
+        "eligible_not_applicable_count": sum(len(codes) for codes in not_applicable.values()),
+        "eligible_not_applicable_codes_by_reason": not_applicable,
+        "eligible_unscored_data_gap_count": sum(len(codes) for codes in data_gaps.values()),
+        "eligible_unscored_data_gap_codes_by_reason": data_gaps,
+    }
+    return artifact, summary, status
 
 
 _REPORTING_PERIOD_CONTRACT = {
@@ -370,11 +443,84 @@ def _financial_pb_valuation_result(code):
     }
 
 
+def _fixture_type1_1a_from_valuation(result):
+    price = float(result["current_price"])
+    buy_upper = float(result["buy_zone_upper"])
+    depth = (buy_upper - price) / buy_upper
+    if depth > 0.20:
+        return 9.5
+    if depth >= 0.10:
+        return 7.5
+    if depth >= 0:
+        return 5.5
+    if depth >= -0.10:
+        return 3.5
+    return 1.5
+
+
+def _set_fixture_type1_from_valuation(company, result):
+    score = _fixture_type1_1a_from_valuation(result)
+    payload = company["type1"]
+    payload["sub_scores"]["1a"] = score
+    payload["reasons"]["1a"] = "独立估值位置夹具"
+    payload["total"] = round(
+        payload["sub_scores"]["1a"] * 0.30
+        + payload["sub_scores"]["1b"] * 0.35
+        + payload["sub_scores"]["1c"] * 0.20
+        + payload["sub_scores"]["1d"] * 0.15,
+        1,
+    )
+    payload["triggered"] = False
+    payload["veto"] = score <= 2.0
+    payload["status"] = "vetoed" if payload["veto"] else "not_triggered"
+    payload["applicable"] = True
+    payload["evidence_complete"] = True
+    payload["reasons"].update(
+        {
+            "_status": payload["status"],
+            "_applicable": "yes",
+            "_evidence": "complete",
+        }
+    )
+    if payload["veto"]:
+        payload["reasons"]["_veto"] = "买入区深度不足"
+    else:
+        payload["reasons"].pop("_veto", None)
+    company["type1_score"] = payload["total"]
+
+
+def _set_fixture_type1_from_skip(company, category):
+    payload = company["type1"]
+    payload["sub_scores"] = {key: 0.0 for key in ("1a", "1b", "1c", "1d")}
+    payload["total"] = 0.0
+    payload["triggered"] = False
+    payload["veto"] = False
+    payload["reasons"] = {key: "估值跳过夹具" for key in payload["sub_scores"]}
+    if category in {"model_unsupported", "economic_not_applicable"}:
+        payload.update(status="not_applicable", applicable=False, evidence_complete=True)
+        payload["reasons"]["_scope"] = "估值模型不适用"
+    elif category in {"source_missing", "inconsistent_source"}:
+        payload.update(status="insufficient_evidence", applicable=True, evidence_complete=False)
+        payload["reasons"]["_missing"] = "估值证据不足"
+    else:
+        payload.update(status="blocked", applicable=True, evidence_complete=False)
+        payload["reasons"]["_blocked"] = "估值计算异常"
+    payload["reasons"].update(
+        {
+            "_status": payload["status"],
+            "_applicable": "yes" if payload["applicable"] else "no",
+            "_evidence": "complete" if payload["evidence_complete"] else "incomplete",
+        }
+    )
+    company["type1_score"] = 0.0
+
+
 def _convert_first_valuation_to_financial_pb(payload):
     code = next(iter(payload["dcf_results"]))
     payload["dcf_results"][code] = _financial_pb_valuation_result(code)
     company = next(company for company in payload["companies"] if company["code"] == code)
     company["industry"] = "BANK"
+    _set_fixture_type1_from_valuation(company, payload["dcf_results"][code])
     coverage = payload["provenance"]["caller_metadata"]["validation"]["strict_ttm_source_coverage"]
     coverage["denominator"] -= 1
     coverage["excluded_financial_codes"] = sorted([*coverage["excluded_financial_codes"], code])
@@ -384,6 +530,64 @@ def _convert_first_valuation_to_financial_pb(payload):
         metric_coverage["complete"] -= 1
         metric_coverage["status_counts"]["complete"] -= 1
         metric_coverage["coverage"] = 1.0
+    _set_fixture_type7_ledger(
+        company,
+        valuation_evidence_complete=False,
+        metric={
+            "code": code,
+            "industry": "BANK",
+            "source_trade_date": "2026-07-15",
+        },
+    )
+    _refresh_fixture_company_summary(company)
+
+
+_TYPE7_FIXTURE_CACHE = {}
+
+
+def _set_fixture_type7_ledger(company, *, valuation_evidence_complete, metric=None, history=None):
+    code = company["code"]
+    type1 = company["type1"]
+    type1_outcome = (
+        type1["triggered"],
+        type1["total"],
+        type1["sub_scores"],
+        type1["reasons"],
+    )
+    source_metric = metric or {
+        "code": code,
+        "industry": company["industry"],
+        "source_trade_date": "2026-07-15",
+    }
+    type1_1a = float(type1["sub_scores"]["1a"])
+    cache_key = (valuation_evidence_complete, type1_1a) if metric is None and history is None else None
+    cached = _TYPE7_FIXTURE_CACHE.get(cache_key) if cache_key is not None else None
+    if cached is None:
+        outcome, ledger = score_type7_quality_equity(
+            source_metric,
+            type1_outcome,
+            history,
+            valuation_evidence_complete=valuation_evidence_complete,
+        )
+        if cache_key is not None:
+            _TYPE7_FIXTURE_CACHE[cache_key] = deepcopy((outcome, ledger))
+    else:
+        outcome, ledger = deepcopy(cached)
+        ledger["code"] = code
+        ledger["prerequisites"]["external_report_content_verification"]["code"] = code
+    triggered, total, sub_scores, reasons = outcome
+    company["type7_score"] = total
+    company["type7"] = {
+        "triggered": triggered,
+        "total": total,
+        "sub_scores": sub_scores,
+        "reasons": reasons,
+        "veto": bool(reasons.get("_veto")),
+        "status": reasons["_status"],
+        "applicable": reasons["_status"] != "not_applicable",
+        "evidence_complete": reasons.get("_evidence") == "complete",
+        "ledger": ledger,
+    }
 
 
 def _audit_payload(files):
@@ -403,7 +607,7 @@ def _audit_payload(files):
         row = {
             "code": code,
             "name": f"样本{code}",
-            "industry": "SOFTWARE",
+            "industry": "SOFTWARE" if code in {sample_codes[0], sample_codes[-1]} else "BANK",
             "price": 10.0,
             "market_cap": 1_000_000_000.0,
             "buy_types": [],
@@ -453,8 +657,8 @@ def _audit_payload(files):
             "applicable": False,
             "evidence_complete": True,
             "ledger": {
-                "schema_version": 4,
-                "model_id": "patch6-type7-quality-equity-v4",
+                "schema_version": 5,
+                "model_id": "patch6-type7-quality-equity-v5",
                 "code": code,
                 "applicable": False,
                 "reason": type7_reason,
@@ -505,7 +709,11 @@ def _audit_payload(files):
         + [f"{code:06d}" for code in range(300001, 300694)]
         + [f"{code:06d}" for code in range(600001, 602308)]
     )
-    excluded_financial_codes = [f"{code:06d}" for code in range(602001, 602031)]
+    ineligible_codes = sorted(set(analysis_codes) - set(eligible_codes))
+    coldness_artifact, coldness_summary, coldness_status = deepcopy(
+        _market_coldness_audit_fixture(tuple(analysis_codes), tuple(eligible_codes))
+    )
+    excluded_financial_codes = sorted({f"{code:06d}" for code in range(602001, 602031)} | set(sample_codes[1:-1]))
     nonfinancial_codes = sorted(set(analysis_codes) - set(excluded_financial_codes))
     strict_ttm_source_coverage = {
         "population": "SH_SZ_non_financial",
@@ -534,9 +742,19 @@ def _audit_payload(files):
         "quotes": 5_527,
         "market_counts": {"SH": 2_307, "SZ": 2_893, "BJ": 327},
         "analysis_market_quotes": 5_200,
+        "trading_quotes": 5_200,
+        "trading_coverage": 1.0,
+        "analysis_trading_quotes": 5_200,
+        "analysis_trading_coverage": 1.0,
+        "eligible_trading_quotes": len(eligible_codes),
+        "eligible_trading_coverage": 1.0,
+        "trading_source_trade_dates": ["2026-07-15"],
         "analysis_eligible_coverage": len(eligible_codes) / 5_200,
         "eligible_companies": len(eligible_codes),
+        "analysis_market_codes": analysis_codes,
         "eligible_codes": eligible_codes,
+        "analysis_ineligible_codes": ineligible_codes,
+        "ineligible_codes": ineligible_codes,
         "unsupported_market_codes": [f"{code:06d}" for code in range(920001, 920328)],
         "listing_date_evidence": {
             "required": True,
@@ -559,7 +777,7 @@ def _audit_payload(files):
         },
         "strict_ttm_source_coverage": strict_ttm_source_coverage,
     }
-    return {
+    payload = {
         "seed": 20260715,
         "sample_size": 100,
         "sample_codes": sample_codes,
@@ -613,6 +831,7 @@ def _audit_payload(files):
                 "evidence_sha256": hashlib.sha256(b"fixture Type 7 research report evidence").hexdigest(),
                 "as_of_sessions": ["2026-07-15"],
             },
+            "market_coldness_evidence": coldness_summary,
             "caller_metadata": {
                 "snapshot_schema_version": 8,
                 "snapshot_source": "network",
@@ -620,6 +839,8 @@ def _audit_payload(files):
                 "snapshot_artifact_bytes": 123,
                 "validation": validation,
                 "full_market_quality": quality,
+                "market_coldness": coldness_status,
+                "market_coldness_reference_artifact": coldness_artifact,
             },
             "git": {"commit": "a" * 40, "dirty": False},
             "code_sha256": _hash_files(files, code_files),
@@ -647,10 +868,33 @@ def _audit_payload(files):
         "independent_check_errors": [],
         "invariant_errors": [],
         "pipeline_issues": [],
-        "dcf_results": {code: _valuation_result(code) for code in sample_codes[:60]},
+        "dcf_results": {
+            code: _valuation_result(code) if code == sample_codes[0] else _financial_pb_valuation_result(code)
+            for code in sample_codes[:60]
+        },
         "dcf_skip_reasons": {code: "fixture_skip" for code in sample_codes[60:]},
+        "dcf_skip_classifications": {
+            code: {"category": "economic_not_applicable", "reason": "fixture_skip"} for code in sample_codes[60:]
+        },
         "companies": [company_row(code) for code in sample_codes],
     }
+    company_by_code = {company["code"]: company for company in payload["companies"]}
+    for code, result in payload["dcf_results"].items():
+        _set_fixture_type1_from_valuation(company_by_code[code], result)
+    for code, classification in payload["dcf_skip_classifications"].items():
+        _set_fixture_type1_from_skip(company_by_code[code], classification["category"])
+    first = company_by_code[sample_codes[0]]
+    _set_fixture_type7_ledger(
+        first,
+        valuation_evidence_complete=True,
+    )
+    _set_fixture_type7_ledger(
+        payload["companies"][-1],
+        valuation_evidence_complete=False,
+    )
+    for company in payload["companies"]:
+        _refresh_fixture_company_summary(company)
+    return payload
 
 
 def _render_csv(payload):
@@ -822,6 +1066,7 @@ def _write_minimal_release(
         "data/quality_history.py": b"# quality history\n",
         "data/research_reports.py": b"# Type 7 research report evidence\n",
         "data/snapshot.py": b"# snapshot\n",
+        "data/trading_calendar.py": b"# pinned trading calendar\n",
         "desktop/__init__.py": b"\n",
         "desktop/launcher.py": b"# desktop launcher\n",
         "desktop/installer.py": b"# desktop installer\n",
@@ -849,6 +1094,7 @@ def _write_minimal_release(
         "tools/__init__.py": b"",
         "tools/build_official_industry_source.py": b"# official industry source generator\n",
         "tools/build_desktop.py": b"# desktop builder\n",
+        "tools/china_a_share_trading_calendar.json": b'{"schema_version":1}\n',
         "tools/run_full_audit.py": b"# audit cli\n",
         "tools/sign_desktop_update_manifest.ps1": b"# desktop manifest signer\n",
         "tools/verify_release_zip.py": b"# verifier\n",
@@ -900,7 +1146,76 @@ def _write_minimal_release(
             archive.writestr(prefix + "data/cache/market_snapshot.json.gz", b"secret runtime cache")
 
 
-_TYPE_PRIORITY = ("type1", "type2", "type5", "type3", "type4", "type6")
+_TYPE_PRIORITY = ("type1", "type2", "type5", "type3", "type4", "type6", "type7")
+_TYPE_LABELS = {
+    "type1": "1️⃣ 估值买入区",
+    "type2": "2️⃣ 两热一冷",
+    "type3": "3️⃣ 可持续高增长",
+    "type4": "4️⃣ 长坡厚雪",
+    "type5": "5️⃣ 强周期底部",
+    "type6": "6️⃣ 高风险早期/困境型",
+    "type7": "7️⃣ 优质股权型",
+}
+_TYPE_WEIGHTS = {
+    "type1": {"1a": 0.30, "1b": 0.35, "1c": 0.20, "1d": 0.15},
+    "type2": {"2a": 0.25, "2b": 0.30, "2c": 0.25, "2d": 0.20},
+    "type3": {"3a": 0.25, "3b": 0.20, "3c": 0.20, "3d": 0.25, "3e": 0.10},
+    "type4": {"4a": 0.25, "4b": 0.25, "4c": 0.20, "4d": 0.15, "4e": 0.08, "4f": 0.07},
+    "type5": {"5a": 0.35, "5b": 0.25, "5c": 0.20, "5d": 0.10, "5e": 0.10},
+    "type6": {"6a": 0.25, "6b": 0.20, "6c": 0.15, "6d": 0.25, "6e": 0.15},
+    "type7": {"7a": 1.0 / 3.0, "7b": 1.0 / 3.0, "7c": 1.0 / 3.0},
+}
+
+
+def _refresh_fixture_company_summary(company):
+    for type_key in _TYPE_PRIORITY:
+        company[f"{type_key}_score"] = company[type_key]["total"]
+    triggered_types = [type_key for type_key in _TYPE_PRIORITY if company[type_key]["triggered"]]
+    company["buy_types"] = triggered_types
+    company["num_types"] = len(triggered_types)
+    primary = triggered_types[0] if triggered_types else None
+    company["primary_type"] = primary
+    company["primary_label"] = _TYPE_LABELS[primary] if primary else "无触发（不买）"
+    diagnostic_types = [
+        type_key
+        for type_key in _TYPE_PRIORITY
+        if company[type_key]["status"] not in {"not_applicable", "insufficient_evidence"}
+    ]
+    top_score = max((company[type_key]["total"] for type_key in diagnostic_types), default=None)
+    diagnostic = next(
+        (type_key for type_key in diagnostic_types if company[type_key]["total"] == top_score),
+        None,
+    )
+    company["diagnostic_type"] = diagnostic
+    company["diagnostic_label"] = _TYPE_LABELS[diagnostic] if diagnostic else "无可完整诊断框架"
+    company["max_score"] = top_score
+    if diagnostic is None:
+        company["bear_case"] = []
+        return
+    payload = company[diagnostic]
+    scores = payload["sub_scores"]
+    reasons = payload["reasons"]
+    minimum = min(scores.values())
+    bear_case = []
+    for meta_key in ("_veto", "_condition", "_downgrade"):
+        if reasons.get(meta_key):
+            bear_case.append({"dimension": meta_key, "score": minimum, "reason": reasons[meta_key]})
+    order = {key: index for index, key in enumerate(_TYPE_WEIGHTS[diagnostic])}
+    ranked = sorted(
+        _TYPE_WEIGHTS[diagnostic],
+        key=lambda key: (scores[key], -_TYPE_WEIGHTS[diagnostic][key], order[key]),
+    )
+    for dimension in ranked:
+        if len(bear_case) == 3:
+            break
+        bear_case.append(
+            {
+                "dimension": dimension,
+                "score": scores[dimension],
+                "reason": reasons[dimension],
+            }
+        )
+    company["bear_case"] = bear_case
 
 
 def _set_all_scoring_statuses(payload, status, score):
@@ -910,6 +1225,10 @@ def _set_all_scoring_statuses(payload, status, score):
     veto = status in {"vetoed", "blocked"}
     for company in payload["companies"]:
         for type_key in ("type1", "type2", "type3", "type4", "type5", "type6"):
+            if type_key == "type1" and (
+                company["code"] not in payload["dcf_results"] or status in {"not_applicable", "insufficient_evidence"}
+            ):
+                continue
             type_payload = company[type_key]
             type_payload["sub_scores"] = {dimension: score for dimension in type_payload["sub_scores"]}
             type_payload["total"] = score
@@ -932,29 +1251,23 @@ def _set_all_scoring_statuses(payload, status, score):
             )
             type_payload["reasons"] = reasons
             company[f"{type_key}_score"] = score
-
-        company["buy_types"] = list(_TYPE_PRIORITY) if triggered else []
-        company["num_types"] = 6 if triggered else 0
-        company["primary_type"] = "type1" if triggered else None
-        company["primary_label"] = "1️⃣ 估值买入区" if triggered else "无触发（不买）"
-        if status in {"not_applicable", "insufficient_evidence"}:
-            company["diagnostic_type"] = None
-            company["diagnostic_label"] = "无可完整诊断框架"
-            company["max_score"] = None
-            company["bear_case"] = []
-            continue
-        company["diagnostic_type"] = "type1"
-        company["diagnostic_label"] = "1️⃣ 估值买入区"
-        company["max_score"] = score
-        metadata_case = []
-        if veto:
-            metadata_case = [{"dimension": "_veto", "score": score, "reason": "状态契约否决"}]
-        elif status == "conditional":
-            metadata_case = [{"dimension": "_condition", "score": score, "reason": "状态契约条件"}]
-        company["bear_case"] = metadata_case + [
-            {"dimension": dimension, "score": score, "reason": "状态契约夹具"}
-            for dimension in ("1b", "1a", "1c")[: 3 - len(metadata_case)]
-        ]
+        if company["code"] in payload["dcf_results"] and status not in {
+            "not_applicable",
+            "insufficient_evidence",
+        }:
+            expected_1a = _fixture_type1_1a_from_valuation(payload["dcf_results"][company["code"]])
+            company["type1"]["sub_scores"]["1a"] = expected_1a
+            company["type1"]["total"] = round(
+                sum(company["type1"]["sub_scores"][key] * weight for key, weight in _TYPE_WEIGHTS["type1"].items()),
+                1,
+            )
+    for company in payload["companies"]:
+        if company["industry"] == "SOFTWARE":
+            _set_fixture_type7_ledger(
+                company,
+                valuation_evidence_complete=company["code"] in payload["dcf_results"],
+            )
+        _refresh_fixture_company_summary(company)
 
 
 def _install_applicable_type7_ledger(payload):
@@ -1029,11 +1342,12 @@ def _install_applicable_type7_ledger(payload):
     }:
         metric.update(evidence(key))
     metric.update(evidence("technology_score", score=6.0))
+    type1 = company["type1"]
     type1_outcome = (
-        True,
-        9.0,
-        {"1a": 9.0, "1b": 9.0, "1c": 9.0, "1d": 9.0},
-        {"_status": "triggered", "_evidence": "complete"},
+        type1["triggered"],
+        type1["total"],
+        type1["sub_scores"],
+        type1["reasons"],
     )
     history = {
         "available": True,
@@ -1051,7 +1365,12 @@ def _install_applicable_type7_ledger(payload):
             "pb_percentile": 0.12,
         },
     }
-    outcome, ledger = score_type7_quality_equity(metric, type1_outcome, history)
+    outcome, ledger = score_type7_quality_equity(
+        metric,
+        type1_outcome,
+        history,
+        valuation_evidence_complete=True,
+    )
     triggered, total, sub_scores, reasons = outcome
     assert reasons["_status"] == STATUS_INSUFFICIENT_EVIDENCE
     company["type7_score"] = total
@@ -1075,6 +1394,164 @@ def test_release_zip_verifier_accepts_a_clean_source_package(tmp_path):
     assert _verify(path) == ()
 
 
+def _forge_market_coldness_na_partition(payload):
+    caller = payload["provenance"]["caller_metadata"]
+    eligible_codes = caller["validation"]["eligible_codes"]
+    artifact = caller["market_coldness_reference_artifact"]
+    replay = _replay_market_coldness_reference_artifact(
+        artifact,
+        eligible_codes=eligible_codes,
+        as_of_session="2026-07-15",
+    )
+    retained_code = eligible_codes[0]
+    forged_evidence = {retained_code: replay["eligible_evidence"][retained_code]}
+    payload["provenance"]["market_coldness_evidence"].update(
+        evidence_count=1,
+        eligible_evidence_count=1,
+        eligible_evidence_coverage=1 / len(eligible_codes),
+        evidence_sha256=hashlib.sha256(_canonical_market_coldness_json(forged_evidence)).hexdigest(),
+    )
+    caller["market_coldness"].update(
+        eligible_evidence_count=1,
+        eligible_evidence_coverage=1 / len(eligible_codes),
+        eligible_applicable_count=1,
+        eligible_applicable_evidence_coverage=1.0,
+        eligible_not_applicable_count=len(eligible_codes) - 1,
+        eligible_not_applicable_codes_by_reason={
+            "listed_in_current_year": eligible_codes[1:],
+            "listing_history_lt_120_days": [],
+        },
+    )
+
+
+def _forge_market_coldness_relative_rank(payload):
+    caller = payload["provenance"]["caller_metadata"]
+    eligible_codes = caller["validation"]["eligible_codes"]
+    replay = _replay_market_coldness_reference_artifact(
+        caller["market_coldness_reference_artifact"],
+        eligible_codes=eligible_codes,
+        as_of_session="2026-07-15",
+    )
+    forged_evidence = deepcopy(replay["eligible_evidence"])
+    forged_evidence[eligible_codes[0]]["components"]["relative"]["turnover_rate_pct"] = 9.0
+    payload["provenance"]["market_coldness_evidence"]["evidence_sha256"] = hashlib.sha256(
+        _canonical_market_coldness_json(forged_evidence)
+    ).hexdigest()
+
+
+def _move_market_coldness_reference_before_close(payload):
+    caller = payload["provenance"]["caller_metadata"]
+    artifact = caller["market_coldness_reference_artifact"]
+    artifact["retrieved_at"] = "2026-07-15T01:00:00Z"
+    caller["market_coldness"].update(
+        retrieved_at=artifact["retrieved_at"],
+        reference_artifact_sha256=hashlib.sha256(_canonical_market_coldness_json(artifact)).hexdigest(),
+    )
+
+
+def _set_one_eligible_market_coldness_turnover_to_numeric_zero(payload):
+    caller = payload["provenance"]["caller_metadata"]
+    eligible_codes = caller["validation"]["eligible_codes"]
+    artifact = caller["market_coldness_reference_artifact"]
+    target = eligible_codes[0]
+    row = next(item for item in artifact["records"] if item[0] == target)
+    row[4] = 0.0
+    replay = _replay_market_coldness_reference_artifact(
+        artifact,
+        eligible_codes=eligible_codes,
+        as_of_session="2026-07-15",
+    )
+    evidence = replay["eligible_evidence"]
+    payload["provenance"]["market_coldness_evidence"]["evidence_sha256"] = hashlib.sha256(
+        _canonical_market_coldness_json(evidence)
+    ).hexdigest()
+    caller["market_coldness"].update(
+        reference_artifact_sha256=hashlib.sha256(_canonical_market_coldness_json(artifact)).hexdigest(),
+        full_listed_evidence_count=len(replay["full_evidence"]),
+        eligible_not_applicable_codes_by_reason=replay["eligible_not_applicable_codes_by_reason"],
+        eligible_unscored_data_gap_codes_by_reason=replay["eligible_unscored_data_gap_codes_by_reason"],
+    )
+
+
+def test_release_zip_accepts_numeric_zero_turnover_as_replayed_market_coldness_evidence(tmp_path):
+    path = tmp_path / "zero-turnover-market-coldness.zip"
+    _write_minimal_release(
+        path,
+        mutate_payload=_set_one_eligible_market_coldness_turnover_to_numeric_zero,
+        rerender_companions=True,
+    )
+
+    assert _verify(path) == ()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        _forge_market_coldness_na_partition,
+        _forge_market_coldness_relative_rank,
+        _move_market_coldness_reference_before_close,
+    ],
+)
+def test_release_zip_verifier_replays_raw_market_coldness_instead_of_trusting_coordinated_claims(
+    tmp_path,
+    tamper,
+):
+    path = tmp_path / "forged-market-coldness.zip"
+    _write_minimal_release(path, mutate_payload=tamper)
+
+    assert any("market-coldness provenance" in error for error in _verify(path))
+
+
+@pytest.mark.parametrize(
+    ("tamper", "expected_error"),
+    [
+        (
+            lambda payload: payload["provenance"]["caller_metadata"].update(snapshot_source="cache"),
+            "identified, time-consistent market snapshot",
+        ),
+        (
+            lambda payload: payload.update(data_timestamp_utc="2026-07-15T00:00:00+00:00"),
+            "identified, time-consistent market snapshot",
+        ),
+        (
+            lambda payload: payload["provenance"].pop("market_coldness_evidence"),
+            "market-coldness provenance",
+        ),
+        (
+            lambda payload: payload["provenance"]["caller_metadata"]["market_coldness"].update(available=False),
+            "market-coldness provenance",
+        ),
+        (
+            lambda payload: payload["provenance"]["caller_metadata"]["market_coldness"].update(
+                retrieved_at="2026-07-14T08:05:00Z"
+            ),
+            "market-coldness provenance",
+        ),
+        (
+            lambda payload: payload["provenance"]["caller_metadata"]["validation"].update(
+                trading_quotes=5096,
+                analysis_trading_quotes=5096,
+                trading_coverage=0.98,
+                analysis_trading_coverage=0.98,
+            ),
+            "99% same-session trading quote coverage",
+        ),
+        (
+            lambda payload: payload["provenance"]["caller_metadata"]["validation"].update(
+                eligible_trading_quotes=4116,
+                eligible_trading_coverage=0.98,
+            ),
+            "99% same-session trading quote coverage",
+        ),
+    ],
+)
+def test_release_zip_verifier_requires_fresh_quote_and_market_coldness_proof(tmp_path, tamper, expected_error):
+    path = tmp_path / "invalid-market-proof.zip"
+    _write_minimal_release(path, mutate_payload=tamper)
+
+    assert any(expected_error in error for error in _verify(path))
+
+
 def test_release_zip_verifier_replays_an_applicable_type7_ledger_and_rejects_nested_tampering(tmp_path):
     clean = tmp_path / "applicable-type7.zip"
     _write_minimal_release(
@@ -1096,6 +1573,169 @@ def test_release_zip_verifier_replays_an_applicable_type7_ledger_and_rejects_nes
         rerender_companions=True,
     )
     assert any("100 complete company rows" in error for error in _verify(tampered))
+
+
+def test_release_zip_verifier_rejects_type7_claim_after_validated_dcf_is_removed(tmp_path):
+    path = tmp_path / "type7-dcf-removed.zip"
+
+    def remove_bound_dcf(payload):
+        company = payload["companies"][0]
+        code = company["code"]
+        assert code in payload["dcf_results"]
+        payload["dcf_results"].pop(code)
+        payload["dcf_skip_reasons"][code] = "fixture_removed_dcf"
+        payload["dcf_skip_classifications"][code] = {
+            "category": "source_missing",
+            "reason": "fixture_removed_dcf",
+        }
+        payload["dcf_valid"] = len(payload["dcf_results"])
+
+    _write_minimal_release(
+        path,
+        mutate_payload=remove_bound_dcf,
+        rerender_companions=True,
+    )
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_nonfinancial_type7_not_applicable_claim(tmp_path):
+    path = tmp_path / "nonfinancial-type7-not-applicable.zip"
+
+    def hide_nonfinancial_type7(payload):
+        company = payload["companies"][0]
+        _set_fixture_type7_ledger(
+            company,
+            valuation_evidence_complete=False,
+            metric={
+                "code": company["code"],
+                "industry": "BANK",
+                "source_trade_date": "2026-07-15",
+            },
+        )
+
+    _write_minimal_release(
+        path,
+        mutate_payload=hide_nonfinancial_type7,
+        rerender_companions=True,
+    )
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_coordinated_type1_and_type7_dcf_score_forgery(tmp_path):
+    path = tmp_path / "type7-type1-coordinated-forgery.zip"
+
+    def change_company_type1(payload):
+        company = payload["companies"][0]
+        company["type1"]["sub_scores"]["1a"] = 1.0
+        company["type1"]["total"] = 0.3
+        company["type1_score"] = 0.3
+        company["max_score"] = 0.3
+        company["bear_case"] = [
+            {"dimension": "1b", "score": 0.0, "reason": "审计夹具"},
+            {"dimension": "1c", "score": 0.0, "reason": "审计夹具"},
+            {"dimension": "1d", "score": 0.0, "reason": "审计夹具"},
+        ]
+        _set_fixture_type7_ledger(company, valuation_evidence_complete=True)
+
+    _write_minimal_release(
+        path,
+        mutate_payload=change_company_type1,
+        rerender_companions=True,
+    )
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_missing_structured_skip_classifications(tmp_path):
+    path = tmp_path / "missing-skip-classifications.zip"
+
+    _write_minimal_release(
+        path,
+        mutate_payload=lambda payload: payload.pop("dcf_skip_classifications"),
+        rerender_companions=True,
+    )
+
+    assert any("skip classifications are missing" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_financial_pb_type1_position_mismatch(tmp_path):
+    path = tmp_path / "financial-pb-type1-mismatch.zip"
+
+    def forge_pb_position(payload):
+        code = payload["sample_codes"][1]
+        company = next(row for row in payload["companies"] if row["code"] == code)
+        assert payload["dcf_results"][code]["_pb_valuation"] is True
+        company["type1"]["sub_scores"]["1a"] = 7.5
+        company["type1"]["total"] = 2.2
+        _refresh_fixture_company_summary(company)
+
+    _write_minimal_release(path, mutate_payload=forge_pb_position, rerender_companions=True)
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_valid_valuation_hidden_as_type1_not_applicable(tmp_path):
+    path = tmp_path / "valid-valuation-hidden-as-na.zip"
+
+    def hide_type1(payload):
+        company = payload["companies"][0]
+        type1 = company["type1"]
+        type1.update(
+            triggered=False,
+            veto=False,
+            status="not_applicable",
+            applicable=False,
+            evidence_complete=True,
+        )
+        type1["reasons"].pop("_veto", None)
+        type1["reasons"].update(_status="not_applicable", _applicable="no", _evidence="complete")
+        _refresh_fixture_company_summary(company)
+
+    _write_minimal_release(path, mutate_payload=hide_type1, rerender_companions=True)
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_triggered_type1_after_valuation_skip(tmp_path):
+    path = tmp_path / "skipped-valuation-triggered-type1.zip"
+
+    def trigger_skipped_type1(payload):
+        code = payload["sample_codes"][-2]
+        company = next(row for row in payload["companies"] if row["code"] == code)
+        type1 = company["type1"]
+        type1.update(
+            triggered=True,
+            total=10.0,
+            sub_scores={key: 10.0 for key in type1["sub_scores"]},
+            veto=False,
+            status="triggered",
+            applicable=True,
+            evidence_complete=True,
+        )
+        type1["reasons"] = {
+            **{key: "伪造完整证据" for key in type1["sub_scores"]},
+            "_status": "triggered",
+            "_applicable": "yes",
+            "_evidence": "complete",
+        }
+        _refresh_fixture_company_summary(company)
+
+    _write_minimal_release(path, mutate_payload=trigger_skipped_type1, rerender_companions=True)
+
+    assert any("Type 1 or Type 7 evidence" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_previous_type7_ledger_schema(tmp_path):
+    path = tmp_path / "type7-schema-v4.zip"
+
+    def downgrade_schema(payload):
+        payload["companies"][0]["type7"]["ledger"]["schema_version"] = 4
+
+    _write_minimal_release(path, mutate_payload=downgrade_schema, rerender_companions=True)
+
+    assert any("100 complete company rows" in error for error in _verify(path))
 
 
 @pytest.mark.parametrize(
@@ -1164,6 +1804,14 @@ def test_release_zip_verifier_accepts_financial_pb_without_industrial_ttm_fields
             "strict TTM source coverage",
         ),
         (
+            lambda payload: payload["provenance"]["caller_metadata"]["validation"].pop("analysis_market_codes"),
+            "strict TTM source coverage",
+        ),
+        (
+            lambda payload: payload["provenance"]["caller_metadata"]["validation"].pop("analysis_ineligible_codes"),
+            "strict TTM source coverage",
+        ),
+        (
             lambda payload: payload["provenance"]["caller_metadata"]["validation"].pop("listing_date_evidence"),
             "listing-date provenance",
         ),
@@ -1217,6 +1865,20 @@ def test_release_zip_verifier_rejects_internally_inconsistent_ttm_coverage(tmp_p
     def tamper(payload):
         coverage = payload["provenance"]["caller_metadata"]["validation"]["strict_ttm_source_coverage"]
         coverage["fcff"]["coverage"] = 0.50
+
+    _write_minimal_release(path, mutate_payload=tamper)
+
+    assert any("strict TTM source coverage" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_binds_the_coldness_universe_to_the_ttm_population(tmp_path):
+    path = tmp_path / "forged-coldness-universe.zip"
+
+    def tamper(payload):
+        validation = payload["provenance"]["caller_metadata"]["validation"]
+        forged = list(validation["analysis_market_codes"])
+        forged[0] = "688999"
+        validation["analysis_market_codes"] = sorted(forged)
 
     _write_minimal_release(path, mutate_payload=tamper)
 
@@ -1297,7 +1959,7 @@ def test_release_zip_verifier_replays_strict_ttm_lineage_and_five_year_endpoints
 
     _write_minimal_release(path, mutate_payload=mutate)
 
-    assert any("complete valuation result or skip reason" in error for error in _verify(path))
+    assert any("complete valuation result or structured skip" in error for error in _verify(path))
 
 
 @pytest.mark.parametrize(
@@ -1317,7 +1979,7 @@ def test_release_zip_verifier_independently_replays_financial_pb_endpoints(tmp_p
 
     _write_minimal_release(path, mutate_payload=mutate, rerender_companions=True)
 
-    assert any("complete valuation result or skip reason" in error for error in _verify(path))
+    assert any("complete valuation result or structured skip" in error for error in _verify(path))
 
 
 def test_checked_in_desktop_launcher_preserves_secure_domestic_install_contract():
@@ -1456,7 +2118,7 @@ def test_release_zip_verifier_accepts_confirmed_veto_with_other_evidence_incompl
         company["bear_case"] = [
             {"dimension": "_veto", "score": 0.0, "reason": "独立硬否决已确认"},
             {"dimension": "1b", "score": 0.0, "reason": "审计夹具"},
-            {"dimension": "1a", "score": 0.0, "reason": "审计夹具"},
+            {"dimension": "1c", "score": 0.0, "reason": "审计夹具"},
         ]
 
     _write_minimal_release(path, mutate_payload=mutate, rerender_companions=True)
@@ -1469,7 +2131,7 @@ def test_release_zip_verifier_accepts_20_character_evidence_and_rejects_21(tmp_p
 
     def set_20(payload):
         evidence = "证" * 20
-        payload["companies"][0]["type1"]["reasons"]["1a"] = evidence
+        payload["companies"][0]["type1"]["reasons"]["1c"] = evidence
         payload["companies"][0]["bear_case"][1]["reason"] = evidence
 
     _write_minimal_release(accepted, mutate_payload=set_20, rerender_companions=True)
@@ -1479,7 +2141,7 @@ def test_release_zip_verifier_accepts_20_character_evidence_and_rejects_21(tmp_p
 
     def set_21(payload):
         evidence = "证" * 21
-        payload["companies"][0]["type1"]["reasons"]["1a"] = evidence
+        payload["companies"][0]["type1"]["reasons"]["1c"] = evidence
         payload["companies"][0]["bear_case"][1]["reason"] = evidence
 
     _write_minimal_release(rejected, mutate_payload=set_21, rerender_companions=True)
@@ -1545,7 +2207,7 @@ def test_release_zip_verifier_excludes_non_diagnostic_scores_from_maximum(tmp_pa
 
     def mutate(payload):
         company = payload["companies"][0]
-        type_payload = company["type1"]
+        type_payload = company["type2"]
         type_payload["sub_scores"] = {dimension: 10.0 for dimension in type_payload["sub_scores"]}
         type_payload["total"] = 10.0
         type_payload["status"] = status
@@ -1554,15 +2216,8 @@ def test_release_zip_verifier_excludes_non_diagnostic_scores_from_maximum(tmp_pa
         type_payload["reasons"]["_status"] = status
         type_payload["reasons"]["_applicable"] = "yes" if type_payload["applicable"] else "no"
         type_payload["reasons"]["_evidence"] = "complete" if type_payload["evidence_complete"] else "incomplete"
-        company["type1_score"] = 10.0
-        company["diagnostic_type"] = "type2"
-        company["diagnostic_label"] = "2️⃣ 两热一冷"
-        company["max_score"] = 0.0
-        company["bear_case"] = [
-            {"dimension": "2b", "score": 0.0, "reason": "审计夹具"},
-            {"dimension": "2a", "score": 0.0, "reason": "审计夹具"},
-            {"dimension": "2c", "score": 0.0, "reason": "审计夹具"},
-        ]
+        company["type2_score"] = 10.0
+        _refresh_fixture_company_summary(company)
 
     _write_minimal_release(path, mutate_payload=mutate, rerender_companions=True)
 
@@ -1667,7 +2322,7 @@ def test_release_zip_verifier_requires_complete_scoring_and_valuation_rows(tmp_p
         payload["dcf_skip_reasons"].pop(payload["sample_codes"][-1])
 
     _write_minimal_release(incomplete_valuation, mutate_payload=remove_valuation_status)
-    assert any("complete valuation result or skip reason" in error for error in _verify(incomplete_valuation))
+    assert any("complete valuation result or structured skip" in error for error in _verify(incomplete_valuation))
 
 
 def test_release_zip_verifier_binds_csv_and_markdown_to_json_manifest(tmp_path):
@@ -1808,7 +2463,7 @@ def test_release_zip_verifier_recomputes_weighted_scores_and_valuation_structure
         payload["dcf_results"][first_code] = {"zone": "观察区"}
 
     _write_minimal_release(forged_valuation, mutate_payload=mutate_valuation)
-    assert any("complete valuation result or skip reason" in error for error in _verify(forged_valuation))
+    assert any("complete valuation result or structured skip" in error for error in _verify(forged_valuation))
 
 
 def test_release_zip_verifier_rejects_superficial_snapshot_hashes(tmp_path):

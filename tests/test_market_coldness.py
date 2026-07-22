@@ -15,11 +15,14 @@ from data.market_coldness import (
     EASTMONEY_UNIVERSE,
     EastmoneyMarketColdnessAdapter,
     MarketColdnessError,
+    archive_market_coldness_session_snapshot,
     fetch_market_coldness_snapshot,
+    load_market_coldness_session_snapshot,
 )
 
 
 FIXED_TIME = datetime(2026, 7, 16, 5, 10, 9, tzinfo=timezone.utc)
+AFTER_CLOSE_TIME = datetime(2026, 7, 16, 8, 5, tzinfo=timezone.utc)
 
 
 def _row(code="600000", market=1, **overrides):
@@ -84,14 +87,14 @@ class _FakeHttpClient:
         return response
 
 
-def _adapter(client, *, page_size=2, retries=1, max_workers=10):
+def _adapter(client, *, page_size=2, retries=1, max_workers=10, clock=None):
     return EastmoneyMarketColdnessAdapter(
         http_client=client,
         page_size=page_size,
         retries=retries,
         retry_delay=0,
         max_workers=max_workers,
-        clock=lambda: FIXED_TIME,
+        clock=clock or (lambda: FIXED_TIME),
     )
 
 
@@ -490,7 +493,10 @@ def test_cache_hit_replays_strict_records_without_calling_network(tmp_path):
 def test_force_refresh_bypasses_hit_but_preserves_cache_cas(tmp_path):
     cache_path = tmp_path / "coldness.json.gz"
     first = fetch_market_coldness_snapshot(
-        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row("600000", 1)])})),
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("600000", 1)])}),
+            clock=lambda: AFTER_CLOSE_TIME,
+        ),
         cache_path=cache_path,
     )
     refresh_client = _FakeHttpClient({1: _page(1, [_row("000001", 0)])})
@@ -571,3 +577,62 @@ def test_constructor_rejects_invalid_retry_and_page_contract_before_io():
         EastmoneyMarketColdnessAdapter(timeout=True)
     with pytest.raises(ValueError, match="allow_expired_cache"):
         fetch_market_coldness_snapshot(use_cache=False, allow_expired_cache=1)
+
+
+def test_session_archive_replays_an_exact_generation_after_the_rolling_cache_advances(tmp_path):
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("600000", 1)])}),
+            clock=lambda: AFTER_CLOSE_TIME,
+        ),
+        use_cache=False,
+    )
+    archive_market_coldness_session_snapshot(first, "2026-07-16", directory=tmp_path)
+
+    later = fetch_market_coldness_snapshot(
+        adapter=EastmoneyMarketColdnessAdapter(
+            http_client=_FakeHttpClient({1: _page(1, [_row("000001", 0)])}),
+            page_size=2,
+            retries=1,
+            retry_delay=0,
+            clock=lambda: datetime(2026, 7, 17, 8, 0, tzinfo=timezone.utc),
+        ),
+        use_cache=False,
+    )
+    assert later.records != first.records
+
+    replay = load_market_coldness_session_snapshot("2026-07-16", directory=tmp_path)
+    assert replay is not None
+    assert replay.records == first.records
+    assert replay.cache_diagnostic == "immutable_session_hit"
+
+
+def test_session_archive_rejects_a_different_rewrite_for_the_same_session(tmp_path):
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("600000", 1)])}),
+            clock=lambda: AFTER_CLOSE_TIME,
+        ),
+        use_cache=False,
+    )
+    different = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("000001", 0)])}),
+            clock=lambda: AFTER_CLOSE_TIME,
+        ),
+        use_cache=False,
+    )
+    archive_market_coldness_session_snapshot(first, "2026-07-16", directory=tmp_path)
+
+    with pytest.raises(MarketColdnessError, match="different generation"):
+        archive_market_coldness_session_snapshot(different, "2026-07-16", directory=tmp_path)
+
+
+def test_session_archive_rejects_an_intraday_generation(tmp_path):
+    intraday = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row("600000", 1)])})),
+        use_cache=False,
+    )
+
+    with pytest.raises(MarketColdnessError, match="before the session close"):
+        archive_market_coldness_session_snapshot(intraday, "2026-07-16", directory=tmp_path)

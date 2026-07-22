@@ -406,6 +406,29 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
+    public void displayLabelNeverLeaksAnInternalIndustryEnumFromAnOlderCache() {
+        Map<String, String> names = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            names.put("type" + number, number + "类");
+        }
+        MarketRepository.MarketEntry entry = new MarketRepository.MarketEntry(
+                "600519",
+                "贵州茅台",
+                "ALCOHOL",
+                1327.5,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                typeScores(),
+                names,
+                null
+        );
+
+        assertTrue(entry.displayLabel().contains("未分类行业"));
+        assertFalse(entry.displayLabel().contains("ALCOHOL"));
+        assertFalse(entry.searchText.contains("alcohol"));
+    }
+
+    @Test
     public void companyUniverseRejectsBeijingAndNonCompanyPrefixes() {
         for (String code : Arrays.asList("000001", "300750", "600519", "688981")) {
             assertTrue(MarketRepository.isShanghaiShenzhenCompanyCode(code));
@@ -463,6 +486,60 @@ public final class MarketRepositoryContractTest {
         assertEquals("不适用；当前框架不适用", notApplicable.describe());
         assertEquals(Double.valueOf(5.8), observed.score);
         assertEquals("观察，5.8分；继续观察", observed.describe());
+    }
+
+    @Test
+    public void legacyMachineReasonsAreSanitizedBeforeAnyAndroidDisplay() {
+        for (String machineText : Arrays.asList(
+                "证据:patch6-observable",
+                "model_id=patch6-type7-quality-equity-v5",
+                "schema_version=5",
+                "formula=internal_formula",
+                "reported_formula=(normalised_roe-g)/(cost_of_equity-g)",
+                "financial_fade_horizon_not_tam_or_penetration_proof"
+        )) {
+            MarketRepository.TypeScore score = new MarketRepository.TypeScore("observe", 5.8, machineText);
+            assertFalse(score.describe().contains(machineText));
+            assertTrue(score.describe().contains("可核验的财务与行业数据"));
+        }
+
+        MarketRepository.TypeScore type2 = new MarketRepository.TypeScore(
+                "insufficient_evidence",
+                null,
+                "证据:patch6-type2c-qua"
+        );
+        MarketRepository.TypeScore readable = new MarketRepository.TypeScore(
+                "observe",
+                5.8,
+                "净10/毛10/现8/ROIC10"
+        );
+        assertEquals("资料不足；量价与换手数据", type2.describe());
+        assertEquals("观察，5.8分；净10/毛10/现8/ROIC10", readable.describe());
+    }
+
+    @Test
+    public void legacyDetailTextCannotLeakModelContractsFromAnOlderCache() {
+        Map<String, String> names = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            names.put("type" + number, number + "类");
+        }
+        MarketRepository.MarketEntry entry = new MarketRepository.MarketEntry(
+                "600519",
+                "贵州茅台",
+                "白酒",
+                1327.5,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                typeScores(),
+                names,
+                "普通说明\nmodel_id=patch6-type7-quality-equity-v5\nschema_version=5"
+        );
+
+        String detail = entry.detailedLabel();
+        assertTrue(detail.contains("可核验的财务与行业数据"));
+        assertFalse(detail.contains("model_id"));
+        assertFalse(detail.contains("schema_version"));
+        assertFalse(detail.contains("patch6"));
     }
 
     @Test

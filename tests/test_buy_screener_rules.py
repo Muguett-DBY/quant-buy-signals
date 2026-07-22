@@ -3582,7 +3582,52 @@ class TestMarketScreen(unittest.TestCase):
 
         self.assertTrue(all(types == [] for types in result["buy_types"]))
         for _, row in result.iterrows():
-            self.assertTrue(all(row[key]["veto"] for key in bs.TYPE_WEIGHTS))
+            self.assertTrue(all(row[key]["veto"] for key in ("type1", "type2", "type3", "type4", "type5", "type6")))
+            self.assertFalse(row["type7"]["veto"])
+            self.assertEqual(row["type7"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
+    def test_market_block_preserves_existing_na_missing_veto_and_internal_block_states(self):
+        def complete_scores(type_key):
+            return {key: 8.0 for key in bs.TYPE_WEIGHTS[type_key]}
+
+        def complete_reasons(type_key):
+            return {key: "证据" for key in bs.TYPE_WEIGHTS[type_key]}
+
+        outcomes = {
+            "type1": bs._not_applicable("type1", "模型不适用"),
+            "type2": bs._insufficient_evidence("type2", "证据缺失"),
+            "type3": bs._finish(
+                "type3",
+                complete_scores("type3"),
+                {**complete_reasons("type3"), "_veto": "公司否决"},
+                veto=True,
+            ),
+            "type4": bs._valuation_skip_outcome(
+                "type4",
+                {"category": "internal_error", "reason": "fixture_internal_error"},
+            ),
+            "type5": bs._finish("type5", complete_scores("type5"), complete_reasons("type5")),
+            "type6": bs._finish("type6", complete_scores("type6"), complete_reasons("type6")),
+        }
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "tradable": False}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "score_type1_dcf", return_value=outcomes["type1"]),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=outcomes["type2"]),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=outcomes["type3"]),
+            patch.object(bs, "score_type4_long_runway", return_value=outcomes["type4"]),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=outcomes["type5"]),
+            patch.object(bs, "score_type6_vc", return_value=outcomes["type6"]),
+        ):
+            row = bs.screen_all_types({"1": {}}, quotes).iloc[0]
+
+        self.assertEqual(row["type1"]["status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertEqual(row["type2"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(row["type3"]["status"], bs.STATUS_VETOED)
+        self.assertEqual(row["type4"]["status"], bs.STATUS_BLOCKED)
+        self.assertNotIn("_veto", row["type4"]["reasons"])
+        self.assertEqual(row["type5"]["status"], bs.STATUS_BLOCKED)
+        self.assertEqual(row["type6"]["status"], bs.STATUS_BLOCKED)
 
     def test_normalized_financial_code_collision_is_rejected(self):
         quotes = pd.DataFrame([{"code": "000001", "name": "甲", "price": 1}])
@@ -3725,7 +3770,8 @@ class TestMarketScreen(unittest.TestCase):
                 metric_[f"{key}_evidence"] = score_evidence(key)
                 metric_[f"{key}_evidence_level"] = "derived_proxy"
 
-        def fake_type7(_metric, _type1, _history):
+        def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             return neutral_outcome("type7"), {
                 "research_request_needed": False,
                 "history_request_needed": False,
@@ -3785,6 +3831,56 @@ class TestMarketScreen(unittest.TestCase):
         )
         self.assertNotEqual(result.iloc[0]["type3"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
 
+    def test_type7_dcf_flag_is_independent_from_type1_overall_evidence(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        incomplete_type1 = bs._finish(
+            "type1",
+            {key: 4.0 for key in bs.TYPE_WEIGHTS["type1"]},
+            {**{key: "测试证据" for key in bs.TYPE_WEIGHTS["type1"]}, "_missing": "仅催化剂证据不足"},
+            evidence_complete=False,
+        )
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-17"}])
+        for expected in (True, False):
+            captured = []
+
+            def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete, captured=captured):
+                captured.append(valuation_evidence_complete)
+                return neutral_outcome("type7"), {
+                    "history_request_needed": False,
+                    "research_request_needed": False,
+                    "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                    "triggered": False,
+                }
+
+            with (
+                self.subTest(validated_dcf=expected),
+                patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+                patch.object(
+                    bs,
+                    "extract_metrics",
+                    return_value={"industry": "SOFTWARE", "source_trade_date": "2026-07-17"},
+                ),
+                patch.object(bs, "enrich_metrics", return_value=({}, {})),
+                patch.object(bs, "score_type1_dcf", return_value=incomplete_type1),
+                patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+                patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+                patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+                patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+                patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+                patch.object(bs, "_valid_nonfinancial_dcf_evidence", return_value=expected),
+                patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+                patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+            ):
+                bs.screen_all_types({"1": {}}, quotes)
+
+            self.assertEqual(captured, [expected])
+
     def test_type7_history_loader_runs_only_after_preflight_requests_the_candidate(self):
         def neutral_outcome(type_key):
             return bs._finish(
@@ -3801,7 +3897,8 @@ class TestMarketScreen(unittest.TestCase):
         }
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence):
+        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
             ledger = {
                 "history_request_needed": history_evidence is None,
@@ -3847,7 +3944,8 @@ class TestMarketScreen(unittest.TestCase):
         report = type7_report_evidence()
         calls = []
 
-        def fake_type7(metric, _type1, history_evidence):
+        def fake_type7(metric, _type1, history_evidence, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             report_ready = len(metric.get("type7_research_sources", [])) == 3
             calls.append((report_ready, history_evidence is history))
             return neutral_outcome("type7"), {
@@ -3909,7 +4007,8 @@ class TestMarketScreen(unittest.TestCase):
         history = {"available": True, "code": "000001", "as_of": "2026-07-17"}
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence):
+        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
             exact_history_loaded = history_evidence is history
             return neutral_outcome("type7"), {
@@ -3994,7 +4093,8 @@ class TestMarketScreen(unittest.TestCase):
             loader_calls.append((requests, progress_cb))
             return {"000001": type5_history_evidence()}
 
-        def fake_type7(_metric, _type1, _history):
+        def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             return neutral_outcome("type7"), {
                 "history_request_needed": False,
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
@@ -4051,7 +4151,8 @@ class TestMarketScreen(unittest.TestCase):
 
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence):
+        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
             return neutral_outcome("type7"), {
                 "history_request_needed": False,
