@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from copy import deepcopy
+from datetime import datetime
 from functools import lru_cache
 import hashlib
 import io
@@ -81,9 +82,9 @@ def _eligible_codes():
 
 @lru_cache(maxsize=1)
 def _market_coldness_audit_fixture(analysis_codes: tuple[str, ...], eligible_codes: tuple[str, ...]):
-    retrieved_at = "2026-07-15T08:05:00Z"
+    retrieved_at = "2026-07-15T08:20:00Z"
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_id": MARKET_COLDNESS_MODEL_ID,
         "source": "Eastmoney push2 clist",
         "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
@@ -99,6 +100,7 @@ def _market_coldness_audit_fixture(analysis_codes: tuple[str, ...], eligible_cod
                 round(-40.0 + (index % 121) * 0.6, 2),
                 round(0.25 + (index % 80) * 0.1, 2),
                 round(0.4 + (index % 40) * 0.05, 2),
+                int(datetime.fromisoformat("2026-07-15T07:34:00+00:00").timestamp()),
             ]
             for index, code in enumerate(analysis_codes)
         ],
@@ -1523,7 +1525,7 @@ def test_release_zip_verifier_replays_raw_market_coldness_instead_of_trusting_co
         ),
         (
             lambda payload: payload["provenance"]["caller_metadata"]["market_coldness"].update(
-                retrieved_at="2026-07-14T08:05:00Z"
+                retrieved_at="2026-07-14T08:20:00Z"
             ),
             "market-coldness provenance",
         ),

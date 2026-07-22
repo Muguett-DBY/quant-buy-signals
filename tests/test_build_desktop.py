@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import zipfile
 
 import pytest
@@ -55,6 +56,16 @@ def test_desktop_bundle_and_health_gate_include_every_financial_evidence_file():
     assert evidence_files <= set(launcher._HEALTH_REQUIRED_RESOURCE_FILES)
     for relative in evidence_files:
         assert f'ROOT / "data" / "{Path(relative).name}"' in spec
+
+
+def test_desktop_bundle_and_health_gate_include_the_pinned_trading_calendar():
+    relative = "tools/china_a_share_trading_calendar.json"
+    spec = (Path(__file__).resolve().parents[1] / "desktop" / "DS_DCF.spec").read_text(encoding="utf-8")
+
+    assert relative in launcher._HEALTH_REQUIRED_RESOURCE_FILES
+    assert 'ROOT / "tools" / "china_a_share_trading_calendar.json"' in spec
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "china_a_share_trading_calendar.json" in pyproject["tool"]["setuptools"]["package-data"]["tools"]
 
 
 def test_bootstrap_installer_spec_and_default_release_url_are_version_bound():

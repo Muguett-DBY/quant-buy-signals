@@ -17,6 +17,7 @@ datas = [
     (str(ROOT / "data" / "industry_em_map.json"), "data"),
     (str(ROOT / "data" / "industry_capco_2025h2.json"), "data"),
     (str(ROOT / "data" / "industry_exchange_new_listings_2026.json"), "data"),
+    (str(ROOT / "tools" / "china_a_share_trading_calendar.json"), "tools"),
 ]
 binaries = []
 hiddenimports = []

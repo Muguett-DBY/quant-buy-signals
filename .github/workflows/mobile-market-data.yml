@@ -199,8 +199,8 @@ jobs:
             [Globalization.CultureInfo]::InvariantCulture
           )
           $dataTimestampShanghai = [TimeZoneInfo]::ConvertTime($dataTimestamp, $shanghaiZone)
-          if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
-            throw 'The mobile manifest was not generated after 16:00 on its Shanghai market date.'
+          if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+            throw 'The mobile manifest was not generated after 16:15 on its Shanghai market date.'
           }
 
           $validation = $manifest.provenance.snapshot_validation
@@ -220,8 +220,8 @@ jobs:
             (Convert-SourceTimestamp $validation.retrieval_time_oldest 'oldest quote retrieval timestamp'),
             $shanghaiZone
           )
-          if ($retrievedShanghai.Date -ne $marketDate.Date -or $retrievedShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
-            throw 'The quote pages were not retrieved after 16:00 on the published market date.'
+          if ($retrievedShanghai.Date -ne $marketDate.Date -or $retrievedShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+            throw 'The quote pages were not retrieved after 16:15 on the published market date.'
           }
           $latestQuoteShanghai = [TimeZoneInfo]::ConvertTime(
             (Convert-SourceTimestamp $validation.source_quote_timestamp_latest 'latest source quote timestamp'),

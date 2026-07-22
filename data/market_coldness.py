@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
-from datetime import date, datetime, time as datetime_time, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Protocol
@@ -28,13 +28,14 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, CONCURRENCY, REQUEST_TIMEOUT
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
+from data.trading_calendar import is_a_share_trading_day
 
 
 EASTMONEY_CLIST_ENDPOINT = "https://push2delay.eastmoney.com/api/qt/clist/get"
 EASTMONEY_SOURCE = "Eastmoney push2 clist"
 EASTMONEY_SOURCE_ID = "eastmoney_push2_sh_sz_a_coldness"
 EASTMONEY_UNIVERSE = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-EASTMONEY_FIELDS = ("f12", "f13", "f14", "f24", "f25", "f8", "f10", "f26")
+EASTMONEY_FIELDS = ("f12", "f13", "f14", "f24", "f25", "f8", "f10", "f26", "f124")
 
 METRIC_SOURCE_FIELDS: Mapping[str, str] = {
     "change_60d_pct": "f24",
@@ -42,6 +43,7 @@ METRIC_SOURCE_FIELDS: Mapping[str, str] = {
     "turnover_rate_pct": "f8",
     "volume_ratio": "f10",
     "listing_date": "f26",
+    "source_updated_at": "f124",
 }
 
 # The public clist service currently caps a page at 100 rows even when a
@@ -52,13 +54,18 @@ MAX_PAGE_WORKERS = 10
 DEFAULT_PAGE_WORKERS = max(1, min(int(CONCURRENCY), MAX_PAGE_WORKERS))
 DEFAULT_MARKET_COLDNESS_CACHE_PATH = CACHE_DIRECTORY / "market_coldness" / "eastmoney_sh_sz_a.json.gz"
 DEFAULT_MARKET_COLDNESS_SESSION_CACHE_DIRECTORY = CACHE_DIRECTORY / "market_coldness" / "sessions"
-_SESSION_ARCHIVE_READY_TIME = datetime_time(15, 15)
+MARKET_COLDNESS_INTRADAY_START_TIME = datetime_time(9, 15)
+# Since 2026-07-06, both Shanghai and Shenzhen A shares can trade at the
+# closing price until 15:30.  The delayed whole-market feed has also been
+# observed finalising rows after 16:00, so keep a conservative 45-minute
+# settlement/data-publication buffer before accepting an immutable close.
+MARKET_COLDNESS_DECISION_READY_TIME = datetime_time(16, 15)
 _RECOVERY_TIMEOUT_FLOOR_SECONDS = 30.0
 _RECOVERY_RETRIES = 2
 _MAX_RECOVERY_PAGES = 5
 _RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
 
-_CACHE_SCHEMA_VERSION = 1
+_CACHE_SCHEMA_VERSION = 2
 _MAX_PAGE_RESPONSE_BYTES = 4 * 1024 * 1024
 _MAX_ACQUISITION_RESPONSE_BYTES = 32 * 1024 * 1024
 _MAX_TOTAL_ROWS = 10_000
@@ -69,6 +76,7 @@ _SIX_DIGIT_CODE = re.compile(r"[0-9]{6}")
 _STRICT_UINT = re.compile(r"0|[1-9][0-9]*")
 _CALLBACK_NAME = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _PLACEHOLDERS = {"", "-", "--"}
+_MAX_SOURCE_FUTURE_SKEW_SECONDS = 5 * 60
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Referer": "https://quote.eastmoney.com/center/gridlist.html",
@@ -78,6 +86,32 @@ _HEADERS = {
 
 class MarketColdnessError(RuntimeError):
     """The source response cannot prove a complete, valid market snapshot."""
+
+
+def market_coldness_completed_session(retrieved_at: datetime) -> date | None:
+    """Return the latest complete A-share session represented at acquisition time.
+
+    The delayed whole-market fields still represent the previous close before
+    the next trading day's opening auction.  During the auction/continuous
+    session they can be a mixed intraday generation, so no complete session is
+    returned until the post-close decision boundary.
+    """
+
+    if not isinstance(retrieved_at, datetime) or retrieved_at.tzinfo is None or retrieved_at.utcoffset() is None:
+        raise MarketColdnessError("market-coldness retrieval timestamp lacks a timezone")
+    local = retrieved_at.astimezone(ZoneInfo("Asia/Shanghai"))
+    local_time = local.time().replace(tzinfo=None)
+    local_date = local.date()
+    if is_a_share_trading_day(local_date):
+        if local_time >= MARKET_COLDNESS_DECISION_READY_TIME:
+            return local_date
+        if local_time >= MARKET_COLDNESS_INTRADAY_START_TIME:
+            return None
+
+    candidate = local_date - timedelta(days=1)
+    while not is_a_share_trading_day(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 class _MarketColdnessResourceLimitError(MarketColdnessError):
@@ -154,6 +188,7 @@ class MarketColdnessRecord:
     turnover_rate_pct: float | None
     volume_ratio: float | None
     listing_date: str | None
+    source_updated_at: str | None
     source: str
     source_url: str
     retrieved_at: str
@@ -404,6 +439,24 @@ def _optional_listing_date(row: Mapping[str, Any]) -> tuple[str | None, str | No
     return parsed.isoformat(), None
 
 
+def _optional_source_updated_at(row: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    field = "f124"
+    if field not in row:
+        return None, f"upstream_field_absent:{field}"
+    raw = row[field]
+    if raw is None:
+        return None, f"upstream_null:{field}"
+    if isinstance(raw, str) and raw.strip() in _PLACEHOLDERS:
+        return None, f"upstream_placeholder:{field}"
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise MarketColdnessError("Eastmoney f124 must be a positive Unix timestamp")
+    try:
+        parsed = datetime.fromtimestamp(raw, timezone.utc)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise MarketColdnessError("Eastmoney f124 is outside the supported timestamp range") from exc
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z"), None
+
+
 def _parse_name(row: Mapping[str, Any]) -> tuple[str | None, str | None]:
     if "f14" not in row:
         return None, "upstream_field_absent:f14"
@@ -443,6 +496,7 @@ def _parse_row(row: Any, retrieved_at: str) -> MarketColdnessRecord:
     turnover, turnover_reason = _optional_number(row, "f8", nonnegative=True)
     volume_ratio, volume_ratio_reason = _optional_number(row, "f10", nonnegative=True)
     listing_date, listing_reason = _optional_listing_date(row)
+    source_updated_at, source_updated_at_reason = _optional_source_updated_at(row)
 
     reasons = {
         key: value
@@ -453,6 +507,7 @@ def _parse_row(row: Any, retrieved_at: str) -> MarketColdnessRecord:
             ("turnover_rate_pct", turnover_reason),
             ("volume_ratio", volume_ratio_reason),
             ("listing_date", listing_reason),
+            ("source_updated_at", source_updated_at_reason),
         )
         if value is not None
     }
@@ -470,6 +525,7 @@ def _parse_row(row: Any, retrieved_at: str) -> MarketColdnessRecord:
         turnover_rate_pct=turnover,
         volume_ratio=volume_ratio,
         listing_date=listing_date,
+        source_updated_at=source_updated_at,
         source=EASTMONEY_SOURCE,
         source_url=EASTMONEY_CLIST_ENDPOINT,
         retrieved_at=retrieved_at,
@@ -478,10 +534,14 @@ def _parse_row(row: Any, retrieved_at: str) -> MarketColdnessRecord:
     )
 
 
-def _utc_timestamp(clock: Callable[[], datetime]) -> str:
+def _utc_datetime(clock: Callable[[], datetime]) -> datetime:
     value = clock()
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise MarketColdnessError("market-coldness clock must return a timezone-aware datetime")
+    return value.astimezone(timezone.utc)
+
+
+def _format_utc_timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
@@ -495,6 +555,37 @@ def _validate_retrieved_at(value: Any) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise MarketColdnessError("market-coldness retrieval timestamp lacks a timezone")
     return value
+
+
+def _source_update_datetime(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise MarketColdnessError("market-coldness source update timestamp is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MarketColdnessError("market-coldness source update timestamp is invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise MarketColdnessError("market-coldness source update timestamp lacks a timezone")
+    return parsed
+
+
+def _require_source_generation_session(
+    snapshot: MarketColdnessSnapshot,
+    session: date,
+    *,
+    label: str,
+) -> None:
+    if snapshot.retrieved_at is None:
+        raise MarketColdnessError(f"{label} has no retrieval timestamp")
+    retrieved = _source_update_datetime(snapshot.retrieved_at)
+    source_sessions: set[date] = set()
+    for record in snapshot.records:
+        source_updated = _source_update_datetime(record.source_updated_at)
+        if source_updated > retrieved + timedelta(seconds=_MAX_SOURCE_FUTURE_SKEW_SECONDS):
+            raise MarketColdnessError(f"{label} has a source update after retrieval")
+        source_sessions.add(source_updated.astimezone(ZoneInfo("Asia/Shanghai")).date())
+    if source_sessions != {session}:
+        raise MarketColdnessError(f"{label} source rows are bound to another session")
 
 
 class EastmoneyMarketColdnessAdapter:
@@ -625,7 +716,7 @@ class EastmoneyMarketColdnessAdapter:
         ) from last_error
 
     def fetch_all(self) -> MarketColdnessBatch:
-        retrieved_at = _utc_timestamp(self.clock)
+        acquisition_started = _utc_datetime(self.clock)
         recovery_timeout = max(self.timeout * 2, _RECOVERY_TIMEOUT_FLOOR_SECONDS)
         acquisition_budget = _AcquisitionByteBudget(_MAX_ACQUISITION_RESPONSE_BYTES)
         try:
@@ -697,6 +788,14 @@ class EastmoneyMarketColdnessAdapter:
                 except _MarketColdnessTransientTransportError as exc:
                     raise MarketColdnessError(f"failed to recover Eastmoney page {page}: {exc}") from exc
 
+        acquisition_completed = _utc_datetime(self.clock)
+        if acquisition_completed < acquisition_started:
+            raise MarketColdnessError("market-coldness acquisition clock moved backwards")
+        if market_coldness_completed_session(acquisition_started) != market_coldness_completed_session(
+            acquisition_completed
+        ):
+            raise MarketColdnessError("market-coldness acquisition crossed a trading-session decision boundary")
+        retrieved_at = _format_utc_timestamp(acquisition_completed)
         records: list[MarketColdnessRecord] = []
         seen: set[str] = set()
         response_bytes = 0
@@ -761,6 +860,7 @@ def _coverage(records: tuple[MarketColdnessRecord, ...]) -> MarketColdnessCovera
 
 def _available_snapshot(batch: MarketColdnessBatch) -> MarketColdnessSnapshot:
     _validate_retrieved_at(batch.retrieved_at)
+    retrieved = _source_update_datetime(batch.retrieved_at)
     if (
         isinstance(batch.total_expected, bool)
         or not isinstance(batch.total_expected, int)
@@ -780,6 +880,10 @@ def _available_snapshot(batch: MarketColdnessBatch) -> MarketColdnessSnapshot:
             raise MarketColdnessError("adapter record source provenance is invalid")
         if record.retrieved_at != batch.retrieved_at:
             raise MarketColdnessError("adapter record retrieval timestamps are inconsistent")
+        if record.source_updated_at is not None and _source_update_datetime(
+            record.source_updated_at
+        ) > retrieved + timedelta(seconds=_MAX_SOURCE_FUTURE_SKEW_SECONDS):
+            raise MarketColdnessError("adapter record source update is after retrieval")
         # Re-parse cached/upstream fields so a custom adapter cannot bypass the
         # exchange identity or numeric evidence contract.
         if _parse_row(record.upstream_fields, batch.retrieved_at) != record:
@@ -887,6 +991,7 @@ def _snapshot_from_cache(value: Any) -> MarketColdnessSnapshot:
         "turnover_rate_pct",
         "volume_ratio",
         "listing_date",
+        "source_updated_at",
         "upstream_fields",
         "missing_reasons",
     }
@@ -1015,7 +1120,11 @@ def market_coldness_session_cache_path(
             raise ValueError("market-coldness session must be an ISO date")
     else:
         raise ValueError("market-coldness session must be a date")
-    return Path(directory) / f"eastmoney_sh_sz_a_{session.isoformat()}.json.gz"
+    # Immutable archives must never reuse a filename across incompatible
+    # schemas.  A user can legitimately retain a v1 session file from an
+    # older release; giving v2 its own path lets the new generation be written
+    # without overwriting or treating the historical file as corruption.
+    return Path(directory) / f"eastmoney_sh_sz_a_{session.isoformat()}.v{_CACHE_SCHEMA_VERSION}.json.gz"
 
 
 def load_market_coldness_session_snapshot(
@@ -1048,10 +1157,15 @@ def load_market_coldness_session_snapshot(
     if retrieved.tzinfo is None or retrieved.utcoffset() is None:
         raise MarketColdnessError("immutable market-coldness session cache timestamp lacks a timezone")
     retrieved_shanghai = retrieved.astimezone(ZoneInfo("Asia/Shanghai"))
-    if retrieved_shanghai.date() != session:
-        raise MarketColdnessError("immutable market-coldness session cache is bound to another session")
-    if retrieved_shanghai.time().replace(tzinfo=None) < _SESSION_ARCHIVE_READY_TIME:
+    if (
+        retrieved_shanghai.date() == session
+        and retrieved_shanghai.time().replace(tzinfo=None) < MARKET_COLDNESS_DECISION_READY_TIME
+    ):
         raise MarketColdnessError("immutable market-coldness session cache was acquired before the session close")
+    completed_session = market_coldness_completed_session(retrieved)
+    if completed_session != session:
+        raise MarketColdnessError("immutable market-coldness session cache is bound to another session")
+    _require_source_generation_session(snapshot, session, label="immutable market-coldness session cache")
     return replace(snapshot, cache_hit=True, cache_diagnostic="immutable_session_hit")
 
 
@@ -1074,10 +1188,15 @@ def archive_market_coldness_session_snapshot(
     if retrieved.tzinfo is None or retrieved.utcoffset() is None:
         raise MarketColdnessError("market-coldness retrieval timestamp lacks a timezone")
     retrieved_shanghai = retrieved.astimezone(ZoneInfo("Asia/Shanghai"))
-    if retrieved_shanghai.date() != session:
-        raise MarketColdnessError("market-coldness snapshot is bound to another session")
-    if retrieved_shanghai.time().replace(tzinfo=None) < _SESSION_ARCHIVE_READY_TIME:
+    if (
+        retrieved_shanghai.date() == session
+        and retrieved_shanghai.time().replace(tzinfo=None) < MARKET_COLDNESS_DECISION_READY_TIME
+    ):
         raise MarketColdnessError("market-coldness snapshot was acquired before the session close")
+    completed_session = market_coldness_completed_session(retrieved)
+    if completed_session != session:
+        raise MarketColdnessError("market-coldness snapshot is bound to another session")
+    _require_source_generation_session(snapshot, session, label="market-coldness snapshot")
 
     cache = SafeFileCache(
         path,
@@ -1119,9 +1238,12 @@ __all__ = [
     "MarketColdnessError",
     "MarketColdnessRecord",
     "MarketColdnessSnapshot",
+    "MARKET_COLDNESS_DECISION_READY_TIME",
+    "MARKET_COLDNESS_INTRADAY_START_TIME",
     "MetricCoverage",
     "archive_market_coldness_session_snapshot",
     "fetch_market_coldness_snapshot",
     "load_market_coldness_session_snapshot",
     "market_coldness_session_cache_path",
+    "market_coldness_completed_session",
 ]

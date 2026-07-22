@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import threading
 
 import pytest
@@ -18,11 +18,31 @@ from data.market_coldness import (
     archive_market_coldness_session_snapshot,
     fetch_market_coldness_snapshot,
     load_market_coldness_session_snapshot,
+    market_coldness_session_cache_path,
+    market_coldness_completed_session,
 )
 
 
 FIXED_TIME = datetime(2026, 7, 16, 5, 10, 9, tzinfo=timezone.utc)
-AFTER_CLOSE_TIME = datetime(2026, 7, 16, 8, 5, tzinfo=timezone.utc)
+AFTER_CLOSE_TIME = datetime(2026, 7, 16, 8, 20, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    ("retrieved_at", "expected"),
+    [
+        ("2026-07-23T02:11:06+08:00", date(2026, 7, 22)),
+        ("2026-07-23T09:14:59+08:00", date(2026, 7, 22)),
+        ("2026-07-23T09:15:00+08:00", None),
+        ("2026-07-23T15:15:00+08:00", None),
+        ("2026-07-23T15:30:00+08:00", None),
+        ("2026-07-23T16:14:59+08:00", None),
+        ("2026-07-23T16:15:00+08:00", date(2026, 7, 23)),
+        ("2026-07-25T12:00:00+08:00", date(2026, 7, 24)),
+        ("2026-02-16T12:00:00+08:00", date(2026, 2, 13)),
+    ],
+)
+def test_completed_session_uses_exchange_calendar_and_strict_intraday_boundaries(retrieved_at, expected):
+    assert market_coldness_completed_session(datetime.fromisoformat(retrieved_at)) == expected
 
 
 def _row(code="600000", market=1, **overrides):
@@ -35,6 +55,7 @@ def _row(code="600000", market=1, **overrides):
         "f8": 0.71,
         "f10": 0.83,
         "f26": 19991110,
+        "f124": int(datetime(2026, 7, 16, 5, 0, tzinfo=timezone.utc).timestamp()),
     }
     value.update(overrides)
     return value
@@ -177,6 +198,24 @@ def test_remaining_pages_are_fetched_concurrently_but_consumed_in_page_order():
 
     assert peak == 3
     assert [record.code for record in batch.records] == ["600000", "000001", "000002", "000003"]
+
+
+@pytest.mark.parametrize(
+    ("started", "completed"),
+    [
+        ("2026-07-23T09:14:59+08:00", "2026-07-23T09:15:00+08:00"),
+        ("2026-07-23T16:14:59+08:00", "2026-07-23T16:15:00+08:00"),
+    ],
+)
+def test_acquisition_crossing_a_session_decision_boundary_is_rejected(started, completed):
+    times = iter((datetime.fromisoformat(started), datetime.fromisoformat(completed)))
+    adapter = _adapter(
+        _FakeHttpClient({1: _page(1, [_row()])}),
+        clock=lambda: next(times),
+    )
+
+    with pytest.raises(MarketColdnessError, match="crossed a trading-session decision boundary"):
+        adapter.fetch_all()
 
 
 def test_first_page_transport_failure_gets_bounded_longer_recovery():
@@ -338,6 +377,12 @@ def test_nonnegative_market_fields_reject_negative_values():
             _adapter(_FakeHttpClient({1: _page(1, [_row(**{field: -0.01})])})).fetch_all()
 
 
+@pytest.mark.parametrize("bad_value", [True, 0, -1, 1.5, "1784187600"])
+def test_source_update_timestamp_requires_a_positive_integer_epoch(bad_value):
+    with pytest.raises(MarketColdnessError, match="f124 must be a positive Unix timestamp"):
+        _adapter(_FakeHttpClient({1: _page(1, [_row(f124=bad_value)])})).fetch_all()
+
+
 def test_transport_timeout_is_retried_and_successful_response_is_closed():
     client = _FakeHttpClient({1: [requests.Timeout("slow"), _page(1, [_row()])]})
 
@@ -468,7 +513,7 @@ def test_cache_hit_replays_strict_records_without_calling_network(tmp_path):
     assert not first.cache_hit
     assert first.cache_diagnostic.endswith(";saved")
     assert len(first_client.calls) == 1
-    loaded = SafeFileCache(cache_path, schema_version=1, max_uncompressed_bytes=64 * 1024 * 1024).load()
+    loaded = SafeFileCache(cache_path, schema_version=2, max_uncompressed_bytes=64 * 1024 * 1024).load()
     assert loaded.hit, loaded.reason
     assert loaded.value["contract"]["universe"] == EASTMONEY_UNIVERSE
     assert loaded.value["records"][0]["upstream_fields"]["f24"] == -12.5
@@ -551,7 +596,7 @@ def test_semantically_invalid_checksummed_cache_is_refetched(tmp_path):
         cache_path=cache_path,
     )
     assert first.available
-    SafeFileCache(cache_path, schema_version=1).save({"unexpected": []})
+    SafeFileCache(cache_path, schema_version=2).save({"unexpected": []})
 
     client = _FakeHttpClient({1: _page(1, [_row("000001", 0)])})
     replacement = fetch_market_coldness_snapshot(
@@ -605,6 +650,107 @@ def test_session_archive_replays_an_exact_generation_after_the_rolling_cache_adv
     assert replay is not None
     assert replay.records == first.records
     assert replay.cache_diagnostic == "immutable_session_hit"
+
+
+def test_session_archive_uses_a_schema_versioned_path_without_touching_a_legacy_file(tmp_path):
+    legacy_path = tmp_path / "eastmoney_sh_sz_a_2026-07-16.json.gz"
+    SafeFileCache(legacy_path, schema_version=1).save({"legacy_schema": 1})
+    legacy_bytes = legacy_path.read_bytes()
+    current_path = market_coldness_session_cache_path("2026-07-16", directory=tmp_path)
+    assert current_path.name == "eastmoney_sh_sz_a_2026-07-16.v2.json.gz"
+    assert current_path != legacy_path
+
+    snapshot = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("600000", 1)])}),
+            clock=lambda: AFTER_CLOSE_TIME,
+        ),
+        use_cache=False,
+    )
+    archived = archive_market_coldness_session_snapshot(snapshot, "2026-07-16", directory=tmp_path)
+    replay = load_market_coldness_session_snapshot("2026-07-16", directory=tmp_path)
+
+    assert current_path.exists()
+    assert legacy_path.read_bytes() == legacy_bytes
+    assert archived.records == snapshot.records
+    assert replay is not None
+    assert replay.records == snapshot.records
+
+
+def test_session_archive_accepts_next_trading_day_preopen_for_the_previous_close(tmp_path):
+    overnight = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient(
+                {
+                    1: _page(
+                        1,
+                        [
+                            _row(
+                                "600000",
+                                1,
+                                f124=int(datetime(2026, 7, 22, 7, 34, tzinfo=timezone.utc).timestamp()),
+                            )
+                        ],
+                    )
+                }
+            ),
+            clock=lambda: datetime(2026, 7, 22, 18, 11, 6, tzinfo=timezone.utc),
+        ),
+        use_cache=False,
+    )
+
+    archived = archive_market_coldness_session_snapshot(overnight, "2026-07-22", directory=tmp_path)
+    replay = load_market_coldness_session_snapshot("2026-07-22", directory=tmp_path)
+
+    assert archived.records == overnight.records
+    assert replay is not None
+    assert replay.records == overnight.records
+
+
+def test_session_archive_rejects_source_rows_from_an_older_session(tmp_path):
+    stale_source = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient(
+                {
+                    1: _page(
+                        1,
+                        [
+                            _row(
+                                "600000",
+                                1,
+                                f124=int(datetime(2026, 7, 21, 7, 34, tzinfo=timezone.utc).timestamp()),
+                            )
+                        ],
+                    )
+                }
+            ),
+            clock=lambda: datetime(2026, 7, 22, 18, 11, 6, tzinfo=timezone.utc),
+        ),
+        use_cache=False,
+    )
+
+    with pytest.raises(MarketColdnessError, match="source rows are bound to another session"):
+        archive_market_coldness_session_snapshot(stale_source, "2026-07-22", directory=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "retrieved_at",
+    [
+        datetime(2026, 7, 23, 1, 15, tzinfo=timezone.utc),
+        datetime(2026, 7, 23, 7, 15, tzinfo=timezone.utc),
+    ],
+)
+def test_session_archive_rejects_a_generation_after_the_next_session_starts(tmp_path, retrieved_at):
+    snapshot = fetch_market_coldness_snapshot(
+        adapter=_adapter(
+            _FakeHttpClient({1: _page(1, [_row("600000", 1)])}),
+            clock=lambda: retrieved_at,
+        ),
+        use_cache=False,
+    )
+
+    with pytest.raises(MarketColdnessError, match="bound to another session"):
+        archive_market_coldness_session_snapshot(snapshot, "2026-07-22", directory=tmp_path)
 
 
 def test_session_archive_rejects_a_different_rewrite_for_the_same_session(tmp_path):

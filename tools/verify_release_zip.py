@@ -2476,7 +2476,7 @@ def _valid_market_coldness_provenance(
         or status.get("source_url") != _LISTING_DATE_SOURCE_URL
         or status.get("as_of_session") != trade_session
         or parsed_retrieval is None
-        or parsed_retrieval.astimezone(_SHANGHAI).date().isoformat() != trade_session
+        or retrieved_at != reference_artifact.get("retrieved_at")
         or status.get("eligible_evidence_count") != evidence_count
         or not _close_number(status.get("eligible_evidence_coverage"), evidence_coverage, rel_tol=0.0, abs_tol=1e-12)
         or status.get("reference_artifact_sha256")

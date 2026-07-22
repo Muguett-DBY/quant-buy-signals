@@ -16,11 +16,16 @@ import bisect
 import math
 import re
 from collections.abc import Iterable, Mapping, MutableMapping
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from data.market_coldness import MarketColdnessRecord, MarketColdnessSnapshot
+from data.market_coldness import (
+    MARKET_COLDNESS_DECISION_READY_TIME,
+    MarketColdnessRecord,
+    MarketColdnessSnapshot,
+    market_coldness_completed_session,
+)
 from data.trading_calendar import a_share_trading_days_ytd
 
 
@@ -29,7 +34,6 @@ MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION = 1
 MAX_COLDNESS_SCORE = 8.0
 MAX_SCORE_WITHOUT_VOLUME_RATIO = 7.5
 MIN_LISTING_AGE_DAYS = 120
-MARKET_COLDNESS_DECISION_READY_TIME = time(15, 15)
 MAX_RETRIEVAL_AGE_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_AGE_DAYS = 10
 MAX_FUTURE_SKEW_SECONDS = 5 * 60
@@ -408,7 +412,7 @@ def build_market_coldness_evidence(
         if record.code in seen_source_codes:
             raise MarketColdnessScoringError(f"duplicate market-coldness code: {record.code}")
         seen_source_codes.add(record.code)
-    for metric in (*_REQUIRED_METRICS, "listing_date"):
+    for metric in (*_REQUIRED_METRICS, "listing_date", "source_updated_at"):
         coverage = _source_metric_coverage(snapshot, metric)
         if coverage is None or coverage < MIN_SOURCE_FIELD_COVERAGE:
             return unavailable(
@@ -422,26 +426,45 @@ def build_market_coldness_evidence(
     age_seconds = (current - retrieved).total_seconds()
     if age_seconds < -MAX_FUTURE_SKEW_SECONDS or age_seconds > MAX_RETRIEVAL_AGE_SECONDS:
         return unavailable("stale_or_future_retrieval", retrieval_age_seconds=age_seconds)
-    retrieved_shanghai = retrieved.astimezone(_SHANGHAI)
     current_shanghai = current.astimezone(_SHANGHAI)
-    if session != retrieved_shanghai.date():
+    retrieved_shanghai = retrieved.astimezone(_SHANGHAI)
+    if (
+        retrieved_shanghai.date() == session
+        and retrieved_shanghai.time().replace(tzinfo=None) < MARKET_COLDNESS_DECISION_READY_TIME
+    ):
+        return unavailable(
+            "retrieval_before_close",
+            retrieval_time_shanghai=retrieved_shanghai.time().replace(tzinfo=None).isoformat(),
+            decision_eligible_after=f"{MARKET_COLDNESS_DECISION_READY_TIME.isoformat()} Asia/Shanghai",
+        )
+    completed_session = market_coldness_completed_session(retrieved)
+    if session != completed_session:
         return unavailable(
             "session_retrieval_mismatch",
-            retrieval_session=retrieved_shanghai.date().isoformat(),
+            retrieval_session=completed_session.isoformat() if completed_session is not None else None,
+            requested_session=session.isoformat(),
+        )
+    source_sessions: set[date] = set()
+    for record in snapshot.records:
+        if not isinstance(record.source_updated_at, str):
+            return unavailable("missing_source_update_time", source_code=record.code)
+        try:
+            source_updated = datetime.fromisoformat(record.source_updated_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise MarketColdnessScoringError(f"invalid market-coldness source update timestamp: {record.code}") from exc
+        if source_updated.tzinfo is None or source_updated.utcoffset() is None:
+            raise MarketColdnessScoringError(f"naive market-coldness source update timestamp: {record.code}")
+        if source_updated > retrieved + timedelta(seconds=MAX_FUTURE_SKEW_SECONDS):
+            raise MarketColdnessScoringError(f"future market-coldness source update timestamp: {record.code}")
+        source_sessions.add(source_updated.astimezone(_SHANGHAI).date())
+    if source_sessions != {session}:
+        return unavailable(
+            "source_session_mismatch",
+            source_sessions=sorted(value.isoformat() for value in source_sessions),
             requested_session=session.isoformat(),
         )
     if session > current_shanghai.date() or (current_shanghai.date() - session).days > MAX_SESSION_AGE_DAYS:
         return unavailable("session_current_date_mismatch")
-    # Intraday f8/f10 are incomplete.  Decision eligibility is a property of
-    # the acquired batch, not of the later wall clock: a 09:00 cache must never
-    # become closing evidence merely because it is replayed after 15:15.
-    if retrieved_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME:
-        return unavailable(
-            "retrieval_before_close",
-            retrieval_time_shanghai=retrieved_shanghai.time().isoformat(),
-            decision_eligible_after=f"{MARKET_COLDNESS_DECISION_READY_TIME.isoformat()} Asia/Shanghai",
-        )
-
     records_by_code: dict[str, tuple[MarketColdnessRecord, date | None, dict[str, float | None]]] = {}
     reference_records: list[tuple[MarketColdnessRecord, dict[str, float | None]]] = []
     isolated_future_listing_codes: list[str] = []
@@ -607,6 +630,7 @@ def build_market_coldness_evidence(
                 "retrieved_at": snapshot.retrieved_at,
                 "as_of_session": session.isoformat(),
                 "source_url": snapshot.source_url,
+                "source_updated_at": _record.source_updated_at,
             },
         }
     unscored_details = _unscored_diagnostics(

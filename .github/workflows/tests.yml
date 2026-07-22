@@ -142,7 +142,7 @@ jobs:
           try {
             $env:PYTHONPATH = $target
             Push-Location $env:RUNNER_TEMP
-            python -c "from data.industry import industry_data_status; import tools.run_full_audit; status = industry_data_status(); assert status['loader_ok'], status; assert status['f10_entries'] > 0, status; assert status['authoritative_records'] >= 5000, status; assert status['authoritative_source']['source_sha256'], status"
+            python -c "from datetime import date; from data.industry import industry_data_status; from data.trading_calendar import is_a_share_trading_day; import tools.run_full_audit; status = industry_data_status(); assert status['loader_ok'], status; assert status['f10_entries'] > 0, status; assert status['authoritative_records'] >= 5000, status; assert status['authoritative_source']['source_sha256'], status; assert is_a_share_trading_day(date(2026, 7, 23))"
             if ($LASTEXITCODE -ne 0) { throw "Installed wheel verification failed with exit code $LASTEXITCODE" }
           } finally {
             Pop-Location

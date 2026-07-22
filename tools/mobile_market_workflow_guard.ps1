@@ -37,6 +37,7 @@ if ($MaximumCompanyCount -lt $MinimumCompanyCount) {
 $script:MinimumCompanyCount = $MinimumCompanyCount
 $script:MaximumCompanyCount = $MaximumCompanyCount
 $script:MaximumFutureClockSkew = [TimeSpan]::FromMinutes(10)
+$script:PostCloseReadyTime = [TimeSpan]::FromMinutes(975)
 $script:ValidTypeStatuses = @(
   'triggered',
   'conditional',
@@ -622,7 +623,7 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
       [Globalization.DateTimeStyles]::RoundtripKind
     )
     $dataShanghai = [TimeZoneInfo]::ConvertTime($dataTimestamp, $script:ShanghaiZone)
-    if ($dataShanghai.Date -ne $ShanghaiNow.Date -or $dataShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
+    if ($dataShanghai.Date -ne $ShanghaiNow.Date -or $dataShanghai.TimeOfDay -lt $script:PostCloseReadyTime) {
       throw 'Published manifest is not a same-day post-close generation.'
     }
 
@@ -714,7 +715,7 @@ if ($calendarDecision.closed) {
   return
 }
 if ($EventName -ceq 'workflow_dispatch') {
-  if ($shanghaiNow.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
+  if ($shanghaiNow.TimeOfDay -lt $script:PostCloseReadyTime) {
     Write-WorkflowDecision $false 'manual_dispatch_before_post_close_window'
     return
   }

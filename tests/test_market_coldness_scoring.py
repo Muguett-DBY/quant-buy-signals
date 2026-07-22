@@ -21,7 +21,7 @@ from engine.market_coldness import (
 )
 
 
-RETRIEVED = "2026-07-15T08:00:00+00:00"
+RETRIEVED = "2026-07-15T08:20:00+00:00"
 NOW = datetime(2026, 7, 16, 2, 0, tzinfo=timezone.utc)
 
 
@@ -34,6 +34,7 @@ def _record(
     volume_ratio: float | None,
     listing_date: str | None = "2001-08-27",
     retrieved_at: str = RETRIEVED,
+    source_updated_at: str | None = None,
 ) -> MarketColdnessRecord:
     exchange = "SH" if code.startswith("6") else "SZ"
     return MarketColdnessRecord(
@@ -46,6 +47,7 @@ def _record(
         turnover_rate_pct=turnover_rate_pct,
         volume_ratio=volume_ratio,
         listing_date=listing_date,
+        source_updated_at=source_updated_at or retrieved_at,
         source="Eastmoney push2 clist",
         source_url="https://push2delay.eastmoney.com/api/qt/clist/get",
         retrieved_at=retrieved_at,
@@ -55,7 +57,14 @@ def _record(
 
 
 def _snapshot(*records: MarketColdnessRecord) -> MarketColdnessSnapshot:
-    metrics = ("change_60d_pct", "change_ytd_pct", "turnover_rate_pct", "volume_ratio", "listing_date")
+    metrics = (
+        "change_60d_pct",
+        "change_ytd_pct",
+        "turnover_rate_pct",
+        "volume_ratio",
+        "listing_date",
+        "source_updated_at",
+    )
     by_metric = {}
     for metric in metrics:
         present = sum(getattr(record, metric) is not None for record in records)
@@ -600,7 +609,7 @@ def test_unscored_diagnostics_are_a_complete_sorted_candidate_partition():
 
 
 def test_listing_age_and_current_year_reasons_are_distinct_non_applicable_categories():
-    retrieved = "2026-01-15T08:00:00+00:00"
+    retrieved = "2026-01-15T08:20:00+00:00"
     old = _record(
         "600001",
         change_60d_pct=-20,
@@ -705,7 +714,7 @@ def test_same_session_intraday_evidence_is_provisional_and_not_decision_eligible
         "evidence_available": False,
         "evidence_reason": "retrieval_before_close",
         "retrieval_time_shanghai": "09:00:00",
-        "decision_eligible_after": "15:15:00 Asia/Shanghai",
+        "decision_eligible_after": "16:15:00 Asia/Shanghai",
     }
 
 
@@ -719,6 +728,7 @@ def test_preclose_retrieval_never_becomes_decision_eligible_after_the_close():
             turnover_rate_pct=1.0,
             volume_ratio=0.8,
             retrieved_at=retrieved,
+            source_updated_at="2026-07-22T07:34:00Z",
         )
     )
     diagnostics = {}
@@ -755,3 +765,87 @@ def test_different_session_trading_activity_is_never_rebound_to_the_snapshot():
     assert diagnostics["evidence_reason"] == "session_retrieval_mismatch"
     assert diagnostics["retrieval_session"] == "2026-07-15"
     assert diagnostics["requested_session"] == "2026-07-16"
+
+
+def test_next_trading_day_preopen_batch_remains_bound_to_the_previous_close():
+    retrieved = "2026-07-22T18:11:06Z"
+    snapshot = _snapshot(
+        _record(
+            "600001",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            retrieved_at=retrieved,
+            source_updated_at="2026-07-22T07:34:00Z",
+        )
+    )
+    diagnostics = {}
+
+    evidence = build_market_coldness_evidence(
+        snapshot,
+        as_of_session="2026-07-22",
+        now=datetime(2026, 7, 22, 18, 12, tzinfo=timezone.utc),
+        min_cross_section_records=1,
+        diagnostics=diagnostics,
+    )
+
+    assert evidence["600001"]["market_coldness_score_evidence"]["as_of"] == "2026-07-22"
+    assert diagnostics["evidence_reason"] == "available"
+
+
+def test_source_update_date_must_independently_match_the_bound_session():
+    retrieved = "2026-07-22T18:11:06Z"
+    snapshot = _snapshot(
+        _record(
+            "600001",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            retrieved_at=retrieved,
+            source_updated_at="2026-07-21T07:34:00Z",
+        )
+    )
+    diagnostics = {}
+
+    assert (
+        build_market_coldness_evidence(
+            snapshot,
+            as_of_session="2026-07-22",
+            now=datetime(2026, 7, 22, 18, 12, tzinfo=timezone.utc),
+            min_cross_section_records=1,
+            diagnostics=diagnostics,
+        )
+        == {}
+    )
+    assert diagnostics["evidence_reason"] == "source_session_mismatch"
+    assert diagnostics["source_sessions"] == ["2026-07-21"]
+
+
+def test_next_trading_day_opening_auction_cannot_reuse_the_previous_close_batch():
+    retrieved = "2026-07-23T01:15:00Z"
+    snapshot = _snapshot(
+        _record(
+            "600001",
+            change_60d_pct=-20,
+            change_ytd_pct=-20,
+            turnover_rate_pct=1.0,
+            volume_ratio=0.8,
+            retrieved_at=retrieved,
+        )
+    )
+    diagnostics = {}
+
+    assert (
+        build_market_coldness_evidence(
+            snapshot,
+            as_of_session="2026-07-22",
+            now=datetime(2026, 7, 23, 1, 16, tzinfo=timezone.utc),
+            min_cross_section_records=1,
+            diagnostics=diagnostics,
+        )
+        == {}
+    )
+    assert diagnostics["evidence_reason"] == "session_retrieval_mismatch"
+    assert diagnostics["retrieval_session"] is None

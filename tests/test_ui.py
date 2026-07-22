@@ -471,7 +471,7 @@ def test_intraday_coldness_notice_persists_candidate_count_limit():
     assert notice is not None
     level, message = notice
     assert level == "warning"
-    assert "15:15后刷新" in message
+    assert "16:15后刷新" in message
     assert "不代表全市场最终只有这些公司" in message
 
 

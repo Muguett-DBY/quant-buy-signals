@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+from datetime import date, datetime
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -31,13 +32,28 @@ def _reporting_period_contract_payload():
     }
 
 
+@pytest.mark.parametrize(
+    ("retrieved_at", "expected"),
+    [
+        ("2026-07-23T15:15:00+08:00", None),
+        ("2026-07-23T15:30:00+08:00", None),
+        ("2026-07-23T16:14:59+08:00", None),
+        ("2026-07-23T16:15:00+08:00", date(2026, 7, 23)),
+        ("2026-07-25T12:00:00+08:00", date(2026, 7, 24)),
+    ],
+)
+def test_release_completed_session_independently_enforces_the_safe_close_boundary(retrieved_at, expected):
+    assert run_full_audit._release_market_coldness_completed_session(datetime.fromisoformat(retrieved_at)) == expected
+
+
 def _market_coldness_record(
     code: str,
     *,
     as_of_session: str = "2026-07-16",
-    retrieved_at: str = "2026-07-16T08:05:00Z",
+    retrieved_at: str = "2026-07-16T08:20:00Z",
     raw_values=None,
     relative=None,
+    source_updated_at=None,
 ):
     from datetime import date
 
@@ -108,6 +124,7 @@ def _market_coldness_record(
             "as_of_session": as_of_session,
             "source_url": run_full_audit.EASTMONEY_CLIST_ENDPOINT,
             "retrieved_at": retrieved_at,
+            "source_updated_at": source_updated_at or f"{as_of_session}T07:34:00Z",
         },
     }
 
@@ -117,7 +134,7 @@ def _market_coldness_status(
     evidence_codes=None,
     *,
     as_of_session="2026-07-16",
-    retrieved_at="2026-07-16T08:05:00Z",
+    retrieved_at="2026-07-16T08:20:00Z",
     not_applicable=None,
     data_gaps=None,
 ):
@@ -157,11 +174,12 @@ def _market_coldness_reference_artifact(
     listed_codes,
     *,
     as_of_session="2026-07-16",
-    retrieved_at="2026-07-16T08:05:00Z",
+    retrieved_at="2026-07-16T08:20:00Z",
     current_year=(),
     recent=(),
     zero_turnover=(),
     raw_values=None,
+    source_updated_at=None,
 ):
     complete_listed = set(listed_codes)
     candidate = 600000
@@ -175,6 +193,9 @@ def _market_coldness_reference_artifact(
         "volume_ratio": 0.8,
     }
     rows = []
+    source_update_epoch = int(
+        datetime.fromisoformat((source_updated_at or f"{as_of_session}T07:34:00Z").replace("Z", "+00:00")).timestamp()
+    )
     for code in sorted(complete_listed):
         listing_date = (
             "2026-01-02" if code in set(current_year) else "2026-04-01" if code in set(recent) else "2000-01-01"
@@ -188,6 +209,7 @@ def _market_coldness_reference_artifact(
                 values["change_ytd_pct"],
                 turnover,
                 values["volume_ratio"],
+                source_update_epoch,
             ]
         )
     return {
@@ -361,7 +383,7 @@ def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_sn
         available=True,
         source=run_full_audit.EASTMONEY_SOURCE,
         source_url=run_full_audit.EASTMONEY_CLIST_ENDPOINT,
-        retrieved_at="2026-07-15T08:00:00+00:00",
+        retrieved_at="2026-07-15T08:20:00+00:00",
         fetched_count=1,
         total_expected=1,
         coverage=coverage,
@@ -418,7 +440,7 @@ def test_market_coldness_loader_rejects_builder_identity_outside_quote_boundary(
         available=True,
         source=run_full_audit.EASTMONEY_SOURCE,
         source_url=run_full_audit.EASTMONEY_CLIST_ENDPOINT,
-        retrieved_at="2026-07-16T08:05:00Z",
+        retrieved_at="2026-07-16T08:20:00Z",
         fetched_count=1,
         total_expected=1,
         coverage=SimpleNamespace(to_dict=lambda: {"total_records": 1}),
@@ -456,7 +478,7 @@ def test_fresh_publication_refetches_when_cached_coldness_belongs_to_another_ses
         available=True,
         source="old",
         source_url="https://example.test/old",
-        retrieved_at="2026-07-15T08:00:00+00:00",
+        retrieved_at="2026-07-15T08:20:00+00:00",
         fetched_count=1,
         total_expected=1,
         coverage=coverage,
@@ -468,7 +490,7 @@ def test_fresh_publication_refetches_when_cached_coldness_belongs_to_another_ses
         available=True,
         source=run_full_audit.EASTMONEY_SOURCE,
         source_url=run_full_audit.EASTMONEY_CLIST_ENDPOINT,
-        retrieved_at="2026-07-16T08:00:00+00:00",
+        retrieved_at="2026-07-16T08:20:00+00:00",
         fetched_count=1,
         total_expected=1,
         coverage=coverage,
@@ -527,7 +549,7 @@ def test_fresh_publication_does_not_refetch_coldness_that_is_newer_than_quotes(m
         available=True,
         source="newer",
         source_url="https://example.test/newer",
-        retrieved_at="2026-07-17T08:00:00+00:00",
+        retrieved_at="2026-07-17T08:20:00+00:00",
         fetched_count=1,
         total_expected=1,
         coverage=SimpleNamespace(to_dict=lambda: {"total_records": 1}),
@@ -710,6 +732,73 @@ def test_release_market_coldness_gate_rejects_preclose_reference_batch():
         )
 
 
+def test_release_market_coldness_gate_accepts_next_day_preopen_previous_close_batch():
+    eligible = ("600000",)
+    artifact = _market_coldness_reference_artifact(
+        eligible,
+        as_of_session="2026-07-22",
+        retrieved_at="2026-07-22T18:11:06Z",
+    )
+    evidence, status = _status_from_reference_artifact(artifact, eligible)
+
+    assert (
+        run_full_audit._require_market_coldness_release_evidence(
+            evidence,
+            status,
+            reference_artifact=artifact,
+            eligible_codes=eligible,
+            as_of_session="2026-07-22",
+        )
+        == 1.0
+    )
+
+
+def test_release_market_coldness_replay_rejects_stale_source_update_dates():
+    artifact = _market_coldness_reference_artifact(
+        ("600000",),
+        as_of_session="2026-07-22",
+        retrieved_at="2026-07-22T18:11:06Z",
+        source_updated_at="2026-07-21T07:34:00Z",
+    )
+
+    with pytest.raises(RuntimeError, match="source row belongs to another session"):
+        run_full_audit._replay_market_coldness_reference_artifact(
+            artifact,
+            eligible_codes=("600000",),
+            as_of_session="2026-07-22",
+        )
+
+
+def test_release_market_coldness_gate_rejects_previous_close_after_next_auction_starts():
+    eligible = ("600000",)
+    artifact = _market_coldness_reference_artifact(
+        eligible,
+        as_of_session="2026-07-22",
+        retrieved_at="2026-07-23T01:15:00Z",
+    )
+    evidence = {
+        eligible[0]: _market_coldness_record(
+            eligible[0],
+            as_of_session="2026-07-22",
+            retrieved_at="2026-07-23T01:15:00Z",
+        )
+    }
+    status = _market_coldness_status(
+        eligible,
+        as_of_session="2026-07-22",
+        retrieved_at="2026-07-23T01:15:00Z",
+    )
+
+    with pytest.raises(RuntimeError, match="retrieval timestamp is invalid"):
+        run_full_audit._require_market_coldness_release_evidence(
+            evidence,
+            status,
+            reference_artifact=artifact,
+            eligible_codes=eligible,
+            as_of_session="2026-07-22",
+        )
+
+
 def test_market_coldness_replay_accepts_complete_source_rows_outside_the_listed_boundary():
     listed = tuple(f"{600000 + index:06d}" for index in range(50))
     artifact = _market_coldness_reference_artifact(listed)
@@ -718,7 +807,17 @@ def test_market_coldness_replay_accepts_complete_source_rows_outside_the_listed_
         eligible_codes=(listed[0],),
         as_of_session="2026-07-16",
     )
-    artifact["records"].append(["300000", "2000-01-01", -90.0, -90.0, 99.0, 99.0])
+    artifact["records"].append(
+        [
+            "300000",
+            "2000-01-01",
+            -90.0,
+            -90.0,
+            99.0,
+            99.0,
+            int(datetime.fromisoformat("2026-07-16T07:34:00+00:00").timestamp()),
+        ]
+    )
     artifact["records"].sort(key=lambda row: row[0])
     artifact["source_record_count"] += 1
 
@@ -737,7 +836,17 @@ def test_market_coldness_replay_rejects_an_extra_row_masking_a_missing_listed_co
     artifact = _market_coldness_reference_artifact(listed)
     missing_code = artifact["listed_codes"][0]
     artifact["records"] = [row for row in artifact["records"] if row[0] != missing_code]
-    artifact["records"].append(["688888", "2000-01-01", -12.0, -8.0, 1.0, 0.8])
+    artifact["records"].append(
+        [
+            "688888",
+            "2000-01-01",
+            -12.0,
+            -8.0,
+            1.0,
+            0.8,
+            int(datetime.fromisoformat("2026-07-16T07:34:00+00:00").timestamp()),
+        ]
+    )
     artifact["records"].sort(key=lambda row: row[0])
 
     with pytest.raises(RuntimeError, match="source does not cover the listed universe"):
@@ -820,7 +929,7 @@ def test_release_market_coldness_gate_rejects_zero_or_inconsistent_evidence():
                 **_market_coldness_record("000001"),
                 "components": {
                     **_market_coldness_record("000001")["components"],
-                    "retrieved_at": "2026-07-15T08:05:00Z",
+                    "retrieved_at": "2026-07-15T08:20:00Z",
                 },
             },
             "component provenance is invalid",
@@ -1101,13 +1210,13 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
         "000001": _market_coldness_record(
             "000001",
             as_of_session="2026-07-15",
-            retrieved_at="2026-07-15T08:05:00Z",
+            retrieved_at="2026-07-15T08:20:00Z",
         )
     }
     coldness_status = _market_coldness_status(
         ("000001",),
         as_of_session="2026-07-15",
-        retrieved_at="2026-07-15T08:05:00Z",
+        retrieved_at="2026-07-15T08:20:00Z",
     )
 
     archive_candidate = SimpleNamespace(available=True)

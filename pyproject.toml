@@ -40,6 +40,7 @@ data = [
   "financial_balance_sheet_evidence.json",
 ]
 desktop = ["update_config.json", "version_info.txt", "DS_DCF.spec", "DS_DCF_Installer.spec"]
+tools = ["china_a_share_trading_calendar.json"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["*.pyc", "*.pyo", "*.pkl", "*.parquet", "cache/*", ".reasonix/*"]

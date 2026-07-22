@@ -10,7 +10,7 @@ import hashlib
 import json
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,7 +25,7 @@ from data.market_coldness import (
     fetch_market_coldness_snapshot,
     load_market_coldness_session_snapshot,
 )
-from data.trading_calendar import a_share_trading_days_ytd
+from data.trading_calendar import a_share_trading_days_ytd, is_a_share_trading_day
 from data.growth_evidence import fetch_growth_evidence_batch
 from data.quality_history import fetch_quality_history_batch
 from data.research_reports import fetch_research_reports_batch
@@ -40,7 +40,6 @@ from engine.audit import audit_random_sample, audit_state_hashes, write_audit_ar
 from engine.dcf import ReportingPeriodContract
 from engine.market_coldness import (
     MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION,
-    MARKET_COLDNESS_DECISION_READY_TIME,
     MARKET_COLDNESS_MODEL_ID,
     MAX_COLDNESS_SCORE,
     MAX_SCORE_WITHOUT_VOLUME_RATIO,
@@ -56,7 +55,10 @@ from engine.valuation_status import DCF_SKIP_ECONOMIC_NOT_APPLICABLE
 
 _STRICT_TTM_PERIOD_BASIS = "FY_plus_current_YTD_minus_prior_YTD"
 _MARKET_COLDNESS_UNAVAILABLE_POLICY = "continue_with_insufficient_evidence"
-_MARKET_COLDNESS_REFERENCE_ARTIFACT_SCHEMA_VERSION = 1
+_MARKET_COLDNESS_REFERENCE_ARTIFACT_SCHEMA_VERSION = 2
+_MARKET_COLDNESS_INTRADAY_START_TIME = datetime_time(9, 15)
+_MARKET_COLDNESS_DECISION_READY_TIME = datetime_time(16, 15)
+_MARKET_COLDNESS_MAX_SOURCE_FUTURE_SKEW_SECONDS = 5 * 60
 _MARKET_COLDNESS_NOT_APPLICABLE_REASONS = frozenset(
     {
         "listed_in_current_year",
@@ -178,6 +180,25 @@ def _market_coldness_business_days_ytd(session: date) -> int:
     return a_share_trading_days_ytd(session)
 
 
+def _release_market_coldness_completed_session(retrieved_at: datetime) -> date | None:
+    """Independently derive the complete session for formal replay."""
+
+    if retrieved_at.tzinfo is None or retrieved_at.utcoffset() is None:
+        return None
+    local = retrieved_at.astimezone(_SHANGHAI)
+    local_time = local.time().replace(tzinfo=None)
+    local_date = local.date()
+    if is_a_share_trading_day(local_date):
+        if local_time >= _MARKET_COLDNESS_DECISION_READY_TIME:
+            return local_date
+        if local_time >= _MARKET_COLDNESS_INTRADAY_START_TIME:
+            return None
+    candidate = local_date - timedelta(days=1)
+    while not is_a_share_trading_day(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def _market_coldness_board(code: str) -> str:
     if code.startswith(("688", "689")):
         return "STAR"
@@ -224,6 +245,7 @@ def _build_market_coldness_reference_artifact(
         raise RuntimeError("market-coldness source records are unavailable")
     rows: list[list[object]] = []
     for record in sorted(records, key=lambda item: str(getattr(item, "code", ""))):
+        upstream = getattr(record, "upstream_fields", None)
         rows.append(
             [
                 getattr(record, "code", None),
@@ -232,6 +254,7 @@ def _build_market_coldness_reference_artifact(
                 getattr(record, "change_ytd_pct", None),
                 getattr(record, "turnover_rate_pct", None),
                 getattr(record, "volume_ratio", None),
+                upstream.get("f124") if isinstance(upstream, Mapping) else None,
             ]
         )
     artifact: dict[str, object] = {
@@ -300,12 +323,8 @@ def _replay_market_coldness_reference_artifact(
         retrieved = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
     except ValueError as exc:
         raise RuntimeError("market-coldness reference artifact has an invalid retrieval timestamp") from exc
-    retrieved_shanghai = retrieved.astimezone(_SHANGHAI) if retrieved.tzinfo is not None else None
-    if (
-        retrieved_shanghai is None
-        or retrieved_shanghai.date() != session
-        or retrieved_shanghai.time().replace(tzinfo=None) < MARKET_COLDNESS_DECISION_READY_TIME
-    ):
+    completed_session = _release_market_coldness_completed_session(retrieved)
+    if completed_session != session:
         raise RuntimeError("market-coldness reference artifact was not acquired after the session close")
 
     listed_raw = artifact.get("listed_codes")
@@ -328,12 +347,12 @@ def _replay_market_coldness_reference_artifact(
     ):
         raise RuntimeError("market-coldness reference artifact has an invalid source count")
 
-    source_records: dict[str, tuple[date | None, dict[str, float | None]]] = {}
+    source_records: dict[str, tuple[date | None, dict[str, float | None], str]] = {}
     prior_code = ""
     for row in raw_rows:
-        if not isinstance(row, list) or len(row) != 6:
+        if not isinstance(row, list) or len(row) != 7:
             raise RuntimeError("market-coldness reference artifact has an invalid source row")
-        code, listing_value, change_60d, change_ytd, turnover, volume = row
+        code, listing_value, change_60d, change_ytd, turnover, volume, source_update_epoch = row
         if (
             not isinstance(code, str)
             or re.fullmatch(r"[036][0-9]{5}", code) is None
@@ -369,16 +388,35 @@ def _replay_market_coldness_reference_artifact(
             if metric in {"turnover_rate_pct", "volume_ratio"} and numeric < 0.0:
                 raise RuntimeError(f"market-coldness reference artifact has invalid raw data: {code}:{metric}")
             values[metric] = numeric
-        source_records[code] = (listed_date, values)
+        if (
+            isinstance(source_update_epoch, bool)
+            or not isinstance(source_update_epoch, int)
+            or source_update_epoch <= 0
+        ):
+            raise RuntimeError(f"market-coldness reference artifact has no source update timestamp: {code}")
+        try:
+            source_updated = datetime.fromtimestamp(source_update_epoch, timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"market-coldness reference artifact has an invalid source update timestamp: {code}"
+            ) from exc
+        if source_updated > retrieved + timedelta(seconds=_MARKET_COLDNESS_MAX_SOURCE_FUTURE_SKEW_SECONDS):
+            raise RuntimeError(f"market-coldness reference artifact has a future source update timestamp: {code}")
+        if source_updated.astimezone(_SHANGHAI).date() != session:
+            raise RuntimeError(f"market-coldness reference artifact source row belongs to another session: {code}")
+        normalized_source_update = source_updated.isoformat(timespec="seconds").replace("+00:00", "Z")
+        source_records[code] = (listed_date, values, normalized_source_update)
 
     if not listed.issubset(source_records):
         raise RuntimeError("market-coldness source does not cover the listed universe")
 
     source_count = len(source_records)
     source_coverages = {
-        "listing_date": sum(listed_date is not None for listed_date, _values in source_records.values()) / source_count,
+        "listing_date": sum(listed_date is not None for listed_date, _values, _updated in source_records.values())
+        / source_count,
         **{
-            metric: sum(values[metric] is not None for _listed_date, values in source_records.values()) / source_count
+            metric: sum(values[metric] is not None for _listed_date, values, _updated in source_records.values())
+            / source_count
             for metric in _MARKET_COLDNESS_BASE_WEIGHTS
         },
     }
@@ -388,13 +426,13 @@ def _replay_market_coldness_reference_artifact(
 
     not_applicable: dict[str, list[str]] = {reason: [] for reason in sorted(_MARKET_COLDNESS_NOT_APPLICABLE_REASONS)}
     data_gaps: dict[str, list[str]] = {}
-    bound_records: dict[str, tuple[date, dict[str, float | None]]] = {}
+    bound_records: dict[str, tuple[date, dict[str, float | None], str]] = {}
     for code in sorted(listed):
         source = source_records.get(code)
         if source is None:
             data_gaps.setdefault("missing_source_record", []).append(code)
             continue
-        listed_date, values = source
+        listed_date, values, source_updated_at = source
         if listed_date is None:
             data_gaps.setdefault("missing_listing_date", []).append(code)
             continue
@@ -409,7 +447,7 @@ def _replay_market_coldness_reference_artifact(
         if any(values[metric] is None for metric in ("change_60d_pct", "change_ytd_pct", "turnover_rate_pct")):
             data_gaps.setdefault("missing_required_metric", []).append(code)
             continue
-        bound_records[code] = (listed_date, values)
+        bound_records[code] = (listed_date, values, source_updated_at)
 
     if len(bound_records) < min_cross_section_records:
         data_gaps.setdefault("insufficient_reference_cross_section", []).extend(sorted(bound_records))
@@ -417,7 +455,7 @@ def _replay_market_coldness_reference_artifact(
 
     global_sections = {
         metric: sorted(
-            value for _listed_date, values in bound_records.values() if (value := values[metric]) is not None
+            value for _listed_date, values, _updated in bound_records.values() if (value := values[metric]) is not None
         )
         for metric in _MARKET_COLDNESS_BASE_WEIGHTS
     }
@@ -428,7 +466,7 @@ def _replay_market_coldness_reference_artifact(
     board_turnover = {
         board: sorted(
             values["turnover_rate_pct"]
-            for code, (_listed_date, values) in bound_records.items()
+            for code, (_listed_date, values, _updated) in bound_records.items()
             if _market_coldness_board(code) == board and values["turnover_rate_pct"] is not None
         )
         for board in board_counts
@@ -437,7 +475,7 @@ def _replay_market_coldness_reference_artifact(
     weights = dict(_MARKET_COLDNESS_BASE_WEIGHTS)
     weights["change_ytd_pct"] *= ytd_reliability
     full_evidence: dict[str, dict[str, object]] = {}
-    for code, (_listed_date, values) in bound_records.items():
+    for code, (_listed_date, values, source_updated_at) in bound_records.items():
         available = [metric for metric in _MARKET_COLDNESS_BASE_WEIGHTS if values[metric] is not None]
         absolute = {
             metric: _market_coldness_interpolate(values[metric], _MARKET_COLDNESS_ABSOLUTE_BANDS[metric])
@@ -515,6 +553,7 @@ def _replay_market_coldness_reference_artifact(
                 "retrieved_at": retrieved_at,
                 "as_of_session": session.isoformat(),
                 "source_url": EASTMONEY_CLIST_ENDPOINT,
+                "source_updated_at": source_updated_at,
             },
         }
 
@@ -647,6 +686,7 @@ def _require_market_coldness_record(
         "retrieved_at",
         "as_of_session",
         "source_url",
+        "source_updated_at",
     }
     if (
         not isinstance(components, Mapping)
@@ -657,6 +697,22 @@ def _require_market_coldness_record(
         or components.get("board") != _market_coldness_board(code)
     ):
         raise RuntimeError(f"release market-coldness component provenance is invalid: {code}")
+    source_updated_at = components.get("source_updated_at")
+    try:
+        parsed_source_update = datetime.fromisoformat(str(source_updated_at).replace("Z", "+00:00"))
+        parsed_retrieval = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError(f"release market-coldness source timestamp is invalid: {code}") from exc
+    if (
+        not isinstance(source_updated_at, str)
+        or parsed_source_update.tzinfo is None
+        or parsed_source_update.utcoffset() is None
+        or parsed_retrieval.tzinfo is None
+        or parsed_retrieval.utcoffset() is None
+        or parsed_source_update.astimezone(_SHANGHAI).date() != parsed_session
+        or parsed_source_update > parsed_retrieval + timedelta(seconds=_MARKET_COLDNESS_MAX_SOURCE_FUTURE_SKEW_SECONDS)
+    ):
+        raise RuntimeError(f"release market-coldness source timestamp is invalid: {code}")
 
     raw_values = components.get("raw_values")
     if not isinstance(raw_values, Mapping) or set(raw_values) != _MARKET_COLDNESS_RAW_KEYS:
@@ -844,8 +900,7 @@ def _require_market_coldness_release_evidence(
     if (
         parsed_retrieval.tzinfo is None
         or parsed_retrieval.utcoffset() is None
-        or parsed_retrieval.astimezone(_SHANGHAI).date() != parsed_session
-        or parsed_retrieval.astimezone(_SHANGHAI).time().replace(tzinfo=None) < MARKET_COLDNESS_DECISION_READY_TIME
+        or _release_market_coldness_completed_session(parsed_retrieval) != parsed_session
     ):
         raise RuntimeError("release market-coldness retrieval timestamp is invalid")
     _market_coldness_status_partition(status, eligible, evidence_codes)

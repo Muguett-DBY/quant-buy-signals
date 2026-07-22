@@ -1577,9 +1577,9 @@ def _market_coldness_status_message(status: object) -> tuple[str, str] | None:
     if reason in {"intraday_before_close", "retrieval_before_close"}:
         return (
             "warning",
-            "本代在交易日15:15前完成，盘中换手率/量比尚未成为可决策证据；"
+            "本代在交易日16:15前完成，两市15:30结束的盘后交易及延迟数据尚未完成稳定汇总；"
             "情况二（两热一冷）统一显示证据不足。当前“有买入信号”数量不包含可能依赖收盘冷度的公司，"
-            "不代表全市场最终只有这些公司；请在15:15后刷新。",
+            "不代表全市场最终只有这些公司；请在16:15后刷新。",
         )
     if not evidence_available:
         detail = f"（{count}/{total}）" if isinstance(count, int) and isinstance(total, int) else ""

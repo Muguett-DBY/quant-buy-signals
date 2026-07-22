@@ -129,7 +129,7 @@ def _signed_generation(
         )
     if scalar_type_list is not None:
         companies[0][scalar_type_list] = "type1"
-    timestamp = data_timestamp_utc or f"{market_date}T08:05:00+00:00"
+    timestamp = data_timestamp_utc or f"{market_date}T08:20:00+00:00"
     provenance = {"source_commit": SOURCE_COMMIT}
     shared = {
         "schema_version": 1,
@@ -268,7 +268,7 @@ def test_manual_dispatch_forces_post_close_refresh_without_reading_network(tmp_p
     result, decision = _run_guard(
         tmp_path,
         event="workflow_dispatch",
-        now_utc="2026-07-22T08:05:00.0000000+00:00",
+        now_utc="2026-07-22T08:15:00.0000000+00:00",
     )
 
     assert result.returncode == 0, result.stderr
@@ -279,7 +279,7 @@ def test_manual_dispatch_before_close_is_a_successful_noop(tmp_path):
     result, decision = _run_guard(
         tmp_path,
         event="workflow_dispatch",
-        now_utc="2026-07-22T07:59:59.0000000+00:00",
+        now_utc="2026-07-22T08:14:59.0000000+00:00",
     )
 
     assert result.returncode == 0, result.stderr

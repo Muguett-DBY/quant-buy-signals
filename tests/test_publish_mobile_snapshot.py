@@ -74,16 +74,16 @@ def _after_close(monkeypatch):
     monkeypatch.setattr(
         publisher,
         "_shanghai_now",
-        lambda: datetime(2026, 7, 20, 16, 1, tzinfo=ZoneInfo("Asia/Shanghai")),
+        lambda: datetime(2026, 7, 20, 16, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
     )
 
 
 @lru_cache(maxsize=2)
 def _market_coldness_fixture(as_of_session="2026-07-17"):
     codes = tuple(f"{index:06d}" for index in range(1, 1_001))
-    retrieved_at = f"{as_of_session}T08:05:00Z"
+    retrieved_at = f"{as_of_session}T08:20:00Z"
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_id": MARKET_COLDNESS_MODEL_ID,
         "source": EASTMONEY_SOURCE,
         "source_url": EASTMONEY_CLIST_ENDPOINT,
@@ -99,6 +99,7 @@ def _market_coldness_fixture(as_of_session="2026-07-17"):
                 round(-40.0 + (index % 121) * 0.6, 2),
                 round(0.25 + (index % 80) * 0.1, 2),
                 round(0.4 + (index % 40) * 0.05, 2),
+                int(datetime.fromisoformat(f"{as_of_session}T07:34:00+00:00").timestamp()),
             ]
             for index, code in enumerate(codes)
         ],
@@ -354,15 +355,15 @@ def test_mobile_publication_requires_one_validated_market_session():
         publisher._utc_timestamp(True)
 
 
-def test_mobile_publication_refuses_a_manual_refresh_before_four_pm(monkeypatch, tmp_path):
+def test_mobile_publication_refuses_a_manual_refresh_before_the_safe_close_boundary(monkeypatch, tmp_path):
     monkeypatch.setattr(
         publisher,
         "_shanghai_now",
-        lambda: datetime(2026, 7, 20, 15, 59, tzinfo=ZoneInfo("Asia/Shanghai")),
+        lambda: datetime(2026, 7, 20, 16, 14, 59, tzinfo=ZoneInfo("Asia/Shanghai")),
         raising=False,
     )
 
-    with pytest.raises(RuntimeError, match="16:00"):
+    with pytest.raises(RuntimeError, match="16:15"):
         publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
 
     assert not list(tmp_path.iterdir())

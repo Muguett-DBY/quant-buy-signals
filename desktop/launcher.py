@@ -41,6 +41,7 @@ _HEALTH_REQUIRED_RESOURCE_FILES = (
     "data/industry_em_map.json",
     "data/industry_capco_2025h2.json",
     "data/industry_exchange_new_listings_2026.json",
+    "tools/china_a_share_trading_calendar.json",
 )
 _HEALTH_REQUIRED_MODULES = ("data", "engine", "ui")
 

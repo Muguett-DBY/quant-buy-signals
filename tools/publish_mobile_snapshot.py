@@ -26,7 +26,7 @@ from data.quality_history import fetch_quality_history_batch
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import DEFAULT_SNAPSHOT_PATH, SNAPSHOT_SCHEMA_VERSION, get_market_snapshot, save_market_snapshot
 from data.mobile_snapshot import write_mobile_snapshot
-from data.market_coldness import archive_market_coldness_session_snapshot
+from data.market_coldness import MARKET_COLDNESS_DECISION_READY_TIME, archive_market_coldness_session_snapshot
 from engine.audit import audit_state_hashes
 from engine.pipeline import run_market_analysis
 from tools.run_full_audit import (
@@ -162,8 +162,8 @@ def _require_post_close_quotes(snapshot: object, market_as_of: str) -> float:
 
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
-    if refresh and _shanghai_now().time() < time(16, 0):
-        raise RuntimeError("post-close mobile publication is not allowed before 16:00 Asia/Shanghai")
+    if refresh and _shanghai_now().time() < MARKET_COLDNESS_DECISION_READY_TIME:
+        raise RuntimeError("post-close mobile publication is not allowed before 16:15 Asia/Shanghai")
     source_commit = _source_commit()
     starting_state = audit_state_hashes()
     cache = SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
