@@ -1629,6 +1629,43 @@ def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
         return False
 
 
+def _expected_audit_bear_case(
+    type_key: str,
+    scores: Mapping[str, float],
+    reasons: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Independently replay the production report's two-decimal bear-case view."""
+
+    weights = _AUDIT_TYPE_WEIGHTS[type_key]
+    display_scores = {dimension: round(float(scores[dimension]), 2) for dimension in weights}
+    minimum_score = min(display_scores.values())
+    expected: list[dict[str, Any]] = []
+    for meta_key in ("_veto", "_condition", "_downgrade"):
+        if reasons.get(meta_key):
+            expected.append(
+                {
+                    "dimension": meta_key,
+                    "score": minimum_score,
+                    "reason": str(reasons[meta_key]),
+                }
+            )
+            if len(expected) == 3:
+                return expected
+    order = {key: index for index, key in enumerate(weights)}
+    ranked = sorted(weights, key=lambda key: (display_scores[key], -weights[key], order[key]))
+    for dimension in ranked:
+        expected.append(
+            {
+                "dimension": dimension,
+                "score": display_scores[dimension],
+                "reason": str(reasons[dimension]),
+            }
+        )
+        if len(expected) == 3:
+            break
+    return expected
+
+
 def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
     companies = payload.get("companies")
     if not isinstance(companies, list) or len(companies) != 100:
@@ -1826,35 +1863,11 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
             continue
         if not isinstance(bear_case, list) or len(bear_case) != 3:
             return None
-        diagnostic_scores = clean_sub_scores[expected_diagnostic]
-        diagnostic_reasons = clean_reasons[expected_diagnostic]
-        minimum_score = min(diagnostic_scores.values())
-        expected_bear_case: list[dict[str, Any]] = []
-        for meta_key in ("_veto", "_condition", "_downgrade"):
-            if diagnostic_reasons.get(meta_key):
-                expected_bear_case.append(
-                    {
-                        "dimension": meta_key,
-                        "score": minimum_score,
-                        "reason": str(diagnostic_reasons[meta_key]),
-                    }
-                )
-                if len(expected_bear_case) == 3:
-                    break
-        if len(expected_bear_case) < 3:
-            weights = _AUDIT_TYPE_WEIGHTS[expected_diagnostic]
-            order = {key: index for index, key in enumerate(weights)}
-            ranked = sorted(weights, key=lambda key: (diagnostic_scores[key], -weights[key], order[key]))
-            for dimension in ranked:
-                expected_bear_case.append(
-                    {
-                        "dimension": dimension,
-                        "score": diagnostic_scores[dimension],
-                        "reason": str(diagnostic_reasons[dimension]),
-                    }
-                )
-                if len(expected_bear_case) == 3:
-                    break
+        expected_bear_case = _expected_audit_bear_case(
+            expected_diagnostic,
+            clean_sub_scores[expected_diagnostic],
+            clean_reasons[expected_diagnostic],
+        )
         if bear_case != expected_bear_case:
             return None
         codes.append(code)

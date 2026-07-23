@@ -27,6 +27,7 @@ from tools.verify_release_zip import (
     _REQUIRED_FILES,
     _RULE_FILES as _RELEASE_RULE_FILES,
     _desktop_launcher_errors,
+    _expected_audit_bear_case,
     _git_tree_entries,
     _normalised_file_names,
     verify_release_zip,
@@ -1394,6 +1395,25 @@ def test_release_zip_verifier_accepts_a_clean_source_package(tmp_path):
     _write_minimal_release(path)
 
     assert _verify(path) == ()
+
+
+def test_release_zip_verifier_replays_type7_bear_case_at_production_precision():
+    reasons = {
+        "7a": "第1模板52.93",
+        "7b": "第5模板45.38",
+        "7c": "补丁565.00",
+        "_condition": "补全证据后仍有弱项",
+    }
+
+    assert _expected_audit_bear_case(
+        "type7",
+        {"7a": 5.293, "7b": 4.538, "7c": 6.5},
+        reasons,
+    ) == [
+        {"dimension": "_condition", "score": 4.54, "reason": "补全证据后仍有弱项"},
+        {"dimension": "7b", "score": 4.54, "reason": "第5模板45.38"},
+        {"dimension": "7a", "score": 5.29, "reason": "第1模板52.93"},
+    ]
 
 
 def _forge_market_coldness_na_partition(payload):
