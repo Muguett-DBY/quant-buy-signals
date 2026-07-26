@@ -35,7 +35,7 @@ _ANNUAL_BATCH_DATASETS = 4
 # Eastmoney resets TLS connections when four annual datasets each fan out to
 # five page workers (20 concurrent requests).  Twelve requests preserves most
 # of the speed-up while avoiding the observed connection-reset cliff; the
-# all-or-error batch below also has a one-shot sequential recovery path.
+# all-or-error batch below recovers only the small failed page subset.
 _DATACENTER_WORKERS = max(1, min(int(CONCURRENCY) // _ANNUAL_BATCH_DATASETS, 3))
 _DATACENTER_BATCH_WORKERS = max(1, min(_ANNUAL_BATCH_DATASETS, int(CONCURRENCY) // _DATACENTER_WORKERS))
 # Annual and interim generations are independent and may overlap, but their
@@ -49,6 +49,10 @@ _MAX_DATACENTER_ROWS = 50_000
 _MAX_DATACENTER_RESPONSE_BYTES = 16 * 1024 * 1024
 _RESPONSE_CHUNK_BYTES = 64 * 1024
 _MAX_REMOTE_SECURITY_CODES = 100
+_DATACENTER_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
+_DATACENTER_RECOVERY_RETRIES = 2
+_MAX_DATACENTER_RECOVERY_PAGES = 3
+_RETRYABLE_DATACENTER_HTTP_STATUSES = frozenset({408, 425, 429})
 ANNUAL_HISTORY_YEARS = 10
 DETAILED_ANNUAL_HISTORY_YEARS = 5
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -177,12 +181,27 @@ class _DataResourceLimitError(DataFetchError):
     """A response exceeded a fixed local resource budget and must not be retried."""
 
 
+class _DataTransientTransportError(DataFetchError):
+    """A page exhausted retries using only recoverable transport failures."""
+
+
 @dataclass(frozen=True)
 class _PageResult:
     page: int
     pages: int
     data: list[dict[str, Any]]
     count: int | None = None
+
+
+def _is_transient_datacenter_transport_error(exc: BaseException | None) -> bool:
+    if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
+        return False
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
+        return True
+    if not isinstance(exc, requests.HTTPError):
+        return False
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return isinstance(status, int) and (status in _RETRYABLE_DATACENTER_HTTP_STATUSES or 500 <= status <= 599)
 
 
 def _strict_nonnegative_int(value: Any, *, field: str, report_name: str, page: int) -> int:
@@ -291,6 +310,13 @@ def _request_page(
         or page_size < 1
     ):
         raise ValueError("page and page_size must be positive integers")
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or float(timeout) <= 0
+    ):
+        raise ValueError("timeout must be positive")
     if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
         raise ValueError("retries must be a positive integer")
     params = {
@@ -307,7 +333,10 @@ def _request_page(
         params["filter"] = extra_filter
 
     last_error: Exception | None = None
+    transient_only = True
+    attempts_used = 0
     for attempt in range(retries):
+        attempts_used = attempt + 1
         try:
             with _DATACENTER_REQUEST_SLOTS:
                 response = requests.get(
@@ -375,10 +404,17 @@ def _request_page(
             raise
         except (requests.RequestException, ValueError, DataFetchError) as exc:
             last_error = exc
+            if not _is_transient_datacenter_transport_error(exc):
+                transient_only = False
             if attempt + 1 < retries:
                 time.sleep(0.5 * (attempt + 1))
-    raise DataFetchError(
-        f"failed to fetch {report_name} page {page} after {retries} attempts: {last_error}"
+    error_type = (
+        _DataTransientTransportError
+        if transient_only and _is_transient_datacenter_transport_error(last_error)
+        else DataFetchError
+    )
+    raise error_type(
+        f"failed to fetch {report_name} page {page} after {attempts_used} attempts: {last_error}"
     ) from last_error
 
 
@@ -465,13 +501,27 @@ def _fetch_all_pages(
         or max_workers < 1
     ):
         raise ValueError("page_size and max_workers must be positive integers")
-    first = _request_page(
-        report_name,
-        columns,
-        1,
-        page_size,
-        extra_filter=extra_filter,
-    )
+    try:
+        first = _request_page(
+            report_name,
+            columns,
+            1,
+            page_size,
+            extra_filter=extra_filter,
+        )
+    except _DataTransientTransportError:
+        try:
+            first = _request_page(
+                report_name,
+                columns,
+                1,
+                page_size,
+                extra_filter=extra_filter,
+                timeout=_DATACENTER_RECOVERY_TIMEOUT,
+                retries=_DATACENTER_RECOVERY_RETRIES,
+            )
+        except _DataTransientTransportError as exc:
+            raise DataFetchError(f"failed to recover {report_name} metadata page 1: {exc}") from exc
     if first.pages > _MAX_DATACENTER_PAGES:
         raise _DataResourceLimitError(
             f"{report_name} page count exceeds limit: {first.pages} > {_MAX_DATACENTER_PAGES}"
@@ -489,6 +539,21 @@ def _fetch_all_pages(
 
     pages: dict[int, list[dict[str, Any]]] = {1: first.data}
     remaining = range(2, first.pages + 1)
+    transient_failures: dict[int, _DataTransientTransportError] = {}
+
+    def retain_page(page: int, page_result: _PageResult) -> None:
+        if page_result.page != page:
+            raise DataFetchError(
+                f"{report_name} response page identity changed during fetch: requested {page}, received {page_result.page}"
+            )
+        if page_result.pages != first.pages:
+            raise DataFetchError(f"page-count changed during fetch: {first.pages} -> {page_result.pages}")
+        if page_result.count != first.count:
+            raise DataFetchError(f"row-count changed during fetch: {first.count} -> {page_result.count}")
+        if not page_result.data:
+            raise DataFetchError(f"{report_name} page {page}/{first.pages} is empty")
+        pages[page] = page_result.data
+
     if first.pages > 1:
         worker_count = min(max_workers, _DATACENTER_WORKERS, first.pages - 1)
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -507,14 +572,48 @@ def _fetch_all_pages(
             }
             for future in as_completed(futures):
                 page = futures[future]
-                page_result = future.result()
-                if page_result.pages != first.pages:
-                    raise DataFetchError(f"page-count changed during fetch: {first.pages} -> {page_result.pages}")
-                if page_result.count != first.count:
-                    raise DataFetchError(f"row-count changed during fetch: {first.count} -> {page_result.count}")
-                if not page_result.data:
-                    raise DataFetchError(f"{report_name} page {page}/{first.pages} is empty")
-                pages[page] = page_result.data
+                try:
+                    page_result = future.result()
+                except _DataResourceLimitError:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
+                except _DataTransientTransportError as exc:
+                    transient_failures[page] = exc
+                    continue
+                except DataFetchError:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
+                retain_page(page, page_result)
+
+    if len(transient_failures) > _MAX_DATACENTER_RECOVERY_PAGES:
+        failed_pages = sorted(transient_failures)
+        raise DataFetchError(
+            f"{report_name} parallel fetch failed on {len(failed_pages)} pages, "
+            f"above recovery limit {_MAX_DATACENTER_RECOVERY_PAGES}: "
+            f"{failed_pages[:_MAX_DATACENTER_RECOVERY_PAGES]}"
+        ) from transient_failures[failed_pages[0]]
+
+    # Retain every validated parallel page and recover only the small failed
+    # subset.  Each recovered response must still match page 1's generation
+    # metadata; the complete-frame checks below remain fail closed.
+    for page in sorted(transient_failures):
+        try:
+            recovered = _request_page(
+                report_name,
+                columns,
+                page,
+                page_size,
+                "SECURITY_CODE",
+                1,
+                extra_filter,
+                timeout=_DATACENTER_RECOVERY_TIMEOUT,
+                retries=_DATACENTER_RECOVERY_RETRIES,
+            )
+        except _DataTransientTransportError as exc:
+            raise DataFetchError(f"failed to recover {report_name} page {page}: {exc}") from exc
+        retain_page(page, recovered)
 
     missing = sorted(set(range(1, first.pages + 1)) - pages.keys())
     if missing:
@@ -1373,27 +1472,16 @@ def fetch_interim_financials_parallel(
         }
     worker_count = max(1, min(len(fetchers), int(CONCURRENCY) // _DATACENTER_WORKERS))
     results: dict[str, pd.DataFrame] = {}
-    parallel_error: DataFetchError | None = None
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {executor.submit(fetch): label for label, fetch in fetchers.items()}
-        try:
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
-        except DataFetchError as exc:
-            parallel_error = exc
-            for future in futures:
-                future.cancel()
-    if parallel_error is not None:
-        time.sleep(1.0)
-        results = {}
-        try:
-            for label, fetch in fetchers.items():
-                results[label] = fetch()
-        except DataFetchError as exc:
-            raise DataFetchError(
-                f"interim financial refresh failed in parallel ({parallel_error}); "
-                f"sequential recovery also failed ({exc})"
-            ) from exc
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
+                results[label] = future.result()
+            except DataFetchError as exc:
+                for pending in futures:
+                    pending.cancel()
+                raise DataFetchError(f"interim financial refresh failed for {label}: {exc}") from exc
     return (
         results["income_interim"],
         results["cashflow_interim"],
@@ -1427,30 +1515,14 @@ def fetch_all_financials_parallel(
             "indicators": lambda: fetch_main_financial_indicator_history(codes=normalized_codes),
         }
     results: dict[str, pd.DataFrame] = {}
-    parallel_error: DataFetchError | None = None
     with ThreadPoolExecutor(max_workers=_DATACENTER_BATCH_WORKERS) as executor:
         futures = {executor.submit(fetch): label for label, fetch in fetchers.items()}
-        try:
-            for future in as_completed(futures):
-                label = futures[future]
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
                 results[label] = future.result()
-        except DataFetchError as exc:
-            parallel_error = exc
-            for future in futures:
-                future.cancel()
-    if parallel_error is not None:
-        # A transient reset in any dataset invalidates the entire concurrent
-        # generation.  Retry all four sequentially so they still form one
-        # coherent all-or-error batch; never mix partial parallel results with
-        # the recovery generation.
-        time.sleep(1.0)
-        results = {}
-        try:
-            for label, fetch in fetchers.items():
-                results[label] = fetch()
-        except DataFetchError as exc:
-            raise DataFetchError(
-                f"annual financial refresh failed in parallel ({parallel_error}); "
-                f"sequential recovery also failed ({exc})"
-            ) from exc
+            except DataFetchError as exc:
+                for pending in futures:
+                    pending.cancel()
+                raise DataFetchError(f"annual financial refresh failed for {label}: {exc}") from exc
     return results["income"], results["cashflow"], results["balance"], results["indicators"]

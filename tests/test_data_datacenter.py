@@ -130,6 +130,145 @@ def test_fetch_all_pages_requests_page_one_once_and_returns_page_order(monkeypat
     assert frame["SECURITY_CODE"].tolist() == ["000001", "000002", "000003"]
 
 
+def test_fetch_all_pages_recovers_only_failed_transient_page_and_keeps_page_order(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, timeout=dc.REQUEST_TIMEOUT, retries=3, **_kwargs):
+        calls.append((page, timeout, retries))
+        if page == 2 and sum(call[0] == 2 for call in calls) == 1:
+            raise dc._DataTransientTransportError("parallel read timeout")
+        return dc._PageResult(
+            page,
+            3,
+            [{"SECURITY_CODE": f"00000{page}", "REPORT_DATE": "2025-12-31"}],
+            3,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    frame = dc._fetch_all_pages(
+        dc.RPT_INCOME,
+        "SECURITY_CODE,REPORT_DATE",
+        "(REPORT_DATE='2025-12-31')",
+        page_size=1,
+        max_workers=2,
+    )
+
+    assert frame["SECURITY_CODE"].tolist() == ["000001", "000002", "000003"]
+    assert sum(page == 1 for page, _timeout, _retries in calls) == 1
+    assert sum(page == 3 for page, _timeout, _retries in calls) == 1
+    assert [call for call in calls if call[0] == 2] == [
+        (2, dc.REQUEST_TIMEOUT, 3),
+        (2, dc._DATACENTER_RECOVERY_TIMEOUT, dc._DATACENTER_RECOVERY_RETRIES),
+    ]
+
+
+def test_fetch_all_pages_recovers_metadata_page_before_using_it_as_the_generation_baseline(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, timeout=dc.REQUEST_TIMEOUT, retries=3, **_kwargs):
+        calls.append((page, timeout, retries))
+        if page == 1 and len(calls) == 1:
+            raise dc._DataTransientTransportError("metadata read timeout")
+        return dc._PageResult(page, 2, [{"SECURITY_CODE": f"00000{page}"}], 2)
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    frame = dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
+
+    assert frame["SECURITY_CODE"].tolist() == ["000001", "000002"]
+    assert calls[:2] == [
+        (1, dc.REQUEST_TIMEOUT, 3),
+        (1, dc._DATACENTER_RECOVERY_TIMEOUT, dc._DATACENTER_RECOVERY_RETRIES),
+    ]
+    assert sum(page == 2 for page, _timeout, _retries in calls) == 1
+
+
+def test_fetch_all_pages_rejects_recovered_page_metadata_change(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        if page == 2 and calls.count(2) == 1:
+            raise dc._DataTransientTransportError("parallel read timeout")
+        count = 4 if page == 2 else 3
+        return dc._PageResult(page, 3, [{"SECURITY_CODE": f"00000{page}"}], count)
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    with pytest.raises(dc.DataFetchError, match="row-count changed during fetch: 3 -> 4"):
+        dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
+
+    assert calls.count(1) == calls.count(3) == 1
+    assert calls.count(2) == 2
+
+
+def test_fetch_all_pages_rejects_duplicate_identity_after_page_recovery(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        if page == 2 and calls.count(2) == 1:
+            raise dc._DataTransientTransportError("parallel read timeout")
+        return dc._PageResult(
+            page,
+            2,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2025-12-31"}],
+            2,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    with pytest.raises(dc.DataFetchError, match="duplicate report identities across pages"):
+        dc._fetch_all_pages(
+            dc.RPT_INCOME,
+            "SECURITY_CODE,REPORT_DATE",
+            "(REPORT_DATE='2025-12-31')",
+            page_size=1,
+        )
+
+
+def test_fetch_all_pages_rejects_systemic_parallel_failure_without_amplifying_retries(monkeypatch):
+    calls = []
+    page_count = dc._MAX_DATACENTER_RECOVERY_PAGES + 2
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        if page > 1:
+            raise dc._DataTransientTransportError(f"page {page} unavailable")
+        return dc._PageResult(1, page_count, [{"SECURITY_CODE": "000001"}], page_count)
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    with pytest.raises(dc.DataFetchError, match="above recovery limit"):
+        dc._fetch_all_pages(
+            dc.RPT_INCOME,
+            "SECURITY_CODE",
+            page_size=1,
+            max_workers=page_count,
+        )
+
+    assert calls.count(1) == 1
+    assert sorted(page for page in calls if page > 1) == list(range(2, page_count + 1))
+
+
+def test_fetch_all_pages_deterministic_page_error_never_enters_long_recovery(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, timeout=dc.REQUEST_TIMEOUT, **_kwargs):
+        calls.append((page, timeout))
+        if page == 2:
+            raise dc.DataFetchError("invalid page schema")
+        return dc._PageResult(page, 2, [{"SECURITY_CODE": f"00000{page}"}], 2)
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+
+    with pytest.raises(dc.DataFetchError, match="invalid page schema"):
+        dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
+
+    assert calls == [(1, dc.REQUEST_TIMEOUT), (2, dc.REQUEST_TIMEOUT)]
+
+
 @pytest.mark.parametrize("requested_field", ["GOODWILL", "OBTAIN_SUBSIDIARY_OTHER"])
 def test_fetch_all_pages_rejects_an_omitted_requested_financial_column(
     monkeypatch,
@@ -213,20 +352,49 @@ def test_fetch_all_pages_rejects_incomplete_snapshots(monkeypatch, failure):
         dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
 
 
-def test_fetch_all_pages_retries_http_failure_then_raises(monkeypatch):
+def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_two_attempts(monkeypatch):
     monkeypatch.setattr(dc.time, "sleep", lambda _seconds: None)
     calls = []
 
-    def fake_get(_url, *, params, **_kwargs):
-        calls.append(params["pageNumber"])
+    def fake_get(_url, *, params, timeout, **_kwargs):
+        calls.append((params["pageNumber"], timeout))
         if params["pageNumber"] == 1:
             return FakeResponse(page_payload(1, 2, [{"SECURITY_CODE": "1"}]))
-        raise requests.ConnectionError("network down")
+        raise requests.ReadTimeout("network down")
 
     monkeypatch.setattr(dc.requests, "get", fake_get)
-    with pytest.raises(dc.DataFetchError, match="page 2"):
+    with pytest.raises(dc.DataFetchError, match="failed to recover.*page 2"):
         dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
-    assert calls.count(2) == 3
+    assert [timeout for page, timeout in calls if page == 2] == [
+        dc.REQUEST_TIMEOUT,
+        dc.REQUEST_TIMEOUT,
+        dc.REQUEST_TIMEOUT,
+        dc._DATACENTER_RECOVERY_TIMEOUT,
+        dc._DATACENTER_RECOVERY_TIMEOUT,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(408, True), (425, True), (429, True), (500, True), (599, True), (400, False), (404, False)],
+)
+def test_datacenter_http_status_transience_is_explicit(status, expected):
+    response = requests.Response()
+    response.status_code = status
+    error = requests.HTTPError(f"HTTP {status}", response=response)
+
+    assert dc._is_transient_datacenter_transport_error(error) is expected
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.exceptions.SSLError("certificate"),
+        requests.exceptions.ProxyError("proxy"),
+    ],
+)
+def test_datacenter_security_and_proxy_failures_are_not_transient(error):
+    assert dc._is_transient_datacenter_transport_error(error) is False
 
 
 def test_request_page_rejects_declared_oversized_response_without_retry(monkeypatch):
@@ -559,7 +727,7 @@ def test_annual_financial_refresh_never_returns_a_partial_batch(monkeypatch):
         dc.fetch_all_financials_parallel()
 
 
-def test_annual_financial_refresh_retries_one_coherent_sequential_generation(monkeypatch):
+def test_annual_financial_refresh_hard_failure_never_restarts_successful_datasets(monkeypatch):
     calls = {label: 0 for label in ("income", "cashflow", "balance", "indicators")}
     lock = Lock()
     all_started = Event()
@@ -572,20 +740,47 @@ def test_annual_financial_refresh_retries_one_coherent_sequential_generation(mon
                 all_started.set()
         if attempt == 1:
             assert all_started.wait(timeout=2)
-        if label == "balance" and attempt == 1:
-            raise dc.DataFetchError("transient TLS reset")
+        if label == "balance":
+            raise dc.DataFetchError("page-level recovery exhausted")
         return pd.DataFrame([{"dataset": label, "attempt": attempt}])
 
     monkeypatch.setattr(dc, "fetch_income_history", lambda: fake_fetch("income"))
     monkeypatch.setattr(dc, "fetch_cashflow_history", lambda: fake_fetch("cashflow"))
     monkeypatch.setattr(dc, "fetch_balance_history", lambda: fake_fetch("balance"))
     monkeypatch.setattr(dc, "fetch_main_financial_indicator_history", lambda: fake_fetch("indicators"))
-    monkeypatch.setattr(dc.time, "sleep", lambda _seconds: None)
+    with pytest.raises(dc.DataFetchError, match="annual financial refresh failed for balance"):
+        dc.fetch_all_financials_parallel()
 
-    frames = dc.fetch_all_financials_parallel()
+    assert calls == {"income": 1, "cashflow": 1, "balance": 1, "indicators": 1}
 
-    assert [frame.loc[0, "dataset"] for frame in frames] == ["income", "cashflow", "balance", "indicators"]
-    assert all(frame.loc[0, "attempt"] >= 2 for frame in frames)
+
+def test_interim_financial_refresh_hard_failure_never_restarts_successful_datasets(monkeypatch):
+    calls = {label: 0 for label in ("income", "cashflow", "detailed")}
+    lock = Lock()
+    all_started = Event()
+
+    def fake_fetch(label):
+        with lock:
+            calls[label] += 1
+            if sum(calls.values()) == 3:
+                all_started.set()
+        assert all_started.wait(timeout=2)
+        if label == "detailed":
+            raise dc.DataFetchError("page-level recovery exhausted")
+        return pd.DataFrame([{"dataset": label}])
+
+    monkeypatch.setattr(dc, "fetch_interim_income_comparables", lambda: fake_fetch("income"))
+    monkeypatch.setattr(dc, "fetch_interim_cashflow_comparables", lambda: fake_fetch("cashflow"))
+    monkeypatch.setattr(
+        dc,
+        "fetch_detailed_interim_cashflow_comparables",
+        lambda: fake_fetch("detailed"),
+    )
+
+    with pytest.raises(dc.DataFetchError, match="interim financial refresh failed for detailed_cashflow_interim"):
+        dc.fetch_interim_financials_parallel()
+
+    assert calls == {"income": 1, "cashflow": 1, "detailed": 1}
 
 
 def test_fetch_all_pages_rejects_row_count_mismatch(monkeypatch):
