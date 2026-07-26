@@ -23,6 +23,7 @@ from engine.audit import (
     _audit_bear_case,
     _audit_patch4_evidence_valid,
     _audit_type5_bottom_evidence_errors,
+    _audit_type5_market_replay,
     _audit_type7_ledger,
     _audit_validate_capex_provenance,
     _independent_checks,
@@ -794,6 +795,145 @@ def _replayable_type5_payload():
         "bottom_evidence_mode": "automatic_replay",
         "bottom_evidence_contract": _replayable_type5_bottom_contract(),
     }
+
+
+def _type5_market_record_002522_rounding_boundary():
+    """Production-shaped record whose six-decimal ranks lose replay precision."""
+
+    return {
+        "score": 7.7,
+        "evidence_level": "derived_proxy",
+        "evidence": {
+            "source": "Eastmoney push2 clist; https://push2delay.eastmoney.com/api/qt/clist/get",
+            "evidence_id": "patch6-type2c-quantity-price-v1:002522:20260724",
+            "as_of": "2026-07-24",
+            "summary": "量价冷度;60日-28.7%;YTD-22.8%;换手2.38%;量比0.64;上限8.0",
+        },
+        "components": {
+            "schema_version": 1,
+            "model_id": "patch6-type2c-quantity-price-v1",
+            "code": "002522",
+            "source": "Eastmoney push2 clist",
+            "raw_values": {
+                "change_60d_pct": -28.74,
+                "change_ytd_pct": -22.78,
+                "turnover_rate_pct": 2.38,
+                "volume_ratio": 0.64,
+            },
+            "absolute": {
+                "change_60d_pct": 9.187,
+                "change_ytd_pct": 8.278,
+                "turnover_rate_pct": 6.12,
+                "volume_ratio": 8.2,
+            },
+            "relative": {
+                "change_60d_pct": 6.663244,
+                "change_ytd_pct": 5.503003,
+                "turnover_rate_pct": 3.890236,
+                "volume_ratio": 5.449098,
+            },
+            "relative_sample_sizes": {
+                "change_60d_pct": 5162,
+                "change_ytd_pct": 5162,
+                "turnover_rate_pct": 1486,
+                "volume_ratio": 5158,
+            },
+            "relative_context": {
+                "change_60d_pct": {
+                    "section_size": 5162,
+                    "minimum_section_records": 1000,
+                    "section_population": 5162,
+                    "source_present": 5539,
+                    "source_total": 5542,
+                    "lower_count": 1507,
+                    "equal_count": 2,
+                },
+                "change_ytd_pct": {
+                    "section_size": 5162,
+                    "minimum_section_records": 1000,
+                    "section_population": 5162,
+                    "source_present": 5539,
+                    "source_total": 5542,
+                    "lower_count": 2256,
+                    "equal_count": 1,
+                },
+                "turnover_rate_pct": {
+                    "section_size": 1486,
+                    "minimum_section_records": 200,
+                    "section_population": 1486,
+                    "source_present": 5542,
+                    "source_total": 5542,
+                    "lower_count": 948,
+                    "equal_count": 2,
+                },
+                "volume_ratio": {
+                    "section_size": 5158,
+                    "minimum_section_records": 1000,
+                    "section_population": 5162,
+                    "source_present": 5197,
+                    "source_total": 5542,
+                    "lower_count": 2216,
+                    "equal_count": 147,
+                },
+            },
+            "metric_scores": {
+                "change_60d_pct": 8.682249,
+                "change_ytd_pct": 7.723001,
+                "turnover_rate_pct": 5.674047,
+                "volume_ratio": 7.64982,
+            },
+            "weights": {
+                "change_60d_pct": 0.45,
+                "change_ytd_pct": 0.25,
+                "turnover_rate_pct": 0.2,
+                "volume_ratio": 0.1,
+            },
+            "ytd_reliability": 1.0,
+            "price_score": 8.33966,
+            "raw_score": 7.737553,
+            "score_cap": 8.0,
+            "caps": ["evidence_cap=8.0"],
+            "board": "SZ_MAIN",
+            "retrieved_at": "2026-07-26T15:36:14Z",
+            "as_of_session": "2026-07-24",
+            "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
+            "source_updated_at": "2026-07-24T07:34:12Z",
+        },
+    }
+
+
+def test_independent_type5_market_replay_uses_unrounded_relative_context():
+    record = _type5_market_record_002522_rounding_boundary()
+    components = record["components"]
+    rounded_rank_replay = sum(
+        (0.8 * components["absolute"][metric] + 0.2 * components["relative"][metric]) * components["weights"][metric]
+        for metric in components["metric_scores"]
+    )
+
+    # Replaying only the already-rounded rank/metric ledger crosses the sixth
+    # decimal. The count ledger is the lossless source of the published score.
+    assert round(rounded_rank_replay, 6) == 7.737554
+    assert components["raw_score"] == 7.737553
+    assert _audit_type5_market_replay(record, code="002522", as_of="2026-07-24") == 7.7
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda record: record["components"].pop("relative_context"),
+        lambda record: record["components"]["relative_context"]["change_60d_pct"].update(lower_count=1508),
+        lambda record: record["components"].update(schema_version=2),
+        lambda record: record["components"].update(model_id="patch6-type2c-quantity-price-v2"),
+        lambda record: record["components"].update(code="002523"),
+        lambda record: record["components"].update(source="forged source"),
+        lambda record: record["evidence"].update(source="forged source"),
+    ),
+)
+def test_independent_type5_market_replay_rejects_context_and_identity_tampering(mutation):
+    record = _type5_market_record_002522_rounding_boundary()
+    mutation(record)
+
+    assert _audit_type5_market_replay(record, code="002522", as_of="2026-07-24") is None
 
 
 @pytest.mark.parametrize(
