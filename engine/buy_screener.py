@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 import math
 import re
@@ -31,6 +31,12 @@ from config import (
 from data.financial_indicator_evidence import derive_main_financial_indicator_evidence
 from data.growth_evidence import GrowthEvidenceError, validate_growth_evidence_record
 from data.industry import begin_industry_generation, classify_industries, classify_industry, get_industry_benchmark
+from data.patch4_evidence import (
+    MODEL_ID as PATCH4_PUBLIC_EVIDENCE_MODEL_ID,
+    Patch4EvidenceError,
+    validate_patch4_evidence_record,
+)
+from data.quality_history import replay_valuation_distribution
 from engine.dcf import (
     MAX_NORMALISED_FCFF_PREMIUM,
     ReportingPeriodContract,
@@ -41,20 +47,28 @@ from engine.dcf import (
     reconstruct_ttm_fcff,
     reconstruct_ttm_revenue,
 )
+from engine.market_coldness import (
+    MarketColdnessScoringError,
+    validate_market_coldness_evidence_record,
+)
 from engine.quantitative_evidence import (
+    EVIDENCE_LEVELS as QUANTITATIVE_EVIDENCE_LEVELS,
     MIN_COMPARABLE_COVERAGE,
     MIN_SECTOR_COMPANIES,
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
+    SCORE_KEYS as QUANTITATIVE_SCORE_KEYS,
     TYPE3_GROWTH_VALIDATION_TOKEN,
     derive_company_evidence,
     enrich_metrics,
 )
 from engine.quality_equity import (
     MODEL_ID as QUALITY_EQUITY_MODEL_ID,
+    PATCH5_SAFETY_VETO,
     RESEARCH_EVIDENCE_MODEL_ID,
     SCHEMA_VERSION as QUALITY_EQUITY_SCHEMA_VERSION,
     TYPE7_DIRECT_SCORE_KEYS,
     assess_quality_equity,
+    normalise_patch4_assessment,
     normalise_research_content_verification,
     normalise_research_sources,
     research_metadata_precheck,
@@ -72,10 +86,10 @@ from engine.valuation_status import (
 
 QUALIFY_THRESHOLD = 7.0
 VETO_SCORE = 3.0
-# Patch6 requires a one-line evidence sentence of at most 20 characters.
-# Numeric evidence is formatted before compaction (see ``_format_rmb``), so the
-# old scientific-notation truncation bug does not justify violating the public
-# contract.  Full values and formulas live in the structured valuation ledger.
+# Public cards keep each evidence sentence within 20 characters.  Compaction
+# must end at a semantic separator where possible and always show an ellipsis;
+# silently slicing through a percentage or unit makes the explanation false.
+# Full values and formulas live in the structured valuation ledger.
 EVIDENCE_MAX_LENGTH = 20
 
 STATUS_TRIGGERED = "triggered"
@@ -95,6 +109,50 @@ TYPE_STATUSES = {
     STATUS_NOT_APPLICABLE,
     STATUS_INSUFFICIENT_EVIDENCE,
     STATUS_BLOCKED,
+}
+
+DECISION_SCHEMA_VERSION = 1
+DECISION_MODEL_ID = "buy-decision-bounds-v1"
+DECISION_BASES = frozenset(
+    {
+        "full_evidence",
+        "scope_exclusion",
+        "confirmed_veto",
+        "conservative_upper_bound",
+        "action_condition",
+        "market_block",
+        "unresolved_missing_evidence",
+    }
+)
+DECISION_VETO_STATES = frozenset({"none", "possible", "confirmed"})
+_DECISION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "model_id",
+        "decision_complete",
+        "decision_basis",
+        "score_lower_bound",
+        "score_upper_bound",
+        "veto_state",
+        "potentially_triggerable",
+        "missing_dimensions",
+    }
+)
+_DECISION_MISSING_DIMENSIONS_REASON = "_decision_missing_dimensions"
+_DECISION_MARKET_BLOCK_REASON = "_decision_market_block"
+_DECISION_MARKET_CONTEXT = "decision_market_context"
+_DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
+_POTENTIAL_VETO_DIMENSIONS = {
+    "type1": frozenset({"1a", "1b"}),
+    "type2": frozenset({"2a", "2b", "2c"}),
+    "type3": frozenset({"3a", "3d", "3e"}),
+    "type4": frozenset({"4c", "4e", "4f"}),
+    # The authoritative Type 5 appendix currently has no post-applicability
+    # hard veto.  Type 6 can be ruled out when fewer than two of 6a..6d can
+    # reach five.  Type 7's safety veto lives in 7c.
+    "type5": frozenset(),
+    "type6": frozenset({"6a", "6b", "6c", "6d"}),
+    "type7": frozenset({"7c"}),
 }
 
 TYPE_WEIGHTS: dict[str, dict[str, float]] = {
@@ -179,6 +237,8 @@ TYPE5_PB_MIN_OBSERVATIONS = 500
 TYPE5_HISTORY_MIN_SPAN_DAYS = 1_743
 TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
 TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
+TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION = 1
+TYPE5_BOTTOM_EVIDENCE_MODEL_ID = "type5-bottom-observables-v1"
 # 第19模板明确区分两类VC标的：高景气赛道不超过300亿元、平稳
 # 产业反转不超过100亿元。旧值 ``30e8`` 只有30亿元，缩小了10倍。
 TYPE6_GROWTH_MARKET_CAP_LIMIT = 300e8  # 300亿元
@@ -222,7 +282,21 @@ _EVIDENCE_SOURCE_MAX_LENGTH = 200
 _EVIDENCE_ID_MAX_LENGTH = 200
 _EVIDENCE_SUMMARY_MAX_LENGTH = 1_000
 _EVIDENCE_MAX_AGE_DAYS = 550
+_FINANCIAL_EVIDENCE_MAX_AGE_DAYS = 550
 _DCF_VALIDATION_CACHE_TOKEN = object()
+
+
+class _ProcessValidationToken:
+    """An unforgeable in-process marker that remains stable across safe copies."""
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, _memo):
+        return self
+
+
+_TYPE5_EXTERNAL_VALIDATION_TOKEN = _ProcessValidationToken()
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -284,11 +358,14 @@ def _evidence_id_is_bound(evidence_id: str, expected_code: str) -> bool:
     if not expected_code:
         return True
     tokens = {
-        normalized
+        token.upper()
         for token in re.split(r"[^A-Za-z0-9._]+", evidence_id)
-        if (normalized := _canonical_evidence_code(token))
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", token)
     }
-    return expected_code in tokens
+    # Evidence identifiers must contain the exact canonical security code.
+    # Padding an arbitrary numeric token here allowed e.g. ``report-1`` to
+    # impersonate the distinct A-share identity ``000001``.
+    return expected_code.upper() in tokens
 
 
 def _normalise_score_evidence(
@@ -301,10 +378,11 @@ def _normalise_score_evidence(
 ) -> tuple[Optional[float], Optional[dict[str, str]]]:
     """Accept a qualitative score only with traceable, dated source metadata."""
     evidence_level = container.get(f"{key}_evidence_level")
-    if evidence_level is not None and evidence_level not in {"primary", "derived_proxy"}:
+    if evidence_level not in {"primary", "derived_proxy"}:
         # Partial/missing formula diagnostics remain replayable under
         # ``quantitative_evidence`` but are not production scores.  Enforce
-        # that boundary here too, so alternate callers cannot re-inject a
+        # that boundary here too.  Missing labels are not silently promoted
+        # to primary evidence, and alternate callers cannot re-inject a
         # finite default-backed number after enrichment rejected it.
         return None, None
     score = _safe_float(container.get(key))
@@ -367,11 +445,34 @@ def _verified_score(container: Mapping[str, Any], key: str) -> Optional[float]:
     )[0]
 
 
+def _verified_market_coldness_score(container: Mapping[str, Any]) -> Optional[float]:
+    """Require a source-bound production ledger that independently replays."""
+
+    reference = _evidence_reference_date(container.get("source_trade_date"))
+    code = _canonical_evidence_code(container.get("code"))
+    if reference is None or not code:
+        return None
+    record = {
+        "market_coldness_score": container.get("market_coldness_score"),
+        "market_coldness_score_evidence_level": container.get("market_coldness_score_evidence_level"),
+        "market_coldness_score_evidence": container.get("market_coldness_score_evidence"),
+        "components": container.get("market_coldness_components"),
+    }
+    try:
+        return validate_market_coldness_evidence_record(
+            record,
+            expected_code=code,
+            expected_session=reference,
+        )
+    except (MarketColdnessScoringError, TypeError, ValueError):
+        return None
+
+
 def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> str:
     """Return a short human-facing evidence description, never an internal ID.
 
     Evidence IDs remain in the JSON/audit record for replay, but identifiers
-    such as ``patch6-observable-outcomes-v1`` are implementation details and
+    such as ``patch6-observable-outcomes-v*`` are implementation details and
     are meaningless in an investment-screening page.
     """
     _score, evidence = _normalise_score_evidence(
@@ -443,7 +544,11 @@ def _normalise_structured_growth_evidence(
         return result
     metadata = {key: result[key] for key in _EVIDENCE_ALLOWED_KEYS if key in result}
     _score, normalized = _normalise_score_evidence(
-        {"structured_score": 1.0, "structured_score_evidence": metadata},
+        {
+            "structured_score": 1.0,
+            "structured_score_evidence": metadata,
+            "structured_score_evidence_level": "primary",
+        },
         "structured_score",
         expected_code=expected_code,
         reference_date=reference_date,
@@ -604,16 +709,66 @@ def _years_are_consecutive(years: Any, count: int) -> bool:
         return False
     recent = list(years[-count:])
     return all(
-        isinstance(year, (int, np.integer)) and isinstance(prior, (int, np.integer)) and int(year) - int(prior) == 1
+        not isinstance(year, (bool, np.bool_))
+        and not isinstance(prior, (bool, np.bool_))
+        and isinstance(year, (int, np.integer))
+        and isinstance(prior, (int, np.integer))
+        and int(year) - int(prior) == 1
         for prior, year in zip(recent, recent[1:])
     )
 
 
 def _aligned_consecutive(values: Any, years: Any, count: int) -> bool:
-    """Require dated observations to be one-to-one and consecutive."""
+    """Require a finite, one-to-one, ordered consecutive annual ledger."""
     if not isinstance(values, (list, tuple)) or not isinstance(years, (list, tuple)):
         return False
-    return len(values) == len(years) and len(values) >= count and _years_are_consecutive(years, count)
+    if len(values) != len(years) or len(values) < count:
+        return False
+    normalized_years: list[int] = []
+    for raw_year, raw_value in zip(years, values):
+        if (
+            isinstance(raw_year, (bool, np.bool_))
+            or not isinstance(raw_year, (int, np.integer))
+            or _safe_float(raw_value) is None
+        ):
+            return False
+        normalized_years.append(int(raw_year))
+    return normalized_years == sorted(set(normalized_years)) and _years_are_consecutive(normalized_years, count)
+
+
+def _latest_complete_financial_year(m: Mapping[str, Any]) -> int | None:
+    """Return the annual endpoint justified by the current report snapshot."""
+
+    trade_date = _evidence_reference_date(m.get("source_trade_date"))
+    financial_date = _evidence_reference_date(m.get("financial_indicator_as_of"))
+    today = _shanghai_today()
+    if trade_date is not None and trade_date > today:
+        return None
+    if financial_date is not None:
+        if (
+            financial_date > today
+            or (trade_date is not None and financial_date > trade_date)
+            or (trade_date is not None and (trade_date - financial_date).days > _FINANCIAL_EVIDENCE_MAX_AGE_DAYS)
+        ):
+            return None
+        return (
+            financial_date.year if (financial_date.month, financial_date.day) == (12, 31) else financial_date.year - 1
+        )
+    return trade_date.year - 1 if trade_date is not None else None
+
+
+def _aligned_current_consecutive(
+    m: Mapping[str, Any],
+    values: Any,
+    years: Any,
+    count: int,
+) -> bool:
+    """Bind a decision window to the latest complete annual reporting period."""
+
+    expected_year = _latest_complete_financial_year(m)
+    return bool(
+        expected_year is not None and _aligned_consecutive(values, years, count) and int(years[-1]) == expected_year
+    )
 
 
 def _financial_metric_points(m: Mapping[str, Any], metric_name: str) -> list[tuple[int, float]]:
@@ -625,13 +780,18 @@ def _financial_metric_points(m: Mapping[str, Any], metric_name: str) -> list[tup
     for raw_year, raw_value in zip(years, values):
         value = _safe_float(raw_value)
         if isinstance(raw_year, bool) or value is None:
-            continue
+            return []
         try:
             year = int(raw_year)
         except (TypeError, ValueError, OverflowError):
-            continue
+            return []
+        if year in {item[0] for item in points}:
+            return []
         points.append((year, value))
     points.sort()
+    expected_year = _latest_complete_financial_year(m)
+    if not points or expected_year is None or points[-1][0] != expected_year:
+        return []
     return points
 
 
@@ -647,6 +807,24 @@ def _financial_metric_growth(m: Mapping[str, Any], metric_name: str) -> float | 
     if pair is None or pair[0] == 0:
         return None
     return (pair[1] - pair[0]) / abs(pair[0])
+
+
+def _current_annual_change(
+    m: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+) -> float | None:
+    """Recompute a one-year change only from the current bound annual pair."""
+
+    values = m.get(values_key)
+    years = m.get(years_key)
+    if not _aligned_current_consecutive(m, values, years, 2):
+        return None
+    prior = _safe_float(values[-2])
+    current = _safe_float(values[-1])
+    if prior is None or current is None or prior == 0:
+        return None
+    return (current - prior) / abs(prior)
 
 
 def _score_higher_is_safer(value: float | None, *, strong: float, minimum: float) -> int | None:
@@ -1013,8 +1191,26 @@ def _get_bench(benchmarks: Mapping[str, Mapping[str, Any]], industry: str, key: 
 
 
 def _compact_reason(value: Any) -> str:
-    text = str(value or "数据不足").strip()
-    return text[:EVIDENCE_MAX_LENGTH]
+    text = " ".join(str(value or "数据不足").split())
+    if len(text) <= EVIDENCE_MAX_LENGTH:
+        return text
+
+    content_limit = EVIDENCE_MAX_LENGTH - 1
+    best_boundary = ""
+    for match in re.finditer(r"[；;。！？!?，,]", text):
+        candidate = text[: match.start()].rstrip()
+        if len(candidate) > content_limit:
+            break
+        if candidate:
+            best_boundary = candidate
+    if best_boundary:
+        return best_boundary + "…"
+
+    prefix = text[:content_limit].rstrip()
+    word_boundary = prefix.rfind(" ")
+    if word_boundary >= max(4, content_limit // 2):
+        prefix = prefix[:word_boundary].rstrip()
+    return prefix + "…"
 
 
 def _format_rmb(value: Any) -> str:
@@ -1059,15 +1255,52 @@ def _finish(
     applicable: bool = True,
     evidence_complete: bool = True,
     status_override: Optional[str] = None,
+    missing_dimensions: Sequence[str] | None = None,
 ) -> tuple[bool, float, dict, dict]:
     """统一清洗、加权、舍入与触发，保证显示值就是判定值。"""
     weights = TYPE_WEIGHTS[type_key]
     score_decimals = 3 if type_key == "type7" else 2
+    missing_score_keys = [key for key in weights if _safe_float(scores.get(key)) is None]
+    raw_reasons = dict(reasons)
+    if missing_score_keys:
+        # Public payloads keep a fixed numeric radar shape, so the final
+        # serializer must still emit a number for every dimension.  Missing or
+        # non-finite scorer output is therefore represented by a numeric zero,
+        # but it must never retain a "complete" evidence state: downstream
+        # consumers otherwise cannot distinguish "unknown" from a measured
+        # zero-point failure.
+        evidence_complete = False
+        missing_labels = "/".join(missing_score_keys)
+        raw_reasons.setdefault("_missing", f"{missing_labels}评分输入缺失")
+        raw_reasons["_score_placeholder"] = f"{missing_labels}缺失以0占位"
+    if not applicable or evidence_complete:
+        declared_missing: list[str] = []
+    else:
+        requested_missing = list(missing_dimensions) if missing_dimensions is not None else missing_score_keys
+        if not requested_missing:
+            # Older callers can still supply the historical four-tuple.  An
+            # incomplete result without a dimension ledger must fail closed:
+            # every framework dimension remains unknown until a scorer
+            # explicitly narrows the list.
+            requested_missing = list(weights)
+        unknown = set(requested_missing) - set(weights)
+        if unknown:
+            raise ValueError(f"{type_key} unknown missing dimensions: {sorted(unknown)}")
+        declared_missing = [key for key in weights if key in requested_missing]
+    raw_reasons[_DECISION_MISSING_DIMENSIONS_REASON] = declared_missing
     clean_scores = _sanitize_scores(scores, weights, decimals=score_decimals)
-    clean_reasons = {key: _compact_reason(reasons.get(key)) for key in weights}
-    for key, value in reasons.items():
+    clean_reasons = {key: _compact_reason(raw_reasons.get(key)) for key in weights}
+    for key, value in raw_reasons.items():
         if key.startswith("_"):
-            clean_reasons[key] = _compact_reason(value)
+            clean_reasons[key] = list(value) if key == _DECISION_MISSING_DIMENSIONS_REASON else _compact_reason(value)
+    if type_key != "type7":
+        if not applicable:
+            clean_reasons["_score_quality"] = "模型不适用，0分不是结论"
+        elif evidence_complete:
+            clean_reasons["_score_quality"] = "完整证据评分"
+        else:
+            clean_reasons.setdefault("_missing", "关键评分证据不完整")
+            clean_reasons["_score_quality"] = "缺失项以0占位" if missing_score_keys else "证据不足，分数仅供诊断"
     total = _weighted_total(clean_scores, weights, decimals=score_decimals)
     if total_cap is not None:
         total = min(total, round(float(total_cap), 1))
@@ -1118,6 +1351,8 @@ def _insufficient_evidence(type_key: str, reason: str):
     scores = {key: 0.0 for key in TYPE_WEIGHTS[type_key]}
     reasons = {key: reason for key in TYPE_WEIGHTS[type_key]}
     reasons["_missing"] = reason
+    if type_key != "type7":
+        reasons["_score_placeholder"] = "全部子分为缺失占位"
     return _finish(type_key, scores, reasons, evidence_complete=False)
 
 
@@ -1194,6 +1429,11 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         "quote_status": quote_status,
         "price_source": price_source,
         "source_trade_date": str(quote_row.get("source_trade_date") or "").strip() or None,
+        # Needed by evidence-completeness rules that lower the minimum annual
+        # history only for genuinely recent listings.  The snapshot layer has
+        # already validated the canonical YYYY-MM-DD value; preserving it here
+        # avoids treating a mature company with missing history as a new IPO.
+        "listing_date": str(quote_row.get("listing_date") or "").strip() or None,
         "reference_price": bool(
             any(isinstance(value, (bool, np.bool_)) and bool(value) for value in reference_flags)
             or quote_status in {"suspended_or_no_trade", "invalid_price"}
@@ -1855,11 +2095,21 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         )
         m[key] = evidence_score
         m[f"{key}_evidence"] = evidence
+        raw_level = fin_data.get(f"{key}_evidence_level")
+        m[f"{key}_evidence_level"] = raw_level if raw_level in QUANTITATIVE_EVIDENCE_LEVELS else None
+    if fin_data.get("_type5_external_validation_token") is _TYPE5_EXTERNAL_VALIDATION_TOKEN:
+        # Preserve only the server-created marker.  Serialized snapshots
+        # cannot create this identity, and it is never part of result output.
+        m["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
     m["type7_research_sources"] = normalise_research_sources(
         fin_data.get("type7_research_sources"),
         today=_evidence_reference_date(m.get("source_trade_date")) or _shanghai_today(),
         security_code=str(m.get("code") or ""),
     )
+    # Patch 4 is an exact raw-fact contract, not another naked qualitative
+    # score.  Preserve it for Type 7, whose validator binds every criterion to
+    # the current company/date and independently replays the formula.
+    m["type7_patch4_assessment"] = fin_data.get("type7_patch4_assessment")
     for key in ("position_size_pct", "type6_portfolio_pct"):
         value = _safe_float(fin_data.get(key))
         m[key] = value if value is not None and 0 < value <= 100 else None
@@ -2891,7 +3141,20 @@ def score_type1_dcf(
         interest_debt_ratio = _safe_float(m.get("interest_bearing_debt_ratio"))
         if interest_debt_ratio is None and interest_debt is not None and assets is not None and assets > 0:
             interest_debt_ratio = interest_debt / assets
-        fcf_values = [value for value in (_safe_float(item) for item in m.get("fcf_history", [])) if value is not None]
+        raw_fcf_values = m.get("fcf_history", [])
+        raw_fcf_values = list(raw_fcf_values) if isinstance(raw_fcf_values, (list, tuple)) else []
+        parsed_fcf_values = [_safe_float(item) for item in raw_fcf_values]
+        fcf_history_complete = bool(
+            len(raw_fcf_values) == len(parsed_fcf_values)
+            and all(value is not None for value in parsed_fcf_values)
+            and _aligned_current_consecutive(
+                m,
+                raw_fcf_values,
+                m.get("fcf_years"),
+                3,
+            )
+        )
+        fcf_values = [float(value) for value in parsed_fcf_values if value is not None] if fcf_history_complete else []
         median_fcf = float(median(fcf_values[-3:])) if len(fcf_values) >= 3 else None
         net_debt_to_fcf = (
             max(0.0, interest_debt - funds) / median_fcf
@@ -2930,8 +3193,35 @@ def score_type1_dcf(
         adjusted_map = dict(zip(m.get("adjusted_profit_ratio_years", []), m.get("adjusted_profit_ratio_history", [])))
         asset_map = dict(zip(m.get("total_assets_years", []), m.get("total_assets_history", [])))
         accounting_years = sorted(set(profit_map) & set(ocf_map) & set(adjusted_map) & set(asset_map))[-3:]
-        accounting_complete = len(accounting_years) == 3 and all(
-            current - prior == 1 for prior, current in zip(accounting_years, accounting_years[1:])
+        accounting_complete = all(
+            (
+                _aligned_current_consecutive(
+                    m,
+                    m.get("net_profit_history", []),
+                    m.get("net_profit_years"),
+                    3,
+                ),
+                _aligned_current_consecutive(
+                    m,
+                    m.get("ocf_history", []),
+                    m.get("ocf_years"),
+                    3,
+                ),
+                _aligned_current_consecutive(
+                    m,
+                    m.get("adjusted_profit_ratio_history", []),
+                    m.get("adjusted_profit_ratio_years"),
+                    3,
+                ),
+                _aligned_current_consecutive(
+                    m,
+                    m.get("total_assets_history", []),
+                    m.get("total_assets_years"),
+                    3,
+                ),
+                len(accounting_years) == 3,
+                all(current - prior == 1 for prior, current in zip(accounting_years, accounting_years[1:])),
+            )
         )
         accounting_integrity = _verified_score(m, "accounting_integrity_score")
         if accounting_complete:
@@ -3036,7 +3326,10 @@ def score_type1_dcf(
             catalyst += 2.0
             items.append("最新同口径利润增")
         margins = m.get("margin_history", [])
-        if _aligned_consecutive(margins, m.get("margin_years"), 3) and margins[-1] > margins[-2] > margins[-3]:
+        if (
+            _aligned_current_consecutive(m, margins, m.get("margin_years"), 3)
+            and margins[-1] > margins[-2] > margins[-3]
+        ):
             catalyst += 2.0
             items.append("净利率连升")
         explicit_catalyst = _verified_score(m, "catalyst_score")
@@ -3065,6 +3358,16 @@ def score_type1_dcf(
         reasons["_veto"] = "价值陷阱未排除"
     if not in_buy_zone:
         reasons["_condition"] = "须进入模型买入区"
+    missing_dimensions: list[str] = []
+    missing_dimension_keys: list[str] = []
+    if not trap_evidence_complete:
+        missing_dimensions.append("价值陷阱")
+        missing_dimension_keys.append("1b")
+    if not catalyst_evidence_complete:
+        missing_dimensions.append("回归催化")
+        missing_dimension_keys.append("1d")
+    if missing_dimensions:
+        reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
     return _finish(
         "type1",
         scores,
@@ -3072,7 +3375,97 @@ def score_type1_dcf(
         veto=veto,
         extra_condition=in_buy_zone,
         evidence_complete=trap_evidence_complete and catalyst_evidence_complete,
+        missing_dimensions=missing_dimension_keys,
     )
+
+
+def _type2_company_turn_evidence(m: Mapping[str, Any]) -> tuple[bool, str]:
+    """Return whether Type2 2b has a continuous, comparable operating chain.
+
+    A mature company needs three consecutive annual observations for revenue,
+    parent profit and net margin.  A genuinely recent listing may use two
+    consecutive annual observations or an exact same-period interim revenue
+    and parent-profit pair.  Listing age is never inferred from short history:
+    without a canonical listing date, short annual data remains a source gap.
+    Operating cash flow is useful corroboration in the score but is not an
+    absolute completeness requirement because cash timing differs materially
+    across otherwise comparable business models.
+    """
+
+    annual_three_year = all(
+        (
+            _aligned_current_consecutive(
+                m,
+                m.get("revenue_values", []),
+                m.get("revenue_years"),
+                3,
+            ),
+            _aligned_current_consecutive(
+                m,
+                m.get("net_profit_history", []),
+                m.get("net_profit_years"),
+                3,
+            ),
+            _aligned_current_consecutive(
+                m,
+                m.get("margin_history", []),
+                m.get("margin_years"),
+                3,
+            ),
+        )
+    )
+    if annual_three_year:
+        return True, "公司3年连续财务数据"
+
+    listing_date = _evidence_reference_date(m.get("listing_date"))
+    reference_date = _evidence_reference_date(m.get("source_trade_date"))
+    recent_listing = bool(
+        listing_date is not None
+        and reference_date is not None
+        and reference_date >= listing_date
+        and (reference_date - listing_date).days < 3 * 366
+    )
+    if not recent_listing:
+        return False, "公司拐点连续数据不足"
+
+    annual_two_year = all(
+        (
+            _aligned_current_consecutive(
+                m,
+                m.get("revenue_values", []),
+                m.get("revenue_years"),
+                2,
+            ),
+            _aligned_current_consecutive(
+                m,
+                m.get("net_profit_history", []),
+                m.get("net_profit_years"),
+                2,
+            ),
+            _aligned_current_consecutive(
+                m,
+                m.get("margin_history", []),
+                m.get("margin_years"),
+                2,
+            ),
+        )
+    )
+    if annual_two_year:
+        return True, "上市后2年连续财务数据"
+
+    interim_pair = all(
+        (
+            m.get("interim_revenue_pair_basis") == "same_period_yoy",
+            m.get("interim_profit_pair_basis") == "same_period_yoy",
+            _safe_float(m.get("interim_current_revenue")) is not None,
+            _safe_float(m.get("interim_prior_revenue")) is not None,
+            _safe_float(m.get("interim_current_profit")) is not None,
+            _safe_float(m.get("interim_prior_profit")) is not None,
+        )
+    )
+    if interim_pair:
+        return True, "上市后同口径季报同比"
+    return False, "新股缺2年或同口径季报"
 
 
 def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
@@ -3149,7 +3542,7 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
 
     scores["2b"], company_ready, reasons["2b"] = _financial_catalyst_score(m)
 
-    coldness = _verified_score(m, "market_coldness_score")
+    coldness = _verified_market_coldness_score(m)
     market_coldness_missing = coldness is None
     if coldness is None:
         scores["2c"], reasons["2c"] = 0.0, "缺独立量价冷度证据"
@@ -3159,7 +3552,16 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
 
     pb = _safe_float(m.get("pb"))
     median_pb = benchmark("median_pb")
-    if pb is not None and pb > 0 and median_pb is not None and median_pb > 0:
+    median_pb_count = benchmark("median_pb_count")
+    valuation_evidence_complete = bool(
+        pb is not None
+        and pb > 0
+        and median_pb is not None
+        and median_pb > 0
+        and median_pb_count is not None
+        and median_pb_count >= minimum_sample
+    )
+    if valuation_evidence_complete:
         pb_ratio = pb / median_pb
         scores["2d"] = _score_0_10(
             pb_ratio,
@@ -3175,12 +3577,23 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
     cold_veto = not market_coldness_missing and scores["2c"] <= 3.0
     valuation_adjustment = hot_average >= 7 and scores["2c"] >= 7 and 4 <= scores["2d"] <= 5
     valuation_ready = scores["2d"] >= 5 or valuation_adjustment
+    missing_dimensions: list[str] = []
+    missing_dimension_keys: list[str] = []
     if not industry_ready:
-        reasons["_missing"] = "金融行业周期样本不足"
-    elif not company_ready:
-        reasons["_missing"] = "金融公司拐点证据不足"
+        missing_dimensions.append("金融行业周期")
+        missing_dimension_keys.append("2a")
+    if not company_ready:
+        missing_dimensions.append("金融公司拐点")
+        missing_dimension_keys.append("2b")
     if market_coldness_missing:
-        reasons["_missing"] = "缺独立市场冷度证据"
+        missing_dimensions.append("市场冷度")
+        missing_dimension_keys.append("2c")
+    if not valuation_evidence_complete:
+        missing_dimensions.append("金融估值")
+        missing_dimension_keys.append("2d")
+    if missing_dimensions:
+        reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
+    reasons["_coverage"] = "金融周期/公司/冷度/PB齐全" if not missing_dimensions else "金融四维证据存在缺口"
     if hot_veto:
         reasons["_veto"] = "金融两热平均须大于4"
     elif cold_veto:
@@ -3193,7 +3606,10 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
         reasons,
         veto=hot_veto or cold_veto,
         extra_condition=valuation_ready,
-        evidence_complete=industry_ready and company_ready and not market_coldness_missing,
+        evidence_complete=bool(
+            industry_ready and company_ready and not market_coldness_missing and valuation_evidence_complete
+        ),
+        missing_dimensions=missing_dimension_keys,
     )
 
 
@@ -3242,21 +3658,22 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
     margins = m.get("margin_history", [])
     profits = m.get("net_profit_history", [])
     profit_years = m.get("net_profit_years", [])
+    company_turn_evidence_complete, company_turn_evidence_basis = _type2_company_turn_evidence(m)
     points = 0.0
     signals: list[str] = []
-    rates = _growth_rates(revenue[-3:]) if _aligned_consecutive(revenue, revenue_years, 3) else []
+    rates = _growth_rates(revenue[-3:]) if _aligned_current_consecutive(m, revenue, revenue_years, 3) else []
     if len(rates) == 2 and rates[-1] > 0.05 and rates[-1] > rates[-2] + 0.03:
         points += 3
         signals.append("营收加速")
     elif rates and rates[-1] > 0.05:
         points += 1
     margin_years = m.get("margin_years", [])
-    if _aligned_consecutive(margins, margin_years, 3) and margins[-1] > margins[-2] > margins[-3]:
+    if _aligned_current_consecutive(m, margins, margin_years, 3) and margins[-1] > margins[-2] > margins[-3]:
         points += 3
         signals.append("净利率连升")
-    elif _aligned_consecutive(margins, margin_years, 2) and margins[-1] > margins[-2]:
+    elif _aligned_current_consecutive(m, margins, margin_years, 2) and margins[-1] > margins[-2]:
         points += 1.5
-    if _aligned_consecutive(profits, profit_years, 3) and profits[-1] > profits[-2] > profits[-3]:
+    if _aligned_current_consecutive(m, profits, profit_years, 3) and profits[-1] > profits[-2] > profits[-3]:
         points += 2.5
         signals.append("利润连升")
     ocf_np = _safe_float(m.get("ocf_np_ratio"))
@@ -3283,7 +3700,7 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         if scores["2b"] > limit:
             scores["2b"], reasons["2b"] = limit, reason
 
-    profit_change = _safe_float(m.get("profit_1yr_change"))
+    profit_change = _current_annual_change(m, "net_profit_history", "net_profit_years")
     if profit_change is not None and profit_change <= -0.50:
         cap_company_turn(2.0, "年度利润暴跌")
     elif profit_change is not None and profit_change < -0.20:
@@ -3325,7 +3742,7 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         reason = "零基数无可比同比,拐点封顶" if exact_pairs and zero_base else "缺最新同口径报告期,拐点封顶"
         cap_company_turn(6.0, reason)
 
-    explicit_coldness = _verified_score(m, "market_coldness_score")
+    explicit_coldness = _verified_market_coldness_score(m)
     market_coldness_missing = explicit_coldness is None
     if explicit_coldness is not None and 0 <= explicit_coldness <= 10:
         scores["2c"] = explicit_coldness
@@ -3338,15 +3755,31 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
 
     # 2d独立使用增长调整PE，缺失时再用同行PB。
     peg = _safe_float(m.get("peg"))
+    if not _aligned_current_consecutive(m, profits, profit_years, 3):
+        peg = None
     pb = _safe_float(m.get("pb"))
     median_pb = None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb"))
+    median_pb_count = (
+        None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb_count"))
+    )
     if peg is not None and peg > 0:
+        valuation_evidence_complete = True
+        valuation_evidence_basis = "盈利趋势PEG"
         scores["2d"] = _score_0_10(
             peg,
             [(0.50, 10), (0.80, 9), (1.20, 7.5), (1.80, 5), (2.00, 4), (2.50, 3), (4.00, 1)],
         )
         reasons["2d"] = f"归母利润趋势PEG{peg:.1f}"
-    elif pb is not None and pb > 0 and median_pb is not None and median_pb > 0:
+    elif (
+        pb is not None
+        and pb > 0
+        and median_pb is not None
+        and median_pb > 0
+        and median_pb_count is not None
+        and median_pb_count >= MIN_SECTOR_COMPANIES
+    ):
+        valuation_evidence_complete = True
+        valuation_evidence_basis = "同行市净率"
         pb_ratio = pb / median_pb
         scores["2d"] = _score_0_10(
             pb_ratio,
@@ -3354,6 +3787,8 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         )
         reasons["2d"] = f"当前PB/行业{pb_ratio:.1f}倍"
     else:
+        valuation_evidence_complete = False
+        valuation_evidence_basis = "估值证据缺失"
         scores["2d"], reasons["2d"] = 2.0, "估值数据不足"
 
     # 否决边界必须使用最终对外展示的一位小数分数。否则插值得到的
@@ -3365,21 +3800,36 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
     # 两项各自都大于4。旧实现把平均条件擅自收紧成逐项条件，会错杀
     # “产业刚回暖、公司强拐点”等典型错配机会。
     hot_dimensions_ready = hot_average > 4
-    hot_veto = not industry_evidence_missing and not hot_dimensions_ready
+    hot_veto = not industry_evidence_missing and company_turn_evidence_complete and not hot_dimensions_ready
     cold_veto = not market_coldness_missing and scores["2c"] <= 3
     veto = hot_veto or cold_veto
+    missing_dimensions: list[str] = []
+    missing_dimension_keys: list[str] = []
     if industry_evidence_missing:
-        reasons["_missing"] = "产业周期证据不足"
+        missing_dimensions.append("产业周期")
+        missing_dimension_keys.append("2a")
+    if not company_turn_evidence_complete:
+        missing_dimensions.append("公司拐点")
+        missing_dimension_keys.append("2b")
     if market_coldness_missing:
-        reasons["_missing"] = "缺独立市场冷度证据"
+        missing_dimensions.append("市场冷度")
+        missing_dimension_keys.append("2c")
+    if not valuation_evidence_complete:
+        missing_dimensions.append("估值")
+        missing_dimension_keys.append("2d")
+    if missing_dimensions:
+        reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
+    reasons["_coverage"] = f"{company_turn_evidence_basis};{valuation_evidence_basis}"
     if hot_veto:
         reasons["_veto"] = "产业与公司热度平均须>4"
     elif cold_veto:
         reasons["_veto"] = "市场周期不够冷"
     # 估值必须合理（>=5）。补丁6只在“两热”和“冷”都很强时，
     # 允许4~5分的中性偏高估值；显著高估绝不能仅靠其他维度补回。
-    valuation_adjustment = hot_average >= 7 and scores["2c"] >= 7 and 4 <= scores["2d"] <= 5
-    valuation_ready = scores["2d"] >= 5 or valuation_adjustment
+    valuation_adjustment = bool(
+        valuation_evidence_complete and hot_average >= 7 and scores["2c"] >= 7 and 4 <= scores["2d"] <= 5
+    )
+    valuation_ready = bool(valuation_evidence_complete and (scores["2d"] >= 5 or valuation_adjustment))
     if valuation_adjustment:
         reasons["_adjustment"] = "强两热一冷允许中性估值"
     if not valuation_ready:
@@ -3390,20 +3840,27 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         reasons,
         veto=veto,
         extra_condition=valuation_ready,
-        evidence_complete=not industry_evidence_missing and not market_coldness_missing,
+        evidence_complete=bool(
+            not industry_evidence_missing
+            and company_turn_evidence_complete
+            and not market_coldness_missing
+            and valuation_evidence_complete
+        ),
+        missing_dimensions=missing_dimension_keys,
     )
 
 
 def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
     """情况三：使用趋势调整增长，拒绝3/5年CAGR择高。"""
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _not_applicable("type3", "金融机构不适用投入回报增长模板")
+        return _not_applicable("type3", "金融机构不适用可持续高增长型")
+    revenue_values = list(m.get("revenue_values", []))
+    revenue_years = m.get("revenue_years", [])
+    if not _aligned_current_consecutive(m, revenue_values, revenue_years, 4):
+        return _insufficient_evidence("type3", "缺截至最新完整财年的连续4年营收")
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {}
-    trend_growth = _safe_float(m.get("trend_growth"))
-    if trend_growth is None:
-        values = [value for value in m.get("revenue_values", []) if _safe_float(value) is not None]
-        trend_growth = _trend_adjusted_growth(values)
+    trend_growth = _trend_adjusted_growth(revenue_values)
     if trend_growth is None:
         return _insufficient_evidence("type3", "趋势增长证据缺失")
     if trend_growth < 0.10:
@@ -3560,7 +4017,7 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
             reason_3d = f"增速趋势减速{growth_slope:.1%}"
         else:
             reason_3d = f"趋势增速{trend_growth:.1%}"
-        profit_change = _safe_float(m.get("profit_1yr_change"))
+        profit_change = _current_annual_change(m, "net_profit_history", "net_profit_years")
         if profit_change is not None and profit_change < -0.20:
             sustainable, reason_3d = min(sustainable, 2.0), "年度利润降幅超20%"
         elif profit_change is not None and profit_change < -0.10:
@@ -3605,6 +4062,25 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
         reasons["_veto"] = "增长不可持续"
     if cap is not None:
         reasons["_downgrade"] = "产业或股价泡沫风险"
+    missing_dimensions: list[str] = []
+    missing_dimension_keys: list[str] = []
+    if not moat_evidence_complete:
+        missing_dimensions.append("护城河")
+        missing_dimension_keys.append("3a")
+    if not growth_quality_evidence_complete:
+        missing_dimensions.append("增长质量")
+        missing_dimension_keys.append("3b")
+    if roic_wacc_missing:
+        missing_dimensions.append("投入回报")
+        missing_dimension_keys.append("3c")
+    if not sustainability_evidence_complete:
+        missing_dimensions.append("增长持续性")
+        missing_dimension_keys.append("3d")
+    if not bubble_evidence_complete:
+        missing_dimensions.append("泡沫")
+        missing_dimension_keys.append("3e")
+    if missing_dimensions:
+        reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
     return _finish(
         "type3",
         scores,
@@ -3620,6 +4096,7 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
                 bubble_evidence_complete,
             )
         ),
+        missing_dimensions=missing_dimension_keys,
     )
 
 
@@ -3635,7 +4112,7 @@ def score_type4_long_runway(
         if skip_outcome is not None:
             return skip_outcome
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _insufficient_evidence("type4", "金融缺专属长坡护城河证据")
+        return _not_applicable("type4", "金融机构暂无专属长坡厚雪模型")
     del benchmarks  # Type4 industry-bubble evidence must not fall back to peer PE.
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {}
@@ -3663,11 +4140,15 @@ def score_type4_long_runway(
         )
         reasons["4a"] = f"历史增速弱代理{trend_growth:.1%}"
 
-    margin_values = [
-        value for value in (_safe_float(item) for item in m.get("margin_history", [])) if value is not None
-    ]
-    margin_years = list(m.get("margin_years", []))
-    net_margin_history_complete = _aligned_consecutive(margin_values, margin_years, 3)
+    raw_margin_values = m.get("margin_history", [])
+    raw_margin_values = list(raw_margin_values) if isinstance(raw_margin_values, (list, tuple)) else []
+    parsed_margin_values = [_safe_float(item) for item in raw_margin_values]
+    margin_values = [float(value) for value in parsed_margin_values if value is not None]
+    raw_margin_years = m.get("margin_years", [])
+    margin_years = list(raw_margin_years) if isinstance(raw_margin_years, (list, tuple)) else []
+    net_margin_history_complete = len(margin_values) == len(raw_margin_values) and _aligned_current_consecutive(
+        m, raw_margin_values, margin_years, 3
+    )
     margin = float(median(margin_values[-3:])) if net_margin_history_complete else _safe_float(m.get("net_margin"))
     if margin is None:
         margin = _safe_float(m.get("margin_median_hist"))
@@ -3676,11 +4157,15 @@ def score_type4_long_runway(
         if margin is not None
         else 0.0
     )
-    gross_values = [
-        value for value in (_safe_float(item) for item in m.get("gross_margin_history", [])) if value is not None
-    ]
-    gross_years = list(m.get("gross_margin_years", []))
-    gross_history_complete = _aligned_consecutive(gross_values, gross_years, 3)
+    raw_gross_values = m.get("gross_margin_history", [])
+    raw_gross_values = list(raw_gross_values) if isinstance(raw_gross_values, (list, tuple)) else []
+    parsed_gross_values = [_safe_float(item) for item in raw_gross_values]
+    gross_values = [float(value) for value in parsed_gross_values if value is not None]
+    raw_gross_years = m.get("gross_margin_years", [])
+    gross_years = list(raw_gross_years) if isinstance(raw_gross_years, (list, tuple)) else []
+    gross_history_complete = len(gross_values) == len(raw_gross_values) and _aligned_current_consecutive(
+        m, raw_gross_values, gross_years, 3
+    )
     gross_cv = (
         float(np.std(gross_values[-3:]) / abs(np.mean(gross_values[-3:])))
         if gross_history_complete and abs(float(np.mean(gross_values[-3:]))) > 1e-12
@@ -3702,19 +4187,31 @@ def score_type4_long_runway(
     if str(m.get("gross_margin_trend") or "") == "decreasing":
         gross_score = max(0.0, gross_score - 2.0)
 
-    fcf_values = [_safe_float(value) for value in m.get("fcf_history", [])]
-    profit_values = [_safe_float(value) for value in m.get("net_profit_history", [])]
-    revenue_values = [_safe_float(value) for value in m.get("revenue_values", [])]
-    fcf_years = list(m.get("fcf_years", []))
-    profit_years = list(m.get("net_profit_years", []))
-    revenue_years = list(m.get("revenue_years", []))
+    raw_fcf_history = m.get("fcf_history", [])
+    raw_profit_history = m.get("net_profit_history", [])
+    raw_revenue_history = m.get("revenue_values", [])
+    raw_fcf_values = list(raw_fcf_history) if isinstance(raw_fcf_history, (list, tuple)) else []
+    raw_profit_values = list(raw_profit_history) if isinstance(raw_profit_history, (list, tuple)) else []
+    raw_revenue_values = list(raw_revenue_history) if isinstance(raw_revenue_history, (list, tuple)) else []
+    fcf_values = [_safe_float(value) for value in raw_fcf_values]
+    profit_values = [_safe_float(value) for value in raw_profit_values]
+    revenue_values = [_safe_float(value) for value in raw_revenue_values]
+    raw_fcf_years = m.get("fcf_years", [])
+    raw_profit_years = m.get("net_profit_years", [])
+    raw_revenue_years = m.get("revenue_years", [])
+    fcf_years = list(raw_fcf_years) if isinstance(raw_fcf_years, (list, tuple)) else []
+    profit_years = list(raw_profit_years) if isinstance(raw_profit_years, (list, tuple)) else []
+    revenue_years = list(raw_revenue_years) if isinstance(raw_revenue_years, (list, tuple)) else []
     fcf_map = {year: value for year, value in zip(fcf_years, fcf_values) if value is not None}
     profit_map = {year: value for year, value in zip(profit_years, profit_values) if value is not None}
     revenue_map = {year: value for year, value in zip(revenue_years, revenue_values) if value is not None}
     fcf_margin_years = sorted(set(fcf_map) & set(revenue_map))[-3:]
     fcf_margin_history_complete = (
-        len(fcf_margin_years) == 3
+        _aligned_current_consecutive(m, raw_fcf_values, fcf_years, 3)
+        and _aligned_current_consecutive(m, raw_revenue_values, revenue_years, 3)
+        and len(fcf_margin_years) == 3
         and all(current - prior == 1 for prior, current in zip(fcf_margin_years, fcf_margin_years[1:]))
+        and fcf_margin_years[-1] == _latest_complete_financial_year(m)
         and all(revenue_map[year] > 0 for year in fcf_margin_years)
     )
     fcf_margins = (
@@ -3727,8 +4224,12 @@ def score_type4_long_runway(
         else 0.0
     )
     cash_years = sorted(set(fcf_map) & set(profit_map))[-3:]
-    cash_history_complete = len(cash_years) == 3 and all(
-        current - prior == 1 for prior, current in zip(cash_years, cash_years[1:])
+    cash_history_complete = (
+        _aligned_current_consecutive(m, raw_fcf_values, fcf_years, 3)
+        and _aligned_current_consecutive(m, raw_profit_values, profit_years, 3)
+        and len(cash_years) == 3
+        and cash_years[-1] == _latest_complete_financial_year(m)
+        and all(current - prior == 1 for prior, current in zip(cash_years, cash_years[1:]))
     )
     total_profit = sum(profit_map[year] for year in cash_years) if cash_history_complete else 0.0
     total_fcf = sum(fcf_map[year] for year in cash_years) if cash_history_complete else 0.0
@@ -3740,17 +4241,27 @@ def score_type4_long_runway(
     )
     cash_score = (cash_margin_score + conversion_score) / 2.0
 
-    roic_values = [_safe_float(item) for item in m.get("indicator_roic_history", [])]
-    roic_years = list(m.get("indicator_roic_years", []))
+    raw_roic_history = m.get("indicator_roic_history", [])
+    raw_roic_values = list(raw_roic_history) if isinstance(raw_roic_history, (list, tuple)) else []
+    roic_values = [_safe_float(item) for item in raw_roic_values]
+    raw_roic_years = m.get("indicator_roic_years", [])
+    roic_years = list(raw_roic_years) if isinstance(raw_roic_years, (list, tuple)) else []
     roic_map = {year: value for year, value in zip(roic_years, roic_values) if value is not None}
     recent_roic_years = sorted(roic_map)[-3:]
-    roic_history_complete = len(recent_roic_years) == 3 and all(
-        current - prior == 1 for prior, current in zip(recent_roic_years, recent_roic_years[1:])
+    roic_history_complete = (
+        _aligned_current_consecutive(m, raw_roic_values, roic_years, 3)
+        and len(recent_roic_years) == 3
+        and recent_roic_years[-1] == _latest_complete_financial_year(m)
+        and all(current - prior == 1 for prior, current in zip(recent_roic_years, recent_roic_years[1:]))
     )
     roic_history = [roic_map[year] for year in recent_roic_years] if roic_history_complete else []
     wacc = _safe_float(m.get("wacc"))
     roic_value = float(median(roic_history)) if roic_history_complete else _safe_float(m.get("roic"))
-    roic_spread = roic_value - wacc if roic_value is not None and wacc is not None else None
+    roic_wacc_basis_valid = m.get("roic_wacc_basis") in {
+        "NOPAT/平均投入资本代理",
+        "Eastmoney年度ROIC/公司资本结构WACC",
+    }
+    roic_spread = roic_value - wacc if roic_value is not None and wacc is not None and roic_wacc_basis_valid else None
     roic_score = (
         _score_0_10(roic_spread, [(0.0, 1.0), (0.02, 3.0), (0.05, 5.0), (0.10, 7.0), (0.20, 9.0), (0.30, 10.0)])
         if roic_spread is not None
@@ -3771,12 +4282,13 @@ def score_type4_long_runway(
         and cash_conversion is not None
         and roic_history_complete
         and wacc is not None
+        and roic_wacc_basis_valid
     )
     scores["4b"] = round((margin_score + gross_score + cash_score + roic_score) / 4.0, 1)
     if (margin is not None and margin <= 0) or (cash_history_complete and total_fcf <= 0):
         scores["4b"] = min(scores["4b"], 2.0)
     reasons["4b"] = f"净{margin_score:.0f}/毛{gross_score:.0f}/现{cash_score:.0f}/ROIC{roic_score:.0f}"
-    profit_change = _safe_float(m.get("profit_1yr_change"))
+    profit_change = _current_annual_change(m, "net_profit_history", "net_profit_years")
     if profit_change is not None and profit_change <= -0.50:
         scores["4b"], reasons["4b"] = min(scores["4b"], 2.0), "年度利润崩塌"
     latest_severity, latest_reason = _latest_period_deterioration(m)
@@ -3864,20 +4376,26 @@ def score_type4_long_runway(
         reasons["_veto"] = "持久护城河不足"
     elif double_bubble_veto:
         reasons["_veto"] = "产业与股价双泡沫"
+    missing_contract = (
+        (runway_complete, "4a", "坡长"),
+        (snow_complete, "4b", "厚雪"),
+        (moat_complete, "4c", "护城河"),
+        (not valuation_missing, "4d", "10年估值"),
+        (bubble_complete, "4e", "产业泡沫"),
+        (not valuation_missing, "4f", "10年估值"),
+    )
+    missing_dimension_keys = [key for complete, key, _label in missing_contract if not complete]
     if not evidence_complete:
-        missing_dimensions = [
-            label
-            for complete, label in (
-                (runway_complete, "坡长"),
-                (snow_complete, "厚雪"),
-                (moat_complete, "护城河"),
-                (bubble_complete, "产业泡沫"),
-                (not valuation_missing, "10年估值"),
-            )
-            if not complete
-        ]
+        missing_dimensions = list(dict.fromkeys(label for complete, _key, label in missing_contract if not complete))
         reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
-    return _finish("type4", scores, reasons, veto=veto, evidence_complete=evidence_complete)
+    return _finish(
+        "type4",
+        scores,
+        reasons,
+        veto=veto,
+        evidence_complete=evidence_complete,
+        missing_dimensions=missing_dimension_keys,
+    )
 
 
 def _is_strict_recovery(values: list[float], years: Any = None) -> bool:
@@ -3902,11 +4420,28 @@ def _is_strict_recovery(values: list[float], years: Any = None) -> bool:
 def _has_cycle_history(values: list[float], years: Any = None) -> bool:
     """要求历史同时出现下降、上升和足够振幅，排除普通成长股。"""
     raw = [_safe_float(item) for item in values]
-    cleaned = [value for value in raw if value is not None]
-    if len(cleaned) < 4:
+    if len(raw) < 4 or any(value is None for value in raw):
         return False
-    if years is not None and (len(cleaned) != len(raw) or not _aligned_consecutive(values, years, 4)):
-        return False
+    cleaned = [float(value) for value in raw if value is not None]
+    if years is not None:
+        if not isinstance(years, (list, tuple)) or len(years) != len(cleaned):
+            return False
+        points: list[tuple[int, float]] = []
+        for raw_year, value in zip(years, cleaned):
+            if isinstance(raw_year, (bool, np.bool_)) or not isinstance(raw_year, (int, np.integer)):
+                return False
+            points.append((int(raw_year), value))
+        points.sort()
+        if len({year for year, _ in points}) != len(points):
+            return False
+        suffix = [points[-1]]
+        for point in reversed(points[:-1]):
+            if suffix[0][0] - point[0] != 1:
+                break
+            suffix.insert(0, point)
+        if len(suffix) < 4:
+            return False
+        cleaned = [value for _, value in suffix]
     changes = [current - prior for prior, current in zip(cleaned, cleaned[1:])]
     if not any(change < 0 for change in changes) or not any(change > 0 for change in changes):
         return False
@@ -3922,10 +4457,13 @@ def _score_type5_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
     reasons: dict[str, str] = {}
     pb = _safe_float(m.get("pb"))
     profit_points: list[tuple[int, float]] = []
-    for raw_year, raw_value in zip(m.get("net_profit_years", []), m.get("net_profit_history", [])):
-        parsed = _safe_float(raw_value)
-        if isinstance(raw_year, (int, np.integer)) and parsed is not None:
-            profit_points.append((int(raw_year), parsed))
+    raw_profit_years = m.get("net_profit_years", [])
+    raw_profit_values = m.get("net_profit_history", [])
+    if _aligned_current_consecutive(m, raw_profit_values, raw_profit_years, 4):
+        for raw_year, raw_value in zip(raw_profit_years, raw_profit_values):
+            parsed = _safe_float(raw_value)
+            if isinstance(raw_year, (int, np.integer)) and parsed is not None:
+                profit_points.append((int(raw_year), parsed))
     profit_points.sort()
 
     if industry == "BANK":
@@ -3935,7 +4473,13 @@ def _score_type5_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
         values = [value for _, value in driver_points]
         changes = [current - prior for prior, current in zip(values, values[1:])]
         cycle_history = (
-            len(values) >= 4
+            _aligned_current_consecutive(
+                m,
+                m.get("net_interest_margin_history", []),
+                m.get("net_interest_margin_years", []),
+                4,
+            )
+            and len(values) >= 4
             and any(change < 0 for change in changes)
             and any(change > 0 for change in changes)
             and max(values) - min(values) >= max(abs(float(median(values))) * 0.10, 0.001)
@@ -3953,7 +4497,15 @@ def _score_type5_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
         driver_points = _financial_metric_points(m, "new_business_value")
         values = [value for _, value in driver_points]
         years = [year for year, _ in driver_points]
-        cycle_history = _has_cycle_history(values, years)
+        cycle_history = bool(
+            _aligned_current_consecutive(
+                m,
+                m.get("new_business_value_history", []),
+                m.get("new_business_value_years", []),
+                4,
+            )
+            and _has_cycle_history(values, years)
+        )
         recovering = bool(cycle_history and _is_strict_recovery(values, years))
         positive_values = [value for value in values if value > 0]
         trough = bool(positive_values and values[-1] <= float(median(positive_values)) * 0.70)
@@ -4256,17 +4808,39 @@ def _score_type5_legacy_counter_cyclical(
 
 def _type5_cycle_profit_history(m: Mapping[str, Any]) -> tuple[list[float], list[int]]:
     """Return only fully dated annual profit observations for normalisation."""
+    raw_years = m.get("net_profit_years")
+    raw_values = m.get("net_profit_history")
+    if (
+        not isinstance(raw_years, (list, tuple))
+        or not isinstance(raw_values, (list, tuple))
+        or len(raw_years) != len(raw_values)
+    ):
+        return [], []
     points: list[tuple[int, float]] = []
-    for raw_year, raw_value in zip(m.get("net_profit_years", []), m.get("net_profit_history", [])):
+    for raw_year, raw_value in zip(raw_years, raw_values):
         value = _safe_float(raw_value)
-        if isinstance(raw_year, (int, np.integer)) and value is not None:
-            points.append((int(raw_year), value))
+        if isinstance(raw_year, (bool, np.bool_)) or not isinstance(raw_year, (int, np.integer)) or value is None:
+            return [], []
+        points.append((int(raw_year), value))
     points.sort()
+    if len({year for year, _ in points}) != len(points):
+        return [], []
     return [value for _, value in points], [year for year, _ in points]
 
 
 def _type5_external_score(m: Mapping[str, Any], key: str) -> tuple[Optional[float], Optional[str]]:
-    """Read one traceable user-supplied Type5 score and its display reason."""
+    """Read one independently validated primary Type5 assessment.
+
+    Generic score metadata is not a replayable Type5 model.  Serialized input
+    therefore cannot promote an arbitrary ``derived_proxy`` value into one of
+    the five decision dimensions.  A future structured Type5 source adapter
+    may attach the process-local token only after validating its raw facts.
+    """
+    if (
+        m.get("_type5_external_validation_token") is not _TYPE5_EXTERNAL_VALIDATION_TOKEN
+        or m.get(f"{key}_evidence_level") != "primary"
+    ):
+        return None, None
     score = _verified_score(m, key)
     if score is None:
         return None, None
@@ -4276,7 +4850,7 @@ def _type5_external_score(m: Mapping[str, Any], key: str) -> tuple[Optional[floa
 def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
     """Use 5–10 consecutive annual profits, never the current single-year PE."""
     profits, years = _type5_cycle_profit_history(m)
-    if len(profits) < 5 or not _aligned_consecutive(profits, years, 5):
+    if len(profits) < 5 or not _aligned_current_consecutive(m, profits, years, 5):
         return None, 0
     selected_points = list(zip(years, profits))[-10:]
     consecutive_suffix = [selected_points[-1]]
@@ -4369,7 +4943,18 @@ def _type5_pb_history_inputs(
         return None
     percentile = _type5_contract_number(valuation.get("pb_percentile"))
     current_pb = _type5_contract_number(valuation.get("current_pb_mrq"))
-    if percentile is None or current_pb is None or _type5_pb_bottom_score(percentile, current_pb) is None:
+    replay = replay_valuation_distribution(valuation.get("pb_distribution"), current_pb)
+    declared_median = _type5_contract_number(valuation.get("median_pb_mrq"))
+    if (
+        percentile is None
+        or current_pb is None
+        or replay is None
+        or observations != replay["observations"]
+        or declared_median is None
+        or not math.isclose(declared_median, float(replay["median"]), rel_tol=0.0, abs_tol=1e-9)
+        or not math.isclose(percentile, float(replay["percentile"]), rel_tol=0.0, abs_tol=1e-12)
+        or _type5_pb_bottom_score(percentile, current_pb) is None
+    ):
         return None
     quote_pb_raw = m.get("pb")
     if quote_pb_raw is not None:
@@ -4385,18 +4970,11 @@ def _type5_pb_history_inputs(
 def _type5_market_bottom_score(m: Mapping[str, Any]) -> Optional[float]:
     """Use only same-session, security-bound coldness and price declines."""
     reference_date = _evidence_reference_date(m.get("source_trade_date"))
-    score, evidence = _normalise_score_evidence(
-        m,
-        "market_coldness_score",
-        expected_code=m.get("code"),
-        reference_date=m.get("source_trade_date"),
-    )
+    score = _verified_market_coldness_score(m)
     components = m.get("market_coldness_components")
     if (
         reference_date is None
         or score is None
-        or evidence is None
-        or evidence.get("as_of") != reference_date.isoformat()
         or not isinstance(components, Mapping)
         or components.get("as_of_session") != reference_date.isoformat()
     ):
@@ -4458,6 +5036,9 @@ def _type5_consecutive_history(
             break
         suffix.insert(0, point)
     if len(suffix) < 4:
+        return [], []
+    expected_year = _latest_complete_financial_year(m)
+    if expected_year is None or suffix[-1][0] != expected_year:
         return [], []
     return [value for _, value in suffix], [year for year, _ in suffix]
 
@@ -4549,6 +5130,145 @@ def _type5_automatic_bottom_score(
     return score, reason, True
 
 
+def _type5_automatic_bottom_contract(
+    m: Mapping[str, Any],
+    history_evidence: Optional[Mapping[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Publish the raw, bounded inputs needed to replay an automatic 5b score."""
+
+    pb_inputs = _type5_pb_history_inputs(m, history_evidence)
+    market_score = _type5_market_bottom_score(m)
+    financial_signal = _type5_financial_bottom_score(m)
+    if (
+        pb_inputs is None
+        or market_score is None
+        or financial_signal is None
+        or not isinstance(history_evidence, Mapping)
+    ):
+        return None
+    valuation_history = history_evidence.get("valuation_history")
+    market_evidence = m.get("market_coldness_score_evidence")
+    market_components = m.get("market_coldness_components")
+    if (
+        not isinstance(valuation_history, Mapping)
+        or not isinstance(market_evidence, Mapping)
+        or not isinstance(market_components, Mapping)
+    ):
+        return None
+    gross_margins, gross_margin_years = _type5_consecutive_history(
+        m,
+        "gross_margin_history",
+        "gross_margin_years",
+    )
+    profits, profit_years = _type5_consecutive_history(
+        m,
+        "net_profit_history",
+        "net_profit_years",
+    )
+    return {
+        "schema_version": TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION,
+        "model_id": TYPE5_BOTTOM_EVIDENCE_MODEL_ID,
+        "code": _canonical_evidence_code(m.get("code")),
+        "as_of": str(m.get("source_trade_date") or ""),
+        "quote_pb": _type5_contract_number(m.get("pb")),
+        "valuation_history": dict(valuation_history),
+        "market_coldness_record": {
+            "score": _type5_contract_number(m.get("market_coldness_score")),
+            "evidence_level": m.get("market_coldness_score_evidence_level"),
+            "evidence": dict(market_evidence),
+            "components": dict(market_components),
+        },
+        "financial_cycle": {
+            "gross_margin_history": gross_margins,
+            "gross_margin_years": gross_margin_years,
+            "net_profit_history": profits,
+            "net_profit_years": profit_years,
+        },
+    }
+
+
+def replay_type5_bottom_evidence_contract(
+    value: Any,
+    *,
+    expected_code: Any,
+    expected_as_of: Any,
+) -> Optional[dict[str, Any]]:
+    """Replay one exported automatic 5b contract from its raw observables."""
+
+    expected = {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "quote_pb",
+        "valuation_history",
+        "market_coldness_record",
+        "financial_cycle",
+    }
+    code = _canonical_evidence_code(expected_code)
+    as_of = str(expected_as_of or "")
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != expected
+        or value.get("schema_version") != TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION
+        or value.get("model_id") != TYPE5_BOTTOM_EVIDENCE_MODEL_ID
+        or _canonical_evidence_code(value.get("code")) != code
+        or value.get("as_of") != as_of
+    ):
+        return None
+    valuation = value.get("valuation_history")
+    market = value.get("market_coldness_record")
+    financial = value.get("financial_cycle")
+    if (
+        not isinstance(valuation, Mapping)
+        or not isinstance(market, Mapping)
+        or set(market) != {"score", "evidence_level", "evidence", "components"}
+        or not isinstance(market.get("evidence"), Mapping)
+        or not isinstance(market.get("components"), Mapping)
+        or not isinstance(financial, Mapping)
+        or set(financial)
+        != {
+            "gross_margin_history",
+            "gross_margin_years",
+            "net_profit_history",
+            "net_profit_years",
+        }
+        or any(
+            not isinstance(financial.get(values_key), list)
+            or not isinstance(financial.get(years_key), list)
+            or len(financial[values_key]) != len(financial[years_key])
+            for values_key, years_key in (
+                ("gross_margin_history", "gross_margin_years"),
+                ("net_profit_history", "net_profit_years"),
+            )
+        )
+    ):
+        return None
+    quote_pb = value.get("quote_pb")
+    if quote_pb is not None and (_type5_contract_number(quote_pb) is None or float(quote_pb) <= 0):
+        return None
+    metric = {
+        "code": code,
+        "source_trade_date": as_of,
+        "pb": quote_pb,
+        "market_coldness_score": market.get("score"),
+        "market_coldness_score_evidence_level": market.get("evidence_level"),
+        "market_coldness_score_evidence": dict(market["evidence"]),
+        "market_coldness_components": dict(market["components"]),
+        **{key: financial[key] for key in financial},
+    }
+    history = {
+        "model_id": LONG_HORIZON_HISTORY_MODEL_ID,
+        "code": code,
+        "as_of": as_of,
+        "valuation_history": dict(valuation),
+    }
+    score, reason, complete = _type5_automatic_bottom_score(metric, history)
+    if not complete:
+        return None
+    return {"score": score, "reason": reason}
+
+
 def score_type5_counter_cyclical(
     m: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
@@ -4571,14 +5291,21 @@ def score_type5_counter_cyclical(
 
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {}
-    profits, profit_years = _type5_cycle_profit_history(m)
+    profits, profit_years = _type5_consecutive_history(
+        m,
+        "net_profit_history",
+        "net_profit_years",
+    )
     profit_cycle = _has_cycle_history(profits, profit_years)
-    margins = [
-        value for value in (_safe_float(item) for item in m.get("gross_margin_history", [])) if value is not None
-    ]
-    margin_years = list(m.get("gross_margin_years", []))
+    margins, margin_years = _type5_consecutive_history(
+        m,
+        "gross_margin_history",
+        "gross_margin_years",
+    )
     margin_swing = (
-        len(margins) >= 4 and _aligned_consecutive(margins, margin_years, 4) and max(margins) - min(margins) > 0.15
+        len(margins) >= 4
+        and _aligned_current_consecutive(m, margins, margin_years, 4)
+        and max(margins) - min(margins) > 0.15
     )
     direct_commodity_industry = industry in TYPE5_DIRECT_CYCLICAL_INDUSTRIES
 
@@ -4621,8 +5348,11 @@ def score_type5_counter_cyclical(
         assets = _safe_float(m.get("total_assets"))
         raw_fcf_history = list(m.get("fcf_history", []))
         fcf_history = [value for value in (_safe_float(item) for item in raw_fcf_history) if value is not None]
-        fcf_complete = len(fcf_history) == len(raw_fcf_history) and _aligned_consecutive(
-            raw_fcf_history, m.get("fcf_years"), 3
+        fcf_complete = len(fcf_history) == len(raw_fcf_history) and _aligned_current_consecutive(
+            m,
+            raw_fcf_history,
+            m.get("fcf_years"),
+            3,
         )
         signals = sum(
             (
@@ -4691,18 +5421,29 @@ def score_type5_counter_cyclical(
     # Type5 has no “cycle stage ≤3” veto and no hard 5c≥5 trigger gate:
     # total≥7 is the appendix's sole buy-point decision after applicability.
     evidence_complete = all((bottom_complete, survival_complete, elasticity_complete, earnings_complete))
+    missing_dimension_keys: list[str] = []
     if not evidence_complete:
         missing = []
         if not bottom_complete:
             missing.append("底部")
+            missing_dimension_keys.append("5b")
         if not survival_complete:
             missing.append("抗压")
+            missing_dimension_keys.append("5c")
         if not elasticity_complete:
             missing.append("上行弹性")
+            missing_dimension_keys.append("5d")
         if not earnings_complete:
             missing.append("均利")
+            missing_dimension_keys.append("5e")
         reasons["_missing"] = "缺" + "/".join(missing) + "证据"
-    return _finish("type5", scores, reasons, evidence_complete=evidence_complete)
+    return _finish(
+        "type5",
+        scores,
+        reasons,
+        evidence_complete=evidence_complete,
+        missing_dimensions=missing_dimension_keys,
+    )
 
 
 def _type5_history_request_needed(m: Mapping[str, Any], outcome: tuple) -> bool:
@@ -4931,6 +5672,129 @@ _RESEARCH_EVIDENCE_FIELDS = {
     "reason",
 }
 
+_PATCH4_EVIDENCE_FIELDS = {
+    "available",
+    "code",
+    "as_of",
+    "model_id",
+    "assessment",
+    "criteria",
+    "status",
+    "documents",
+    "cache_hit",
+    "cache_diagnostic",
+    "reason",
+}
+_PATCH4_CRITERIA = {
+    "core_rd_ownership_pct",
+    "esop_core_talent_coverage_pct",
+    "long_term_rd_metrics",
+    "frontline_rd_equity",
+    "short_term_price_binding",
+}
+
+
+def _type7_patch4_assessment_from_evidence(
+    evidence: Any,
+    *,
+    code: str,
+    as_of: str,
+) -> dict[str, Any] | None:
+    """Validate the fail-closed announcement record before it can affect Type 7."""
+
+    try:
+        evidence = validate_patch4_evidence_record(evidence, code, as_of)
+    except (Patch4EvidenceError, TypeError, ValueError) as exc:
+        raise ValueError(f"科技股股东文化公告证据校验失败:{code}:{exc}") from exc
+    if not isinstance(evidence, Mapping) or set(evidence) != _PATCH4_EVIDENCE_FIELDS:
+        raise ValueError(f"科技股股东文化公告证据结构无效:{code}")
+    available = evidence.get("available")
+    if (
+        evidence.get("code") != code
+        or evidence.get("as_of") != as_of
+        or evidence.get("model_id") != PATCH4_PUBLIC_EVIDENCE_MODEL_ID
+        or not isinstance(available, bool)
+        or not isinstance(evidence.get("cache_hit"), bool)
+        or evidence.get("status") not in {"complete", "incomplete", "source_unavailable"}
+    ):
+        raise ValueError(f"科技股股东文化公告证据身份无效:{code}")
+    for key in ("cache_diagnostic", "reason"):
+        text = evidence.get(key)
+        if not isinstance(text, str) or len(text) > 500 or any(ord(character) < 32 for character in text):
+            raise ValueError(f"科技股股东文化公告证据诊断字段无效:{code}")
+    criteria = evidence.get("criteria")
+    documents = evidence.get("documents")
+    if not isinstance(criteria, Mapping) or set(criteria) != _PATCH4_CRITERIA or not isinstance(documents, list):
+        raise ValueError(f"科技股股东文化公告证据明细无效:{code}")
+    known = 0
+    for key in sorted(_PATCH4_CRITERIA):
+        item = criteria.get(key)
+        if not isinstance(item, Mapping) or set(item) != {
+            "status",
+            "reason",
+            "value",
+            "evidence_id",
+            "documents_checked",
+        }:
+            raise ValueError(f"科技股股东文化公告证据子项无效:{code}:{key}")
+        if item.get("status") not in {"known", "unknown"} or not isinstance(item.get("reason"), str):
+            raise ValueError(f"科技股股东文化公告证据子项状态无效:{code}:{key}")
+        checked = item.get("documents_checked")
+        if isinstance(checked, bool) or not isinstance(checked, int) or checked < 0 or checked > len(documents):
+            raise ValueError(f"科技股股东文化公告证据核验数量无效:{code}:{key}")
+        if item["status"] == "known":
+            known += 1
+        elif item.get("value") is not None or item.get("evidence_id") is not None:
+            raise ValueError(f"科技股股东文化公告未知子项携带了结论:{code}:{key}")
+    assessment = evidence.get("assessment")
+    if available:
+        if evidence.get("status") != "complete" or evidence.get("reason") or known != len(_PATCH4_CRITERIA):
+            raise ValueError(f"科技股股东文化公告证据完整状态矛盾:{code}")
+        try:
+            return normalise_patch4_assessment(assessment, security_code=code, as_of=as_of)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"科技股股东文化公告结论校验失败:{code}:{exc}") from exc
+    if (
+        assessment is not None
+        or evidence.get("status") == "complete"
+        or not evidence.get("reason")
+        or known == len(_PATCH4_CRITERIA)
+    ):
+        raise ValueError(f"科技股股东文化公告证据失败状态矛盾:{code}")
+    return None
+
+
+def _type7_patch4_request_needed(ledger: Mapping[str, Any]) -> bool:
+    """Fetch Patch 4 only when it can still change a viable Type 7 decision."""
+
+    prerequisites = ledger.get("prerequisites")
+    upper_bounds = ledger.get("decisive_score_upper_bounds")
+    if not isinstance(prerequisites, Mapping) or not isinstance(upper_bounds, Mapping):
+        return False
+    technology = prerequisites.get("technology_patch4")
+    if (
+        not isinstance(technology, Mapping)
+        or technology.get("applicable") is not True
+        or technology.get("passed") is not False
+        or technology.get("validation_status") != "missing_validated_patch4_assessment"
+        or ledger.get("safety_veto") is True
+        or ledger.get("decisively_not_triggered") is True
+    ):
+        return False
+    permanent_prerequisites = {
+        "core_modules_80pct",
+        "three_year_financials",
+        "latest_quote_and_valuation",
+    }
+    if any(
+        not isinstance(prerequisites.get(key), Mapping) or prerequisites[key].get("passed") is not True
+        for key in permanent_prerequisites
+    ):
+        return False
+    return set(upper_bounds) == {"template1", "template5", "patch5"} and all(
+        (_safe_float(value) or 0.0) > 70.0 for value in upper_bounds.values()
+    )
+
 
 def _type7_research_sources_from_evidence(
     evidence: Any,
@@ -4985,7 +5849,7 @@ def _type7_research_sources_from_evidence(
 def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
     """情况六：按第19模板区分300亿高景气与100亿反转两类标的。"""
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _not_applicable("type6", "金融机构不适用小盘高风险模板")
+        return _not_applicable("type6", "金融机构不适用小盘高风险型")
     industry = str(m.get("industry", ""))
     market_cap = _safe_float(m.get("market_cap"))
     industry_bucket = {} if industry == "DEFAULT" else benchmarks.get(industry, {})
@@ -5026,6 +5890,10 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
 
     net_profit = _safe_float(m.get("net_profit"))
     net_margin = _safe_float(m.get("net_margin"))
+    if net_profit is None:
+        return _insufficient_evidence("type6", "净利润缺失,无法确认亏损或微利画像")
+    if net_profit > 0 and net_margin is None:
+        return _insufficient_evidence("type6", "盈利但净利率缺失,无法确认微利画像")
     vc_profit_profile = bool(
         net_profit is not None and (net_profit <= 0 or (net_margin is not None and net_margin <= 0.05))
     )
@@ -5061,22 +5929,44 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     else:
         scores["6c"], reasons["6c"] = 0.0, "无模式创新原始数据"
 
-    profits = [value for value in (_safe_float(v) for v in m.get("net_profit_history", [])) if value is not None]
+    raw_profits = m.get("net_profit_history", [])
+    raw_profits = list(raw_profits) if isinstance(raw_profits, (list, tuple)) else []
+    parsed_profits = [_safe_float(value) for value in raw_profits]
+    profits = [float(value) for value in parsed_profits if value is not None]
     profit_years = m.get("net_profit_years", [])
-    profit_change = _safe_float(m.get("profit_1yr_change"))
-    margins = m.get("margin_history", [])
+    annual_profit_pair_complete = bool(
+        len(profits) == len(raw_profits) and _aligned_current_consecutive(m, raw_profits, profit_years, 2)
+    )
+    profit_change = _current_annual_change(m, "net_profit_history", "net_profit_years")
+    raw_margins = m.get("margin_history", [])
+    raw_margins = list(raw_margins) if isinstance(raw_margins, (list, tuple)) else []
+    parsed_margins = [_safe_float(value) for value in raw_margins]
+    margins = [float(value) for value in parsed_margins if value is not None]
     margin_years = m.get("margin_years", [])
-    if _aligned_consecutive(profits, profit_years, 3) and profits[-3] < profits[-2] < profits[-1]:
+    annual_margin_complete = bool(
+        len(margins) == len(raw_margins) and _aligned_current_consecutive(m, raw_margins, margin_years, 3)
+    )
+    interim_profit_yoy = _same_period_metric_yoy(m, "profit")
+    turnaround_evidence_complete = bool(
+        annual_profit_pair_complete
+        or annual_margin_complete
+        or profit_change is not None
+        or interim_profit_yoy is not None
+    )
+    if (
+        len(profits) == len(raw_profits)
+        and _aligned_current_consecutive(m, raw_profits, profit_years, 3)
+        and profits[-3] < profits[-2] < profits[-1]
+    ):
         scores["6d"], reasons["6d"] = 8.0, "利润连续两年改善"
-    elif _aligned_consecutive(profits, profit_years, 2) and profits[-2] < 0 < profits[-1]:
+    elif annual_profit_pair_complete and profits[-2] < 0 < profits[-1]:
         scores["6d"], reasons["6d"] = 6.0, "最新年度扭亏"
     elif profit_change is not None and profit_change > 0.30:
         scores["6d"], reasons["6d"] = 6.0, f"利润改善{profit_change:.1%}"
-    elif _aligned_consecutive(margins, margin_years, 3) and margins[-3] < margins[-2] < margins[-1]:
+    elif annual_margin_complete and margins[-3] < margins[-2] < margins[-1]:
         scores["6d"], reasons["6d"] = 6.0, "净利率连续改善"
     else:
         scores["6d"], reasons["6d"] = 3.0, "困境反转未验证"
-    interim_profit_yoy = _same_period_metric_yoy(m, "profit")
     if scores["6d"] <= 3 and interim_profit_yoy is not None and interim_profit_yoy > 0.30:
         scores["6d"], reasons["6d"] = 5.0, "最新同口径利润改善"
     latest_severity, latest_reason = _latest_period_deterioration(m, allow_improving_losses=True)
@@ -5113,12 +6003,23 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     reasons["_risk"] = f"最坏归零时组合最大损失≤{risk_cap:.0f}%"
 
     high_elements = sum(scores[key] >= 5 for key in ("6a", "6b", "6c", "6d"))
-    evidence_complete = technology_score is not None and model_score is not None
+    evidence_complete = bool(technology_score is not None and model_score is not None and turnaround_evidence_complete)
     evidence_veto = evidence_complete and high_elements < 2
     if evidence_veto:
         reasons["_veto"] = f"仅{high_elements}项核心证据≥5"
-    if not evidence_complete:
-        reasons["_missing"] = "缺技术或商业模式可追溯证据"
+    missing_dimensions: list[str] = []
+    missing_dimension_keys: list[str] = []
+    if technology_score is None:
+        missing_dimensions.append("技术")
+        missing_dimension_keys.append("6b")
+    if model_score is None:
+        missing_dimensions.append("商业模式")
+        missing_dimension_keys.append("6c")
+    if not turnaround_evidence_complete:
+        missing_dimensions.append("反转历史")
+        missing_dimension_keys.append("6d")
+    if missing_dimensions:
+        reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "可追溯证据"
     return _finish(
         "type6",
         scores,
@@ -5126,7 +6027,35 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         veto=evidence_veto,
         extra_condition=discipline_ready,
         evidence_complete=evidence_complete,
+        missing_dimensions=missing_dimension_keys,
     )
+
+
+def _type7_missing_dimensions(ledger: Mapping[str, Any]) -> list[str]:
+    """Map incomplete Type 7 source ledgers to the three public dimensions."""
+
+    scores = ledger.get("scores")
+    upper_bounds = ledger.get("decisive_score_upper_bounds")
+    missing: list[str] = []
+    if isinstance(scores, Mapping) and isinstance(upper_bounds, Mapping):
+        for dimension, source_key in {
+            "7a": "template1",
+            "7b": "template5",
+            "7c": "patch5",
+        }.items():
+            score = _safe_float(scores.get(source_key))
+            upper = _safe_float(upper_bounds.get(source_key))
+            if score is None or upper is None or upper > score + 1e-9:
+                missing.append(dimension)
+    else:
+        missing = list(TYPE_WEIGHTS["type7"])
+
+    if ledger.get("prerequisites_complete") is not True and not missing:
+        # A prerequisite failure with no usable item-level interval cannot be
+        # assigned to a narrower dimension.  Keep all three unresolved rather
+        # than certifying a score whose source contract is incomplete.
+        missing = list(TYPE_WEIGHTS["type7"])
+    return missing
 
 
 def score_type7_quality_equity(
@@ -5136,7 +6065,7 @@ def score_type7_quality_equity(
     *,
     valuation_evidence_complete: bool,
 ) -> tuple[tuple[bool, float, dict, dict], dict[str, Any]]:
-    """情况七：第1模板、第5模板、补丁5三套分数必须分别严格超过70。"""
+    """情况七：三项独立质量与估值评分必须分别严格超过70。"""
 
     industry = str(m.get("industry") or "")
     if industry in FINANCIAL_INDUSTRIES:
@@ -5166,9 +6095,9 @@ def score_type7_quality_equity(
     }
     safety = float(ledger["patch5"]["safety_margin_score"])
     reasons = {
-        "7a": f"第1模板{source_scores['template1']:.2f}",
-        "7b": f"第5模板{source_scores['template5']:.2f}",
-        "7c": f"补丁5{source_scores['patch5']:.2f}；安全边际{safety:.1f}",
+        "7a": f"长期质量回报{source_scores['template1']:.2f}",
+        "7b": f"产业质量估值{source_scores['template5']:.2f}",
+        "7c": f"商业安全{source_scores['patch5']:.2f}；边际{safety:.1f}",
     }
     strict_pass = bool(ledger["all_scores_strictly_above_70"])
     decisive_failure = bool(ledger["decisively_not_triggered"])
@@ -5178,9 +6107,17 @@ def score_type7_quality_equity(
         reasons["_condition"] = "三套分数均须严格大于70"
     failed_prerequisites = [key for key, record in ledger["prerequisites"].items() if not bool(record.get("passed"))]
     if failed_prerequisites:
+        patch4_source_status = str(m.get("_type7_patch4_evidence_status") or "")
+        technology_missing = (
+            "公告数据源暂时不可用"
+            if patch4_source_status == "source_unavailable"
+            else "公告未直接披露全部五项"
+            if patch4_source_status == "incomplete"
+            else "缺核心研发持股与长期激励资料"
+        )
         labels = {
-            "core_modules_80pct": "核心分析不足80%",
-            "technology_patch4": "科技股缺可复算补丁4账本",
+            "core_modules_80pct": "核心必需子项不完整或覆盖不足80%",
+            "technology_patch4": technology_missing,
             "three_year_financials": "不足3年财报",
             "latest_quote_and_valuation": "缺最新估值",
             "three_external_reports": "外部研报可获取性预检不足",
@@ -5188,17 +6125,18 @@ def score_type7_quality_equity(
             "ten_year_return_and_five_year_valuation": "缺十年回报或估值史",
         }
         reasons["_missing"] = labels.get(failed_prerequisites[0], "优质股权前置证据不足")
-    if ledger["safety_veto"] and not decisive_failure:
-        reasons["_veto"] = "补丁5安全边际低于8"
+    if ledger["safety_veto"]:
+        reasons["_veto"] = "安全边际低于8/20"
     return (
         _finish(
             "type7",
             scores,
             reasons,
-            veto=bool(ledger["safety_veto"] and not decisive_failure),
+            veto=bool(ledger["safety_veto"]),
             extra_condition=strict_pass,
             evidence_complete=bool(ledger["prerequisites_complete"]),
-            status_override=STATUS_NOT_TRIGGERED if decisive_failure else None,
+            status_override=STATUS_NOT_TRIGGERED if decisive_failure and not ledger["safety_veto"] else None,
+            missing_dimensions=_type7_missing_dimensions(ledger),
         ),
         ledger,
     )
@@ -5234,6 +6172,371 @@ def _market_trigger_block_reason(m: Mapping[str, Any]) -> Optional[str]:
     if status and status.lower() not in {"正常", "normal", "active", "ok"}:
         return f"风险状态:{status}"
     return None
+
+
+def _decision_market_context(m: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the raw market-actionability inputs used by the decision replay.
+
+    ``_status`` and ``_veto`` are conclusions and can be edited together with a
+    serialized decision object.  The three fields below are the smallest source
+    context from which the market gate can be independently reconstructed.
+    """
+
+    raw_tradable = m.get("tradable")
+    tradable = bool(raw_tradable) if isinstance(raw_tradable, (bool, np.bool_)) else None
+    return {
+        "tradable": tradable,
+        "reference_price": bool(m.get("reference_price")),
+        "risk_status": str(m.get("risk_status") or "").strip(),
+    }
+
+
+def _decision_market_block_reason(payload: Mapping[str, Any]) -> Optional[str]:
+    """Replay the market gate from raw context, never from status/veto flags."""
+
+    context = payload.get(_DECISION_MARKET_CONTEXT)
+    if context is None:
+        # Direct scorer callers and historical in-memory fixtures do not have a
+        # row-level quote context.  They can still replay company rules, but a
+        # serialized market-block claim without this context is rejected by the
+        # result validator below.
+        return None
+    if not isinstance(context, Mapping) or set(context) != _DECISION_MARKET_CONTEXT_FIELDS:
+        raise ValueError("decision market context is malformed")
+    tradable = context.get("tradable")
+    reference_price = context.get("reference_price")
+    risk_status = context.get("risk_status")
+    if (tradable is not None and type(tradable) is not bool) or type(reference_price) is not bool:
+        raise ValueError("decision market context types are invalid")
+    if not isinstance(risk_status, str):
+        raise ValueError("decision market risk status is invalid")
+    return _market_trigger_block_reason(context)
+
+
+def _decision_dimension_bounds(
+    type_key: str,
+    sub_scores: Mapping[str, Any],
+    missing_dimensions: Sequence[str],
+    ledger: Mapping[str, Any] | None,
+) -> tuple[float, float, dict[str, float]]:
+    """Replay conservative score bounds without treating placeholders as facts."""
+
+    weights = TYPE_WEIGHTS[type_key]
+    missing = set(missing_dimensions)
+    lower_dimensions: dict[str, float] = {}
+    upper_dimensions: dict[str, float] = {}
+    type7_upper: dict[str, float] = {}
+    if type_key == "type7" and isinstance(ledger, Mapping):
+        raw_upper = ledger.get("decisive_score_upper_bounds")
+        if isinstance(raw_upper, Mapping):
+            for dimension, source_key in {
+                "7a": "template1",
+                "7b": "template5",
+                "7c": "patch5",
+            }.items():
+                value = _safe_float(raw_upper.get(source_key))
+                if value is not None and 0.0 <= value <= 100.0:
+                    type7_upper[dimension] = min(10.0, value / 10.0)
+
+    for dimension in weights:
+        score = _safe_float(sub_scores.get(dimension))
+        known_score = min(10.0, max(0.0, score if score is not None else 0.0))
+        if dimension in missing:
+            lower_dimensions[dimension] = 0.0
+            # Type 7 has a replayed, component-by-component mathematical
+            # ceiling.  The other frameworks deliberately use the full 0..10
+            # theoretical range for every missing dimension.  In particular,
+            # Type 3's data-adapter capability cap is not a model ceiling.
+            upper_dimensions[dimension] = type7_upper.get(dimension, 10.0)
+        else:
+            lower_dimensions[dimension] = known_score
+            upper_dimensions[dimension] = known_score
+
+    lower = round(math.fsum(lower_dimensions[key] * weights[key] for key in weights), 1)
+    upper = round(math.fsum(upper_dimensions[key] * weights[key] for key in weights), 1)
+    # Patch 6 makes a confirmed Type 3 bubble score a hard diagnostic cap.
+    # Apply it only when 3e itself is known; a missing 3e has a theoretical
+    # range of 0..10 and cannot inherit the adapter's displayed placeholder.
+    if type_key == "type3" and "3e" not in missing and upper_dimensions.get("3e", 10.0) <= 3.0:
+        lower = min(lower, 4.9)
+        upper = min(upper, 4.9)
+    return lower, upper, upper_dimensions
+
+
+def _decision_missing_dimensions(
+    type_key: str,
+    reasons: Mapping[str, Any],
+    *,
+    applicable: bool,
+    evidence_complete: bool,
+) -> list[str]:
+    weights = TYPE_WEIGHTS[type_key]
+    if not applicable:
+        return []
+    raw = reasons.get(_DECISION_MISSING_DIMENSIONS_REASON)
+    if isinstance(raw, (list, tuple)):
+        declared = [key for key in weights if key in raw]
+    else:
+        declared = []
+    if not evidence_complete and not declared:
+        declared = list(weights)
+    if type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and "6e" not in declared:
+        declared.append("6e")
+    return [key for key in weights if key in declared]
+
+
+def _decision_possible_veto(
+    type_key: str,
+    missing_dimensions: Sequence[str],
+    upper_dimensions: Mapping[str, float],
+) -> tuple[bool, bool]:
+    """Return (possible veto, logically confirmed veto) from score intervals."""
+
+    missing = set(missing_dimensions)
+    if type_key == "type2":
+        possible = "2c" in missing
+        if missing.intersection({"2a", "2b"}):
+            lower_hot = math.fsum(0.0 if key in missing else upper_dimensions[key] for key in ("2a", "2b")) / 2.0
+            possible = possible or lower_hot <= 4.0
+        return possible, False
+    if type_key == "type4":
+        possible_moat = "4c" in missing
+        possible_double_bubble = bool(
+            missing.intersection({"4e", "4f"})
+            and (0.0 if "4e" in missing else upper_dimensions["4e"]) <= 3.0
+            and (0.0 if "4f" in missing else upper_dimensions["4f"]) <= 3.0
+        )
+        return possible_moat or possible_double_bubble, False
+    if type_key == "type6":
+        core = ("6a", "6b", "6c", "6d")
+        known_high = sum(key not in missing and upper_dimensions[key] >= 5.0 for key in core)
+        missing_core = sum(key in missing for key in core)
+        maximum_high = known_high + missing_core
+        if maximum_high < 2:
+            return False, True
+        return known_high < 2, False
+    return bool(missing.intersection(_POTENTIAL_VETO_DIMENSIONS[type_key])), False
+
+
+def _decision_confirmed_hard_veto(
+    type_key: str,
+    missing_dimensions: Sequence[str],
+    dimensions: Mapping[str, float],
+    ledger: Mapping[str, Any] | None,
+) -> bool:
+    """Recompute every framework's source-proven hard veto from model inputs."""
+
+    missing = set(missing_dimensions)
+
+    def known(key: str) -> bool:
+        return key not in missing
+
+    if type_key == "type1":
+        return bool((known("1a") and dimensions["1a"] <= 2.0) or (known("1b") and dimensions["1b"] <= VETO_SCORE))
+    if type_key == "type2":
+        hot_veto = bool(known("2a") and known("2b") and (dimensions["2a"] + dimensions["2b"]) / 2.0 <= 4.0)
+        cold_veto = bool(known("2c") and dimensions["2c"] <= VETO_SCORE)
+        return hot_veto or cold_veto
+    if type_key == "type3":
+        # 3e is a 4.9-point total cap, not a company-level veto.
+        return bool(
+            (known("3a") and dimensions["3a"] <= VETO_SCORE) or (known("3d") and dimensions["3d"] <= VETO_SCORE)
+        )
+    if type_key == "type4":
+        moat_veto = bool(known("4c") and dimensions["4c"] <= VETO_SCORE)
+        double_bubble_veto = bool(
+            known("4e") and known("4f") and dimensions["4e"] <= VETO_SCORE and dimensions["4f"] <= VETO_SCORE
+        )
+        return moat_veto or double_bubble_veto
+    if type_key == "type5":
+        # The versioned, later Type 5 appendix has no post-applicability veto.
+        return False
+    if type_key == "type6":
+        core = ("6a", "6b", "6c", "6d")
+        return bool(all(known(key) for key in core) and sum(dimensions[key] >= 5.0 for key in core) < 2)
+    if type_key == "type7":
+        patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
+        if not isinstance(patch5, Mapping) or patch5.get("safety_margin_complete") is not True:
+            return False
+        safety_score = _safe_float(patch5.get("safety_margin_score"))
+        return bool(safety_score is not None and safety_score < PATCH5_SAFETY_VETO)
+    raise ValueError(f"unknown decision type: {type_key}")
+
+
+def _decision_theoretically_triggerable(
+    type_key: str,
+    *,
+    upper: float,
+    upper_dimensions: Mapping[str, float],
+    missing_dimensions: Sequence[str],
+    reasons: Mapping[str, Any],
+) -> bool:
+    """Return whether one assignment inside the evidence bounds can trigger."""
+
+    if upper < QUALIFY_THRESHOLD:
+        return False
+    missing = set(missing_dimensions)
+    if type_key == "type1":
+        # Every measured in-zone score is at least five.  Missing 1a retains
+        # the full theoretical range and can therefore still enter the zone.
+        return bool("1a" in missing or upper_dimensions["1a"] >= 5.0)
+    if type_key == "type2":
+        hot_upper = (upper_dimensions["2a"] + upper_dimensions["2b"]) / 2.0
+        return bool(
+            upper_dimensions["2d"] >= 5.0
+            or (hot_upper >= 7.0 and upper_dimensions["2c"] >= 7.0 and 4.0 <= upper_dimensions["2d"] <= 5.0)
+        )
+    if type_key == "type6":
+        core = ("6a", "6b", "6c", "6d")
+        if sum(upper_dimensions[key] >= 5.0 for key in core) < 2:
+            return False
+        if "6e" in missing:
+            return True
+        # A score below eight cannot satisfy the 5%/15% hard limits.  The
+        # explicit condition also catches non-positive input, which otherwise
+        # maps to a high numeric score through the display rubric.
+        return bool(upper_dimensions["6e"] >= 8.0 and not reasons.get("_condition"))
+    if type_key == "type7":
+        return all(upper_dimensions[key] > QUALIFY_THRESHOLD for key in TYPE_WEIGHTS[type_key])
+    return True
+
+
+def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Independently replay one framework's bounded buy/no-buy decision.
+
+    The stored ``decision`` object is intentionally ignored.  Callers can
+    therefore compare this replay with a serialized contract and detect any
+    mutation of its bounds, basis, veto state or candidate visibility.
+    """
+
+    if type_key not in TYPE_WEIGHTS:
+        raise ValueError(f"unknown decision type: {type_key}")
+    sub_scores = payload.get("sub_scores")
+    reasons = payload.get("reasons")
+    if not isinstance(sub_scores, Mapping) or not isinstance(reasons, Mapping):
+        raise ValueError(f"{type_key} decision source is incomplete")
+    applicable_marker = reasons.get("_applicable")
+    evidence_marker = reasons.get("_evidence")
+    if applicable_marker not in {"yes", "no"}:
+        raise ValueError(f"{type_key} applicability source is invalid")
+    if evidence_marker not in {"complete", "incomplete"}:
+        raise ValueError(f"{type_key} evidence source is invalid")
+    applicable = applicable_marker == "yes"
+    evidence_complete = evidence_marker == "complete"
+    missing = _decision_missing_dimensions(
+        type_key,
+        reasons,
+        applicable=applicable,
+        evidence_complete=evidence_complete,
+    )
+    ledger = payload.get("ledger") if type_key == "type7" else None
+
+    if not applicable:
+        return {
+            "schema_version": DECISION_SCHEMA_VERSION,
+            "model_id": DECISION_MODEL_ID,
+            "decision_complete": True,
+            "decision_basis": "scope_exclusion",
+            "score_lower_bound": 0.0,
+            "score_upper_bound": 0.0,
+            "veto_state": "none",
+            "potentially_triggerable": False,
+            "missing_dimensions": [],
+        }
+
+    lower, upper, upper_dimensions = _decision_dimension_bounds(type_key, sub_scores, missing, ledger)
+    market_blocked = _decision_market_block_reason(payload) is not None
+    confirmed_hard_veto = _decision_confirmed_hard_veto(
+        type_key,
+        missing,
+        upper_dimensions,
+        ledger,
+    )
+    possible_veto, bounded_veto = _decision_possible_veto(type_key, missing, upper_dimensions)
+
+    if confirmed_hard_veto or bounded_veto:
+        complete = True
+        basis = "confirmed_veto"
+        veto_state = "confirmed"
+        potentially_triggerable = False
+    elif market_blocked:
+        complete = True
+        basis = "market_block"
+        veto_state = "none"
+        potentially_triggerable = False
+    else:
+        veto_state = "possible" if possible_veto else "none"
+        action_condition = bool(
+            type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and "6e" in missing
+        )
+        theoretically_triggerable = _decision_theoretically_triggerable(
+            type_key,
+            upper=upper,
+            upper_dimensions=upper_dimensions,
+            missing_dimensions=missing,
+            reasons=reasons,
+        )
+
+        if action_condition:
+            if theoretically_triggerable:
+                complete = False
+                basis = "action_condition"
+                # The company-side model is actionable only after the user
+                # binds the real position.  Keep it visible only when both its
+                # company rules and total can still mathematically pass.
+                potentially_triggerable = True
+            else:
+                complete = True
+                basis = "conservative_upper_bound"
+                potentially_triggerable = False
+        elif evidence_complete:
+            complete = True
+            basis = "full_evidence"
+            potentially_triggerable = theoretically_triggerable
+        elif not theoretically_triggerable:
+            complete = True
+            basis = "conservative_upper_bound"
+            potentially_triggerable = False
+        else:
+            complete = False
+            basis = "unresolved_missing_evidence"
+            potentially_triggerable = True
+
+    return {
+        "schema_version": DECISION_SCHEMA_VERSION,
+        "model_id": DECISION_MODEL_ID,
+        "decision_complete": complete,
+        "decision_basis": basis,
+        "score_lower_bound": lower,
+        "score_upper_bound": upper,
+        "veto_state": veto_state,
+        "potentially_triggerable": potentially_triggerable,
+        "missing_dimensions": missing,
+    }
+
+
+def _decision_source_hard_veto(type_key: str, payload: Mapping[str, Any]) -> bool:
+    """Return only a veto proven by known source dimensions (not a bound)."""
+
+    sub_scores = payload.get("sub_scores")
+    reasons = payload.get("reasons")
+    if not isinstance(sub_scores, Mapping) or not isinstance(reasons, Mapping):
+        raise ValueError(f"{type_key} decision source is incomplete")
+    applicable_marker = reasons.get("_applicable")
+    evidence_marker = reasons.get("_evidence")
+    if applicable_marker not in {"yes", "no"} or evidence_marker not in {"complete", "incomplete"}:
+        raise ValueError(f"{type_key} decision source markers are invalid")
+    if applicable_marker == "no":
+        return False
+    missing = _decision_missing_dimensions(
+        type_key,
+        reasons,
+        applicable=True,
+        evidence_complete=evidence_marker == "complete",
+    )
+    ledger = payload.get("ledger") if type_key == "type7" else None
+    _lower, _upper, upper_dimensions = _decision_dimension_bounds(type_key, sub_scores, missing, ledger)
+    return _decision_confirmed_hard_veto(type_key, missing, upper_dimensions, ledger)
 
 
 def _build_bear_case(primary_type: str, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -5275,7 +6578,15 @@ def _build_bear_case(primary_type: str, payload: Mapping[str, Any]) -> list[dict
 def validate_screening_result(result: pd.DataFrame) -> list[str]:
     """返回跨七类结果的不变量错误；空列表表示结构与算术一致。"""
     errors: list[str] = []
-    required = {"code", "buy_types", "primary_type", "diagnostic_type", "max_score", "bear_case"}
+    required = {
+        "code",
+        "source_trade_date",
+        "buy_types",
+        "primary_type",
+        "diagnostic_type",
+        "max_score",
+        "bear_case",
+    }
     if not required.issubset(result.columns):
         return [f"缺字段:{','.join(sorted(required - set(result.columns)))}"]
     normalized_codes = [_normalize_code(code) for code in result["code"]]
@@ -5323,6 +6634,99 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
             status = payload.get("status")
             if status not in TYPE_STATUSES or status != reasons.get("_status"):
                 errors.append(f"{row_index}:{type_key}状态字段错误")
+            try:
+                market_block_reason = _decision_market_block_reason(payload)
+            except (TypeError, ValueError) as exc:
+                market_block_reason = None
+                errors.append(f"{row_index}:{type_key}市场阻断来源错误:{exc}")
+            published_market_marker = reasons.get(_DECISION_MARKET_BLOCK_REASON)
+            if bool(published_market_marker) != bool(market_block_reason) or (
+                market_block_reason is not None and published_market_marker != _compact_reason(market_block_reason)
+            ):
+                errors.append(f"{row_index}:{type_key}市场阻断标记错误")
+            decision = payload.get("decision")
+            decision_shape_valid = isinstance(decision, Mapping) and set(decision) == _DECISION_FIELDS
+            if not decision_shape_valid:
+                errors.append(f"{row_index}:{type_key}决策边界结构错误")
+            else:
+                assert isinstance(decision, Mapping)
+                lower_bound = _safe_float(decision.get("score_lower_bound"))
+                upper_bound = _safe_float(decision.get("score_upper_bound"))
+                missing_decision_dimensions = decision.get("missing_dimensions")
+                decision_types_valid = bool(
+                    type(decision.get("schema_version")) is int
+                    and decision.get("schema_version") == DECISION_SCHEMA_VERSION
+                    and decision.get("model_id") == DECISION_MODEL_ID
+                    and type(decision.get("decision_complete")) is bool
+                    and decision.get("decision_basis") in DECISION_BASES
+                    and type(decision.get("potentially_triggerable")) is bool
+                    and decision.get("veto_state") in DECISION_VETO_STATES
+                    and lower_bound is not None
+                    and upper_bound is not None
+                    and 0.0 <= lower_bound <= upper_bound <= 10.0
+                    and isinstance(missing_decision_dimensions, list)
+                    and len(missing_decision_dimensions) == len(set(missing_decision_dimensions))
+                    and all(item in weights for item in missing_decision_dimensions)
+                )
+                if not decision_types_valid:
+                    errors.append(f"{row_index}:{type_key}决策边界字段错误")
+                try:
+                    expected_decision = replay_buy_decision(type_key, payload)
+                except (TypeError, ValueError) as exc:
+                    errors.append(f"{row_index}:{type_key}决策边界无法重放:{exc}")
+                else:
+                    if dict(decision) != expected_decision:
+                        errors.append(f"{row_index}:{type_key}决策边界重放错误")
+                    expected_trigger = bool(
+                        expected_decision["decision_basis"] == "full_evidence"
+                        and expected_decision["potentially_triggerable"]
+                    )
+                    if bool(payload.get("triggered")) is not expected_trigger:
+                        errors.append(f"{row_index}:{type_key}模型触发重放错误")
+            try:
+                source_hard_veto = _decision_source_hard_veto(type_key, payload)
+            except (TypeError, ValueError) as exc:
+                source_hard_veto = False
+                errors.append(f"{row_index}:{type_key}否决条件无法重放:{exc}")
+            market_rewrite_veto = bool(
+                market_block_reason is not None and status == STATUS_BLOCKED and not reasons.get("_blocked")
+            )
+            if reason_veto and not source_hard_veto and not market_rewrite_veto:
+                errors.append(f"{row_index}:{type_key}否决缺少模型依据")
+            if status == STATUS_VETOED and not source_hard_veto:
+                errors.append(f"{row_index}:{type_key}否决状态缺少模型依据")
+            if type_key == "type5":
+                bottom_mode = payload.get("bottom_evidence_mode")
+                bottom_contract = payload.get("bottom_evidence_contract")
+                if bottom_mode not in {
+                    "automatic_replay",
+                    "trusted_external",
+                    "incomplete",
+                    "not_applicable",
+                }:
+                    errors.append(f"{row_index}:type5底部证据模式错误")
+                elif bottom_mode == "automatic_replay":
+                    bottom_replay = replay_type5_bottom_evidence_contract(
+                        bottom_contract,
+                        expected_code=row.get("code"),
+                        expected_as_of=row.get("source_trade_date"),
+                    )
+                    if (
+                        bottom_replay is None
+                        or not math.isclose(
+                            float(sub_scores.get("5b", -1.0)),
+                            float(bottom_replay["score"]),
+                            abs_tol=1e-9,
+                        )
+                        or reasons.get("5b") != bottom_replay["reason"]
+                    ):
+                        errors.append(f"{row_index}:type5自动底部证据重放错误")
+                elif bottom_contract is not None:
+                    errors.append(f"{row_index}:type5非自动路径携带底部合同")
+                if status == STATUS_NOT_APPLICABLE and bottom_mode != "not_applicable":
+                    errors.append(f"{row_index}:type5不适用证据模式错误")
+                if status != STATUS_NOT_APPLICABLE and bottom_mode == "not_applicable":
+                    errors.append(f"{row_index}:type5适用证据模式错误")
             if type_key == "type7":
                 ledger = payload.get("ledger")
                 if status == STATUS_NOT_APPLICABLE:
@@ -5416,6 +6820,7 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
 RESULT_COLUMNS = [
     "code",
     "name",
+    "source_trade_date",
     "price",
     "pe",
     "pb",
@@ -5431,6 +6836,13 @@ RESULT_COLUMNS = [
     "financial_sector_evidence",
     "quantitative_model_id",
     "quantitative_evidence",
+    "quantitative_evidence_levels",
+    "quantitative_evidence_status",
+    *(
+        field
+        for evidence_key in QUANTITATIVE_SCORE_KEYS
+        for field in (evidence_key, f"{evidence_key}_evidence", f"{evidence_key}_evidence_level")
+    ),
     "buy_types",
     "num_types",
     "primary_type",
@@ -5473,6 +6885,9 @@ def screen_all_types(
     research_report_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
     research_report_loader=None,
     research_report_progress_cb=None,
+    patch4_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    patch4_loader=None,
+    patch4_progress_cb=None,
 ) -> pd.DataFrame:
     """对合格沪深股票评分；输出按代码稳定排序，并提供完整七类结构。
 
@@ -5492,6 +6907,7 @@ def screen_all_types(
     normalized_quality_history = _canonicalize_mapping(quality_history_evidence or {}, "长期市场历史证据")
     normalized_type3_growth = _canonicalize_mapping(type3_growth_evidence or {}, "可持续增长证据")
     normalized_research_reports = _canonicalize_mapping(research_report_evidence or {}, "优质股权研报元数据")
+    normalized_patch4 = _canonicalize_mapping(patch4_evidence or {}, "科技股股东文化公告证据")
     raw_dcf_skips = _canonicalize_mapping(dcf_skip_classifications or {}, "DCF跳过分类")
     normalized_dcf_skips: dict[str, dict[str, str]] = {}
     for code, value in raw_dcf_skips.items():
@@ -5531,6 +6947,12 @@ def screen_all_types(
     for code, evidence in normalized_research_reports.items():
         if not isinstance(evidence, Mapping):
             raise ValueError(f"优质股权研报元数据必须为映射:{code}")
+    unknown_patch4 = sorted(set(normalized_patch4) - set(canonical_fin))
+    if unknown_patch4:
+        raise ValueError(f"科技股股东文化公告证据包含不在财务全集中的代码:{unknown_patch4[:5]}")
+    for code, evidence in normalized_patch4.items():
+        if not isinstance(evidence, Mapping):
+            raise ValueError(f"科技股股东文化公告证据必须为映射:{code}")
 
     metrics: list[dict[str, Any]] = []
     codes = sorted(canonical_fin)
@@ -5561,19 +6983,22 @@ def screen_all_types(
             if coldness is not None:
                 if not isinstance(coldness, Mapping):
                     raise ValueError(f"市场冷度记录必须为映射:{code}")
-                score, evidence = _normalise_score_evidence(
-                    coldness,
-                    "market_coldness_score",
-                    expected_code=code,
-                    reference_date=metric.get("source_trade_date"),
-                )
-                if score is None or evidence is None:
+                try:
+                    score = validate_market_coldness_evidence_record(
+                        coldness,
+                        expected_code=code,
+                        expected_session=metric.get("source_trade_date"),
+                    )
+                except (MarketColdnessScoringError, TypeError, ValueError) as exc:
+                    raise ValueError(f"市场冷度证据无效:{code}") from exc
+                evidence = coldness.get("market_coldness_score_evidence")
+                components = coldness.get("components")
+                if not isinstance(evidence, Mapping) or not isinstance(components, Mapping):
                     raise ValueError(f"市场冷度证据无效:{code}")
                 metric["market_coldness_score"] = score
-                metric["market_coldness_score_evidence"] = evidence
-                components = coldness.get("components")
-                if isinstance(components, Mapping):
-                    metric["market_coldness_components"] = dict(components)
+                metric["market_coldness_score_evidence"] = dict(evidence)
+                metric["market_coldness_score_evidence_level"] = coldness["market_coldness_score_evidence_level"]
+                metric["market_coldness_components"] = dict(components)
             report_evidence = normalized_research_reports.get(code)
             if report_evidence is not None:
                 as_of = str(metric.get("source_trade_date") or "")
@@ -5595,6 +7020,24 @@ def screen_all_types(
                 metric["external_growth_evidence"] = external
                 metric["segment_growth_sources"] = segments
                 metric["_type3_growth_validation_token"] = TYPE3_GROWTH_VALIDATION_TOKEN
+            patch4_record = normalized_patch4.get(code)
+            if patch4_record is not None:
+                as_of = str(metric.get("source_trade_date") or "")
+                assessment = _type7_patch4_assessment_from_evidence(
+                    patch4_record,
+                    code=code,
+                    as_of=as_of,
+                )
+                if assessment is None:
+                    metric.pop("type7_patch4_assessment", None)
+                else:
+                    metric["type7_patch4_assessment"] = assessment
+                metric["_type7_patch4_evidence_status"] = str(patch4_record.get("status") or "")
+            else:
+                # Production scoring accepts Patch 4 only through the
+                # independently replayed announcement record.  A naked
+                # assessment embedded in financial/user input is not trusted.
+                metric.pop("type7_patch4_assessment", None)
             metrics.append(metric)
         if progress_cb:
             progress_cb(index, len(codes))
@@ -5622,6 +7065,7 @@ def screen_all_types(
     type7_valuation_evidence_by_code: dict[str, bool] = {}
     type3_growth_request_by_code: dict[str, dict[str, Any]] = {}
     research_request_by_code: dict[str, dict[str, str]] = {}
+    patch4_request_by_code: dict[str, dict[str, str]] = {}
     metric_by_code = {str(metric["code"]): metric for metric in scored_metrics}
     for m in scored_metrics:
         code = str(m["code"])
@@ -5662,6 +7106,12 @@ def screen_all_types(
         )
         preliminary_type7_by_code[code] = (preliminary_outcome, preliminary_ledger)
         as_of = str(m.get("source_trade_date") or "")
+        if (
+            code not in normalized_patch4
+            and _type7_patch4_request_needed(preliminary_ledger)
+            and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
+        ):
+            patch4_request_by_code[code] = {"code": code, "as_of": as_of}
         if code not in normalized_type3_growth and _type3_growth_request_needed(m, company_benchmarks):
             growth_request = _type3_growth_request(m)
             if growth_request is not None:
@@ -5699,6 +7149,41 @@ def screen_all_types(
             base_outcomes_by_code[code]["type3"] = score_type3_sustainable_growth(
                 metric,
                 company_benchmarks,
+            )
+
+    patch4_requests = [patch4_request_by_code[code] for code in sorted(patch4_request_by_code)]
+    if patch4_loader is not None and patch4_requests:
+        loaded = patch4_loader(patch4_requests, progress_cb=patch4_progress_cb)
+        if not isinstance(loaded, Mapping):
+            raise TypeError("科技股股东文化公告证据加载器必须返回代码映射")
+        normalized_loaded = _canonicalize_mapping(loaded, "科技股股东文化公告证据加载结果")
+        requested_codes = {request["code"] for request in patch4_requests}
+        unexpected = sorted(set(normalized_loaded) - requested_codes)
+        if unexpected:
+            raise ValueError(f"科技股股东文化公告证据加载结果包含未请求代码:{unexpected[:5]}")
+        missing = sorted(requested_codes - set(normalized_loaded))
+        if missing:
+            raise ValueError(f"科技股股东文化公告证据加载结果遗漏请求代码:{missing[:5]}")
+        for code, evidence in normalized_loaded.items():
+            metric = metric_by_code[code]
+            as_of = str(metric.get("source_trade_date") or "")
+            assessment = _type7_patch4_assessment_from_evidence(
+                evidence,
+                code=code,
+                as_of=as_of,
+            )
+            if assessment is None:
+                metric.pop("type7_patch4_assessment", None)
+            else:
+                metric["type7_patch4_assessment"] = assessment
+            metric["_type7_patch4_evidence_status"] = str(evidence.get("status") or "")
+            normalized_patch4[code] = evidence
+            base_outcomes = base_outcomes_by_code[code]
+            preliminary_type7_by_code[code] = score_type7_quality_equity(
+                metric,
+                base_outcomes["type1"],
+                normalized_quality_history.get(code),
+                valuation_evidence_complete=type7_valuation_evidence_by_code[code],
             )
 
     history_request_by_code: dict[str, dict[str, str]] = {}
@@ -5799,11 +7284,13 @@ def screen_all_types(
         outcomes = dict(base_outcomes_by_code[code])
         type7_outcome, type7_ledger = preliminary_type7_by_code[code]
         outcomes["type7"] = type7_outcome
+        market_context = _decision_market_context(m)
         market_block = _market_trigger_block_reason(m)
         if market_block:
             gated: dict[str, tuple] = {}
             for key, (_triggered, total, sub_scores, raw_reasons) in outcomes.items():
                 reasons = dict(raw_reasons)
+                reasons[_DECISION_MARKET_BLOCK_REASON] = _compact_reason(market_block)
                 # A market-wide actionability block must not rewrite a model
                 # that was already N/A, missing evidence, vetoed or blocked.
                 # In particular, missing valuation data must remain missing
@@ -5838,8 +7325,8 @@ def screen_all_types(
                 else:
                     status = STATUS_NOT_TRIGGERED
                 reasons["_status"] = status
-                reasons.setdefault("_applicable", "yes")
-                reasons.setdefault("_evidence", "complete")
+            reasons.setdefault("_applicable", "yes")
+            reasons.setdefault("_evidence", "complete")
             normalized_outcomes[key] = (triggered, total, sub_scores, reasons)
         outcomes = normalized_outcomes
         qualifiers = [key for key in TYPE_PRIORITY if outcomes[key][0]]
@@ -5864,12 +7351,51 @@ def screen_all_types(
                 "status": status,
                 "applicable": status != STATUS_NOT_APPLICABLE,
                 "evidence_complete": reasons.get("_evidence") == "complete",
+                _DECISION_MARKET_CONTEXT: market_context,
             }
+            if key == "type5":
+                bottom_mode = "incomplete"
+                if status == STATUS_NOT_APPLICABLE:
+                    bottom_mode = "not_applicable"
+                else:
+                    direct_score, direct_reason = _type5_external_score(m, "type5_bottom_signal_score")
+                    direct_reason = direct_reason or "周期底部外部证据"
+                    direct_used = bool(
+                        direct_score is not None
+                        and math.isclose(float(sub_scores.get("5b", -1.0)), direct_score, abs_tol=1e-9)
+                        and reasons.get("5b") == direct_reason
+                    )
+                    if direct_used:
+                        bottom_mode = "trusted_external"
+                    else:
+                        bottom_contract = _type5_automatic_bottom_contract(
+                            m,
+                            normalized_quality_history.get(code),
+                        )
+                        bottom_replay = replay_type5_bottom_evidence_contract(
+                            bottom_contract,
+                            expected_code=code,
+                            expected_as_of=m.get("source_trade_date"),
+                        )
+                        if (
+                            bottom_replay is not None
+                            and math.isclose(
+                                float(sub_scores.get("5b", -1.0)),
+                                float(bottom_replay["score"]),
+                                abs_tol=1e-9,
+                            )
+                            and reasons.get("5b") == bottom_replay["reason"]
+                        ):
+                            bottom_mode = "automatic_replay"
+                            payloads[key]["bottom_evidence_contract"] = bottom_contract
+                payloads[key]["bottom_evidence_mode"] = bottom_mode
             if key == "type7":
                 payloads[key]["ledger"] = type7_ledger
+            payloads[key]["decision"] = replay_buy_decision(key, payloads[key])
         row = {
             "code": code,
             "name": m.get("name"),
+            "source_trade_date": m.get("source_trade_date"),
             "price": m.get("price"),
             "pe": m.get("pe"),
             "pb": m.get("pb"),
@@ -5885,6 +7411,8 @@ def screen_all_types(
             "financial_sector_evidence": m.get("financial_sector_evidence"),
             "quantitative_model_id": QUANTITATIVE_EVIDENCE_MODEL_ID,
             "quantitative_evidence": m.get("quantitative_evidence"),
+            "quantitative_evidence_levels": m.get("quantitative_evidence_levels"),
+            "quantitative_evidence_status": m.get("quantitative_evidence_status"),
             "buy_types": qualifiers,
             "num_types": len(qualifiers),
             "primary_type": primary,
@@ -5894,6 +7422,10 @@ def screen_all_types(
             "max_score": top_score,
             "bear_case": _build_bear_case(diagnostic, payloads[diagnostic]) if diagnostic else [],
         }
+        for evidence_key in QUANTITATIVE_SCORE_KEYS:
+            row[evidence_key] = m.get(evidence_key)
+            row[f"{evidence_key}_evidence"] = m.get(f"{evidence_key}_evidence")
+            row[f"{evidence_key}_evidence_level"] = m.get(f"{evidence_key}_evidence_level")
         for key, total in totals.items():
             row[f"{key}_score"] = total
             row[key] = payloads[key]

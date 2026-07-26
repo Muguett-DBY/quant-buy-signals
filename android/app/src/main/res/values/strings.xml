@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">DS_DCF</string>
     <string name="screen_title">DS_DCF · 沪深收盘后结果</string>
-    <string name="screen_notice">手机端不计算估值，只读取服务器在收盘后通过完整质量检查的结果。\n“待确认”不是买入信号；投资前仍应核对公告、仓位和风险。</string>
+    <string name="screen_notice">手机端不计算估值，只读取服务器在收盘后通过完整质量检查的结果。\n“待确认”和“待补证据”都不是买入信号；投资前仍应核对公告、仓位和风险。</string>
     <string name="refresh_data">获取最新数据</string>
     <string name="check_update">检查应用更新</string>
     <string name="status_loading_cache">正在读取本机已校验缓存…</string>
@@ -10,7 +10,7 @@
     <string name="search_hint">按代码、名称或行业搜索</string>
     <string-array name="display_modes">
         <item>实际买入信号</item>
-        <item>待确认候选（非买入）</item>
+        <item>待确认/待补证据（非买入）</item>
         <item>观察名单（非买入）</item>
         <item>全部沪深公司</item>
     </string-array>
@@ -27,7 +27,7 @@
     <string name="footer_version">版本 %1$s · 数据和安装包均须通过官方加密下载与文件完整性校验</string>
     <string name="status_cached">已读取本机已校验的市场数据。</string>
     <string name="status_refreshing">正在下载并校验最新收盘后数据…</string>
-    <string name="status_refreshed">已更新：数据完整性和质量检查均已通过。</string>
+    <string name="status_refreshed">已更新：文件签名、数据结构和分析质量校验通过；部分公司仍可能显示资料不足。</string>
     <string name="status_refresh_failed">未更新，已保留上一份数据：%1$s</string>
     <string name="status_checking_update">正在检查应用更新…</string>
     <string name="status_latest_app">当前已是最新已发布的手机应用。</string>
@@ -42,7 +42,7 @@
     <string name="status_allow_install">请允许本应用安装更新；返回后会继续打开安装确认页面。</string>
     <string name="status_update_cancelled">更新已取消：%1$s</string>
     <string name="status_update_file_missing">已验证的更新文件不存在，请重新检查应用更新。</string>
-    <string name="market_summary">当前展示交易日：%1$s；覆盖 %2$d 家沪深公司；实际买入信号 %3$d 家；待确认候选 %4$d 家（包含同时触发其他类型的公司）。\n%5$s</string>
+    <string name="market_summary">当前展示交易日：%1$s；覆盖 %2$d 家沪深公司；实际买入信号 %3$d 家；待确认候选 %4$d 家；仍可能触发但待补证据 %5$d 家。\n%6$s</string>
     <string name="close">关闭</string>
     <string name="status_confirm_install">请在 Android 系统页面确认安装。</string>
 </resources>

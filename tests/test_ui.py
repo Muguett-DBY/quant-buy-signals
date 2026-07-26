@@ -30,6 +30,7 @@ from ui.buy_types_page import (
     _market_coldness_status_message,
     _merge_user_evidence,
     _parse_user_evidence_json,
+    _public_dcf_audit_frame,
     _public_failure_message,
     _public_pipeline_issue_rows,
     _reset_buy_type_filters,
@@ -39,6 +40,7 @@ from ui.buy_types_page import (
     _spreadsheet_safe_csv,
     _status_icon,
     _type_risk_notice,
+    _type_trigger_rule_text,
     _type7_ledger_summary,
     _with_diagnostic_fields,
 )
@@ -323,77 +325,56 @@ def test_eligible_analysis_inputs_defensively_exclude_bj_from_precomputed_analys
     assert eligible == ("000001",)
 
 
-def test_external_evidence_overlay_is_strict_traceable_and_non_mutating():
+def test_external_evidence_overlay_accepts_only_portfolio_constraints_without_mutating_the_snapshot():
     original = {"000001": {"income_history": [{"REPORT_DATE": "2025-12-31"}]}}
     payload = {
         "1": {
-            "technology_score": 8,
-            "technology_score_evidence": {
-                "source": "company-announcement",
-                "evidence_id": "announcement:000001:20251231",
-                "as_of": "2025-12-31",
-            },
             "position_size_pct": 3,
             "type6_portfolio_pct": 10,
         }
     }
 
-    merged, normalised = _merge_user_evidence(original, payload)
+    merged, normalised = _merge_user_evidence(original, payload, as_of="2025-12-31")
 
-    assert "technology_score" not in original["000001"]
-    assert merged["000001"]["technology_score"] == 8.0
-    assert normalised["000001"]["technology_score_evidence"]["evidence_id"] == "announcement:000001:20251231"
-
-    from engine.buy_screener import _normalise_score_evidence
-
-    score, evidence = _normalise_score_evidence(
-        merged["000001"],
-        "technology_score",
-        expected_code="000001",
-        reference_date="2025-12-31",
-    )
-    assert score == 8.0
-    assert evidence == normalised["000001"]["technology_score_evidence"]
+    assert "position_size_pct" not in original["000001"]
+    assert merged["000001"]["position_size_pct"] == 3.0
+    assert merged["000001"]["type6_portfolio_pct"] == 10.0
+    assert normalised["000001"] == {"position_size_pct": 3.0, "type6_portfolio_pct": 10.0}
 
 
-def test_external_evidence_overlay_rejects_lookahead_after_the_snapshot_date():
+@pytest.mark.parametrize(
+    "score_key",
+    ["market_coldness_score", "type5_cycle_attribute_score", "business_clarity_score"],
+)
+def test_external_evidence_overlay_rejects_user_authored_scores(score_key):
     payload = {
         "000001": {
-            "technology_score": 8,
-            "technology_score_evidence": {
-                "source": "company-announcement",
-                "evidence_id": "announcement:000001:20260101",
-                "as_of": "2026-01-01",
-            },
-        }
-    }
-
-    with pytest.raises(ValueError, match="晚于行情快照日"):
-        _merge_user_evidence({"000001": {}}, payload, as_of="2025-12-31")
-
-
-def test_external_evidence_overlay_rejects_an_identifier_not_bound_to_the_stock():
-    payload = {
-        "000001": {
-            "technology_score": 8,
-            "technology_score_evidence": {
-                "source": "company-announcement",
-                "evidence_id": "announcement-2025",
+            score_key: 10,
+            f"{score_key}_evidence": {
+                "source": "self-authored conclusion",
+                "evidence_id": f"score:000001:{score_key}",
                 "as_of": "2025-12-31",
             },
         }
     }
 
-    with pytest.raises(ValueError, match="绑定该股票代码"):
+    with pytest.raises(ValueError, match="不允许"):
         _merge_user_evidence({"000001": {}}, payload, as_of="2025-12-31")
+
+
+@pytest.mark.parametrize("field", ["external_growth_evidence", "segment_growth_sources", "type7_research_sources"])
+def test_external_evidence_overlay_rejects_research_payloads_without_a_formula_validator(field):
+    with pytest.raises(ValueError, match="不允许"):
+        _merge_user_evidence({"000001": {}}, {"000001": {field: {}}}, as_of="2025-12-31")
 
 
 @pytest.mark.parametrize(
     "payload, message",
     [
         ({"000002": {"position_size_pct": 3}}, "不在本代合法分析集合"),
-        ({"000001": {"technology_score": 8}}, "必须同时提供"),
+        ({"000001": {"technology_score": 8}}, "不允许"),
         ({"000001": {"unexpected": 1}}, "不允许"),
+        ({"000001": {"type7_patch4_assessment": {}}}, "不允许"),
     ],
 )
 def test_external_evidence_overlay_rejects_out_of_scope_or_untraceable_fields(payload, message):
@@ -457,6 +438,28 @@ def test_dcf_audit_rows_preserve_six_points_parameters_and_skip_reason():
     assert rows[1]["跳过分类"] == "economic_not_applicable"
 
 
+def test_public_dcf_audit_view_translates_machine_reasons_without_changing_raw_export():
+    raw = pd.DataFrame(
+        [
+            {
+                "代码": "600519",
+                "估值状态": "跳过",
+                "跳过分类": "internal_error",
+                "跳过原因": "valuation_exception:RuntimeError",
+                "估值参数（JSON）": '{"formula":"internal_formula"}',
+            }
+        ]
+    )
+
+    public = _public_dcf_audit_frame(raw)
+
+    assert public.loc[0, "跳过分类"] == "估值计算异常"
+    assert public.loc[0, "跳过原因"] == "估值计算发生内部异常，相关结果未被采用"
+    assert "估值参数（JSON）" not in public
+    assert raw.loc[0, "跳过分类"] == "internal_error"
+    assert raw.loc[0, "跳过原因"] == "valuation_exception:RuntimeError"
+
+
 def test_intraday_coldness_notice_persists_candidate_count_limit():
     notice = _market_coldness_status_message(
         {
@@ -503,7 +506,8 @@ def test_radar_threshold_has_same_length_as_axes(monkeypatch, type_key):
     assert len(figure.data[0].r) == len(figure.data[0].theta)
     assert len(figure.data[1].r) == len(figure.data[1].theta)
     assert len(figure.data[1].r) == len(dims) + 1
-    assert figure.data[1].name == "7分视觉参考（非子项门槛）"
+    expected = "每项须严格高于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）"
+    assert figure.data[1].name == expected
 
 
 def test_snapshot_age_formatter_is_bounded_and_readable():
@@ -571,11 +575,17 @@ def test_display_reason_hides_legacy_machine_evidence_ids():
     assert _display_reason("PB分位与库存去化") == "PB分位与库存去化"
 
 
+def test_display_reason_preserves_chinese_conclusion_while_removing_internal_note():
+    assert _display_reason("坡的长度是短板(证据:patch6-observable)") == "坡的长度是短板"
+    assert _display_reason("missing_quote") == "未取得有效行情"
+    assert _display_reason("valuation_exception:RuntimeError") == "估值计算发生内部异常，相关结果未被采用"
+
+
 @pytest.mark.parametrize(
     "machine_text",
     [
-        "model_id=patch6-type7-quality-equity-v5",
-        "schema_version=5",
+        "model_id=patch6-type7-quality-equity-v6",
+        "schema_version=6",
         "derived_proxy",
         "reported_formula",
         "financial_fade_horizon_not_tam_or_penetration_proof",
@@ -674,11 +684,18 @@ def test_dcf_parameters_are_presented_as_a_chinese_summary_without_raw_audit_fie
 def test_type7_ledger_is_presented_as_chinese_scores_and_prerequisites_only():
     summary = _type7_ledger_summary(
         {
-            "model_id": "patch6-type7-quality-equity-v5",
-            "schema_version": 5,
+            "model_id": "patch6-type7-quality-equity-v6",
+            "schema_version": 6,
             "scores": {"template1": 69.5, "template5": 72.0, "patch5": 71.0},
             "strict_checks": {"template1": False, "template5": True, "patch5": True},
             "prerequisites": {
+                "core_modules_80pct": {
+                    "passed": False,
+                    "actual": 0.95,
+                    "required": 0.80,
+                    "required_items_complete": False,
+                    "incomplete_required_items": ["template5.t5_v3"],
+                },
                 "three_year_financials": {"passed": True, "consecutive_years": 10},
                 "three_external_reports": {
                     "passed": False,
@@ -688,24 +705,54 @@ def test_type7_ledger_is_presented_as_chinese_scores_and_prerequisites_only():
                 },
             },
             "prerequisites_complete": False,
+            "safety_veto": False,
+            "patch5": {"safety_margin_score": 9.0},
             "decisively_not_triggered": True,
             "derived_proxy": "financial_fade_horizon_not_tam_or_penetration_proof",
         }
     )
 
     assert summary["score_rows"][0] == {
-        "评分体系": "第1模板",
+        "评分体系": "长期质量与回报评分",
         "百分制得分": "69.50",
         "是否严格高于70分": "否",
     }
     assert summary["prerequisite_rows"] == [
+        {
+            "前置核验": "全部必需子项完整，且核心质量资料覆盖至少80%",
+            "结果": "未通过",
+            "说明": "仍有1个必需子项资料不完整；核心质量资料覆盖95.0%，要求至少80%",
+        },
         {"前置核验": "至少三年连续财务数据", "结果": "通过", "说明": "已有10年连续财务数据"},
         {"前置核验": "至少三份外部研究资料", "结果": "未通过", "说明": "已有1份资料，来自1个不同发布方"},
+        {
+            "前置核验": "安全边际不得触发否决",
+            "结果": "通过",
+            "说明": "当前安全边际9.00/20；低于8分即否决",
+        },
     ]
     assert "即使补全当前缺失资料" in summary["conclusion"]
     public_text = json.dumps(summary, ensure_ascii=False)
-    for marker in ("model_id", "schema_version", "derived_proxy", "validation_status"):
+    for marker in (
+        "model_id",
+        "schema_version",
+        "derived_proxy",
+        "validation_status",
+        "template5.t5_v3",
+        "第1模板",
+        "第5模板",
+        "补丁5",
+    ):
         assert marker not in public_text
+
+
+def test_type7_rule_text_does_not_present_an_average_score_as_the_trigger_threshold():
+    rule = _type_trigger_rule_text("type7")
+
+    assert "三项百分制评分必须分别严格高于70分" in rule
+    assert "不能用平均分相互补偿" in rule
+    assert "全部必需子项" in rule
+    assert "安全边际不得低于8/20" in rule
 
 
 def test_ordinary_stock_detail_never_renders_raw_json_ledgers_or_parameters():
@@ -720,8 +767,8 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
                 "code": "600519",
                 "type7": {
                     "ledger": {
-                        "model_id": "patch6-type7-quality-equity-v5",
-                        "schema_version": 5,
+                        "model_id": "patch6-type7-quality-equity-v6",
+                        "schema_version": 6,
                         "derived_proxy": True,
                     }
                 },
@@ -731,7 +778,7 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
     context = {"buy_types_dcf_results": {"600519": {"params": {"neutral": {"formula": "internal_formula"}}}}}
 
     exported = json.loads(_analysis_export_json(frame, context=context))
-    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v5"
+    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v6"
     assert exported["dcf_results"]["600519"]["params"]["neutral"]["formula"] == "internal_formula"
     render_source = inspect.getsource(buy_types_page._render_analysis_evidence)
     assert "供技术审计" in render_source

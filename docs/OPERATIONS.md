@@ -2,7 +2,7 @@
 
 ## 环境与依赖
 
-生产代码的依赖根是 `numpy`、`orjson`、`pandas`、`plotly`、`requests` 和 `streamlit`；`pillow` 作为 Streamlit 图像链的显式安全版本下限一并固定。`orjson` 用于带格式标识和校验和的快照编码，不是可选的静默加速器。`requirements.txt` 固定这些版本，`requirements-lock.txt` 是生产环境的完整 SHA256 哈希锁；测试和开发分别使用 `requirements-test.txt`、`requirements-dev.txt`，解析结果统一写入 `requirements-dev-lock.txt` 哈希锁。`build`、`pyinstaller`、`setuptools` 和 `wheel` 是显式发布依赖，不能只依赖当前环境恰好带入的传递关系。
+生产代码的依赖根是 `numpy`、`orjson`、`pandas`、`plotly`、`requests` 和 `streamlit`；`pillow` 作为 Streamlit 图像链、`GitPython` 作为 Streamlit Git 集成链的显式安全版本下限一并固定。`orjson` 用于带格式标识和校验和的快照编码，不是可选的静默加速器。`requirements.txt` 固定这些版本，`requirements-lock.txt` 是生产环境的完整 SHA256 哈希锁；测试和开发分别使用 `requirements-test.txt`、`requirements-dev.txt`，解析结果统一写入 `requirements-dev-lock.txt` 哈希锁。wheel 元数据中的直接依赖也必须保留这些安全下限，不能让从 wheel 安装的环境重新解析到已知有漏洞的传递版本。`build`、`pyinstaller`、`setuptools` 和 `wheel` 是显式发布依赖，不能只依赖当前环境恰好带入的传递关系。
 
 依赖升级必须作为显式维护动作完成：
 
@@ -37,9 +37,14 @@ wheel 构建使用 `pyproject.toml` 中固定的 setuptools/wheel 后端，并�
 ```powershell
 python -m tools.run_full_audit --seed 20260715 --sample-size 100
 python -m tools.run_full_audit --refresh --seed 20260715 --sample-size 100
+python -m tools.run_full_audit --require-complete-evidence --seed 20260715 --sample-size 100
 ```
 
 底层 `engine.audit.audit_random_sample()` 强制要求调用者传入快照验证生成的沪深 `eligible_codes`；命令行入口负责整代源质量门、候选代 CAS 晋级、快照 SHA256 和审计产物写入，任一独立不变量失败时退出码为 1。
+
+`--require-complete-evidence` 是七类买入框架的严格完整性验收：全市场每一类都必须有完整且有限的固定子分结构，所有适用框架必须证据完整；合法的不适用结果仍要明确说明，不能用缺失或零分伪装。底层量化证据不得再含 `partial` 或 `missing`，空结果或任一框架整列缺失也会失败。普通审计仍会完整报告这些计数而不隐藏它们；只有严格模式可以作为“全部适用子指标无数据缺失”的证明。
+
+普通发布门与上述“理想零缺口”门不是同一个承诺。普通发布必须同时证明制品完整、每个真实/待确认/待补证据候选都可见，并通过独立决策重放证明没有漏掉数学上仍可能触发的公司；它允许上游确实没有提供的原始事实继续标为资料不足。每类结果都携带固定的分数下界、分数上界、硬否决状态和待补维度：只有上下界与硬规则已经足以终局判断时，才能把不完整证据归入确定结论；否则必须进入待补证据集合。不得把普通发布成功描述为全市场原始数据零缺口。
 
 JSON 产物包含完整七类型子分/依据、Type7 三个百分制账本及前置证据、证据完整性状态、估值模型与六点区间（非金融 DCF 参数或金融 P/B 参数）、严格 TTM 三组件、报告期合同、`[FY-1, FY, TTM]` 归一化依据、Type 4 独立十年面、逐公司跳过原因、管线问题、质量指标，以及快照内容、外部快照文件、代码、规则、行业数据、依赖、Git 和运行时哈希。引擎自身 validator、评分全字段重放及估值存在性/完整 payload/跳过原因重放都明确标为“同源”；另一个独立实现重算权重总分、Type7 模板权重/严格交集/安全边际、触发与优先级关系、空头证据排序、估值区间、关键公式和来源绑定。财务证据到每个业务子分的规则正确性由 `tests/test_buy_screener_rules.py` 和 `tests/test_quality_equity.py` 中固定预期、边界和反例向量验证，不能把同源重放误称为这部分的独立证明。
 

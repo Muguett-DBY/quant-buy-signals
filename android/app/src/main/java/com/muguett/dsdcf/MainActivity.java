@@ -245,6 +245,7 @@ public final class MainActivity extends Activity {
                 marketData.companyCount,
                 marketData.triggeredCompanyCount,
                 marketData.conditionalCompanyCount,
+                marketData.pendingCompanyCount,
                 marketData.typeCoverageSummary()
         ));
     }
@@ -261,6 +262,7 @@ public final class MainActivity extends Activity {
             if (!MarketRepository.matchesSignalFilter(
                     entry.buyTypes,
                     entry.conditionalTypes,
+                    entry.pendingTypes,
                     entry.typeScores,
                     selectedMode,
                     selectedType

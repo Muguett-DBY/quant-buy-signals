@@ -48,6 +48,38 @@ $script:ValidTypeStatuses = @(
   'not_triggered',
   'not_applicable'
 )
+$script:DecisionSchemaVersion = 1
+$script:DecisionModelId = 'buy-decision-bounds-v1'
+$script:DecisionFields = @(
+  'schema_version',
+  'model_id',
+  'decision_complete',
+  'decision_basis',
+  'score_lower_bound',
+  'score_upper_bound',
+  'veto_state',
+  'potentially_triggerable',
+  'missing_dimensions'
+)
+$script:ValidDecisionBases = @(
+  'full_evidence',
+  'scope_exclusion',
+  'confirmed_veto',
+  'conservative_upper_bound',
+  'action_condition',
+  'market_block',
+  'unresolved_missing_evidence'
+)
+$script:ValidDecisionVetoStates = @('none', 'possible', 'confirmed')
+$script:DecisionDimensions = @{
+  type1 = @('1a', '1b', '1c', '1d')
+  type2 = @('2a', '2b', '2c', '2d')
+  type3 = @('3a', '3b', '3c', '3d', '3e')
+  type4 = @('4a', '4b', '4c', '4d', '4e', '4f')
+  type5 = @('5a', '5b', '5c', '5d', '5e')
+  type6 = @('6a', '6b', '6c', '6d', '6e')
+  type7 = @('7a', '7b', '7c')
+}
 $script:ShanghaiOffset = [TimeSpan]::FromHours(8)
 $script:ShanghaiZone = [TimeZoneInfo]::CreateCustomTimeZone(
   'DS_DCF_Asia_Shanghai',
@@ -257,7 +289,23 @@ function Get-RequiredAssetMetadata([object]$Manifest, [string]$Property, [string
   if ($sha256 -cnotmatch '^[0-9a-f]{64}$') {
     throw "Published $Property SHA-256 is invalid."
   }
-  return @{ size = $size; sha256 = $sha256 }
+  $uncompressedProperty = $metadata.PSObject.Properties['uncompressed_size']
+  $hasUncompressedSize = $null -ne $uncompressedProperty
+  $uncompressedSize = 0L
+  if ($hasUncompressedSize) {
+    $uncompressedSize = ConvertTo-RequiredInteger $uncompressedProperty.Value (
+      "Published $Property uncompressed_size"
+    )
+    if ($uncompressedSize -le 0 -or $uncompressedSize -gt $script:MaximumUncompressedPayloadBytes) {
+      throw "Published $Property uncompressed_size is invalid."
+    }
+  }
+  return @{
+    size = $size
+    sha256 = $sha256
+    has_uncompressed_size = $hasUncompressedSize
+    uncompressed_size = $uncompressedSize
+  }
 }
 
 function Get-RequiredProperty([object]$Value, [string]$Name, [string]$Label) {
@@ -314,7 +362,10 @@ function Expand-StrictGzipJson([string]$Path, [string]$Label) {
       }
       $output.Write($buffer, 0, $read)
     }
-    return ConvertFrom-StrictJsonBytes $output.ToArray() $Label
+    return [pscustomobject]@{
+      payload = ConvertFrom-StrictJsonBytes $output.ToArray() $Label
+      uncompressed_size = [long]$output.Length
+    }
   } catch {
     throw "$Label is not a valid bounded gzip JSON payload: $($_.Exception.Message)"
   } finally {
@@ -391,6 +442,83 @@ function Assert-StringTypeList([object]$Company, [string]$Property, [string]$Cod
   return $values
 }
 
+function Assert-DecisionContract([object]$Type, [string]$Code, [string]$TypeKey) {
+  $decisionProperty = $Type.PSObject.Properties['decision']
+  if ($null -eq $decisionProperty) {
+    return [pscustomobject]@{
+      present = $false
+      potentially_triggerable = $false
+    }
+  }
+  $decision = $decisionProperty.Value
+  if ($null -eq $decision) {
+    throw "Company $Code $TypeKey contains an empty decision contract."
+  }
+  $propertyNames = @($decision.PSObject.Properties.Name)
+  $validFields = [Collections.Generic.HashSet[string]]::new(
+    [string[]]$script:DecisionFields,
+    [StringComparer]::Ordinal
+  )
+  if (
+    $propertyNames.Count -ne $script:DecisionFields.Count -or
+    @($propertyNames | Where-Object { -not $validFields.Contains($_) }).Count -ne 0
+  ) {
+    throw "Company $Code $TypeKey contains an invalid decision field set."
+  }
+  if (
+    (ConvertTo-RequiredInteger (
+      Get-RequiredProperty $decision 'schema_version' "Company $Code $TypeKey decision"
+    ) "Company $Code $TypeKey decision schema_version") -ne $script:DecisionSchemaVersion -or
+    [string](Get-RequiredProperty $decision 'model_id' "Company $Code $TypeKey decision") -cne $script:DecisionModelId
+  ) {
+    throw "Company $Code $TypeKey contains an unsupported decision contract."
+  }
+  $complete = Get-RequiredProperty $decision 'decision_complete' "Company $Code $TypeKey decision"
+  $potential = Get-RequiredProperty $decision 'potentially_triggerable' "Company $Code $TypeKey decision"
+  $basis = [string](Get-RequiredProperty $decision 'decision_basis' "Company $Code $TypeKey decision")
+  $vetoState = [string](Get-RequiredProperty $decision 'veto_state' "Company $Code $TypeKey decision")
+  if (
+    $complete -isnot [bool] -or
+    $potential -isnot [bool] -or
+    $basis -cnotin $script:ValidDecisionBases -or
+    $vetoState -cnotin $script:ValidDecisionVetoStates
+  ) {
+    throw "Company $Code $TypeKey contains invalid decision states."
+  }
+  $lower = ConvertTo-RequiredFiniteNumber (
+    Get-RequiredProperty $decision 'score_lower_bound' "Company $Code $TypeKey decision"
+  ) "Company $Code $TypeKey decision score_lower_bound"
+  $upper = ConvertTo-RequiredFiniteNumber (
+    Get-RequiredProperty $decision 'score_upper_bound' "Company $Code $TypeKey decision"
+  ) "Company $Code $TypeKey decision score_upper_bound"
+  if ($lower -lt 0.0 -or $lower -gt $upper -or $upper -gt 10.0) {
+    throw "Company $Code $TypeKey contains invalid decision score bounds."
+  }
+  $missingProperty = $decision.PSObject.Properties['missing_dimensions']
+  if ($null -eq $missingProperty -or $missingProperty.Value -isnot [Array]) {
+    throw "Company $Code $TypeKey contains an invalid missing-dimension list."
+  }
+  $missing = @($missingProperty.Value)
+  $allowed = [Collections.Generic.HashSet[string]]::new(
+    [string[]]$script:DecisionDimensions[$TypeKey],
+    [StringComparer]::Ordinal
+  )
+  $unique = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  foreach ($dimension in $missing) {
+    if (
+      $dimension -isnot [string] -or
+      -not $allowed.Contains($dimension) -or
+      -not $unique.Add($dimension)
+    ) {
+      throw "Company $Code $TypeKey contains an unknown or duplicate missing dimension."
+    }
+  }
+  return [pscustomobject]@{
+    present = $true
+    potentially_triggerable = [bool]$potential
+  }
+}
+
 function Assert-MobilePayloadContract(
   [object]$Manifest,
   [object]$Catalogue,
@@ -462,8 +590,12 @@ function Assert-MobilePayloadContract(
   }
   $companyCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
   $candidateCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  $pendingCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  $visibleCandidateCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  $decisionContractCompanyCount = 0L
   $triggeredCount = 0L
   $conditionalCount = 0L
+  $conditionalOnlyCount = 0L
   foreach ($company in $companies) {
     $code = [string](Get-RequiredProperty $company 'code' 'Published company')
     if ($code -cnotmatch '^[036][0-9]{5}$' -or -not $companyCodes.Add($code)) {
@@ -480,15 +612,22 @@ function Assert-MobilePayloadContract(
     if ($buyTypes.Count -gt 0) {
       $triggeredCount++
       [void]$candidateCodes.Add($code)
+      [void]$visibleCandidateCodes.Add($code)
     }
     if ($conditionalTypes.Count -gt 0) {
       $conditionalCount++
       [void]$candidateCodes.Add($code)
+      [void]$visibleCandidateCodes.Add($code)
+      if ($buyTypes.Count -eq 0) {
+        $conditionalOnlyCount++
+      }
     }
     $types = Get-RequiredProperty $company 'types' "Company $code"
     if (@($types.PSObject.Properties).Count -ne 7) {
       throw "Company $code does not contain exactly seven type states."
     }
+    $companyDecisionCount = 0
+    $expectedPendingTypes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     for ($number = 1; $number -le 7; $number++) {
       $typeKey = "type$number"
       $type = Get-RequiredProperty $types $typeKey "Company $code type states"
@@ -511,9 +650,49 @@ function Assert-MobilePayloadContract(
       if (($typeKey -cin $buyTypes) -ne ($status -ceq 'triggered') -or ($typeKey -cin $conditionalTypes) -ne ($status -ceq 'conditional')) {
         throw "Company $code buy markers disagree with its type states."
       }
+      $decisionSummary = Assert-DecisionContract $type $code $typeKey
+      if ($decisionSummary.present) {
+        $companyDecisionCount++
+        if (
+          $decisionSummary.potentially_triggerable -and
+          $status -cnotin @('triggered', 'conditional')
+        ) {
+          [void]$expectedPendingTypes.Add($typeKey)
+        }
+      }
       $actualCoverage[$typeKey][$status]++
     }
+    if ($companyDecisionCount -notin @(0, 7)) {
+      throw "Company $code contains only part of the seven-type decision contract."
+    }
+    if ($companyDecisionCount -eq 7) {
+      $decisionContractCompanyCount++
+      $pendingTypes = @(Assert-StringTypeList $company 'pending_types' $code)
+      $actualPendingTypes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+      foreach ($pendingType in $pendingTypes) {
+        [void]$actualPendingTypes.Add($pendingType)
+      }
+      if (-not $expectedPendingTypes.SetEquals($actualPendingTypes)) {
+        throw "Company $code pending types disagree with its decision bounds."
+      }
+      if ($pendingTypes.Count -gt 0) {
+        [void]$pendingCodes.Add($code)
+        [void]$visibleCandidateCodes.Add($code)
+      }
+    } else {
+      $pendingProperty = $company.PSObject.Properties['pending_types']
+      if ($null -ne $pendingProperty) {
+        $pendingTypes = @(Assert-StringTypeList $company 'pending_types' $code)
+        if ($pendingTypes.Count -ne 0) {
+          throw "Legacy company $code cannot declare pending decision types."
+        }
+      }
+    }
   }
+  if ($decisionContractCompanyCount -notin @(0, $companyCount)) {
+    throw 'Published catalogue mixes legacy and current decision contracts.'
+  }
+  $hasDecisionContract = $decisionContractCompanyCount -eq $companyCount
 
   $signalRows = @(Get-RequiredProperty $Signals 'signals' 'Published signals')
   $signalCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -530,10 +709,25 @@ function Assert-MobilePayloadContract(
   foreach ($entry in @(
     @($Signals, 'candidate_detail_count', $signalRows.Count),
     @($Signals, 'triggered_company_count', $triggeredCount),
-    @($Signals, 'conditional_company_count', $conditionalCount)
+    @($Signals, 'conditional_company_count', $conditionalCount),
+    @($Signals, 'conditional_only_company_count', $conditionalOnlyCount)
   )) {
     if ((ConvertTo-RequiredInteger (Get-RequiredProperty $entry[0] $entry[1] 'Published signals') "signals $($entry[1])") -ne $entry[2]) {
       throw "Published signals $($entry[1]) is inconsistent."
+    }
+  }
+  foreach ($entry in @(
+    @($Signals, 'pending_company_count', $pendingCodes.Count),
+    @($Signals, 'visible_candidate_company_count', $visibleCandidateCodes.Count)
+  )) {
+    $property = $entry[0].PSObject.Properties[$entry[1]]
+    if ($hasDecisionContract -or $null -ne $property) {
+      if (
+        $null -eq $property -or
+        (ConvertTo-RequiredInteger $property.Value "signals $($entry[1])") -ne $entry[2]
+      ) {
+        throw "Published signals $($entry[1]) is inconsistent."
+      }
     }
   }
   $summary = Get-RequiredProperty $Manifest 'summary' 'Published manifest'
@@ -541,10 +735,25 @@ function Assert-MobilePayloadContract(
     @('company_count', $companyCount),
     @('triggered_company_count', $triggeredCount),
     @('conditional_company_count', $conditionalCount),
+    @('conditional_only_company_count', $conditionalOnlyCount),
     @('candidate_detail_count', $signalRows.Count)
   )) {
     if ((ConvertTo-RequiredInteger (Get-RequiredProperty $summary $entry[0] 'Published manifest summary') "summary $($entry[0])") -ne $entry[1]) {
       throw "Published manifest summary $($entry[0]) is inconsistent."
+    }
+  }
+  foreach ($entry in @(
+    @('pending_company_count', $pendingCodes.Count),
+    @('visible_candidate_company_count', $visibleCandidateCodes.Count)
+  )) {
+    $property = $summary.PSObject.Properties[$entry[0]]
+    if ($hasDecisionContract -or $null -ne $property) {
+      if (
+        $null -eq $property -or
+        (ConvertTo-RequiredInteger $property.Value "summary $($entry[0])") -ne $entry[1]
+      ) {
+        throw "Published manifest summary $($entry[0]) is inconsistent."
+      }
     }
   }
 
@@ -570,6 +779,7 @@ function Assert-MobilePayloadContract(
       }
     }
   }
+  return $hasDecisionContract
 }
 
 function Assert-ArchivedGeneration([string]$Working, [string]$ManifestPath, [string]$SignatureName, [string]$SignaturePath) {
@@ -692,9 +902,25 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
     } finally {
       $verifier.Dispose()
     }
-    $catalogue = Expand-StrictGzipJson $cataloguePath 'Published catalogue'
-    $signals = Expand-StrictGzipJson $signalsPath 'Published signals'
-    Assert-MobilePayloadContract $manifest $catalogue $signals $ShanghaiNow
+    $catalogueExpanded = Expand-StrictGzipJson $cataloguePath 'Published catalogue'
+    $signalsExpanded = Expand-StrictGzipJson $signalsPath 'Published signals'
+    $catalogue = $catalogueExpanded.payload
+    $signals = $signalsExpanded.payload
+    $hasDecisionContract = Assert-MobilePayloadContract $manifest $catalogue $signals $ShanghaiNow
+    foreach ($entry in @(
+      @($catalogueMetadata, $catalogueExpanded.uncompressed_size, 'catalogue'),
+      @($signalsMetadata, $signalsExpanded.uncompressed_size, 'signals')
+    )) {
+      if ($hasDecisionContract -and -not [bool]$entry[0].has_uncompressed_size) {
+        throw "Published $($entry[2]) metadata omits uncompressed_size for the current decision contract."
+      }
+      if (
+        [bool]$entry[0].has_uncompressed_size -and
+        [long]$entry[0].uncompressed_size -ne [long]$entry[1]
+      ) {
+        throw "Published $($entry[2]) uncompressed bytes do not match the manifest."
+      }
+    }
     Assert-ArchivedGeneration $working $localManifest $signatureName $signaturePath
     return $true
   } catch {

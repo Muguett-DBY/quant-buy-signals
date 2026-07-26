@@ -1077,6 +1077,22 @@ def test_pipeline_rejects_malformed_preloaded_type3_growth(invalid_growth):
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_patch4",
+    [[], {"000001": "invalid"}],
+)
+def test_pipeline_rejects_malformed_preloaded_patch4_evidence(invalid_patch4):
+    with pytest.raises(TypeError, match="patch4_evidence"):
+        run_market_analysis(
+            _quotes().iloc[[0]],
+            {"000001": {}},
+            dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+            screen_runner=lambda *_args, **_kwargs: pd.DataFrame([{"code": "000001"}]),
+            patch4_evidence=invalid_patch4,
+            max_workers=1,
+        )
+
+
 def test_pipeline_captures_type3_growth_loader_results_for_audit_replay(monkeypatch):
     from engine import buy_screener
 
@@ -1184,6 +1200,50 @@ def test_pipeline_captures_report_loader_results_for_audit_replay(monkeypatch):
     )
 
     assert outcome.research_report_evidence == {"000001": report}
+
+
+def test_pipeline_captures_patch4_loader_results_for_audit_replay(monkeypatch):
+    from engine import buy_screener
+
+    record = {
+        "available": False,
+        "code": "000001",
+        "as_of": "2026-07-17",
+        "model_id": "patch4-public-announcement-evidence-v2",
+        "assessment": None,
+        "criteria": {},
+        "status": "incomplete",
+        "documents": [],
+        "cache_hit": False,
+        "cache_diagnostic": "disabled",
+        "reason": "incomplete_atomic_facts",
+    }
+    request = [{"code": "000001", "as_of": "2026-07-17"}]
+
+    def loader(requests, *, progress_cb):
+        assert requests == request
+        assert progress_cb == "progress"
+        return {"000001": record}
+
+    def screen(_financials, _quotes_frame, **kwargs):
+        loaded = kwargs["patch4_loader"](
+            request,
+            progress_cb=kwargs["patch4_progress_cb"],
+        )
+        assert loaded == {"000001": record}
+        return pd.DataFrame([{"code": "000001"}])
+
+    monkeypatch.setattr(buy_screener, "screen_all_types", screen)
+    outcome = run_market_analysis(
+        _quotes().iloc[[0]],
+        {"000001": {}},
+        dcf_runner=lambda **kwargs: _valuation_result(kwargs["code"], kwargs["current_price"]),
+        patch4_loader=loader,
+        patch4_progress_cb="progress",
+        max_workers=1,
+    )
+
+    assert outcome.patch4_evidence == {"000001": record}
 
 
 def test_dcf_skip_reason_distinguishes_unrecovered_mixed_profit_cycle():

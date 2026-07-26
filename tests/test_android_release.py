@@ -12,6 +12,9 @@ from tools import android_release
 from tools.android_release import build_android_update_manifest, write_android_update_manifest
 
 
+TEST_GIT_SHA = "1234567890abcdef1234567890abcdef12345678"
+
+
 def test_android_manifest_uses_a_packaged_launcher_icon():
     project_root = Path(__file__).resolve().parents[1]
     manifest_path = project_root / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
@@ -29,10 +32,14 @@ def test_android_user_facing_copy_uses_plain_chinese_and_hides_parser_errors():
     main_activity = (
         project_root / "android" / "app" / "src" / "main" / "java" / "com" / "muguett" / "dsdcf" / "MainActivity.java"
     ).read_text(encoding="utf-8")
-    visible_text = " ".join(node.text or "" for node in ET.parse(strings_path).getroot().iter("string"))
+    string_nodes = list(ET.parse(strings_path).getroot().iter("string"))
+    visible_text = " ".join(node.text or "" for node in string_nodes)
+    strings = {node.attrib["name"]: node.text or "" for node in string_nodes}
 
     for internal_term in ("APK", "HTTPS", "SHA-256", "JSON"):
         assert internal_term not in visible_text
+    assert "部分公司仍可能显示资料不足" in strings["status_refreshed"]
+    assert "数据完整性和质量检查均已通过" not in strings["status_refreshed"]
     assert "friendlyMessage(error)" in main_activity
     assert "error.getClass().getSimpleName()" not in main_activity
 
@@ -130,6 +137,43 @@ def test_android_source_version_is_bound_to_python_and_desktop_versions():
     assert metadata.version_name == pyproject_version == desktop_version
 
 
+def test_android_release_git_gate_requires_the_repository_root_clean_head_commit(tmp_path, monkeypatch):
+    root = tmp_path / "repository"
+    root.mkdir()
+    responses = {
+        ("rev-parse", "--show-toplevel"): str(root),
+        ("rev-parse", "--verify", "HEAD"): TEST_GIT_SHA,
+        ("status", "--porcelain=v1", "--untracked-files=all"): "",
+        ("cat-file", "-t", TEST_GIT_SHA): "commit",
+    }
+
+    def fake_git_output(arguments, *, root: Path):
+        assert root == tmp_path / "repository"
+        return responses[tuple(arguments)]
+
+    monkeypatch.setattr(android_release, "_git_output", fake_git_output)
+    assert android_release._require_clean_committed_git_sha(root=root) == TEST_GIT_SHA
+
+    responses[("rev-parse", "--show-toplevel")] = str(root / "nested")
+    with pytest.raises(RuntimeError, match="repository root"):
+        android_release._require_clean_committed_git_sha(root=root)
+    responses[("rev-parse", "--show-toplevel")] = str(root)
+
+    responses[("rev-parse", "--verify", "HEAD")] = "not-a-commit"
+    with pytest.raises(RuntimeError, match="exact commit SHA"):
+        android_release._require_clean_committed_git_sha(root=root)
+    responses[("rev-parse", "--verify", "HEAD")] = TEST_GIT_SHA
+
+    responses[("status", "--porcelain=v1", "--untracked-files=all")] = "?? untracked.apk"
+    with pytest.raises(RuntimeError, match="clean committed"):
+        android_release._require_clean_committed_git_sha(root=root)
+    responses[("status", "--porcelain=v1", "--untracked-files=all")] = ""
+
+    responses[("cat-file", "-t", TEST_GIT_SHA)] = "blob"
+    with pytest.raises(RuntimeError, match="commit object"):
+        android_release._require_clean_committed_git_sha(root=root)
+
+
 @pytest.mark.parametrize(
     ("android_code", "android_name", "python_name", "desktop_name", "message"),
     [
@@ -186,15 +230,16 @@ def test_android_stable_manifest_downloads_bypass_intermediary_caches():
 
 
 def test_android_update_manifest_is_hash_bound_and_uses_the_pinned_release_path(tmp_path, monkeypatch):
-    apk = tmp_path / "DS_DCF-v11.2.0-android-release.apk"
+    source = android_release.read_source_release_metadata()
+    apk = tmp_path / f"DS_DCF-v{source.version_name}-android-release.apk"
     apk.write_bytes(b"signed-apk-placeholder")
     monkeypatch.setattr(
         android_release,
         "_inspect_apk",
         lambda _path: SimpleNamespace(
             package_id="com.muguett.dsdcf",
-            version_code=1,
-            version_name="11.2.0",
+            version_code=source.version_code,
+            version_name=source.version_name,
             signer_sha256=android_release.RELEASE_CERT_SHA256,
         ),
         raising=False,
@@ -202,30 +247,137 @@ def test_android_update_manifest_is_hash_bound_and_uses_the_pinned_release_path(
 
     manifest = build_android_update_manifest(
         apk,
-        version_code=1,
-        version_name="11.2.0",
-        release_tag="v11.2.0",
+        version_code=source.version_code,
+        version_name=source.version_name,
+        release_tag=f"v{source.version_name}",
     )
     target = tmp_path / "android-update-manifest.json"
     write_android_update_manifest(target, manifest)
 
-    assert manifest["apk_url"].endswith("/v11.2.0/DS_DCF-v11.2.0-android-release.apk")
+    assert manifest["apk_url"].endswith(f"/v{source.version_name}/DS_DCF-v{source.version_name}-android-release.apk")
     assert manifest["apk_size"] == apk.stat().st_size
     assert manifest["apk_sha256"] == hashlib.sha256(apk.read_bytes()).hexdigest()
     assert manifest["signer_sha256"] == android_release.RELEASE_CERT_SHA256
+    assert set(manifest) == {
+        "apk_sha256",
+        "apk_size",
+        "apk_url",
+        "package_id",
+        "schema_version",
+        "signer_sha256",
+        "version_code",
+        "version_name",
+    }
+    assert "git_sha" not in manifest
     assert json.loads(target.read_text(encoding="utf-8")) == manifest
+    assert target.read_bytes().endswith(b"}\n")
+    assert b"\r\n" not in target.read_bytes()
+
+
+def test_android_release_cli_binds_local_provenance_to_clean_head_without_changing_public_schema(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    source = android_release.read_source_release_metadata()
+    apk = tmp_path / f"DS_DCF-v{source.version_name}-android-release.apk"
+    apk.write_bytes(b"signed-apk-placeholder")
+    monkeypatch.setattr(android_release, "_require_clean_committed_git_sha", lambda: TEST_GIT_SHA)
+    monkeypatch.setattr(
+        android_release,
+        "_inspect_apk",
+        lambda _path: SimpleNamespace(
+            package_id=android_release.ANDROID_PACKAGE_ID,
+            version_code=source.version_code,
+            version_name=source.version_name,
+            signer_sha256=android_release.RELEASE_CERT_SHA256,
+        ),
+    )
+    manifest_path = tmp_path / "android-update-manifest.json"
+    provenance_path = tmp_path / "android-release-provenance.json"
+
+    assert (
+        android_release.main(
+            [
+                "--apk",
+                str(apk),
+                "--version-code",
+                str(source.version_code),
+                "--version-name",
+                source.version_name,
+                "--release-tag",
+                f"v{source.version_name}",
+                "--output",
+                str(manifest_path),
+                "--provenance-output",
+                str(provenance_path),
+            ]
+        )
+        == 0
+    )
+
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    provenance_bytes = provenance_path.read_bytes()
+    provenance = json.loads(provenance_bytes)
+    assert manifest_bytes.endswith(b"}\n") and b"\r\n" not in manifest_bytes
+    assert provenance_bytes.endswith(b"}\n") and b"\r\n" not in provenance_bytes
+    assert "git_sha" not in manifest
+    assert provenance == {
+        "apk_sha256": manifest["apk_sha256"],
+        "git_sha": TEST_GIT_SHA,
+        "product": "DS_DCF-android",
+        "schema_version": 1,
+        "update_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "version_code": source.version_code,
+        "version_name": source.version_name,
+    }
+    captured = capsys.readouterr()
+    assert TEST_GIT_SHA in captured.err
+    assert str(provenance_path.resolve()) in captured.err
+
+
+def test_android_release_cli_rejects_a_dirty_tree_before_writing_outputs(tmp_path, monkeypatch):
+    source = android_release.read_source_release_metadata()
+    apk = tmp_path / f"DS_DCF-v{source.version_name}-android-release.apk"
+    apk.write_bytes(b"not-inspected")
+    manifest_path = tmp_path / "android-update-manifest.json"
+    provenance_path = android_release.default_android_release_provenance_path(manifest_path)
+
+    def reject_dirty_tree():
+        raise RuntimeError("Android release manifest requires a clean committed Git work tree")
+
+    monkeypatch.setattr(android_release, "_require_clean_committed_git_sha", reject_dirty_tree)
+    with pytest.raises(RuntimeError, match="clean committed"):
+        android_release.main(
+            [
+                "--apk",
+                str(apk),
+                "--version-code",
+                str(source.version_code),
+                "--version-name",
+                source.version_name,
+                "--release-tag",
+                f"v{source.version_name}",
+                "--output",
+                str(manifest_path),
+            ]
+        )
+    assert not manifest_path.exists()
+    assert not provenance_path.exists()
 
 
 def test_android_update_manifest_rejects_arbitrary_bytes_as_an_apk(tmp_path):
     apk = tmp_path / "not-an-apk.apk"
     apk.write_bytes(b"ordinary bytes")
+    source = android_release.read_source_release_metadata()
 
     with pytest.raises(ValueError, match="valid signed APK"):
         build_android_update_manifest(
             apk,
-            version_code=1,
-            version_name="11.2.0",
-            release_tag="v11.2.0",
+            version_code=source.version_code,
+            version_name=source.version_name,
+            release_tag=f"v{source.version_name}",
         )
 
 

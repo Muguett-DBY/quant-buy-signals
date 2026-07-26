@@ -73,6 +73,7 @@ class MarketAnalysisOutcome:
     quality_history_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     type3_growth_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     research_report_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    patch4_evidence: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 def _recompute_dcf_per_share(
@@ -1532,6 +1533,9 @@ def run_market_analysis(
     research_report_evidence: Mapping[str, Mapping[str, Any]] | None = None,
     research_report_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
     research_report_progress_cb: Callable[[int, int], None] | None = None,
+    patch4_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    patch4_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
+    patch4_progress_cb: Callable[[int, int], None] | None = None,
     reporting_period_contract: ReportingPeriodContract | Mapping[str, Any] | None = None,
 ) -> MarketAnalysisOutcome:
     """Run the supported end-to-end analysis outside Streamlit for testing and audits."""
@@ -1638,6 +1642,26 @@ def run_market_analysis(
                 )
             return loaded
 
+    captured_patch4: dict[str, Mapping[str, Any]] = {}
+    if patch4_evidence is not None:
+        if not isinstance(patch4_evidence, Mapping):
+            raise TypeError("patch4_evidence must be a code mapping or None")
+        for code, value in patch4_evidence.items():
+            if not isinstance(value, Mapping):
+                raise TypeError(f"patch4_evidence record must be a mapping: {_normalise_code(code)}")
+            captured_patch4[_normalise_code(code)] = dict(value)
+
+    captured_patch4_loader = patch4_loader
+    if patch4_loader is not None:
+
+        def captured_patch4_loader(requests, **kwargs):
+            loaded = patch4_loader(requests, **kwargs)
+            if isinstance(loaded, Mapping):
+                captured_patch4.update(
+                    {_normalise_code(code): dict(value) for code, value in loaded.items() if isinstance(value, Mapping)}
+                )
+            return loaded
+
     score_kwargs: dict[str, Any] = {
         "dcf_results": dcf.results,
         "progress_cb": score_progress_cb,
@@ -1658,6 +1682,9 @@ def run_market_analysis(
         score_kwargs["research_report_evidence"] = research_report_evidence
         score_kwargs["research_report_loader"] = captured_research_loader
         score_kwargs["research_report_progress_cb"] = research_report_progress_cb
+        score_kwargs["patch4_evidence"] = patch4_evidence
+        score_kwargs["patch4_loader"] = captured_patch4_loader
+        score_kwargs["patch4_progress_cb"] = patch4_progress_cb
     scores = screen_runner(canonical_financials, canonical_quotes, **score_kwargs)
     if not isinstance(scores, pd.DataFrame):
         raise TypeError("screen runner must return a pandas DataFrame")
@@ -1672,6 +1699,7 @@ def run_market_analysis(
         quality_history_evidence=dict(sorted(captured_quality_history.items())),
         type3_growth_evidence=dict(sorted(captured_type3_growth.items())),
         research_report_evidence=dict(sorted(captured_research_reports.items())),
+        patch4_evidence=dict(sorted(captured_patch4.items())),
     )
     if not enforce_quality:
         return outcome
@@ -1699,4 +1727,5 @@ def run_market_analysis(
         quality_history_evidence=outcome.quality_history_evidence,
         type3_growth_evidence=outcome.type3_growth_evidence,
         research_report_evidence=outcome.research_report_evidence,
+        patch4_evidence=outcome.patch4_evidence,
     )

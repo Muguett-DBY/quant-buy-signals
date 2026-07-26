@@ -21,6 +21,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from data.market_coldness import (
+    EASTMONEY_CLIST_ENDPOINT,
+    EASTMONEY_SOURCE,
     MARKET_COLDNESS_DECISION_READY_TIME,
     MarketColdnessRecord,
     MarketColdnessSnapshot,
@@ -30,6 +32,7 @@ from data.trading_calendar import a_share_trading_days_ytd
 
 
 MARKET_COLDNESS_MODEL_ID = "patch6-type2c-quantity-price-v1"
+MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION = 1
 MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION = 1
 MAX_COLDNESS_SCORE = 8.0
 MAX_SCORE_WITHOUT_VOLUME_RATIO = 7.5
@@ -549,6 +552,7 @@ def build_market_coldness_evidence(
         }
         relative_components: dict[str, float] = {}
         relative_sample_sizes: dict[str, int] = {}
+        relative_context: dict[str, dict[str, int]] = {}
         for metric in available_metrics:
             section = global_sections[metric]
             minimum_section_records = min_cross_section_records
@@ -560,6 +564,18 @@ def build_market_coldness_evidence(
                     section = board_section
                     minimum_section_records = min_board_turnover_records
                     section_population = board_record_counts[board]
+            coverage = snapshot.coverage.by_metric[metric]
+            lower = bisect.bisect_left(section, values[metric])  # type: ignore[arg-type]
+            upper = bisect.bisect_right(section, values[metric])  # type: ignore[arg-type]
+            relative_context[metric] = {
+                "section_size": len(section),
+                "minimum_section_records": minimum_section_records,
+                "section_population": section_population,
+                "source_present": coverage.present,
+                "source_total": coverage.present + coverage.missing,
+                "lower_count": lower,
+                "equal_count": upper - lower,
+            }
             reference_coverage = len(section) / section_population
             source_coverage = _source_metric_coverage(snapshot, metric)
             if (
@@ -608,6 +624,7 @@ def build_market_coldness_evidence(
         evidence_id = f"{MARKET_COLDNESS_MODEL_ID}:{code}:{session.strftime('%Y%m%d')}"
         result[code] = {
             "market_coldness_score": score,
+            "market_coldness_score_evidence_level": "derived_proxy",
             "market_coldness_score_evidence": {
                 "source": f"{snapshot.source}; {snapshot.source_url}",
                 "evidence_id": evidence_id,
@@ -615,10 +632,15 @@ def build_market_coldness_evidence(
                 "summary": summary,
             },
             "components": {
+                "schema_version": MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION,
+                "model_id": MARKET_COLDNESS_MODEL_ID,
+                "code": code,
+                "source": snapshot.source,
                 "raw_values": values,
                 "absolute": {key: round(value, 6) for key, value in absolute_components.items()},
                 "relative": {key: round(value, 6) for key, value in relative_components.items()},
                 "relative_sample_sizes": relative_sample_sizes,
+                "relative_context": relative_context,
                 "metric_scores": {key: round(value, 6) for key, value in metric_scores.items()},
                 "weights": {key: round(weights[key], 6) for key in available_metrics},
                 "ytd_reliability": round(ytd_reliability, 6),
@@ -659,12 +681,263 @@ def build_market_coldness_evidence(
     return result
 
 
+def validate_market_coldness_evidence_record(
+    value: Any,
+    *,
+    expected_code: Any,
+    expected_session: date | str | None,
+) -> float:
+    """Replay one production coldness record from its raw quantitative ledger."""
+
+    top_fields = {
+        "market_coldness_score",
+        "market_coldness_score_evidence_level",
+        "market_coldness_score_evidence",
+        "components",
+    }
+    evidence_fields = {"source", "evidence_id", "as_of", "summary"}
+    component_fields = {
+        "schema_version",
+        "model_id",
+        "code",
+        "source",
+        "raw_values",
+        "absolute",
+        "relative",
+        "relative_sample_sizes",
+        "relative_context",
+        "metric_scores",
+        "weights",
+        "ytd_reliability",
+        "price_score",
+        "raw_score",
+        "score_cap",
+        "caps",
+        "board",
+        "retrieved_at",
+        "as_of_session",
+        "source_url",
+        "source_updated_at",
+    }
+    code = str(expected_code or "")
+    session = _parse_session(expected_session)
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != top_fields
+        or _SH_SZ_CODE.fullmatch(code) is None
+        or session is None
+        or value.get("market_coldness_score_evidence_level") != "derived_proxy"
+    ):
+        raise MarketColdnessScoringError("market-coldness evidence envelope is invalid")
+    evidence = value.get("market_coldness_score_evidence")
+    components = value.get("components")
+    if (
+        not isinstance(evidence, Mapping)
+        or set(evidence) != evidence_fields
+        or not isinstance(components, Mapping)
+        or set(components) != component_fields
+        or components.get("schema_version") != MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION
+        or components.get("model_id") != MARKET_COLDNESS_MODEL_ID
+        or components.get("code") != code
+        or components.get("source") != EASTMONEY_SOURCE
+        or components.get("source_url") != EASTMONEY_CLIST_ENDPOINT
+        or components.get("as_of_session") != session.isoformat()
+        or components.get("board") != _board(code)
+        or evidence.get("source") != f"{EASTMONEY_SOURCE}; {EASTMONEY_CLIST_ENDPOINT}"
+        or evidence.get("evidence_id") != f"{MARKET_COLDNESS_MODEL_ID}:{code}:{session.strftime('%Y%m%d')}"
+        or evidence.get("as_of") != session.isoformat()
+    ):
+        raise MarketColdnessScoringError("market-coldness evidence identity is invalid")
+
+    retrieved = _parse_retrieved_at(components.get("retrieved_at"))
+    source_updated = _parse_retrieved_at(components.get("source_updated_at"))
+    if (
+        market_coldness_completed_session(retrieved) != session
+        or source_updated.astimezone(_SHANGHAI).date() != session
+        or source_updated > retrieved + timedelta(seconds=MAX_FUTURE_SKEW_SECONDS)
+    ):
+        raise MarketColdnessScoringError("market-coldness source session is invalid")
+
+    raw_values = components.get("raw_values")
+    if not isinstance(raw_values, Mapping) or set(raw_values) != set(_BASE_WEIGHTS):
+        raise MarketColdnessScoringError("market-coldness raw values are invalid")
+    normalized_values = {metric: _finite_number(raw_values.get(metric)) for metric in _BASE_WEIGHTS}
+    if any(normalized_values[metric] is None for metric in _REQUIRED_METRICS):
+        raise MarketColdnessScoringError("market-coldness required raw value is missing")
+    for metric in ("change_60d_pct", "change_ytd_pct"):
+        number = normalized_values[metric]
+        if number is None or not -100.0 <= number <= 10_000.0:
+            raise MarketColdnessScoringError("market-coldness return value is invalid")
+    if any(
+        normalized_values[metric] is not None and normalized_values[metric] < 0
+        for metric in ("turnover_rate_pct", "volume_ratio")
+    ):
+        raise MarketColdnessScoringError("market-coldness activity value is invalid")
+    available_metrics = [metric for metric in _BASE_WEIGHTS if normalized_values[metric] is not None]
+
+    def number_map(name: str, expected_keys: set[str]) -> dict[str, float]:
+        item = components.get(name)
+        if not isinstance(item, Mapping) or set(item) != expected_keys:
+            raise MarketColdnessScoringError(f"market-coldness {name} ledger is invalid")
+        normalized = {key: _finite_number(item.get(key)) for key in expected_keys}
+        if any(number is None for number in normalized.values()):
+            raise MarketColdnessScoringError(f"market-coldness {name} ledger is invalid")
+        return {key: float(number) for key, number in normalized.items() if number is not None}
+
+    def close(actual: Any, expected: float, *, tolerance: float = 5e-7) -> bool:
+        number = _finite_number(actual)
+        return number is not None and math.isclose(number, expected, rel_tol=0.0, abs_tol=tolerance)
+
+    expected_absolute = {
+        metric: _interpolate(float(normalized_values[metric]), _ABSOLUTE_BANDS[metric]) for metric in available_metrics
+    }
+    absolute = number_map("absolute", set(available_metrics))
+    if any(not close(absolute[metric], round(expected_absolute[metric], 6)) for metric in available_metrics):
+        raise MarketColdnessScoringError("market-coldness absolute ledger does not replay")
+
+    context = components.get("relative_context")
+    if not isinstance(context, Mapping) or set(context) != set(available_metrics):
+        raise MarketColdnessScoringError("market-coldness relative context is invalid")
+    expected_relative: dict[str, float] = {}
+    expected_sample_sizes: dict[str, int] = {}
+    context_fields = {
+        "section_size",
+        "minimum_section_records",
+        "section_population",
+        "source_present",
+        "source_total",
+        "lower_count",
+        "equal_count",
+    }
+    for metric in available_metrics:
+        item = context.get(metric)
+        if not isinstance(item, Mapping) or set(item) != context_fields:
+            raise MarketColdnessScoringError("market-coldness relative context is invalid")
+        if any(isinstance(item[field], bool) or not isinstance(item[field], int) for field in context_fields):
+            raise MarketColdnessScoringError("market-coldness relative counts are invalid")
+        section_size = item["section_size"]
+        minimum = item["minimum_section_records"]
+        population = item["section_population"]
+        source_present = item["source_present"]
+        source_total = item["source_total"]
+        lower = item["lower_count"]
+        equal = item["equal_count"]
+        if (
+            minimum < 1
+            or section_size < 1
+            or population < section_size
+            or source_total < source_present
+            or source_present < 1
+            or lower < 0
+            or equal < 1
+            or lower + equal > section_size
+        ):
+            raise MarketColdnessScoringError("market-coldness relative counts are invalid")
+        eligible = (
+            section_size >= minimum
+            and section_size / population >= MIN_SOURCE_FIELD_COVERAGE
+            and source_present / source_total >= MIN_SOURCE_FIELD_COVERAGE
+        )
+        if eligible:
+            if section_size < 2 or equal == section_size:
+                rank_score = 5.0
+            else:
+                greater = section_size - lower - equal
+                rank_score = 1.0 + 8.0 * (greater + 0.5 * (equal - 1)) / (section_size - 1)
+                rank_score = max(1.0, min(9.0, rank_score))
+            expected_relative[metric] = rank_score
+            expected_sample_sizes[metric] = section_size
+
+    relative = number_map("relative", set(expected_relative))
+    if any(not close(relative[metric], round(expected_relative[metric], 6)) for metric in expected_relative):
+        raise MarketColdnessScoringError("market-coldness relative ledger does not replay")
+    sample_sizes = components.get("relative_sample_sizes")
+    if (
+        not isinstance(sample_sizes, Mapping)
+        or set(sample_sizes) != set(expected_sample_sizes)
+        or any(
+            isinstance(sample_sizes[metric], bool)
+            or not isinstance(sample_sizes[metric], int)
+            or sample_sizes[metric] != expected_sample_sizes[metric]
+            for metric in expected_sample_sizes
+        )
+    ):
+        raise MarketColdnessScoringError("market-coldness relative sample sizes are invalid")
+
+    expected_metric_scores = {
+        metric: (
+            0.80 * expected_absolute[metric] + 0.20 * expected_relative[metric]
+            if metric in expected_relative
+            else expected_absolute[metric]
+        )
+        for metric in available_metrics
+    }
+    metric_scores = number_map("metric_scores", set(available_metrics))
+    if any(not close(metric_scores[metric], round(expected_metric_scores[metric], 6)) for metric in available_metrics):
+        raise MarketColdnessScoringError("market-coldness metric ledger does not replay")
+
+    ytd_reliability = min(1.0, a_share_trading_days_ytd(session) / 60.0)
+    expected_weights = dict(_BASE_WEIGHTS)
+    expected_weights["change_ytd_pct"] *= ytd_reliability
+    weights = number_map("weights", set(available_metrics))
+    if not close(components.get("ytd_reliability"), round(ytd_reliability, 6)) or any(
+        not close(weights[metric], round(expected_weights[metric], 6)) for metric in available_metrics
+    ):
+        raise MarketColdnessScoringError("market-coldness weight ledger does not replay")
+
+    total_weight = sum(expected_weights[metric] for metric in available_metrics)
+    raw_score = (
+        sum(expected_metric_scores[metric] * expected_weights[metric] for metric in available_metrics) / total_weight
+    )
+    price_weight = expected_weights["change_60d_pct"] + expected_weights["change_ytd_pct"]
+    price_score = (
+        expected_metric_scores["change_60d_pct"] * expected_weights["change_60d_pct"]
+        + expected_metric_scores["change_ytd_pct"] * expected_weights["change_ytd_pct"]
+    ) / price_weight
+    initial_cap = (
+        MAX_COLDNESS_SCORE if normalized_values["volume_ratio"] is not None else MAX_SCORE_WITHOUT_VOLUME_RATIO
+    )
+    score_cap = initial_cap
+    caps = [f"evidence_cap={score_cap:.1f}"]
+    if expected_absolute["change_60d_pct"] <= 3.0:
+        score_cap = min(score_cap, 3.0)
+        caps.append("60d_hot_cap=3.0")
+    elif price_score < 5.0:
+        score_cap = min(score_cap, 4.9)
+        caps.append("price_coldness_lt5_cap=4.9")
+    elif price_score < 6.0:
+        score_cap = min(score_cap, 6.9)
+        caps.append("price_coldness_lt6_cap=6.9")
+    score = round(max(1.0, min(score_cap, raw_score)), 1)
+    if (
+        not close(components.get("price_score"), round(price_score, 6))
+        or not close(components.get("raw_score"), round(raw_score, 6))
+        or not close(components.get("score_cap"), score_cap)
+        or components.get("caps") != caps
+        or not close(value.get("market_coldness_score"), score, tolerance=1e-12)
+    ):
+        raise MarketColdnessScoringError("market-coldness final score does not replay")
+    volume_text = (
+        f"{normalized_values['volume_ratio']:.2f}" if normalized_values["volume_ratio"] is not None else "缺失"
+    )
+    expected_summary = (
+        f"量价冷度;60日{normalized_values['change_60d_pct']:.1f}%;"
+        f"YTD{normalized_values['change_ytd_pct']:.1f}%;"
+        f"换手{normalized_values['turnover_rate_pct']:.2f}%;量比{volume_text};上限{score_cap:.1f}"
+    )
+    if evidence.get("summary") != expected_summary:
+        raise MarketColdnessScoringError("market-coldness summary does not replay")
+    return score
+
+
 __all__ = [
     "MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION",
+    "MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION",
     "MARKET_COLDNESS_MODEL_ID",
     "MAX_COLDNESS_SCORE",
     "MAX_SCORE_WITHOUT_VOLUME_RATIO",
     "MARKET_COLDNESS_DECISION_READY_TIME",
     "MarketColdnessScoringError",
     "build_market_coldness_evidence",
+    "validate_market_coldness_evidence_record",
 ]

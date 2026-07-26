@@ -1,6 +1,8 @@
 import hashlib
 import io
 import json
+from copy import deepcopy
+from collections.abc import Mapping
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -10,6 +12,8 @@ import pandas as pd
 import pytest
 
 from engine.dcf import ReportingPeriodContract
+from engine import buy_screener as bs
+from engine import quantitative_evidence as qe
 from tools import run_full_audit
 
 
@@ -102,6 +106,7 @@ def _market_coldness_record(
     )
     return {
         "market_coldness_score": score,
+        "market_coldness_score_evidence_level": "derived_proxy",
         "market_coldness_score_evidence": {
             "source": f"{run_full_audit.EASTMONEY_SOURCE}; {run_full_audit.EASTMONEY_CLIST_ENDPOINT}",
             "evidence_id": f"patch6-type2c-quantity-price-v1:{code}:{as_of_session.replace('-', '')}",
@@ -304,30 +309,243 @@ def test_requested_refresh_is_successful_only_for_a_network_candidate():
     assert run_full_audit._refresh_completed(True, "stale_cache") is False
 
 
+def _quantitative_record(
+    key: str,
+    level: str = "derived_proxy",
+    *,
+    code: str = "000001",
+    missing_inputs: list[str] | None = None,
+):
+    # Reuse a record produced by the real formula engine instead of maintaining
+    # a hand-written ledger that can silently drift whenever replay contracts
+    # gain a new raw input.  The release tests own the canonical complete
+    # full-market fixture and build it through ``derive_company_evidence``.
+    from tests.test_release_zip import _quantitative_evidence_fixture
+
+    payload = deepcopy(_quantitative_evidence_fixture(code)[key])
+    if level == "derived_proxy":
+        return payload
+    quality = payload["details"]["evidence_quality"]
+    requested_missing = list(missing_inputs or ["missing_input"])
+    if level == "partial":
+        available = list(quality["available_inputs"])
+        required = [*available, *requested_missing]
+    elif level == "missing":
+        available = []
+        required = requested_missing
+    elif level == "primary":
+        payload["evidence_level"] = "primary"
+        payload["evidence"]["source"] = "一手来源测试夹具"
+        payload["evidence"]["evidence_id"] = (
+            f"primary:{key}:{code}:{payload['evidence']['as_of'].replace('-', '')}:sha256:{'a' * 64}"
+        )
+        payload["details"] = {
+            "basis": "dated_primary_source_score",
+            "adapter_contract": "trusted-primary-adapter-v1",
+            "source_summary": "经一手来源复核的量化分数",
+            "source_evidence_id": payload["evidence"]["evidence_id"],
+            "source_binding_sha256": "a" * 64,
+            "evidence_quality": {
+                "level": "primary",
+                "input_coverage": 1.0,
+                "required_inputs": ["primary_source_score"],
+                "available_inputs": ["primary_source_score"],
+                "missing_inputs": [],
+            },
+        }
+        payload["evidence"]["summary"] = f"{key}={payload['score']:.1f};model={qe.MODEL_ID};evidence_level=primary"
+        return payload
+    else:
+        raise ValueError(f"unsupported test evidence level: {level}")
+    payload["evidence_level"] = level
+    payload["details"]["evidence_quality"] = {
+        "level": level,
+        "input_coverage": round(len(available) / len(required), 3),
+        "required_inputs": required,
+        "available_inputs": available,
+        "missing_inputs": requested_missing,
+    }
+    payload["evidence"]["summary"] = f"{key}={payload['score']:.1f};model={qe.MODEL_ID};evidence_level={level}"
+    return payload
+
+
+def _quantitative_evidence(level: str = "derived_proxy", *, code: str = "000001"):
+    return {key: _quantitative_record(key, level, code=code) for key in run_full_audit._QUANTITATIVE_EVIDENCE_KEYS}
+
+
+def _quantitative_attachment_fields(evidence):
+    fields = {}
+    for key, payload in evidence.items():
+        if not isinstance(payload, Mapping):
+            continue
+        level = payload.get("evidence_level")
+        fields[f"{key}_evidence_level"] = level
+        if level in {"primary", "derived_proxy"}:
+            fields[key] = payload.get("score")
+            fields[f"{key}_evidence"] = payload.get("evidence")
+    return fields
+
+
+def _with_decision(type_key, payload):
+    payload = deepcopy(payload)
+    reasons = payload.setdefault("reasons", {})
+    reasons.setdefault("_status", payload["status"])
+    reasons.setdefault("_applicable", "yes" if payload["applicable"] else "no")
+    reasons.setdefault("_evidence", "complete" if payload["evidence_complete"] else "incomplete")
+    reasons.setdefault(
+        "_decision_missing_dimensions",
+        []
+        if payload["evidence_complete"] or not payload["applicable"]
+        else list(run_full_audit.TYPE_WEIGHTS[type_key]),
+    )
+    payload.setdefault("veto", bool(reasons.get("_veto")))
+    payload.setdefault(
+        "decision_market_context",
+        {"tradable": True, "reference_price": False, "risk_status": ""},
+    )
+    payload["decision"] = bs.replay_buy_decision(type_key, payload)
+    return payload
+
+
+def _outcome_payload(type_key, outcome, *, ledger=None):
+    triggered, total, sub_scores, reasons = outcome
+    status = reasons["_status"]
+    payload = {
+        "triggered": triggered,
+        "total": total,
+        "sub_scores": sub_scores,
+        "reasons": reasons,
+        "veto": bool(reasons.get("_veto")),
+        "status": status,
+        "applicable": status != "not_applicable",
+        "evidence_complete": reasons.get("_evidence") == "complete",
+    }
+    if ledger is not None:
+        payload["ledger"] = ledger
+    payload["decision_market_context"] = {
+        "tradable": True,
+        "reference_price": False,
+        "risk_status": "",
+    }
+    payload["decision"] = bs.replay_buy_decision(type_key, payload)
+    return payload
+
+
+def _complete_framework_row(*, quantitative_evidence=...):
+    row = {
+        "code": "000001",
+        "primary_type": "type1",
+        "num_types": 1,
+    }
+    if quantitative_evidence is not ...:
+        row["quantitative_evidence"] = quantitative_evidence
+        if isinstance(quantitative_evidence, Mapping):
+            levels = {
+                key: payload.get("evidence_level")
+                for key, payload in quantitative_evidence.items()
+                if isinstance(payload, Mapping)
+            }
+            row.update(_quantitative_attachment_fields(quantitative_evidence))
+            row["quantitative_evidence_levels"] = levels
+            row["quantitative_evidence_status"] = (
+                "complete"
+                if levels and all(level in {"primary", "derived_proxy"} for level in levels.values())
+                else "missing"
+                if levels and all(level == "missing" for level in levels.values())
+                else "partial"
+            )
+    for type_key, dimensions in run_full_audit.TYPE_WEIGHTS.items():
+        framework_score = 7.0 if type_key == "type1" else 6.0
+        row[type_key] = _with_decision(
+            type_key,
+            {
+                "status": "triggered" if type_key == "type1" else "not_triggered",
+                "triggered": type_key == "type1",
+                "veto": False,
+                "applicable": True,
+                "evidence_complete": True,
+                "sub_scores": {dimension: framework_score for dimension in dimensions},
+                "reasons": {},
+            },
+        )
+    return row
+
+
 def test_analysis_coverage_summary_counts_triggers_statuses_and_evidence_levels():
+    first_evidence = _quantitative_evidence()
+    first_evidence["technology_score"] = _quantitative_record(
+        "technology_score",
+        "partial",
+        missing_inputs=["patent_quality"],
+    )
+    second_evidence = _quantitative_evidence(code="000002")
+    second_evidence["moat_score"] = _quantitative_record(
+        "moat_score",
+        "missing",
+        code="000002",
+        missing_inputs=["gross_margin_history"],
+    )
     scores = pd.DataFrame(
         [
             {
+                "code": "000001",
                 "primary_type": "type2",
                 "num_types": 2,
-                "type1": {"status": "triggered", "triggered": True},
-                "type2": {"status": "triggered", "triggered": True},
-                "quantitative_evidence": {
-                    "moat_score": {"evidence_level": "derived_proxy"},
-                    "technology_score": {"evidence_level": "partial"},
+                "type1": {
+                    "status": "triggered",
+                    "triggered": True,
+                    "applicable": True,
+                    "evidence_complete": True,
+                    "sub_scores": {key: 8.0 for key in run_full_audit.TYPE_WEIGHTS["type1"]},
+                    "reasons": {},
                 },
+                "type2": {
+                    "status": "triggered",
+                    "triggered": True,
+                    "applicable": True,
+                    "evidence_complete": False,
+                    "sub_scores": {key: 8.0 for key in run_full_audit.TYPE_WEIGHTS["type2"]},
+                    "reasons": {"_missing": "缺独立估值证据"},
+                },
+                "quantitative_evidence": first_evidence,
+                "quantitative_evidence_levels": {
+                    key: payload["evidence_level"] for key, payload in first_evidence.items()
+                },
+                "quantitative_evidence_status": "partial",
+                **_quantitative_attachment_fields(first_evidence),
             },
             {
+                "code": "000002",
                 "primary_type": None,
                 "num_types": 0,
-                "type1": {"status": "not_applicable", "triggered": False},
-                "type2": {"status": "vetoed", "triggered": False},
-                "quantitative_evidence": {
-                    "moat_score": {"evidence_level": "missing"},
+                "type1": {
+                    "status": "not_applicable",
+                    "triggered": False,
+                    "applicable": False,
+                    "evidence_complete": True,
+                    "sub_scores": {key: 0.0 for key in run_full_audit.TYPE_WEIGHTS["type1"]},
+                    "reasons": {},
                 },
+                "type2": {
+                    "status": "vetoed",
+                    "triggered": False,
+                    "applicable": True,
+                    "evidence_complete": False,
+                    "sub_scores": {key: 2.0 for key in run_full_audit.TYPE_WEIGHTS["type2"]},
+                    "reasons": {},
+                },
+                "quantitative_evidence": second_evidence,
+                "quantitative_evidence_levels": {
+                    key: payload["evidence_level"] for key, payload in second_evidence.items()
+                },
+                "quantitative_evidence_status": "partial",
+                **_quantitative_attachment_fields(second_evidence),
             },
         ]
     )
+    for index in scores.index:
+        for type_key in ("type1", "type2"):
+            scores.at[index, type_key] = _with_decision(type_key, scores.at[index, type_key])
 
     summary = run_full_audit._analysis_coverage_summary(scores)
 
@@ -341,10 +559,331 @@ def test_analysis_coverage_summary_counts_triggers_statuses_and_evidence_levels(
         "triggered": 1,
     }
     assert summary["quantitative_evidence_level_counts"] == {
-        "derived_proxy": 1,
+        "derived_proxy": 24,
         "missing": 1,
         "partial": 1,
     }
+    assert summary["quantitative_metric_level_counts"]["technology_score"] == {
+        "derived_proxy": 1,
+        "partial": 1,
+    }
+    assert summary["quantitative_metric_level_counts"]["moat_score"] == {
+        "derived_proxy": 1,
+        "missing": 1,
+    }
+    assert summary["quantitative_missing_input_counts"]["technology_score"] == {"patent_quality": 1}
+    assert summary["quantitative_missing_input_counts"]["moat_score"] == {"gross_margin_history": 1}
+    assert summary["framework_evidence_contract"]["type1"]["valid_sub_scores"] == 2
+    assert summary["framework_evidence_contract"]["type1"]["evidence_complete"] == 2
+    assert summary["framework_evidence_contract"]["type2"]["applicable_evidence_complete"] == 0
+    assert summary["framework_evidence_contract"]["type2"]["applicable_evidence_incomplete"] == 2
+    assert summary["framework_evidence_contract"]["type2"]["incomplete_with_reason"] == 1
+    assert summary["framework_evidence_contract"]["type2"]["incomplete_without_reason"] == 1
+    assert summary["framework_evidence_contract"]["type2"]["incomplete_without_reason_examples"] == ["000002"]
+    assert summary["quantitative_evidence_gap_examples"] == [
+        {
+            "code": "000001",
+            "metric": "technology_score",
+            "level": "partial",
+            "missing_inputs": ["patent_quality"],
+        },
+        {
+            "code": "000002",
+            "metric": "moat_score",
+            "level": "missing",
+            "missing_inputs": ["gross_margin_history"],
+        },
+    ]
+    assert summary["goal_readiness"] == {
+        "all_framework_payloads_present": False,
+        "all_sub_scores_valid": False,
+        "all_applicable_frameworks_evidence_complete": False,
+        "all_incomplete_frameworks_explained": False,
+        "all_quantitative_evidence_records_valid": True,
+        "no_missing_quantitative_evidence": False,
+        "no_partial_quantitative_evidence": False,
+        "all_decision_contracts_valid": False,
+        "all_potential_candidates_visible": False,
+        "all_candidate_recall_paths_safe": False,
+        "artifact_integrity_ready": False,
+        "candidate_visibility_ready": False,
+        "candidate_recall_ready": False,
+        "ideal_zero_gap_ready": False,
+        "ready": False,
+    }
+
+
+def test_analysis_coverage_summary_proves_a_complete_seven_framework_contract():
+    row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["goal_readiness"] == {
+        "all_framework_payloads_present": True,
+        "all_sub_scores_valid": True,
+        "all_applicable_frameworks_evidence_complete": True,
+        "all_incomplete_frameworks_explained": True,
+        "all_quantitative_evidence_records_valid": True,
+        "no_missing_quantitative_evidence": True,
+        "no_partial_quantitative_evidence": True,
+        "all_decision_contracts_valid": True,
+        "all_potential_candidates_visible": True,
+        "all_candidate_recall_paths_safe": True,
+        "artifact_integrity_ready": True,
+        "candidate_visibility_ready": True,
+        "candidate_recall_ready": True,
+        "ideal_zero_gap_ready": True,
+        "ready": True,
+    }
+    assert summary["quantitative_evidence_contract"]["valid_rows"] == 1
+    assert summary["quantitative_evidence_contract"]["invalid_rows"] == 0
+    assert summary["quantitative_evidence_contract"]["expected_metrics_per_row"] == 13
+
+
+def test_independent_decision_replay_rejects_tampering_and_preserves_type3_theoretical_range():
+    scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type3"]}
+    payload = _outcome_payload(
+        "type3",
+        bs._finish(
+            "type3",
+            scores,
+            {key: "部分可复算证据" for key in scores},
+            evidence_complete=False,
+            missing_dimensions=["3b"],
+        ),
+    )
+
+    replayed = run_full_audit._independent_decision_replay("type3", payload)
+    assert replayed is not None
+    assert replayed["score_lower_bound"] == 6.4
+    assert replayed["score_upper_bound"] == 8.4
+    assert replayed["decision_basis"] == "unresolved_missing_evidence"
+
+    payload["decision"]["score_upper_bound"] = 6.0
+    assert run_full_audit._independent_decision_replay("type3", payload) is None
+
+
+def test_independent_decision_replay_handles_scope_exclusion_and_type7_strict_upper_bound():
+    excluded = _outcome_payload("type5", bs._not_applicable("type5", "不属于强周期公司"))
+    excluded_replay = run_full_audit._independent_decision_replay("type5", excluded)
+    assert excluded_replay is not None
+    assert excluded_replay["decision_basis"] == "scope_exclusion"
+    assert excluded_replay["score_upper_bound"] == 0.0
+
+    scores = {"7a": 8.0, "7b": 8.0, "7c": 6.0}
+    ledger = {
+        "scores": {"template1": 80.0, "template5": 80.0, "patch5": 60.0},
+        "decisive_score_upper_bounds": {"template1": 80.0, "template5": 80.0, "patch5": 70.0},
+        "prerequisites_complete": False,
+    }
+    quality = _outcome_payload(
+        "type7",
+        bs._finish(
+            "type7",
+            scores,
+            {key: "部分质量证据" for key in scores},
+            evidence_complete=False,
+            missing_dimensions=["7c"],
+        ),
+        ledger=ledger,
+    )
+    quality_replay = run_full_audit._independent_decision_replay("type7", quality)
+    assert quality_replay is not None
+    assert quality_replay["decision_basis"] == "conservative_upper_bound"
+    assert quality_replay["score_upper_bound"] == 7.7
+    assert quality_replay["potentially_triggerable"] is False
+
+
+def test_partial_source_failure_stays_visible_without_becoming_a_trigger():
+    scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type4"]}
+    payload = _outcome_payload(
+        "type4",
+        bs._finish(
+            "type4",
+            scores,
+            {key: "公告数据源暂时不可用" for key in scores},
+            evidence_complete=False,
+            missing_dimensions=["4a"],
+        ),
+    )
+    replayed = run_full_audit._independent_decision_replay("type4", payload)
+    assert replayed is not None
+    assert replayed["decision_complete"] is False
+    assert replayed["potentially_triggerable"] is True
+    assert replayed["visible"] is True
+    assert payload["triggered"] is False
+
+
+def test_independent_decision_replay_rejects_coordinated_status_and_veto_forgery():
+    row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
+    type5 = row["type5"]
+    type5["sub_scores"] = {key: 8.0 for key in bs.TYPE_WEIGHTS["type5"]}
+    type5["total"] = 8.0
+    type5["status"] = "observe"
+    type5["reasons"]["_status"] = "observe"
+    type5["triggered"] = False
+    type5["decision"] = bs.replay_buy_decision("type5", type5)
+    assert run_full_audit._independent_decision_replay("type5", type5) is None
+
+    type2 = row["type2"]
+    type2["status"] = "vetoed"
+    type2["reasons"]["_status"] = "vetoed"
+    type2["reasons"]["_veto"] = "伪造否决"
+    type2["veto"] = True
+    type2["decision"] = bs.replay_buy_decision("type2", type2)
+    assert run_full_audit._independent_decision_replay("type2", type2) is None
+
+
+@pytest.mark.parametrize(
+    ("quantitative_evidence", "expected_counter"),
+    [
+        (..., "missing_column"),
+        ({}, "key_mismatch"),
+        ("not-a-mapping", "non_mapping"),
+        (
+            {
+                **_quantitative_evidence(),
+                "moat_score": {
+                    key: value for key, value in _quantitative_record("moat_score").items() if key != "evidence_level"
+                },
+            },
+            "invalid_level",
+        ),
+        (
+            {
+                **_quantitative_evidence(),
+                "moat_score": {
+                    **_quantitative_record("moat_score"),
+                    "evidence_level": "invented",
+                },
+            },
+            "invalid_level",
+        ),
+    ],
+)
+def test_analysis_coverage_summary_rejects_missing_or_forged_quantitative_contract(
+    quantitative_evidence,
+    expected_counter,
+):
+    row = _complete_framework_row(quantitative_evidence=quantitative_evidence)
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"][expected_counter] == 1
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["no_missing_quantitative_evidence"] is False
+    assert summary["goal_readiness"]["no_partial_quantitative_evidence"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_rejects_level_only_quantitative_records():
+    evidence = {key: {"evidence_level": "derived_proxy"} for key in run_full_audit._QUANTITATIVE_EVIDENCE_KEYS}
+    row = _complete_framework_row(quantitative_evidence=evidence)
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["invalid_record"] == 13
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_rejects_quantitative_level_or_status_summary_mismatch():
+    row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
+    row["quantitative_evidence_levels"] = {
+        **{key: "derived_proxy" for key in run_full_audit._QUANTITATIVE_EVIDENCE_KEYS},
+        "moat_score": "partial",
+    }
+    row["quantitative_evidence_status"] = "partial"
+
+    level_summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+    assert level_summary["quantitative_evidence_contract"]["levels_mismatch"] == 1
+    assert level_summary["goal_readiness"]["ready"] is False
+
+    row["quantitative_evidence_levels"]["moat_score"] = "derived_proxy"
+    row["quantitative_evidence_status"] = "partial"
+    status_summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+    assert status_summary["quantitative_evidence_contract"]["status_mismatch"] == 1
+    assert status_summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_rejects_primary_summary_label_over_a_partial_record():
+    evidence = _quantitative_evidence()
+    evidence["moat_score"] = _quantitative_record(
+        "moat_score",
+        "partial",
+        missing_inputs=["gross_margin_history"],
+    )
+    row = _complete_framework_row(quantitative_evidence=evidence)
+    row["quantitative_evidence_levels"]["moat_score"] = "primary"
+    row["quantitative_evidence_status"] = "complete"
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["valid_rows"] == 0
+    assert summary["quantitative_evidence_contract"]["levels_mismatch"] == 1
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["no_partial_quantitative_evidence"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_rejects_serialized_primary_without_a_trusted_runtime_binding():
+    evidence = _quantitative_evidence()
+    evidence["moat_score"] = _quantitative_record("moat_score", "primary")
+    row = _complete_framework_row(quantitative_evidence=evidence)
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["valid_rows"] == 0
+    assert summary["quantitative_evidence_contract"]["invalid_record"] == 1
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_rejects_an_internal_proxy_relabelled_as_primary():
+    evidence = _quantitative_evidence()
+    forged = evidence["moat_score"]
+    forged["evidence_level"] = "primary"
+    forged["evidence"]["summary"] = f"moat_score={forged['score']:.1f};model={qe.MODEL_ID};evidence_level=primary"
+    forged["details"] = {
+        "basis": "dated_primary_source_score",
+        "source_summary": "derived_proxy result relabelled as primary",
+        "evidence_quality": {
+            "level": "primary",
+            "input_coverage": 1.0,
+            "required_inputs": ["primary_source_score"],
+            "available_inputs": ["primary_source_score"],
+            "missing_inputs": [],
+        },
+    }
+    row = _complete_framework_row(quantitative_evidence=evidence)
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["invalid_record"] == 1
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_requires_quantitative_level_and_status_columns():
+    row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
+    row.pop("quantitative_evidence_levels")
+    row.pop("quantitative_evidence_status")
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["summary_columns_missing"] == 1
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_never_accepts_an_empty_result():
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame())
+
+    assert summary["goal_readiness"]["all_framework_payloads_present"] is False
+    assert summary["goal_readiness"]["all_sub_scores_valid"] is False
+    assert summary["goal_readiness"]["all_applicable_frameworks_evidence_complete"] is False
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
+    assert summary["goal_readiness"]["ready"] is False
 
 
 def test_non_economic_skip_details_lists_every_data_and_model_exception_only():
@@ -1189,6 +1728,9 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
         issues=(),
         quality=quality,
         quality_history_evidence={},
+        type3_growth_evidence={},
+        research_report_evidence={},
+        patch4_evidence={},
     )
     calls = {}
 
@@ -1309,6 +1851,7 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     assert calls["coldness_archived"] is True
     assert calls["analysis_kwargs"]["quality_history_loader"] is run_full_audit.fetch_quality_history_batch
     assert calls["analysis_kwargs"]["research_report_loader"] is run_full_audit.fetch_research_reports_batch
+    assert calls["analysis_kwargs"]["patch4_loader"] is run_full_audit.fetch_patch4_evidence_batch
     assert calls["audit_kwargs"]["provenance"]["full_market_quality"] == quality
     assert calls["audit_kwargs"]["provenance"]["market_coldness"] == coldness_status
     assert calls["audit_kwargs"]["full_market_analysis"] is analysis
@@ -1316,6 +1859,7 @@ def test_cached_full_audit_uses_active_quality_as_regression_baseline(monkeypatc
     assert calls["audit_kwargs"]["market_coldness_evidence"] is coldness_evidence
     assert calls["audit_kwargs"]["quality_history_evidence"] == {}
     assert calls["audit_kwargs"]["research_report_evidence"] == {}
+    assert calls["audit_kwargs"]["patch4_evidence"] == {}
     assert len(calls["audit_kwargs"]["snapshot_sha256"]) == 64
     stdout.flush()
     output = json.loads(stdout_bytes.getvalue().decode(stdout_encoding))

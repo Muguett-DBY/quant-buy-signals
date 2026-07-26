@@ -7,10 +7,14 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.KeyPair;
@@ -91,6 +95,29 @@ public final class MarketRepositoryContractTest {
             fail("a signed manifest with a coerced field type must be rejected");
         } catch (IOException expected) {
             assertTrue(expected.getMessage().contains("数字字段"));
+        }
+    }
+
+    @Test
+    public void releaseProvenanceMustStayOutsideTheLegacyCompatibleSignedUpdateManifest() throws Exception {
+        KeyPair trusted = generateSigningKey();
+        String trustedPublicKey = Base64.getEncoder().encodeToString(trusted.getPublic().getEncoded());
+        byte[] manifestWithGitSha = new String(canonicalUpdateManifest(2L), StandardCharsets.UTF_8)
+                .replace(
+                        ",\"package_id\"",
+                        ",\"git_sha\":\"1234567890abcdef1234567890abcdef12345678\",\"package_id\""
+                )
+                .getBytes(StandardCharsets.UTF_8);
+
+        try {
+            MarketRepository.parseSignedUpdateManifest(
+                    manifestWithGitSha,
+                    sign(trusted, manifestWithGitSha),
+                    trustedPublicKey
+            );
+            fail("legacy-compatible update JSON must reject additional provenance fields");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("字段"));
         }
     }
 
@@ -377,9 +404,155 @@ public final class MarketRepositoryContractTest {
         );
 
         String summary = data.typeCoverageSummary();
-        assertTrue(summary.contains("1类：实际2家，待确认0家，观察0家"));
-        assertTrue(summary.contains("6类：实际0家，待确认14家，观察0家"));
-        assertTrue(summary.contains("7类：实际0家，待确认0家，观察1家"));
+        assertTrue(summary.contains("1类：实际2家，待确认0家，待补证据0家，观察0家"));
+        assertTrue(summary.contains("6类：实际0家，待确认14家，待补证据0家，观察0家"));
+        assertTrue(summary.contains("7类：实际0家，待确认0家，待补证据0家，观察1家"));
+    }
+
+    @Test
+    public void unresolvedPossibleCandidateIsBrowsableButNeverBecomesABuySignal() {
+        Map<String, MarketRepository.TypeScore> scores = typeScores(
+                "type1", "insufficient_evidence"
+        );
+        assertTrue(MarketRepository.matchesSignalFilter(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList("type1"),
+                scores,
+                1,
+                0
+        ));
+        assertTrue(MarketRepository.matchesSignalFilter(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList("type1"),
+                scores,
+                1,
+                1
+        ));
+        assertFalse(MarketRepository.matchesSignalFilter(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList("type1"),
+                scores,
+                0,
+                0
+        ));
+
+        Map<String, String> names = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            names.put("type" + number, number + "类");
+        }
+        MarketRepository.MarketEntry entry = new MarketRepository.MarketEntry(
+                "600001",
+                "待补样本",
+                "制造业",
+                10.0,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList("type1"),
+                scores,
+                names,
+                null
+        );
+        assertFalse(entry.hasTriggeredSignal());
+        assertFalse(entry.hasConditionalCandidate());
+        assertTrue(entry.hasPendingEvidenceCandidate());
+        assertTrue(entry.displayLabel().contains("待补证据：1类（不是买入信号）"));
+    }
+
+    @Test
+    public void conditionalOnlyClassificationExcludesACompanyThatAlsoHasABuySignal() {
+        Map<String, String> names = typeNames();
+        MarketRepository.MarketEntry conditionalOnly = new MarketRepository.MarketEntry(
+                "600001",
+                "仅待确认",
+                "制造业",
+                10.0,
+                Collections.emptyList(),
+                Collections.singletonList("type6"),
+                typeScores("type6", "conditional"),
+                names,
+                null
+        );
+        MarketRepository.MarketEntry overlap = new MarketRepository.MarketEntry(
+                "600002",
+                "同时触发",
+                "制造业",
+                10.0,
+                Collections.singletonList("type1"),
+                Collections.singletonList("type6"),
+                typeScores("type1", "triggered", "type6", "conditional"),
+                names,
+                null
+        );
+
+        assertTrue(conditionalOnly.hasConditionalOnlyCandidate());
+        assertFalse(overlap.hasConditionalOnlyCandidate());
+    }
+
+    @Test
+    public void malformedDecisionValuesCannotMasqueradeAsALegacyCatalogue() throws Exception {
+        JSONObject malformed = companyRecordWithDecisions();
+        for (int number = 1; number <= 7; number++) {
+            malformed.getJSONObject("types").getJSONObject("type" + number).put("decision", "malformed");
+        }
+
+        assertCompanyRecordRejected(malformed, "候选边界合同");
+
+        JSONObject nullDecision = companyRecordWithDecisions();
+        for (int number = 1; number <= 7; number++) {
+            nullDecision.getJSONObject("types").getJSONObject("type" + number).put("decision", JSONObject.NULL);
+        }
+        assertCompanyRecordRejected(nullDecision, "候选边界合同");
+    }
+
+    @Test
+    public void legacyCatalogueMayOmitPendingTypesButCannotDeclareOne() throws Exception {
+        JSONObject legacy = companyRecordWithDecisions();
+        for (int number = 1; number <= 7; number++) {
+            legacy.getJSONObject("types").getJSONObject("type" + number).remove("decision");
+        }
+        legacy.remove("pending_types");
+        MarketRepository.MarketEntry accepted = parseCompanyRecord(legacy);
+        assertFalse(accepted.hasDecisionContract());
+        assertTrue(accepted.pendingTypes.isEmpty());
+
+        legacy.put("pending_types", new JSONArray().put("type1"));
+        assertCompanyRecordRejected(legacy, "不能声明待补证据");
+    }
+
+    @Test
+    public void decisionNumbersRejectStringCoercion() throws Exception {
+        JSONObject stringSchema = companyRecordWithDecisions();
+        stringSchema.getJSONObject("types").getJSONObject("type1")
+                .getJSONObject("decision").put("schema_version", "1");
+        assertCompanyRecordRejected(stringSchema, "候选边界合同");
+
+        JSONObject stringBound = companyRecordWithDecisions();
+        stringBound.getJSONObject("types").getJSONObject("type1")
+                .getJSONObject("decision").put("score_lower_bound", "5.0");
+        assertCompanyRecordRejected(stringBound, "候选边界合同");
+    }
+
+    @Test
+    public void currentDecisionContractAcceptsConfirmedVetoWithUnneededMissingDimensions() throws Exception {
+        JSONObject company = companyRecordWithDecisions();
+        JSONObject type4 = company.getJSONObject("types").getJSONObject("type4");
+        type4.put("status", "vetoed").put("score", 4.0);
+        type4.getJSONObject("decision")
+                .put("decision_complete", true)
+                .put("decision_basis", "confirmed_veto")
+                .put("score_lower_bound", 1.0)
+                .put("score_upper_bound", 6.0)
+                .put("veto_state", "confirmed")
+                .put("potentially_triggerable", false)
+                .put("missing_dimensions", new JSONArray().put("4a").put("4b"));
+
+        MarketRepository.MarketEntry accepted = parseCompanyRecord(company);
+        assertTrue(accepted.hasDecisionContract());
+        assertTrue(accepted.pendingTypes.isEmpty());
+        assertEquals("vetoed", accepted.typeScores.get("type4").status);
     }
 
     @Test
@@ -492,8 +665,8 @@ public final class MarketRepositoryContractTest {
     public void legacyMachineReasonsAreSanitizedBeforeAnyAndroidDisplay() {
         for (String machineText : Arrays.asList(
                 "证据:patch6-observable",
-                "model_id=patch6-type7-quality-equity-v5",
-                "schema_version=5",
+                "model_id=patch6-type7-quality-equity-v6",
+                "schema_version=6",
                 "formula=internal_formula",
                 "reported_formula=(normalised_roe-g)/(cost_of_equity-g)",
                 "financial_fade_horizon_not_tam_or_penetration_proof"
@@ -532,7 +705,7 @@ public final class MarketRepositoryContractTest {
                 Collections.emptyList(),
                 typeScores(),
                 names,
-                "普通说明\nmodel_id=patch6-type7-quality-equity-v5\nschema_version=5"
+                "普通说明\nmodel_id=patch6-type7-quality-equity-v6\nschema_version=6"
         );
 
         String detail = entry.detailedLabel();
@@ -549,6 +722,75 @@ public final class MarketRepositoryContractTest {
         ));
         assertFalse(MarketRepository.isExpectedReleaseSignerHash("0".repeat(64)));
         assertFalse(MarketRepository.isExpectedReleaseSignerHash(null));
+    }
+
+    private static JSONObject companyRecordWithDecisions() throws Exception {
+        JSONObject company = new JSONObject()
+                .put("code", "600001")
+                .put("name", "合同样本")
+                .put("industry", "制造业")
+                .put("price", 10.0)
+                .put("buy_types", new JSONArray())
+                .put("conditional_types", new JSONArray())
+                .put("pending_types", new JSONArray());
+        JSONObject types = new JSONObject();
+        for (int number = 1; number <= 7; number++) {
+            JSONObject decision = new JSONObject()
+                    .put("schema_version", 1)
+                    .put("model_id", "buy-decision-bounds-v1")
+                    .put("decision_complete", true)
+                    .put("decision_basis", "full_evidence")
+                    .put("score_lower_bound", 5.0)
+                    .put("score_upper_bound", 5.0)
+                    .put("veto_state", "none")
+                    .put("potentially_triggerable", false)
+                    .put("missing_dimensions", new JSONArray());
+            types.put(
+                    "type" + number,
+                    new JSONObject()
+                            .put("status", "not_triggered")
+                            .put("score", 5.0)
+                            .put("reason", "")
+                            .put("decision", decision)
+            );
+        }
+        return company.put("types", types);
+    }
+
+    private static Map<String, String> typeNames() {
+        Map<String, String> names = new HashMap<>();
+        for (int number = 1; number <= 7; number++) {
+            names.put("type" + number, number + "类");
+        }
+        return names;
+    }
+
+    private static MarketRepository.MarketEntry parseCompanyRecord(JSONObject company) throws Exception {
+        Method method = MarketRepository.class.getDeclaredMethod(
+                "parseEntry",
+                JSONObject.class,
+                Map.class,
+                String.class
+        );
+        method.setAccessible(true);
+        try {
+            return (MarketRepository.MarketEntry) method.invoke(null, company, typeNames(), null);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            throw exception;
+        }
+    }
+
+    private static void assertCompanyRecordRejected(JSONObject company, String expectedMessage) throws Exception {
+        try {
+            parseCompanyRecord(company);
+            fail("invalid company decision contract must be rejected");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains(expectedMessage));
+        }
     }
 
     private static KeyPair generateSigningKey() throws Exception {
@@ -593,13 +835,13 @@ public final class MarketRepositoryContractTest {
                 "e818fa2a0d18b12316e826bdaeb1877a62ccb68634b42fdd598c687a74293369";
         String manifest = "{\"apk_sha256\":\"" + "0".repeat(64)
                 + "\",\"apk_size\":123"
-                + ",\"apk_url\":\"https://github.com/Muguett-DBY/quant-buy-signals/releases/download/v11.2.0/"
-                + "DS_DCF-v11.2.0-android-release.apk\""
+                + ",\"apk_url\":\"https://github.com/Muguett-DBY/quant-buy-signals/releases/download/v11.3.0/"
+                + "DS_DCF-v11.3.0-android-release.apk\""
                 + ",\"package_id\":\"com.muguett.dsdcf\""
                 + ",\"schema_version\":1"
                 + ",\"signer_sha256\":\"" + releaseCertificate + "\""
                 + ",\"version_code\":" + versionCode
-                + ",\"version_name\":\"11.2.0\"}\n";
+                + ",\"version_name\":\"11.3.0\"}\n";
         return manifest.getBytes(StandardCharsets.UTF_8);
     }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from engine.market_coldness import (
     MAX_SCORE_WITHOUT_VOLUME_RATIO,
     MarketColdnessScoringError,
     build_market_coldness_evidence,
+    validate_market_coldness_evidence_record,
 )
 
 
@@ -134,13 +136,64 @@ def test_score_is_independent_of_valuation_and_has_traceable_dated_evidence():
         min_board_turnover_records=1,
     )["600519"]
 
-    assert set(result) == {"market_coldness_score", "market_coldness_score_evidence", "components"}
+    assert set(result) == {
+        "market_coldness_score",
+        "market_coldness_score_evidence",
+        "market_coldness_score_evidence_level",
+        "components",
+    }
+    assert result["market_coldness_score_evidence_level"] == "derived_proxy"
     metadata = result["market_coldness_score_evidence"]
     assert metadata["as_of"] == "2026-07-15"
     assert MARKET_COLDNESS_MODEL_ID in metadata["evidence_id"]
     assert "PE" not in metadata["summary"]
     assert "PB" not in metadata["summary"]
     assert "60日-8.0%" in metadata["summary"]
+
+
+def test_production_record_replays_and_same_session_derived_proxy_forgery_is_rejected():
+    result = build_market_coldness_evidence(
+        _snapshot(_record("600519", change_60d_pct=-20, change_ytd_pct=-25, turnover_rate_pct=0.8, volume_ratio=0.7)),
+        as_of_session="2026-07-15",
+        now=NOW,
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+    )["600519"]
+
+    assert (
+        validate_market_coldness_evidence_record(
+            result,
+            expected_code="600519",
+            expected_session="2026-07-15",
+        )
+        == result["market_coldness_score"]
+    )
+
+    naked_proxy = {
+        "market_coldness_score": 8.0,
+        "market_coldness_score_evidence_level": "derived_proxy",
+        "market_coldness_score_evidence": {
+            "source": "任意量价代理",
+            "evidence_id": "forged:600519:20260715",
+            "as_of": "2026-07-15",
+            "summary": "同日伪造分数",
+        },
+    }
+    with pytest.raises(MarketColdnessScoringError):
+        validate_market_coldness_evidence_record(
+            naked_proxy,
+            expected_code="600519",
+            expected_session="2026-07-15",
+        )
+
+    tampered = deepcopy(result)
+    tampered["components"]["raw_values"]["change_60d_pct"] = 20.0
+    with pytest.raises(MarketColdnessScoringError, match="replay"):
+        validate_market_coldness_evidence_record(
+            tampered,
+            expected_code="600519",
+            expected_session="2026-07-15",
+        )
 
 
 def test_missing_required_observation_is_not_converted_to_zero():

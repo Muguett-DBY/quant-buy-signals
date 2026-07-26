@@ -39,12 +39,18 @@ $outputPath = [IO.Path]::GetFullPath($Output)
 if (-not [IO.File]::Exists($manifestPath)) {
     throw 'Canonical desktop update manifest does not exist.'
 }
+if ([StringComparer]::OrdinalIgnoreCase.Equals($manifestPath, $outputPath)) {
+    throw 'The detached signature output must not overwrite the desktop update manifest.'
+}
 
 [byte[]]$privateKey = $null
 if (-not [string]::IsNullOrWhiteSpace($PrivateKeyPath)) {
     $resolvedPrivateKeyPath = [IO.Path]::GetFullPath($PrivateKeyPath)
     if (-not [IO.File]::Exists($resolvedPrivateKeyPath)) {
         throw 'Desktop update signing private key file does not exist.'
+    }
+    if ([StringComparer]::OrdinalIgnoreCase.Equals($resolvedPrivateKeyPath, $outputPath)) {
+        throw 'The detached signature output must not overwrite the desktop signing private key.'
     }
     $privateKey = ConvertTo-PrivateKeyBytes ([IO.File]::ReadAllBytes($resolvedPrivateKeyPath))
 } else {

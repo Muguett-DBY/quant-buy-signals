@@ -1,5 +1,5 @@
 """
-七种买入类型筛选页 — 补丁6量化打分体系
+七种买入类型量化筛选页
 按钮触发数据加载 · 全部公司展示 · 展开看维度得分
 """
 
@@ -77,9 +77,9 @@ TYPE_DIMENSIONS = {
         ("6e", "仓位风控", 0.15),
     ],
     "type7": [
-        ("7a", "第1模板综合分", 1.0 / 3.0),
-        ("7b", "第5模板综合分", 1.0 / 3.0),
-        ("7c", "补丁5综合分", 1.0 / 3.0),
+        ("7a", "长期质量与回报", 1.0 / 3.0),
+        ("7b", "产业质量与估值", 1.0 / 3.0),
+        ("7c", "商业质量与安全边际", 1.0 / 3.0),
     ],
 }
 
@@ -87,7 +87,7 @@ TYPE6_GLOBAL_RISK_NOTICE = (
     "高风险早期/困境型标的单只股票仓位不得超过5%，此类资产合计仓位不得超过15%；"
     "买入前必须明确并能承受判断错误时的最大损失。"
     "当前自动数据不能直接证明技术突破或商业模式创新；"
-    "可在本页导入可核验的外部资料补充评分依据，未提供时不会据此给出买入信号。"
+    "缺少可复算的结构化原始资料时不会据此给出买入信号，手填结论分数也不会参与买点判定。"
 )
 
 MAX_USER_EVIDENCE_BYTES = 1_000_000
@@ -180,6 +180,20 @@ _PIPELINE_STAGE_MESSAGES = {
     "dcf": "估值计算未能生成有效结果",
     "valuation_evidence": "估值结果与当前公司源数据不一致",
 }
+_DCF_SKIP_CATEGORY_LABELS = {
+    "economic_not_applicable": "经济条件不适用",
+    "source_missing": "数据源缺失",
+    "inconsistent_source": "源数据矛盾",
+    "model_unsupported": "估值模型暂不支持",
+    "internal_error": "估值计算异常",
+}
+_DCF_SKIP_REASON_FALLBACKS = {
+    "economic_not_applicable": "当前经济条件不适合使用该估值模型",
+    "source_missing": "生成估值所需的数据暂时缺失",
+    "inconsistent_source": "不同来源的数据存在矛盾，相关估值未被采用",
+    "model_unsupported": "当前估值模型暂不支持该公司",
+    "internal_error": "估值计算发生内部异常，相关结果未被采用",
+}
 
 
 def _public_failure_message(value: object, *, fallback: str) -> str:
@@ -191,6 +205,40 @@ def _public_failure_message(value: object, *, fallback: str) -> str:
     if display != text or len(text) > 240 or _FAILURE_MACHINE_TEXT.search(text):
         return fallback
     return text
+
+
+def _public_dcf_skip_category(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "原因尚未分类"
+    return _DCF_SKIP_CATEGORY_LABELS.get(raw, "其他未生成原因")
+
+
+def _public_dcf_skip_reason(value: object, *, category: object = None) -> str:
+    raw = " ".join(str(value or "").split())
+    category_key = str(category or "").strip()
+    fallback = _DCF_SKIP_REASON_FALLBACKS.get(category_key, "估值未能生成有效结果")
+    if not raw:
+        return fallback
+    display = _display_reason(raw)
+    if display in {"可核验的财务与行业数据", "量价与换手数据"} and display != raw:
+        return fallback
+    return _public_failure_message(display, fallback=fallback)
+
+
+def _public_dcf_audit_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Create a plain-language table while preserving the raw technical export."""
+    if frame.empty:
+        return frame.copy()
+    public = frame.copy()
+    raw_categories = public.get("跳过分类", pd.Series("", index=public.index)).fillna("").astype(str)
+    raw_reasons = public.get("跳过原因", pd.Series("", index=public.index)).fillna("").astype(str)
+    public["跳过分类"] = raw_categories.map(lambda value: "" if not value else _public_dcf_skip_category(value))
+    public["跳过原因"] = [
+        "" if not reason else _public_dcf_skip_reason(reason, category=category)
+        for reason, category in zip(raw_reasons, raw_categories)
+    ]
+    return public.drop(columns=["估值参数（JSON）"], errors="ignore")
 
 
 def _public_pipeline_issue_rows(issues: object) -> list[dict[str, str]]:
@@ -246,12 +294,12 @@ _SCENARIO_DISPLAY_NAMES = {
     "optimistic": "乐观",
 }
 _TYPE7_SCORE_DISPLAY_NAMES = {
-    "template1": "第1模板",
-    "template5": "第5模板",
-    "patch5": "补丁5",
+    "template1": "长期质量与回报评分",
+    "template5": "产业质量与估值评分",
+    "patch5": "商业质量与安全边际评分",
 }
 _TYPE7_PREREQUISITE_DISPLAY_NAMES = {
-    "core_modules_80pct": "核心模块证据覆盖达到80%",
+    "core_modules_80pct": "全部必需子项完整，且核心质量资料覆盖至少80%",
     "technology_patch4": "技术类公司补充核验",
     "three_year_financials": "至少三年连续财务数据",
     "latest_quote_and_valuation": "最新行情与估值",
@@ -325,13 +373,34 @@ def _type7_prerequisite_detail(key: str, record: Mapping[str, Any]) -> str:
     if key == "core_modules_80pct":
         actual = _fmt_score(record.get("actual"))
         required = _fmt_score(record.get("required"))
-        if actual is not None and required is not None:
-            return f"当前覆盖{actual * 100:.1f}%，要求至少{required * 100:.0f}%"
+        coverage = (
+            f"核心质量资料覆盖{actual * 100:.1f}%，要求至少{required * 100:.0f}%"
+            if actual is not None and required is not None
+            else ""
+        )
+        required_items_complete = record.get("required_items_complete")
+        incomplete_items = record.get("incomplete_required_items")
+        if required_items_complete is True:
+            item_status = "全部必需子项资料完整"
+        elif required_items_complete is False:
+            count = len(incomplete_items) if isinstance(incomplete_items, (list, tuple)) else None
+            item_status = "仍有必需子项资料不完整" if count is None else f"仍有{count}个必需子项资料不完整"
+        else:
+            item_status = ""
+        if item_status and coverage:
+            return f"{item_status}；{coverage}"
+        if item_status or coverage:
+            return item_status or coverage
     elif key == "technology_patch4":
         if record.get("applicable") is False:
             return "该公司不需要此项补充核验"
         score = _fmt_score(record.get("score"))
-        return "等待补充经过核验的技术评估" if score is None else f"核验得分{score:.1f}分"
+        status = str(record.get("validation_status") or "")
+        if score is not None:
+            return f"研发人员持股与长期激励核验得分{score:.1f}分"
+        if status == "incomplete_replayable_assessment":
+            return "公告已经读取，但核心研发持股、人才覆盖、长期考核等五项事实仍有缺口"
+        return "尚未从公司公告中直接确认核心研发持股、人才覆盖和长期研发考核等五项事实"
     elif key == "three_year_financials":
         years = _fmt_score(record.get("consecutive_years"))
         if years is not None:
@@ -385,21 +454,47 @@ def _type7_ledger_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
                 }
             )
 
+    safety_veto = ledger.get("safety_veto")
+    patch5 = ledger.get("patch5")
+    safety_score = _fmt_score(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
+    if isinstance(safety_veto, bool):
+        safety_detail = (
+            f"当前安全边际{safety_score:.2f}/20；低于8分即否决"
+            if safety_score is not None
+            else "安全边际低于8/20时否决"
+        )
+        prerequisite_rows.append(
+            {
+                "前置核验": "安全边际不得触发否决",
+                "结果": "未通过" if safety_veto else "通过",
+                "说明": safety_detail,
+            }
+        )
+
     if ledger.get("triggered") is True:
-        conclusion = "三套评分与全部前置核验均已通过。"
-    elif ledger.get("safety_veto") is True:
-        conclusion = "安全边际未达到最低要求，本类型不触发。"
+        conclusion = "三项百分制评分均严格高于70分，必需子项与全部前置核验通过，且安全边际未触发否决。"
+    elif safety_veto is True:
+        conclusion = "安全边际低于8/20，已触发否决，本类型不触发。"
     elif ledger.get("decisively_not_triggered") is True:
         conclusion = "即使补全当前缺失资料，至少一套评分仍无法严格超过70分。"
     elif ledger.get("prerequisites_complete") is False:
-        conclusion = "三套评分之外仍有前置核验未通过，本类型暂不触发。"
+        conclusion = "必需子项或其他前置核验仍未通过，本类型暂不触发。"
     else:
-        conclusion = "当前结果未满足三套评分均严格超过70分的触发条件。"
+        conclusion = "当前结果未满足三项百分制评分分别严格超过70分的触发条件。"
     return {
         "score_rows": score_rows,
         "prerequisite_rows": prerequisite_rows,
         "conclusion": conclusion,
     }
+
+
+def _type_trigger_rule_text(type_key: str) -> str:
+    if type_key == "type7":
+        return (
+            "触发条件：三项百分制评分必须分别严格高于70分，不能用平均分相互补偿；"
+            "全部必需子项和其他前置核验必须通过，且安全边际不得低于8/20。"
+        )
+    return "触发条件：加权总分达到7.0分，并满足该类型全部附加条件且未触发一票否决。"
 
 
 def _filter_stock_search(frame: pd.DataFrame, term: str) -> pd.DataFrame:
@@ -815,14 +910,7 @@ def _merge_user_evidence(
     *,
     as_of: str | None = None,
 ) -> tuple[dict[str, dict], dict[str, dict]]:
-    """Validate and overlay traceable qualitative evidence without mutating snapshot data."""
-    from engine.buy_screener import (
-        QUALITATIVE_SCORE_KEYS,
-        _normalise_score_evidence,
-        _normalise_structured_growth_evidence,
-    )
-    from engine.quality_equity import normalise_research_sources
-
+    """Overlay only explicit portfolio constraints; research scores stay model-owned."""
     canonical: dict[str, dict] = {}
     for raw_code, company in financials.items():
         code = _normalise_code(raw_code)
@@ -839,17 +927,7 @@ def _merge_user_evidence(
         raise ValueError("外部证据截止日不能晚于今天")
     if not isinstance(payload, Mapping):
         raise ValueError("外部证据 JSON 顶层必须是股票代码到证据对象的映射")
-    allowed = set(QUALITATIVE_SCORE_KEYS)
-    allowed.update(f"{key}_evidence" for key in QUALITATIVE_SCORE_KEYS)
-    allowed.update(
-        {
-            "position_size_pct",
-            "type6_portfolio_pct",
-            "type7_research_sources",
-            "external_growth_evidence",
-            "segment_growth_sources",
-        }
-    )
+    allowed = {"position_size_pct", "type6_portfolio_pct"}
     normalised: dict[str, dict] = {}
     for raw_code, raw_entry in payload.items():
         code = _normalise_code(raw_code)
@@ -863,61 +941,6 @@ def _merge_user_evidence(
         if unknown:
             raise ValueError(f"{code} 包含不允许的外部证据字段: {', '.join(unknown[:5])}")
         clean: dict = {}
-        for key in QUALITATIVE_SCORE_KEYS:
-            score_present = key in raw_entry
-            evidence_key = f"{key}_evidence"
-            evidence_present = evidence_key in raw_entry
-            if not score_present and not evidence_present:
-                continue
-            if not score_present or not evidence_present:
-                raise ValueError(f"{code} 的 {key} 必须同时提供分数和证据元数据")
-            raw_evidence = raw_entry.get(evidence_key)
-            raw_as_of = raw_evidence.get("as_of") if isinstance(raw_evidence, Mapping) else None
-            try:
-                raw_evidence_date = date.fromisoformat(raw_as_of) if isinstance(raw_as_of, str) else None
-            except ValueError:
-                raw_evidence_date = None
-            if raw_evidence_date is not None and raw_evidence_date > evidence_cutoff:
-                raise ValueError(f"{code} 的 {key} 证据晚于行情快照日 {evidence_cutoff.isoformat()}")
-            score, evidence = _normalise_score_evidence(
-                raw_entry,
-                key,
-                expected_code=code,
-                reference_date=evidence_cutoff,
-            )
-            if score is None or evidence is None:
-                raise ValueError(
-                    f"{code} 的 {key} 无效；分数须为0-10，证据须含来源、绑定该股票代码的资料编号和不晚于行情日的日期"
-                )
-            if date.fromisoformat(evidence["as_of"]) > evidence_cutoff:
-                raise ValueError(f"{code} 的 {key} 证据晚于行情快照日 {evidence_cutoff.isoformat()}")
-            clean[key] = score
-            clean[evidence_key] = evidence
-        structured_evidence = (
-            (
-                "external_growth_evidence",
-                "完整并购与商誉来源",
-                ("records", "transactions", "acquisitions", "goodwill_records"),
-            ),
-            (
-                "segment_growth_sources",
-                "分产品或分地区收入增长来源",
-                ("segments", "records"),
-            ),
-        )
-        for key, missing_label, content_keys in structured_evidence:
-            if key not in raw_entry:
-                continue
-            value = _normalise_structured_growth_evidence(
-                raw_entry.get(key),
-                expected_code=code,
-                reference_date=evidence_cutoff,
-                missing_label=missing_label,
-                content_keys=content_keys,
-            )
-            if value.get("status") != "complete":
-                raise ValueError(f"{code} 的 {key} 未通过证券代码、日期、来源和明细完整性校验")
-            clean[key] = value
         for key in ("position_size_pct", "type6_portfolio_pct"):
             if key not in raw_entry:
                 continue
@@ -925,15 +948,6 @@ def _merge_user_evidence(
             if value is None or not 0 < value <= 100:
                 raise ValueError(f"{code} 的 {key} 必须是0到100之间的有限百分数")
             clean[key] = value
-        if "type7_research_sources" in raw_entry:
-            sources = normalise_research_sources(
-                raw_entry.get("type7_research_sources"),
-                today=evidence_cutoff,
-                security_code=code,
-            )
-            if not sources:
-                raise ValueError(f"{code} 的 type7_research_sources 不能为空")
-            clean["type7_research_sources"] = sources
         if not clean:
             raise ValueError(f"{code} 未包含任何受支持的外部证据字段")
         normalised[code] = clean
@@ -1643,7 +1657,7 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
             )
         )
     )
-    with st.expander("🧾 估值六点、模型参数与跳过原因", expanded=False):
+    with st.expander("🧾 估值区间与未生成原因", expanded=False):
         if audit_frame.empty:
             st.caption("本代没有估值审计记录。")
         else:
@@ -1659,21 +1673,14 @@ def _render_analysis_evidence(frame: pd.DataFrame) -> None:
                 if isinstance(payload, Mapping) and payload.get("category")
             )
             if category_counts:
-                labels = {
-                    "economic_not_applicable": "经济条件不适用",
-                    "source_missing": "数据源缺失",
-                    "inconsistent_source": "源数据矛盾",
-                    "model_unsupported": "模型暂不支持",
-                    "internal_error": "内部异常",
-                }
                 breakdown = " · ".join(
-                    f"{labels.get(category, category)} {count} 只"
+                    f"{_public_dcf_skip_category(category)} {count} 只"
                     for category, count in sorted(category_counts.items())
                 )
                 st.caption(f"未生成估值分类：{breakdown}")
-            st.dataframe(audit_frame, width="stretch", hide_index=True, height=420)
+            st.dataframe(_public_dcf_audit_frame(audit_frame), width="stretch", hide_index=True, height=420)
             st.download_button(
-                "下载估值审计 CSV",
+                "下载估值技术审计 CSV（含原始字段）",
                 st.session_state.get("buy_types_dcf_audit_csv")
                 if isinstance(st.session_state.get("buy_types_dcf_audit_csv"), bytes)
                 else _spreadsheet_safe_csv(audit_frame),
@@ -1711,7 +1718,10 @@ def _render_stock_dcf(code: str) -> None:
     if not isinstance(result, Mapping):
         reasons = st.session_state.get("buy_types_dcf_skip_reasons", {})
         reason = reasons.get(normalized) if isinstance(reasons, Mapping) else None
-        st.caption(f"估值：未产生有效结果。原因：{reason or '未返回结构化原因'}")
+        classifications = st.session_state.get("buy_types_dcf_skip_classifications", {})
+        classification = classifications.get(normalized) if isinstance(classifications, Mapping) else None
+        category = classification.get("category") if isinstance(classification, Mapping) else None
+        st.caption(f"估值：未产生有效结果。原因：{_public_dcf_skip_reason(reason, category=category)}")
         return
     model = "金融公司净资产收益估值" if bool(result.get("_pb_valuation")) else "非金融公司现金流估值"
     with st.expander(f"{model}：三种情景的估值区间与主要参数", expanded=False):
@@ -1781,7 +1791,7 @@ def _render_radar_chart(type_key, row):
             r=[7.0] * len(closed_labels),
             theta=closed_labels,
             line=dict(color="red", dash="dash", width=1),
-            name="7分视觉参考（非子项门槛）",
+            name="每项须严格高于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）",
         )
     )
     fig.update_layout(
@@ -1840,7 +1850,7 @@ def _render_judgment_matrix(row):
             textfont=dict(color="white", size=12),
         )
     )
-    fig.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="触发线 7.0")
+    fig.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="7分参考线（非统一触发线）")
     fig.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 10]), showlegend=False)
     st.plotly_chart(fig, width="stretch")
 
@@ -1859,7 +1869,7 @@ def _render_dimension_table(type_key, row):
 
     # 雷达图
     _render_radar_chart(type_key, row)
-    st.caption("7分虚线仅作视觉参考，不是单个子项门槛；是否触发以加权总分和一票否决规则为准。")
+    st.caption(_type_trigger_rule_text(type_key))
 
     status = _type_status_label(type_key, status_code)
     total_text = (
@@ -1869,7 +1879,10 @@ def _render_dimension_table(type_key, row):
         if status_code == "insufficient_evidence"
         else _format_metric(total)
     )
-    st.caption(f"总分: **{total_text}/10** | 状态: {status} | 阈值: ≥7.0")
+    if type_key == "type7":
+        st.caption(f"三项折算平均分: **{total_text}/10**（仅供汇总，不是触发阈值） | 状态: {status}")
+    else:
+        st.caption(f"总分: **{total_text}/10** | 状态: {status} | 基础分数门槛: ≥7.0")
 
     dims = TYPE_DIMENSIONS.get(type_key, [])
     if not dims or not sub_scores:
@@ -2051,7 +2064,7 @@ def _render_stock_inline(row):
                 lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")
             st.caption("  \n".join(lines))
             if t == "type7" and isinstance(td.get("ledger"), Mapping):
-                st.caption("优质股权型的原始规则：第1模板、第5模板、补丁5三套百分制分数都必须严格大于70。")
+                st.caption(_type_trigger_rule_text("type7"))
                 summary = _type7_ledger_summary(td["ledger"])
                 st.dataframe(pd.DataFrame(summary["score_rows"]), width="stretch", hide_index=True)
                 st.caption(summary["conclusion"])
@@ -2071,6 +2084,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     from data.fetcher import DataFetcher
     from data.growth_evidence import fetch_growth_evidence_batch
     from data.market_coldness import fetch_market_coldness_snapshot
+    from data.patch4_evidence import fetch_patch4_evidence_batch
     from data.quality_history import fetch_quality_history_batch
     from data.research_reports import fetch_research_reports_batch
     from data.snapshot import (
@@ -2256,6 +2270,8 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
             analysis_kwargs["type3_growth_progress_cb"] = type3_growth_cb
         if _supports_keyword(run_market_analysis, "research_report_loader"):
             analysis_kwargs["research_report_loader"] = fetch_research_reports_batch
+        if _supports_keyword(run_market_analysis, "patch4_loader"):
+            analysis_kwargs["patch4_loader"] = fetch_patch4_evidence_batch
         analysis = run_market_analysis(
             analysis_quotes,
             analysis_financials,
@@ -2355,7 +2371,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
 def show():
     st.title("🎯 七类型量化诊断与买入信号")
     st.caption(
-        "补丁6规则的量化筛选结果；诊断最高分不等于买入信号，"
+        "七种买入情况的量化筛选结果；诊断最高分不等于买入信号，"
         "只有明确触发且未被否决的类型才进入买入候选。本页面不构成投资建议。"
     )
 
@@ -2370,31 +2386,19 @@ def show():
     force_refresh = bool(st.session_state.pop("force_data_refresh", False))
     user_evidence_payload: object = None
     evidence_input_error = ""
-    with st.expander("🧾 高级功能：导入外部资料（可选）", expanded=False):
+    with st.expander("🧾 高级功能：设置仓位约束（可选）", expanded=False):
         st.caption(
-            "仅当你有可核验的行业或公司资料时使用。每项评分都必须附上来源、资料编号和日期；"
-            "优质股权型还需要至少三家不同机构的研究资料。强周期要成为买点，必须同时证明强周期属性、"
-            "底部、抗压能力、上行弹性和多年平均盈利估值。没有这些资料时，程序只会显示“证据不足”，"
-            "不会伪装成买入信号。资料仅用于本次评分，不会改写市场快照。"
+            "这里只接受你自己的单股仓位上限和同类组合仓位上限。公司、行业或估值的手填0–10分，"
+            "以及无法由程序逐项复算的研究结论，一律拒绝且不能参与买点判定。"
+            "缺少原始数据时程序会显示“证据不足”，不会用主观分数补齐。设置仅用于本次分析，"
+            "不会改写市场数据。"
         )
         st.code(
-            '{"601088":{"type5_cycle_attribute_score":8,'
-            '"type5_cycle_attribute_score_evidence":{"source":"行业协会","evidence_id":"cycle:601088:20251231",'
-            '"as_of":"2025-12-31","summary":"煤价与产能周期确认"},'
-            '"type5_bottom_signal_score":7,"type5_bottom_signal_score_evidence":'
-            '{"source":"行业成本曲线","evidence_id":"bottom:601088:20251231","as_of":"2025-12-31",'
-            '"summary":"PB分位与库存去化"},"type5_survival_score":8,'
-            '"type5_survival_score_evidence":{"source":"年报和分红公告","evidence_id":"survive:601088:20251231",'
-            '"as_of":"2025-12-31","summary":"净现金与分红可持续"},'
-            '"type5_upside_elasticity_score":7,"type5_upside_elasticity_score_evidence":'
-            '{"source":"供需报告","evidence_id":"upside:601088:20251231","as_of":"2025-12-31",'
-            '"summary":"供需缺口和产能释放"},"type5_normalized_earnings_score":7,'
-            '"type5_normalized_earnings_score_evidence":{"source":"历年财报","evidence_id":"norm:601088:20251231",'
-            '"as_of":"2025-12-31","summary":"十年均利PE低于中位"}}}',
+            '{"000001":{"position_size_pct":3,"type6_portfolio_pct":10}}',
             language="json",
         )
         evidence_file = st.file_uploader(
-            "选择外部资料文件（JSON 格式，最大 1MB）",
+            "选择仓位约束文件（JSON 格式，最大 1MB）",
             type=["json"],
             accept_multiple_files=False,
             key="buy_types_evidence_file",
@@ -2444,8 +2448,8 @@ def show():
         **分析内容：**
         1. 抓取沪深行情；源响应中如含北交所记录，会在进入分析快照前剔除
         2. 批量获取最新财报数据
-        3. 对非金融公司按未来现金流估值；对银行、保险和券商按盈利能力和净资产估值（模板25）
-        4. 按补丁6七种买入类型逐维度评分（0-10分制；优质股权型保留三套百分制原始账本）
+        3. 对非金融公司按未来现金流估值；对银行、保险和券商按盈利能力和净资产估值
+        4. 按七种买入情况逐维度评分（0-10分制；优质股权型同时保留三项百分制复算账本）
         5. 展示全部子维度得分 + 评分依据
         """)
         return

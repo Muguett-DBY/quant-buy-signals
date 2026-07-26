@@ -12,13 +12,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
 import json
 import math
 from pathlib import Path
 import re
-from statistics import median
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -181,8 +181,21 @@ def _read_bounded_response(response: Any, *, limit: int = MAX_RESPONSE_BYTES) ->
 
 def _validate_final_https_url(value: Any) -> None:
     parsed = urlsplit(str(value or ""))
-    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise QualityHistoryError("history source redirected outside HTTPS")
+    expected = urlsplit(EASTMONEY_VALUATION_ENDPOINT)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise QualityHistoryError("history source redirected outside the official endpoint") from exc
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname != expected.hostname
+        or parsed.path != expected.path
+        or port not in {None, 443}
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
+        raise QualityHistoryError("history source redirected outside the official endpoint")
 
 
 def _fetch_valuation_rows(
@@ -308,12 +321,68 @@ def _normalise_valuation_rows(value: Any, code: str, as_of: date) -> list[dict[s
     return result
 
 
-def _percentile_rank(current: float | None, history: Sequence[float]) -> float | None:
-    if current is None or not history:
+def _valuation_distribution(history: Sequence[float]) -> dict[str, list[Any]]:
+    counts = Counter(float(value) for value in history)
+    values = sorted(counts)
+    return {
+        "values": values,
+        "counts": [int(counts[value]) for value in values],
+    }
+
+
+def replay_valuation_distribution(value: Any, current: Any) -> dict[str, float | int] | None:
+    """Replay count, median and percentile from a compact raw-value distribution."""
+
+    current_value = _finite(current, positive=True)
+    if not isinstance(value, Mapping) or set(value) != {"values", "counts"} or current_value is None:
         return None
-    below = sum(value < current for value in history)
-    equal = sum(value == current for value in history)
-    return (below + 0.5 * equal) / len(history)
+    values = value.get("values")
+    counts = value.get("counts")
+    if (
+        not isinstance(values, list)
+        or not isinstance(counts, list)
+        or not values
+        or len(values) != len(counts)
+        or len(values) > VALUATION_PAGE_SIZE
+    ):
+        return None
+    normalized_values: list[float] = []
+    normalized_counts: list[int] = []
+    for raw_value, raw_count in zip(values, counts):
+        number = _finite(raw_value, positive=True)
+        if (
+            number is None
+            or (normalized_values and number <= normalized_values[-1])
+            or isinstance(raw_count, bool)
+            or not isinstance(raw_count, int)
+            or raw_count <= 0
+        ):
+            return None
+        normalized_values.append(number)
+        normalized_counts.append(raw_count)
+    observations = sum(normalized_counts)
+    if observations <= 0 or observations > VALUATION_PAGE_SIZE:
+        return None
+
+    def ordered_value(index: int) -> float:
+        consumed = 0
+        for number, count in zip(normalized_values, normalized_counts):
+            consumed += count
+            if index < consumed:
+                return number
+        raise AssertionError("valuation distribution index exceeds observations")
+
+    midpoint = observations // 2
+    historical_median = (
+        ordered_value(midpoint) if observations % 2 else (ordered_value(midpoint - 1) + ordered_value(midpoint)) / 2.0
+    )
+    below = sum(count for number, count in zip(normalized_values, normalized_counts) if number < current_value)
+    equal = sum(count for number, count in zip(normalized_values, normalized_counts) if number == current_value)
+    return {
+        "observations": observations,
+        "median": historical_median,
+        "percentile": (below + 0.5 * equal) / observations,
+    }
 
 
 def _calculate_evidence(
@@ -388,6 +457,8 @@ def _calculate_evidence(
         "median_pb_mrq": None,
         "pe_percentile": None,
         "pb_percentile": None,
+        "pe_distribution": {"values": [], "counts": []},
+        "pb_distribution": {"values": [], "counts": []},
         "reason": "",
     }
     if latest is None:
@@ -403,10 +474,14 @@ def _calculate_evidence(
         pb_history = [value for row in prior if (value := _finite(row.get("pb_mrq"), positive=True)) is not None]
         current_pe = _finite(latest.get("pe_ttm"), positive=True)
         current_pb = _finite(latest.get("pb_mrq"), positive=True)
+        pe_distribution = _valuation_distribution(pe_history)
+        pb_distribution = _valuation_distribution(pb_history)
+        pe_replay = replay_valuation_distribution(pe_distribution, current_pe)
+        pb_replay = replay_valuation_distribution(pb_distribution, current_pb)
         pe_usable = len(pe_history) >= VALUATION_MIN_OBSERVATIONS and current_pe is not None
         pb_usable = len(pb_history) >= VALUATION_MIN_OBSERVATIONS and current_pb is not None
-        pe_percentile = _percentile_rank(current_pe, pe_history) if pe_usable else None
-        pb_percentile = _percentile_rank(current_pb, pb_history) if pb_usable else None
+        pe_percentile = float(pe_replay["percentile"]) if pe_usable and pe_replay is not None else None
+        pb_percentile = float(pb_replay["percentile"]) if pb_usable and pb_replay is not None else None
         sufficient_series = pe_usable or pb_usable
         valuation.update(
             {
@@ -416,10 +491,12 @@ def _calculate_evidence(
                 "pb_observations": len(pb_history),
                 "current_pe_ttm": current_pe,
                 "current_pb_mrq": current_pb,
-                "median_pe_ttm": median(pe_history) if pe_usable else None,
-                "median_pb_mrq": median(pb_history) if pb_usable else None,
+                "median_pe_ttm": float(pe_replay["median"]) if pe_usable and pe_replay is not None else None,
+                "median_pb_mrq": float(pb_replay["median"]) if pb_usable and pb_replay is not None else None,
                 "pe_percentile": pe_percentile,
                 "pb_percentile": pb_percentile,
+                "pe_distribution": pe_distribution,
+                "pb_distribution": pb_distribution,
                 "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
             }
         )
@@ -647,4 +724,5 @@ __all__ = [
     "QualityHistoryEvidence",
     "fetch_quality_history",
     "fetch_quality_history_batch",
+    "replay_valuation_distribution",
 ]

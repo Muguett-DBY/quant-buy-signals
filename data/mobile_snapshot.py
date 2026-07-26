@@ -4,7 +4,9 @@ The desktop analysis contains the complete financial input tree and DCF audit
 ledger.  Publishing that object to a phone would be slow, costly, and expose
 far more raw provider data than the client needs.  This module exports a
 small catalogue for the whole market plus a separate detail file for actual
-or conditional candidates.  It never performs an analysis itself.
+or conditional candidates.  The catalogue also preserves the bounded decision
+contract for unresolved candidates so the phone can show them without
+mistaking them for buy signals.  It never performs an analysis itself.
 """
 
 from __future__ import annotations
@@ -26,7 +28,15 @@ from typing import Any
 import pandas as pd
 
 from data.public_presentation import public_industry_name, public_reason_text
-from engine.buy_screener import TYPE_NAMES, validate_screening_result
+from engine.buy_screener import (
+    DECISION_BASES,
+    DECISION_MODEL_ID,
+    DECISION_SCHEMA_VERSION,
+    DECISION_VETO_STATES,
+    TYPE_NAMES,
+    TYPE_WEIGHTS,
+    validate_screening_result,
+)
 
 
 SNAPSHOT_SCHEMA_VERSION = 1
@@ -38,6 +48,17 @@ SIGNALS_FILENAME = "signals-{generation}.json.gz"
 SIGNATURE_FILENAME = "manifest-{generation}.sig"
 MANIFEST_FILENAME = "manifest.json"
 _TYPE_KEYS = tuple(f"type{number}" for number in range(1, 8))
+_DECISION_FIELDS = {
+    "schema_version",
+    "model_id",
+    "decision_complete",
+    "decision_basis",
+    "score_lower_bound",
+    "score_upper_bound",
+    "veto_state",
+    "potentially_triggerable",
+    "missing_dimensions",
+}
 _PUBLIC_META_REASON_KEYS = ("_scope", "_veto", "_missing", "_condition", "_downgrade", "_risk")
 _SCORELESS_STATUSES = frozenset({"not_applicable", "insufficient_evidence"})
 _STATUS_LABELS = {
@@ -121,9 +142,51 @@ def _public_reason_text(value: Any) -> str:
     return "".join(output).rstrip() + "…"
 
 
-def _compact_type(payload: Any) -> dict[str, Any]:
+def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
+    """Validate and retain the machine-readable candidate-bound contract."""
+
+    if not isinstance(payload, Mapping) or set(payload) != _DECISION_FIELDS:
+        raise MobileSnapshotError(f"{type_key} decision contract is missing or malformed")
+    lower = _finite(payload.get("score_lower_bound"))
+    upper = _finite(payload.get("score_upper_bound"))
+    missing = payload.get("missing_dimensions")
+    if (
+        type(payload.get("schema_version")) is not int
+        or payload.get("schema_version") != DECISION_SCHEMA_VERSION
+        or payload.get("model_id") != DECISION_MODEL_ID
+        or type(payload.get("decision_complete")) is not bool
+        or payload.get("decision_basis") not in DECISION_BASES
+        or payload.get("veto_state") not in DECISION_VETO_STATES
+        or type(payload.get("potentially_triggerable")) is not bool
+        or lower is None
+        or upper is None
+        or not 0.0 <= lower <= upper <= 10.0
+        or not isinstance(missing, list)
+        or len(missing) != len(set(missing))
+        or any(item not in TYPE_WEIGHTS[type_key] for item in missing)
+    ):
+        raise MobileSnapshotError(f"{type_key} decision contract contains invalid fields")
+    return {
+        "schema_version": DECISION_SCHEMA_VERSION,
+        "model_id": DECISION_MODEL_ID,
+        "decision_complete": payload["decision_complete"],
+        "decision_basis": payload["decision_basis"],
+        "score_lower_bound": round(lower, 3),
+        "score_upper_bound": round(upper, 3),
+        "veto_state": payload["veto_state"],
+        "potentially_triggerable": payload["potentially_triggerable"],
+        "missing_dimensions": list(missing),
+    }
+
+
+def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
-        return {"status": "invalid", "score": None, "triggered": False, "reason": ""}
+        return {
+            "status": "invalid",
+            "score": None,
+            "reason": "",
+            "decision": None,
+        }
     status = str(payload.get("status") or "invalid")
     total = None if status in _SCORELESS_STATUSES else _finite(payload.get("total"))
     reasons = payload.get("reasons")
@@ -161,13 +224,13 @@ def _compact_type(payload: Any) -> dict[str, Any]:
     return {
         "status": status,
         "score": round(total, 3) if total is not None else None,
-        "triggered": payload.get("triggered") is True,
         "reason": public_reason,
+        "decision": _public_decision(payload.get("decision"), type_key),
     }
 
 
-def _public_type_detail(payload: Any) -> dict[str, Any]:
-    compact = _compact_type(payload)
+def _public_type_detail(payload: Any, type_key: str) -> dict[str, Any]:
+    compact = _compact_type(payload, type_key)
     if not isinstance(payload, Mapping):
         return compact
     reasons = payload.get("reasons")
@@ -204,9 +267,19 @@ def _public_type_detail(payload: Any) -> dict[str, Any]:
 
 
 def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
-    type_payloads = {type_key: _compact_type(row.get(type_key)) for type_key in _TYPE_KEYS}
+    type_payloads = {type_key: _compact_type(row.get(type_key), type_key) for type_key in _TYPE_KEYS}
     buy_types = [str(value) for value in row.get("buy_types", []) if str(value) in _TYPE_KEYS]
     conditional_types = [type_key for type_key, payload in type_payloads.items() if payload["status"] == "conditional"]
+    # ``potentially_triggerable`` is true for actual triggers as well.  The
+    # separate pending list contains only unresolved evidence candidates that
+    # are neither a real signal nor the existing Type 6 action condition.
+    pending_types = [
+        type_key
+        for type_key, payload in type_payloads.items()
+        if isinstance(payload.get("decision"), Mapping)
+        and payload["decision"].get("potentially_triggerable") is True
+        and payload["status"] not in {"triggered", "conditional"}
+    ]
     diagnostic_score = _finite(row.get("diagnostic_score"))
     if diagnostic_score is None:
         diagnostic_score = _finite(row.get("max_score"))
@@ -225,6 +298,7 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
         "market_cap": _finite(row.get("market_cap")),
         "buy_types": buy_types,
         "conditional_types": conditional_types,
+        "pending_types": pending_types,
         "primary_type": str(row.get("primary_type") or ""),
         "primary_label": str(row.get("primary_label") or ""),
         "diagnostic_type": str(row.get("diagnostic_type") or ""),
@@ -236,7 +310,7 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
 
 def _signal_detail(row: Mapping[str, Any]) -> dict[str, Any]:
     catalog = _catalog_company(row)
-    type_details = {type_key: _public_type_detail(row.get(type_key)) for type_key in _TYPE_KEYS}
+    type_details = {type_key: _public_type_detail(row.get(type_key), type_key) for type_key in _TYPE_KEYS}
     detail_lines = [f"{catalog['name']} {catalog['code']}"]
     for type_key in _TYPE_KEYS:
         payload = type_details[type_key]
@@ -343,6 +417,10 @@ def build_mobile_snapshot(
     conditional_only_company_count = sum(
         1 for company in companies if company["conditional_types"] and not company["buy_types"]
     )
+    pending_company_count = sum(1 for company in companies if company["pending_types"])
+    visible_candidate_company_count = sum(
+        1 for company in companies if company["buy_types"] or company["conditional_types"] or company["pending_types"]
+    )
     candidate_detail_count = len(signals)
     signal_payload = {
         **shared,
@@ -352,6 +430,11 @@ def build_mobile_snapshot(
         "triggered_company_count": triggered_company_count,
         "conditional_company_count": conditional_company_count,
         "conditional_only_company_count": conditional_only_company_count,
+        # Pending evidence candidates live in the all-company catalogue so
+        # older 11.2 clients can keep accepting the historical ``signals``
+        # array contract.  Version 11.3 reads this count and ``pending_types``.
+        "pending_company_count": pending_company_count,
+        "visible_candidate_company_count": visible_candidate_company_count,
         "candidate_detail_count": candidate_detail_count,
         "signals": signals,
     }
@@ -371,6 +454,8 @@ def build_mobile_snapshot(
             "triggered_company_count": triggered_company_count,
             "conditional_company_count": conditional_company_count,
             "conditional_only_company_count": conditional_only_company_count,
+            "pending_company_count": pending_company_count,
+            "visible_candidate_company_count": visible_candidate_company_count,
             "candidate_detail_count": candidate_detail_count,
             "type_coverage": coverage,
         },
@@ -439,8 +524,20 @@ def write_mobile_snapshot(
                 f"{label} exceeds the Android download limit: {len(compressed)} > {MAX_COMPRESSED_ASSET_BYTES}"
             )
     manifest = dict(manifest)
-    manifest["catalogue"].update({"sha256": hashlib.sha256(catalogue_bytes).hexdigest(), "size": len(catalogue_bytes)})
-    manifest["signals"].update({"sha256": hashlib.sha256(signals_bytes).hexdigest(), "size": len(signals_bytes)})
+    manifest["catalogue"].update(
+        {
+            "sha256": hashlib.sha256(catalogue_bytes).hexdigest(),
+            "size": len(catalogue_bytes),
+            "uncompressed_size": len(catalogue_raw),
+        }
+    )
+    manifest["signals"].update(
+        {
+            "sha256": hashlib.sha256(signals_bytes).hexdigest(),
+            "size": len(signals_bytes),
+            "uncompressed_size": len(signals_raw),
+        }
+    )
     staging = Path(tempfile.mkdtemp(prefix=output.name + ".", suffix=".tmp", dir=output.parent))
     committed = False
     try:

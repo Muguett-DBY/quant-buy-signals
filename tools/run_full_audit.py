@@ -27,6 +27,7 @@ from data.market_coldness import (
 )
 from data.trading_calendar import a_share_trading_days_ytd, is_a_share_trading_day
 from data.growth_evidence import fetch_growth_evidence_batch
+from data.patch4_evidence import fetch_patch4_evidence_batch
 from data.quality_history import fetch_quality_history_batch
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import (
@@ -37,6 +38,7 @@ from data.snapshot import (
     save_market_snapshot,
 )
 from engine.audit import audit_random_sample, audit_state_hashes, write_audit_artifacts
+from engine.buy_screener import TYPE_WEIGHTS
 from engine.dcf import ReportingPeriodContract
 from engine.market_coldness import (
     MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION,
@@ -50,6 +52,10 @@ from engine.market_coldness import (
     build_market_coldness_evidence,
 )
 from engine.pipeline import run_market_analysis
+from engine.quantitative_evidence import (
+    MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
+    validate_quantitative_evidence_record,
+)
 from engine.valuation_status import DCF_SKIP_ECONOMIC_NOT_APPLICABLE
 
 
@@ -127,6 +133,50 @@ _MARKET_COLDNESS_ABSOLUTE_BANDS = {
 }
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _TYPE_KEYS = tuple(f"type{index}" for index in range(1, 8))
+_QUANTITATIVE_EVIDENCE_KEYS = frozenset(
+    {
+        "industry_durability_score",
+        "accounting_integrity_score",
+        "management_alignment_score",
+        "moat_score",
+        "moat_durability_score",
+        "growth_quality_score",
+        "growth_sustainability_score",
+        "runway_score",
+        "industry_bubble_score",
+        "type3_bubble_score",
+        "catalyst_score",
+        "technology_score",
+        "business_model_score",
+    }
+)
+_QUANTITATIVE_RECORD_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing"})
+_QUANTITATIVE_EFFECTIVE_LEVELS = _QUANTITATIVE_RECORD_LEVELS
+_DECISION_SCHEMA_VERSION = 1
+_DECISION_MODEL_ID = "buy-decision-bounds-v1"
+_DECISION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "model_id",
+        "decision_complete",
+        "decision_basis",
+        "score_lower_bound",
+        "score_upper_bound",
+        "veto_state",
+        "potentially_triggerable",
+        "missing_dimensions",
+    }
+)
+_DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
+_DECISION_POTENTIAL_VETO_DIMENSIONS = {
+    "type1": frozenset({"1a", "1b"}),
+    "type2": frozenset({"2a", "2b", "2c"}),
+    "type3": frozenset({"3a", "3d", "3e"}),
+    "type4": frozenset({"4c", "4e", "4f"}),
+    "type5": frozenset(),
+    "type6": frozenset({"6a", "6b", "6c", "6d"}),
+    "type7": frozenset({"7c"}),
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -135,6 +185,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=20260715)
     parser.add_argument("--sample-size", type=int, default=100)
     parser.add_argument("--output-dir", type=Path, default=Path("audit"))
+    parser.add_argument(
+        "--require-complete-evidence",
+        action="store_true",
+        help=(
+            "fail unless every framework sub-score is structurally valid, every "
+            "incomplete framework has a specific reason, and no quantitative "
+            "evidence item is partial or missing"
+        ),
+    )
     return parser
 
 
@@ -531,6 +590,7 @@ def _replay_market_coldness_reference_artifact(
         )
         full_evidence[code] = {
             "market_coldness_score": score,
+            "market_coldness_score_evidence_level": "derived_proxy",
             "market_coldness_score_evidence": {
                 "source": f"{EASTMONEY_SOURCE}; {EASTMONEY_CLIST_ENDPOINT}",
                 "evidence_id": f"{MARKET_COLDNESS_MODEL_ID}:{code}:{session.strftime('%Y%m%d')}",
@@ -935,24 +995,438 @@ def _require_market_coldness_release_evidence(
     return coverage
 
 
+def _decision_reason(value: object) -> str:
+    text = " ".join(str(value or "数据不足").split())
+    if len(text) <= 20:
+        return text
+    best_boundary = ""
+    for match in re.finditer(r"[；;。！？!?，,]", text):
+        candidate = text[: match.start()].rstrip()
+        if len(candidate) > 19:
+            break
+        if candidate:
+            best_boundary = candidate
+    if best_boundary:
+        return best_boundary + "…"
+    prefix = text[:19].rstrip()
+    word_boundary = prefix.rfind(" ")
+    if word_boundary >= 9:
+        prefix = prefix[:word_boundary].rstrip()
+    return prefix + "…"
+
+
+def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -> dict[str, object] | None:
+    """Independently reconstruct one published buy/no-buy decision contract.
+
+    This intentionally duplicates the public scoring boundary rather than
+    importing the producer helper.  A scoring-code change must therefore also
+    update this release replay or the audit fails closed.
+    """
+
+    weights = TYPE_WEIGHTS.get(type_key)
+    reasons = payload.get("reasons")
+    sub_scores = payload.get("sub_scores")
+    decision = payload.get("decision")
+    if (
+        weights is None
+        or not isinstance(reasons, Mapping)
+        or not isinstance(sub_scores, Mapping)
+        or set(sub_scores) != set(weights)
+        or not isinstance(decision, Mapping)
+        or set(decision) != _DECISION_FIELDS
+    ):
+        return None
+    clean_scores: dict[str, float] = {}
+    for dimension in weights:
+        score = _finite_numeric(sub_scores.get(dimension))
+        if score is None or not 0.0 <= score <= 10.0:
+            return None
+        clean_scores[dimension] = score
+
+    raw_missing = reasons.get("_decision_missing_dimensions")
+    if not isinstance(raw_missing, (list, tuple)) or any(not isinstance(value, str) for value in raw_missing):
+        return None
+    if len(raw_missing) != len(set(raw_missing)) or set(raw_missing) - set(weights):
+        return None
+    missing = [dimension for dimension in weights if dimension in raw_missing]
+    status = reasons.get("_status")
+    applicable_marker = reasons.get("_applicable")
+    evidence_marker = reasons.get("_evidence")
+    if applicable_marker not in {"yes", "no"} or evidence_marker not in {"complete", "incomplete"}:
+        return None
+    applicable = applicable_marker == "yes"
+    evidence_complete = evidence_marker == "complete"
+    if not evidence_complete and not missing:
+        missing = list(weights)
+    # Type 6's position size is an action input, not company evidence.  It is
+    # nevertheless an unresolved decision dimension until the user confirms
+    # the actual single-name and portfolio exposure.
+    type6_action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
+    if type6_action_condition and "6e" not in missing:
+        missing.append("6e")
+
+    lower_scores = dict(clean_scores)
+    upper_scores = dict(clean_scores)
+    for dimension in missing:
+        lower_scores[dimension] = 0.0
+        upper_scores[dimension] = 10.0
+
+    type7_trigger_possible: bool | None = None
+    if type_key == "type7" and missing:
+        ledger = payload.get("ledger")
+        upper_ledger = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
+        mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
+        if not isinstance(upper_ledger, Mapping) or set(upper_ledger) != set(mapping.values()):
+            return None
+        for dimension in missing:
+            raw_upper = _finite_numeric(upper_ledger.get(mapping[dimension]))
+            if raw_upper is None or not 0.0 <= raw_upper <= 100.0:
+                return None
+            upper_scores[dimension] = raw_upper / 10.0
+        type7_trigger_possible = all(upper_scores[dimension] > 7.0 for dimension in weights)
+
+    lower = round(sum(lower_scores[key] * weight for key, weight in weights.items()), 1)
+    upper = round(sum(upper_scores[key] * weight for key, weight in weights.items()), 1)
+    # Patch 6's Type 3 downgrade applies only when 3e is known.  A missing 3b
+    # remains theoretically capable of scoring 10; the fetch adapter's
+    # narrower operational cap must never become a decision bound.
+    if type_key == "type3" and "3e" not in missing and clean_scores["3e"] <= 3.0:
+        lower = min(lower, 4.9)
+        upper = min(upper, 4.9)
+
+    triggered = payload.get("triggered")
+    published_applicable = payload.get("applicable")
+    published_evidence_complete = payload.get("evidence_complete")
+    published_veto = payload.get("veto")
+    published_status = payload.get("status")
+    if (
+        not all(
+            isinstance(value, bool)
+            for value in (published_applicable, published_evidence_complete, triggered, published_veto)
+        )
+        or published_status != status
+        or published_applicable != applicable
+        or published_evidence_complete != evidence_complete
+        or published_veto != bool(reasons.get("_veto"))
+        or triggered != (status == "triggered")
+    ):
+        return None
+
+    market_context = payload.get("decision_market_context")
+    if (
+        not isinstance(market_context, Mapping)
+        or set(market_context) != _DECISION_MARKET_CONTEXT_FIELDS
+        or (market_context.get("tradable") is not None and type(market_context.get("tradable")) is not bool)
+        or type(market_context.get("reference_price")) is not bool
+        or not isinstance(market_context.get("risk_status"), str)
+    ):
+        return None
+    risk_status = str(market_context["risk_status"]).strip()
+    market_block_reason = (
+        "标的不可交易"
+        if market_context["tradable"] is False
+        else "仅参考价不得触发买入"
+        if market_context["reference_price"]
+        else f"风险状态:{risk_status}"
+        if risk_status and risk_status.lower() not in {"正常", "normal", "active", "ok"}
+        else None
+    )
+    market_block = market_block_reason is not None
+    if bool(reasons.get("_decision_market_block")) != market_block or (
+        market_block and reasons.get("_decision_market_block") != _decision_reason(market_block_reason)
+    ):
+        return None
+    missing_set = set(missing)
+    bounded_veto = False
+    if type_key == "type2":
+        possible_veto = "2c" in missing_set
+        if missing_set.intersection({"2a", "2b"}):
+            lower_hot = sum(0.0 if key in missing_set else upper_scores[key] for key in ("2a", "2b")) / 2.0
+            possible_veto = possible_veto or lower_hot <= 4.0
+    elif type_key == "type4":
+        possible_moat = "4c" in missing_set
+        possible_double_bubble = bool(
+            missing_set.intersection({"4e", "4f"})
+            and (0.0 if "4e" in missing_set else upper_scores["4e"]) <= 3.0
+            and (0.0 if "4f" in missing_set else upper_scores["4f"]) <= 3.0
+        )
+        possible_veto = possible_moat or possible_double_bubble
+    elif type_key == "type6":
+        core = ("6a", "6b", "6c", "6d")
+        known_high = sum(key not in missing_set and upper_scores[key] >= 5.0 for key in core)
+        maximum_high = known_high + sum(key in missing_set for key in core)
+        bounded_veto = maximum_high < 2
+        possible_veto = not bounded_veto and known_high < 2
+    else:
+        possible_veto = bool(missing_set.intersection(_DECISION_POTENTIAL_VETO_DIMENSIONS[type_key]))
+
+    def known(key: str) -> bool:
+        return key not in missing_set
+
+    if type_key == "type1":
+        confirmed_hard_veto = bool(
+            (known("1a") and upper_scores["1a"] <= 2.0) or (known("1b") and upper_scores["1b"] <= 3.0)
+        )
+    elif type_key == "type2":
+        confirmed_hard_veto = bool(
+            (known("2a") and known("2b") and (upper_scores["2a"] + upper_scores["2b"]) / 2.0 <= 4.0)
+            or (known("2c") and upper_scores["2c"] <= 3.0)
+        )
+    elif type_key == "type3":
+        confirmed_hard_veto = bool(
+            (known("3a") and upper_scores["3a"] <= 3.0) or (known("3d") and upper_scores["3d"] <= 3.0)
+        )
+    elif type_key == "type4":
+        confirmed_hard_veto = bool(
+            (known("4c") and upper_scores["4c"] <= 3.0)
+            or (known("4e") and known("4f") and upper_scores["4e"] <= 3.0 and upper_scores["4f"] <= 3.0)
+        )
+    elif type_key == "type5":
+        confirmed_hard_veto = False
+    elif type_key == "type6":
+        confirmed_hard_veto = bool(
+            all(known(key) for key in ("6a", "6b", "6c", "6d"))
+            and sum(upper_scores[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) < 2
+        )
+    else:
+        ledger = payload.get("ledger")
+        patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
+        safety_score = _finite_numeric(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
+        confirmed_hard_veto = bool(
+            isinstance(patch5, Mapping)
+            and patch5.get("safety_margin_complete") is True
+            and safety_score is not None
+            and safety_score < 8.0
+        )
+
+    if not applicable:
+        expected_complete = True
+        expected_basis = "scope_exclusion"
+        lower = upper = 0.0
+        veto_state = "none"
+        expected_potential = False
+    elif confirmed_hard_veto or bounded_veto:
+        expected_complete = True
+        expected_basis = "confirmed_veto"
+        veto_state = "confirmed"
+        expected_potential = False
+    elif market_block:
+        expected_complete = True
+        expected_basis = "market_block"
+        veto_state = "none"
+        expected_potential = False
+    else:
+        veto_state = "possible" if possible_veto else "none"
+        theoretical_possible = bool(upper >= 7.0)
+        if type_key == "type1":
+            theoretical_possible = theoretical_possible and ("1a" in missing or upper_scores["1a"] >= 5.0)
+        elif type_key == "type2":
+            hot_upper = (upper_scores["2a"] + upper_scores["2b"]) / 2.0
+            valuation_possible = bool(
+                upper_scores["2d"] >= 5.0
+                or (hot_upper >= 7.0 and upper_scores["2c"] >= 7.0 and 4.0 <= upper_scores["2d"] <= 5.0)
+            )
+            theoretical_possible = theoretical_possible and valuation_possible
+        elif type_key == "type6":
+            theoretical_possible = theoretical_possible and (
+                sum(upper_scores[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) >= 2
+            )
+            if "6e" not in missing:
+                theoretical_possible = theoretical_possible and (
+                    upper_scores["6e"] >= 8.0 and not reasons.get("_condition")
+                )
+        elif type_key == "type7":
+            theoretical_possible = (
+                bool(type7_trigger_possible)
+                if type7_trigger_possible is not None
+                else all(upper_scores[dimension] > 7.0 for dimension in weights)
+            )
+
+        if type6_action_condition:
+            expected_complete = not theoretical_possible
+            expected_basis = "action_condition" if theoretical_possible else "conservative_upper_bound"
+            expected_potential = theoretical_possible
+        elif evidence_complete:
+            expected_complete = True
+            expected_basis = "full_evidence"
+            expected_potential = theoretical_possible
+        elif not theoretical_possible:
+            expected_complete = True
+            expected_basis = "conservative_upper_bound"
+            expected_potential = False
+        else:
+            expected_complete = False
+            expected_basis = "unresolved_missing_evidence"
+            expected_potential = True
+
+    expected = {
+        "schema_version": _DECISION_SCHEMA_VERSION,
+        "model_id": _DECISION_MODEL_ID,
+        "decision_complete": expected_complete,
+        "decision_basis": expected_basis,
+        "score_lower_bound": lower,
+        "score_upper_bound": upper,
+        "veto_state": veto_state,
+        "potentially_triggerable": expected_potential,
+        "missing_dimensions": missing,
+    }
+    for key, expected_value in expected.items():
+        actual = decision.get(key)
+        if key in {"score_lower_bound", "score_upper_bound"}:
+            numeric = _finite_numeric(actual)
+            if numeric is None or not math.isclose(numeric, float(expected_value), rel_tol=0.0, abs_tol=1e-12):
+                return None
+        elif actual != expected_value:
+            return None
+    expected_trigger = bool(expected_basis == "full_evidence" and expected_potential)
+    market_rewrite_veto = bool(market_block and status == "blocked" and not reasons.get("_blocked"))
+    if (
+        triggered is not expected_trigger
+        or (bool(reasons.get("_veto")) and not confirmed_hard_veto and not market_rewrite_veto)
+        or (status == "vetoed" and not confirmed_hard_veto)
+    ):
+        return None
+
+    visible = bool(
+        not expected_potential or expected_basis in {"full_evidence", "action_condition", "unresolved_missing_evidence"}
+    )
+    recall_safe = bool(
+        visible and (not triggered or (evidence_complete and expected_complete and expected_basis == "full_evidence"))
+    )
+    return {
+        **expected,
+        "visible": visible,
+        "recall_safe": recall_safe,
+    }
+
+
 def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
     """Summarise full-universe triggers, statuses and evidence authority."""
     if not isinstance(scores, pd.DataFrame):
         raise TypeError("analysis scores must be a pandas DataFrame")
     framework_statuses: dict[str, dict[str, int]] = {}
     framework_triggers: dict[str, int] = {}
+    framework_evidence: dict[str, dict[str, object]] = {}
+    codes = (
+        [str(value) for value in scores["code"].tolist()]
+        if "code" in scores
+        else [f"row:{index}" for index in range(len(scores))]
+    )
     for type_key in _TYPE_KEYS:
         statuses: Counter[str] = Counter()
         triggers = 0
+        contract = Counter()
+        incomplete_without_reason: list[str] = []
+        invalid_sub_scores: list[str] = []
+        invalid_decisions: list[str] = []
         if type_key in scores:
-            for payload in scores[type_key]:
+            for code, payload in zip(codes, scores[type_key]):
                 if not isinstance(payload, Mapping):
                     statuses["invalid_payload"] += 1
+                    contract["invalid_payload"] += 1
                     continue
                 statuses[str(payload.get("status") or "missing_status")] += 1
                 triggers += int(payload.get("triggered") is True)
+                applicable = payload.get("applicable")
+                evidence_complete = payload.get("evidence_complete")
+                contract["rows"] += 1
+                if applicable is True:
+                    contract["applicable"] += 1
+                elif applicable is False:
+                    contract["not_applicable"] += 1
+                else:
+                    contract["invalid_applicability"] += 1
+                if evidence_complete is True:
+                    contract["evidence_complete"] += 1
+                    if applicable is True:
+                        contract["applicable_evidence_complete"] += 1
+                elif evidence_complete is False:
+                    contract["evidence_incomplete"] += 1
+                    if applicable is True:
+                        contract["applicable_evidence_incomplete"] += 1
+                    reasons = payload.get("reasons")
+                    missing_reason = reasons.get("_missing") if isinstance(reasons, Mapping) else None
+                    if isinstance(missing_reason, str) and missing_reason.strip():
+                        contract["incomplete_with_reason"] += 1
+                    else:
+                        contract["incomplete_without_reason"] += 1
+                        if len(incomplete_without_reason) < 10:
+                            incomplete_without_reason.append(code)
+                else:
+                    contract["invalid_evidence_complete"] += 1
+
+                sub_scores = payload.get("sub_scores")
+                expected_dimensions = set(TYPE_WEIGHTS[type_key])
+                valid_sub_scores = (
+                    isinstance(sub_scores, Mapping)
+                    and set(sub_scores) == expected_dimensions
+                    and all(
+                        not isinstance(value, bool)
+                        and isinstance(value, (int, float))
+                        and math.isfinite(float(value))
+                        and 0.0 <= float(value) <= 10.0
+                        for value in sub_scores.values()
+                    )
+                )
+                if valid_sub_scores:
+                    contract["valid_sub_scores"] += 1
+                else:
+                    contract["invalid_sub_scores"] += 1
+                    if len(invalid_sub_scores) < 10:
+                        invalid_sub_scores.append(code)
+                replayed_decision = _independent_decision_replay(type_key, payload)
+                if replayed_decision is None:
+                    contract["invalid_decision"] += 1
+                    if len(invalid_decisions) < 10:
+                        invalid_decisions.append(code)
+                else:
+                    contract["valid_decision"] += 1
+                    contract[
+                        "decision_complete" if replayed_decision["decision_complete"] else "decision_incomplete"
+                    ] += 1
+                    if replayed_decision["potentially_triggerable"]:
+                        contract["potentially_triggerable"] += 1
+                    if replayed_decision["visible"]:
+                        contract["decision_visible"] += 1
+                    else:
+                        contract["decision_hidden"] += 1
+                    if replayed_decision["recall_safe"]:
+                        contract["recall_safe"] += 1
+                    else:
+                        contract["recall_unsafe"] += 1
         framework_statuses[type_key] = dict(sorted(statuses.items()))
         framework_triggers[type_key] = triggers
+        contract_fields = (
+            "rows",
+            "applicable",
+            "not_applicable",
+            "invalid_applicability",
+            "evidence_complete",
+            "evidence_incomplete",
+            "invalid_evidence_complete",
+            "applicable_evidence_complete",
+            "applicable_evidence_incomplete",
+            "incomplete_with_reason",
+            "incomplete_without_reason",
+            "valid_sub_scores",
+            "invalid_sub_scores",
+            "valid_decision",
+            "invalid_decision",
+            "decision_complete",
+            "decision_incomplete",
+            "potentially_triggerable",
+            "decision_visible",
+            "decision_hidden",
+            "recall_safe",
+            "recall_unsafe",
+            "invalid_payload",
+        )
+        framework_evidence[type_key] = {
+            **{field: int(contract.get(field, 0)) for field in contract_fields},
+            "incomplete_without_reason_examples": incomplete_without_reason,
+            "invalid_sub_score_examples": invalid_sub_scores,
+            "invalid_decision_examples": invalid_decisions,
+        }
 
     primary_counts = Counter(
         str(value)
@@ -960,13 +1434,166 @@ def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
         if isinstance(value, str) and value
     )
     evidence_levels: Counter[str] = Counter()
-    if "quantitative_evidence" in scores:
-        for company_evidence in scores["quantitative_evidence"]:
-            if not isinstance(company_evidence, Mapping):
-                continue
-            for payload in company_evidence.values():
-                if isinstance(payload, Mapping):
-                    evidence_levels[str(payload.get("evidence_level") or "missing_level")] += 1
+    quantitative_metric_level_counts: dict[str, Counter[str]] = {
+        key: Counter() for key in sorted(_QUANTITATIVE_EVIDENCE_KEYS)
+    }
+    quantitative_missing_input_counts: dict[str, Counter[str]] = {
+        key: Counter() for key in sorted(_QUANTITATIVE_EVIDENCE_KEYS)
+    }
+    quantitative_contract = Counter()
+    quantitative_invalid_examples: list[dict[str, str]] = []
+    quantitative_evidence_gap_examples: list[dict[str, object]] = []
+    has_quantitative_column = "quantitative_evidence" in scores
+    has_levels_column = "quantitative_evidence_levels" in scores
+    has_status_column = "quantitative_evidence_status" in scores
+    quantitative_summary_columns_present = has_levels_column and has_status_column
+    for index, code in enumerate(codes):
+        quantitative_contract["rows"] += 1
+        invalid_reasons: list[str] = []
+        score_row = scores.iloc[index]
+        company_evidence = score_row.get("quantitative_evidence") if has_quantitative_column else None
+        if not has_quantitative_column:
+            quantitative_contract["missing_column"] += 1
+            invalid_reasons.append("缺quantitative_evidence列")
+        elif not isinstance(company_evidence, Mapping):
+            quantitative_contract["non_mapping"] += 1
+            invalid_reasons.append("量化证据不是映射")
+        else:
+            actual_keys = set(company_evidence)
+            if actual_keys != _QUANTITATIVE_EVIDENCE_KEYS:
+                quantitative_contract["key_mismatch"] += 1
+                invalid_reasons.append("量化子指标集合不完整")
+
+            payload_levels: dict[str, str] = {}
+            for evidence_key in sorted(_QUANTITATIVE_EVIDENCE_KEYS & actual_keys):
+                payload = company_evidence.get(evidence_key)
+                if not isinstance(payload, Mapping):
+                    quantitative_contract["invalid_record"] += 1
+                    invalid_reasons.append(f"{evidence_key}记录不是映射")
+                    continue
+                raw_level = payload.get("evidence_level")
+                if not isinstance(raw_level, str) or raw_level not in _QUANTITATIVE_RECORD_LEVELS:
+                    quantitative_contract["invalid_level"] += 1
+                    invalid_reasons.append(f"{evidence_key}证据等级无效")
+                    continue
+                try:
+                    normalized_record = validate_quantitative_evidence_record(
+                        payload,
+                        key=evidence_key,
+                        code=code,
+                    )
+                except (TypeError, ValueError) as exc:
+                    quantitative_contract["invalid_record"] += 1
+                    invalid_reasons.append(f"{evidence_key}记录合同无效:{exc}")
+                    continue
+                attached_level = score_row.get(f"{evidence_key}_evidence_level")
+                attached_score = _finite_numeric(score_row.get(evidence_key))
+                attached_evidence = score_row.get(f"{evidence_key}_evidence")
+                attachment_valid = bool(
+                    attached_level == raw_level
+                    and (
+                        (
+                            raw_level in {"primary", "derived_proxy"}
+                            and attached_score is not None
+                            and math.isclose(
+                                attached_score,
+                                float(normalized_record["score"]),
+                                rel_tol=0.0,
+                                abs_tol=1e-12,
+                            )
+                            and attached_evidence == normalized_record["evidence"]
+                        )
+                        or (
+                            raw_level in {"partial", "missing"}
+                            and attached_score is None
+                            and not isinstance(attached_evidence, Mapping)
+                        )
+                    )
+                )
+                if not attachment_valid:
+                    quantitative_contract["attachment_mismatch"] += 1
+                    invalid_reasons.append(f"{evidence_key}发布分数未绑定量化证据")
+                    continue
+                payload_levels[evidence_key] = raw_level
+
+            if not quantitative_summary_columns_present:
+                if has_levels_column or has_status_column:
+                    quantitative_contract["summary_columns_mismatch"] += 1
+                    invalid_reasons.append("量化证据等级与状态列未成对出现")
+                else:
+                    quantitative_contract["summary_columns_missing"] += 1
+                    invalid_reasons.append("缺量化证据等级与状态列")
+            else:
+                published_levels = scores.iloc[index].get("quantitative_evidence_levels")
+                published_status = scores.iloc[index].get("quantitative_evidence_status")
+                levels_valid = bool(
+                    isinstance(published_levels, Mapping)
+                    and set(published_levels) == _QUANTITATIVE_EVIDENCE_KEYS
+                    and all(
+                        isinstance(level, str) and level in _QUANTITATIVE_EFFECTIVE_LEVELS
+                        for level in published_levels.values()
+                    )
+                )
+                levels_match_records = bool(
+                    levels_valid
+                    and all(
+                        effective_level == payload_levels.get(key) for key, effective_level in published_levels.items()
+                    )
+                )
+                if not levels_valid or not levels_match_records:
+                    quantitative_contract["levels_mismatch"] += 1
+                    invalid_reasons.append("量化证据等级汇总与子指标不一致")
+                effective_levels = dict(published_levels) if levels_valid else {}
+                expected_status = (
+                    "complete"
+                    if effective_levels
+                    and all(level in {"primary", "derived_proxy"} for level in effective_levels.values())
+                    else "missing"
+                    if effective_levels and all(level == "missing" for level in effective_levels.values())
+                    else "partial"
+                )
+                if published_status != expected_status:
+                    quantitative_contract["status_mismatch"] += 1
+                    invalid_reasons.append("量化证据状态与子指标不一致")
+
+                if levels_valid:
+                    evidence_levels.update(effective_levels.values())
+                    for evidence_key in sorted(_QUANTITATIVE_EVIDENCE_KEYS):
+                        level = effective_levels[evidence_key]
+                        quantitative_metric_level_counts[evidence_key][level] += 1
+                        if level not in {"partial", "missing"}:
+                            continue
+                        payload = company_evidence.get(evidence_key)
+                        raw_missing_inputs = payload.get("missing_inputs") if isinstance(payload, Mapping) else None
+                        details = payload.get("details") if isinstance(payload, Mapping) else None
+                        quality = details.get("evidence_quality") if isinstance(details, Mapping) else None
+                        if not isinstance(raw_missing_inputs, list) and isinstance(quality, Mapping):
+                            raw_missing_inputs = quality.get("missing_inputs")
+                        normalized_missing_inputs = (
+                            [str(value) for value in raw_missing_inputs] if isinstance(raw_missing_inputs, list) else []
+                        )
+                        quantitative_missing_input_counts[evidence_key].update(normalized_missing_inputs)
+                        if len(quantitative_evidence_gap_examples) < 25:
+                            quantitative_evidence_gap_examples.append(
+                                {
+                                    "code": code,
+                                    "metric": evidence_key,
+                                    "level": level,
+                                    "missing_inputs": normalized_missing_inputs,
+                                }
+                            )
+
+        if invalid_reasons:
+            quantitative_contract["invalid_rows"] += 1
+            if len(quantitative_invalid_examples) < 25:
+                quantitative_invalid_examples.append(
+                    {
+                        "code": code,
+                        "reason": "；".join(dict.fromkeys(invalid_reasons)),
+                    }
+                )
+        else:
+            quantitative_contract["valid_rows"] += 1
     if "num_types" in scores:
         numeric_types = pd.to_numeric(scores["num_types"], errors="coerce").fillna(0)
         candidate_companies = int((numeric_types > 0).sum())
@@ -980,13 +1607,129 @@ def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
             for row in scores.to_dict(orient="records")
         )
         total_framework_triggers = sum(framework_triggers.values())
+    score_rows = len(scores)
+    all_framework_payloads_present = score_rows > 0 and all(
+        int(contract.get("rows", 0)) == score_rows and int(contract.get("invalid_payload", 0)) == 0
+        for contract in framework_evidence.values()
+    )
+    all_sub_scores_valid = all_framework_payloads_present and all(
+        int(contract.get("valid_sub_scores", 0)) == score_rows
+        and int(contract.get("invalid_payload", 0)) == 0
+        and int(contract.get("invalid_sub_scores", 0)) == 0
+        for contract in framework_evidence.values()
+    )
+    all_applicable_frameworks_evidence_complete = all_framework_payloads_present and all(
+        int(contract.get("applicable_evidence_incomplete", 0)) == 0
+        and int(contract.get("invalid_evidence_complete", 0)) == 0
+        for contract in framework_evidence.values()
+    )
+    all_incomplete_frameworks_explained = all(
+        int(contract.get("incomplete_without_reason", 0)) == 0
+        and int(contract.get("invalid_evidence_complete", 0)) == 0
+        and int(contract.get("invalid_applicability", 0)) == 0
+        for contract in framework_evidence.values()
+    )
+    all_decision_contracts_valid = all_framework_payloads_present and all(
+        int(contract.get("valid_decision", 0)) == score_rows and int(contract.get("invalid_decision", 0)) == 0
+        for contract in framework_evidence.values()
+    )
+    all_potential_candidates_visible = all_decision_contracts_valid and all(
+        int(contract.get("decision_hidden", 0)) == 0 for contract in framework_evidence.values()
+    )
+    all_candidate_recall_paths_safe = all_decision_contracts_valid and all(
+        int(contract.get("recall_unsafe", 0)) == 0 for contract in framework_evidence.values()
+    )
+    all_quantitative_evidence_records_valid = bool(
+        score_rows > 0
+        and int(quantitative_contract.get("valid_rows", 0)) == score_rows
+        and int(quantitative_contract.get("invalid_rows", 0)) == 0
+    )
+    no_missing_quantitative_evidence = bool(
+        all_quantitative_evidence_records_valid and evidence_levels.get("missing", 0) == 0
+    )
+    no_partial_quantitative_evidence = bool(
+        all_quantitative_evidence_records_valid and evidence_levels.get("partial", 0) == 0
+    )
+    artifact_integrity_ready = bool(
+        all_framework_payloads_present
+        and all_sub_scores_valid
+        and all_incomplete_frameworks_explained
+        and all_quantitative_evidence_records_valid
+        and all_decision_contracts_valid
+    )
+    candidate_visibility_ready = bool(artifact_integrity_ready and all_potential_candidates_visible)
+    candidate_recall_ready = bool(
+        artifact_integrity_ready and candidate_visibility_ready and all_candidate_recall_paths_safe
+    )
+    ideal_zero_gap_ready = bool(
+        artifact_integrity_ready
+        and candidate_visibility_ready
+        and candidate_recall_ready
+        and all_applicable_frameworks_evidence_complete
+        and no_missing_quantitative_evidence
+        and no_partial_quantitative_evidence
+    )
+    goal_readiness = {
+        "all_framework_payloads_present": all_framework_payloads_present,
+        "all_sub_scores_valid": all_sub_scores_valid,
+        "all_applicable_frameworks_evidence_complete": all_applicable_frameworks_evidence_complete,
+        "all_incomplete_frameworks_explained": all_incomplete_frameworks_explained,
+        "all_quantitative_evidence_records_valid": all_quantitative_evidence_records_valid,
+        "no_missing_quantitative_evidence": no_missing_quantitative_evidence,
+        "no_partial_quantitative_evidence": no_partial_quantitative_evidence,
+        "all_decision_contracts_valid": all_decision_contracts_valid,
+        "all_potential_candidates_visible": all_potential_candidates_visible,
+        "all_candidate_recall_paths_safe": all_candidate_recall_paths_safe,
+        "artifact_integrity_ready": artifact_integrity_ready,
+        "candidate_visibility_ready": candidate_visibility_ready,
+        "candidate_recall_ready": candidate_recall_ready,
+        "ideal_zero_gap_ready": ideal_zero_gap_ready,
+    }
+    # ``ready`` intentionally remains the strict ideal-data goal used by
+    # ``--require-complete-evidence``.  Normal publication gates use the split
+    # integrity/visibility fields above.
+    goal_readiness["ready"] = ideal_zero_gap_ready
     return {
         "candidate_companies": candidate_companies,
         "total_framework_triggers": total_framework_triggers,
         "framework_trigger_counts": framework_triggers,
         "primary_trigger_counts": dict(sorted(primary_counts.items())),
         "framework_status_counts": framework_statuses,
+        "framework_evidence_contract": framework_evidence,
         "quantitative_evidence_level_counts": dict(sorted(evidence_levels.items())),
+        "quantitative_metric_level_counts": {
+            key: dict(sorted(counts.items())) for key, counts in quantitative_metric_level_counts.items()
+        },
+        "quantitative_missing_input_counts": {
+            key: dict(sorted(counts.items())) for key, counts in quantitative_missing_input_counts.items()
+        },
+        "quantitative_evidence_contract": {
+            "model_id": QUANTITATIVE_EVIDENCE_MODEL_ID,
+            "expected_metrics": sorted(_QUANTITATIVE_EVIDENCE_KEYS),
+            "expected_metrics_per_row": len(_QUANTITATIVE_EVIDENCE_KEYS),
+            "summary_columns_present": quantitative_summary_columns_present,
+            **{
+                key: int(quantitative_contract.get(key, 0))
+                for key in (
+                    "rows",
+                    "valid_rows",
+                    "invalid_rows",
+                    "missing_column",
+                    "non_mapping",
+                    "key_mismatch",
+                    "invalid_record",
+                    "invalid_level",
+                    "attachment_mismatch",
+                    "summary_columns_missing",
+                    "summary_columns_mismatch",
+                    "levels_mismatch",
+                    "status_mismatch",
+                )
+            },
+            "invalid_examples": quantitative_invalid_examples,
+        },
+        "quantitative_evidence_gap_examples": quantitative_evidence_gap_examples,
+        "goal_readiness": goal_readiness,
     }
 
 
@@ -1357,7 +2100,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         quality_history_loader=fetch_quality_history_batch,
         type3_growth_loader=fetch_growth_evidence_batch,
         research_report_loader=fetch_research_reports_batch,
+        patch4_loader=fetch_patch4_evidence_batch,
     )
+    screening_coverage = _analysis_coverage_summary(analysis.scores)
+    if args.require_complete_evidence and not bool(screening_coverage["goal_readiness"]["ready"]):
+        print(
+            json.dumps(
+                {
+                    "refresh_requested": bool(args.refresh),
+                    "refresh_completed": _refresh_completed(args.refresh, snapshot.source),
+                    "snapshot_source": snapshot.source,
+                    "quotes": len(snapshot.quotes),
+                    "eligible": len(eligible),
+                    "score_rows": len(analysis.scores),
+                    "screening_coverage": screening_coverage,
+                    "pipeline_issues": len(analysis.issues),
+                    "analysis_quality": dict(analysis.quality),
+                    "strict_evidence_gate": "failed_before_snapshot_promotion_or_audit_write",
+                },
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            )
+        )
+        return 1
     active_payload_sha256 = snapshot.baseline_payload_sha256
     if snapshot.source == "network":
         saved = save_market_snapshot(
@@ -1392,6 +2158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "full_market_quality": dict(analysis.quality),
             "market_coldness": dict(market_coldness_status),
             "market_coldness_reference_artifact": market_coldness_reference_artifact,
+            "strict_evidence_required": bool(args.require_complete_evidence),
+            "screening_coverage": screening_coverage,
         },
         full_market_analysis=analysis,
         reporting_period_contract=reporting_period_contract,
@@ -1399,6 +2167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         quality_history_evidence=analysis.quality_history_evidence,
         type3_growth_evidence=getattr(analysis, "type3_growth_evidence", {}),
         research_report_evidence=getattr(analysis, "research_report_evidence", {}),
+        patch4_evidence=getattr(analysis, "patch4_evidence", {}),
     )
     ending_state = audit_state_hashes()
     provenance_state = {key: audit.provenance.get(key) for key in starting_state}
@@ -1434,7 +2203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "dcf_skip_reason_counts": dict(sorted(Counter(analysis.dcf_skip_reasons.values()).items())),
         "dcf_skip_classification_counts": dict(sorted(skip_categories.items())),
         "dcf_non_economic_skip_details": _non_economic_skip_details(skip_classifications),
-        "screening_coverage": _analysis_coverage_summary(analysis.scores),
+        "screening_coverage": screening_coverage,
         "pipeline_issues": len(analysis.issues),
         "analysis_quality": dict(analysis.quality),
         "market_coldness": dict(market_coldness_status),
@@ -1452,7 +2221,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     # rate so the UI can retain a prior good generation during source outages.
     # A release audit is stricter: even an issue outside the sampled 100 rows
     # must fail the command and cannot be represented as a clean release.
-    return 1 if not summary["refresh_completed"] or audit.invariant_errors or analysis.issues else 0
+    evidence_ready = bool(summary["screening_coverage"]["goal_readiness"]["ready"])
+    return (
+        1
+        if (
+            not summary["refresh_completed"]
+            or audit.invariant_errors
+            or analysis.issues
+            or (args.require_complete_evidence and not evidence_ready)
+        )
+        else 0
+    )
 
 
 if __name__ == "__main__":

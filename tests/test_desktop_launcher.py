@@ -12,6 +12,40 @@ import pytest
 from desktop import launcher
 
 
+@pytest.mark.parametrize(
+    ("error", "operation", "expected"),
+    [
+        (
+            launcher.UpdateError("update manifest request failed: HTTPError"),
+            "check",
+            "暂时无法连接更新服务器",
+        ),
+        (
+            launcher.UpdateError("update manifest signature request failed: HTTPError"),
+            "check",
+            "暂时无法连接更新服务器",
+        ),
+        (
+            launcher.UpdateError("update package SHA-256 does not match the update manifest"),
+            "install",
+            "更新文件未通过安全校验",
+        ),
+        (
+            launcher.UpdateError("update_config.json has an invalid shape"),
+            "config",
+            "当前安装包的更新配置无效",
+        ),
+        (RuntimeError("unexpected backend failure"), "check", "更新检查未完成"),
+    ],
+)
+def test_update_errors_are_mapped_to_plain_chinese(error, operation, expected):
+    message = launcher._public_update_error_message(error, operation=operation)
+
+    assert expected in message
+    for machine_text in ("UpdateError", "HTTPError", "RuntimeError", "backend"):
+        assert machine_text not in message
+
+
 def test_desktop_runtime_uses_writable_local_app_data_cache(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.delenv("DS_DCF_CACHE_DIR", raising=False)

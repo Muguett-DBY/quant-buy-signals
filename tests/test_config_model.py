@@ -1,9 +1,10 @@
 import math
 from pathlib import Path
+import tomllib
 
 import config
 from data.industry import _INDUSTRY_RULES
-from tools.verify_release_zip import _locked_requirements
+from tools.verify_release_zip import _exact_project_dependencies, _locked_requirements
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,21 @@ def test_hash_locks_do_not_override_the_callers_package_index():
             for line in text.splitlines()
         )
         assert _locked_requirements(content) is not None
+
+
+def test_wheel_metadata_preserves_every_direct_runtime_security_pin():
+    requirements = {}
+    for raw_line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, version = line.partition("==")
+        assert separator and name and version
+        requirements[name.casefold().replace("_", "-").replace(".", "-")] = version
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+
+    assert _exact_project_dependencies(project) == requirements
 
 
 def test_every_supported_industry_has_an_explicit_risk_model():

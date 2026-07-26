@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -33,6 +34,7 @@ _PORTABLE_PACKAGE_NAME = f"DS_DCF-v{__version__}-windows-x64-portable.zip"
 # version in the embedded filename so the installer always locates the exact
 # manifest that was produced beside its portable ZIP.
 _BUNDLED_MANIFEST_NAME = f"DS_DCF-v{__version__}-update-manifest.json"
+_CANONICAL_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
 
 def _resource_root() -> Path:
@@ -77,6 +79,59 @@ def verify_bundled_release(*, resource_root: str | Path | None = None) -> tuple[
     return manifest, verify_update_package(package, manifest)
 
 
+def _installed_version_ceiling(versions_root: Path) -> str | None:
+    """Return the highest complete side-by-side install in one version library."""
+
+    if not versions_root.exists():
+        return None
+    if (
+        not versions_root.is_dir()
+        or versions_root.is_symlink()
+        or getattr(versions_root, "is_junction", lambda: False)()
+    ):
+        raise UpdateError("版本库不是安全的本地目录")
+
+    installed: list[tuple[tuple[int, int, int], str]] = []
+    try:
+        children = tuple(versions_root.iterdir())
+    except OSError as exc:
+        raise UpdateError(f"无法检查已安装版本：{type(exc).__name__}") from exc
+    for version_dir in children:
+        match = _CANONICAL_VERSION.fullmatch(version_dir.name)
+        if match is None:
+            continue
+        if not version_dir.is_dir() or version_dir.is_symlink() or getattr(version_dir, "is_junction", lambda: False)():
+            raise UpdateError("已安装版本目录不是安全的本地目录")
+        app_dir = version_dir / "app"
+        executable = app_dir / "DS_DCF.exe"
+        release_manifest = app_dir / "release-manifest.json"
+        if not executable.is_file() or not release_manifest.is_file():
+            continue
+        try:
+            payload = json.loads(release_manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if payload != {
+            "schema_version": 1,
+            "product": "DS_DCF",
+            "version": version_dir.name,
+            "entrypoint": "DS_DCF.exe",
+        }:
+            continue
+        installed.append((tuple(int(part) for part in match.groups()), version_dir.name))
+    return max(installed)[1] if installed else None
+
+
+def _highest_installed_version(*roots: Path) -> str | None:
+    ceilings = {ceiling for root in roots if (ceiling := _installed_version_ceiling(root)) is not None}
+    if not ceilings:
+        return None
+    return max(
+        ceilings,
+        key=lambda version: tuple(int(part) for part in _CANONICAL_VERSION.fullmatch(version).groups()),
+    )
+
+
 def install_bundled_release(
     *,
     versions_root: str | Path | None = None,
@@ -86,14 +141,34 @@ def install_bundled_release(
     """Install the verified payload as a first install, never as a downgrade."""
 
     manifest, package = verify_bundled_release(resource_root=resource_root)
-    # A bootstrapper has no installed application version.  The updater still
-    # verifies the target directory byte-for-byte if this exact version exists.
+    root = Path(versions_root).expanduser().resolve() if versions_root is not None else default_version_library_root()
+    protected_roots = (root,)
+    if create_shortcut:
+        shortcut_root = default_version_library_root()
+        if shortcut_root != root:
+            protected_roots += (shortcut_root,)
+    installed_ceiling = _highest_installed_version(*protected_roots)
+    manifest_version = tuple(int(part) for part in _CANONICAL_VERSION.fullmatch(manifest.version).groups())
+    ceiling_version = (
+        tuple(int(part) for part in _CANONICAL_VERSION.fullmatch(installed_ceiling).groups())
+        if installed_ceiling is not None
+        else None
+    )
+    if ceiling_version is not None and manifest_version < ceiling_version:
+        raise UpdateError(f"已安装较新版本 {installed_ceiling}，拒绝用旧安装程序覆盖稳定快捷方式")
+    # Re-running the exact current installer remains idempotent: the updater
+    # replays every installed byte against the embedded, hash-bound ZIP before
+    # it refreshes the shortcut.  A genuinely newer installer is compared
+    # against the highest complete version found above.
+    current_version = (
+        installed_ceiling if installed_ceiling is not None and installed_ceiling != manifest.version else "0.0.0"
+    )
     return install_update_package(
         package,
         manifest,
-        versions_root=versions_root,
+        versions_root=root,
         create_shortcut=create_shortcut,
-        current_version="0.0.0",
+        current_version=current_version,
     )
 
 

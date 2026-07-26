@@ -18,6 +18,7 @@ from engine.quantitative_evidence import (
     build_sector_context,
     derive_company_evidence,
     enrich_metrics,
+    validate_quantitative_evidence_record,
 )
 
 
@@ -40,6 +41,7 @@ def _metric(code: str, **overrides: object) -> dict[str, object]:
         "gross_margin_years": [2022, 2023, 2024, 2025],
         "gross_margin_history": [0.43, 0.44, 0.45, 0.45],
         "margin_history": [0.10, 0.105, 0.108, 0.11],
+        "fcf_years": [2022, 2023, 2024, 2025],
         "fcf_history": [7.0, 8.0, 9.0, 10.0],
         "free_cash_flow": 10.0,
         "net_profit": 12.0,
@@ -72,6 +74,93 @@ def _metric(code: str, **overrides: object) -> dict[str, object]:
 def _context() -> dict[str, object]:
     peers = [_metric(f"P{index}", rd_intensity=0.01 * (index + 1)) for index in range(MIN_SECTOR_COMPANIES)]
     return build_sector_context(peers)["TEST"]
+
+
+def _insurance_metric(code: str = "INSURER", **overrides: object) -> dict[str, object]:
+    years = list(range(2017, 2026))
+    metric = _metric(
+        code,
+        industry="INSURANCE",
+        indicator_roic_years=[],
+        indicator_roic_history=[],
+        gross_margin_years=[],
+        gross_margin_history=[],
+        gross_margin=None,
+        gross_margin_cv=None,
+        fcf_years=[],
+        fcf_history=[],
+        free_cash_flow=None,
+        roic=None,
+        wacc=None,
+        solvency_adequacy_ratio_years=years,
+        solvency_adequacy_ratio_history=[2.40, 2.35, 2.30, 2.25, 2.20, 2.15, 2.10, 2.05, 2.00],
+        new_business_value_years=years,
+        new_business_value_history=[20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 27.0, 30.0, 33.0],
+        earned_premium_years=years,
+        earned_premium_history=[100.0, 104.0, 108.0, 112.0, 116.0, 120.0, 125.0, 130.0, 136.0],
+        life_surrender_rate_years=years,
+        life_surrender_rate_history=[0.025, 0.024, 0.023, 0.022, 0.021, 0.020, 0.019, 0.018, 0.017],
+        indicator_weighted_roe_years=years,
+        indicator_weighted_roe_history=[0.12, 0.13, 0.12, 0.14, 0.13, 0.14, 0.15, 0.15, 0.16],
+        adjusted_profit_ratio_years=years,
+        adjusted_profit_ratio_history=[0.96, 0.97, 0.98, 0.98, 0.99, 0.99, 1.00, 0.99, 1.01],
+    )
+    metric.update(overrides)
+    return metric
+
+
+def test_insurance_moat_uses_sector_evidence_without_industrial_defaults() -> None:
+    metric = _insurance_metric()
+
+    _contexts, evidence_by_code = enrich_metrics([metric], {})
+
+    moat = evidence_by_code["INSURER"]["moat_score"]
+    durability = evidence_by_code["INSURER"]["moat_durability_score"]
+    assert moat["evidence_level"] == "derived_proxy"
+    assert moat["details"]["basis"] == "insurance_specific_not_industrial_roic_margin_or_fcff"
+    assert moat["details"]["evidence_quality"]["missing_inputs"] == []
+    assert set(moat["details"]["components"]) == {
+        "solvency_resilience",
+        "new_business_value_growth",
+        "earned_premium_growth",
+        "policyholder_retention",
+        "weighted_roe",
+        "adjusted_profit_quality",
+    }
+    assert durability["evidence_level"] == "derived_proxy"
+    assert durability["details"]["basis"] == "insurance_specific_not_industrial_roic_margin_or_fcff"
+    assert durability["details"]["durability_history_years"] == 9
+    assert durability["details"]["history_cap"] == 6.0
+    assert metric["moat_score"] == moat["score"]
+    assert metric["moat_durability_score"] == durability["score"]
+
+
+def test_single_undated_fcf_cannot_complete_accounting_management_or_moat() -> None:
+    metric = _metric("TARGET", fcf_history=[10.0], fcf_years=[])
+
+    evidence = derive_company_evidence(metric, _context())
+
+    for key in ("accounting_integrity_score", "management_alignment_score", "moat_score"):
+        assert evidence[key]["evidence_level"] != "derived_proxy"
+        assert "free_cash_flow_history" in evidence[key]["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_insurance_moat_fails_closed_when_one_sector_history_is_missing() -> None:
+    metric = _insurance_metric(
+        "INSURANCE-MISSING",
+        life_surrender_rate_years=[],
+        life_surrender_rate_history=[],
+    )
+
+    _contexts, evidence_by_code = enrich_metrics([metric], {})
+
+    moat = evidence_by_code["INSURANCE-MISSING"]["moat_score"]
+    durability = evidence_by_code["INSURANCE-MISSING"]["moat_durability_score"]
+    assert moat["evidence_level"] == "partial"
+    assert moat["details"]["evidence_quality"]["missing_inputs"] == ["life_surrender_rate_history"]
+    assert durability["evidence_level"] == "partial"
+    assert "moat_score" not in metric
+    assert "moat_durability_score" not in metric
 
 
 def test_sector_aggregate_requires_minimum_sample_and_exact_coverage_threshold() -> None:
@@ -117,6 +206,50 @@ def test_sector_aggregate_requires_minimum_sample_and_exact_coverage_threshold()
     assert below_boundary["cohort_count"] == cohort_count
     assert below_boundary["population_count"] == population_count + 1
     assert below_boundary["coverage"] == pytest.approx(cohort_count / (population_count + 1))
+
+
+def test_company_context_rejects_peer_growth_from_an_old_reporting_window() -> None:
+    trade_date = date.today()
+    expected_latest_year = trade_date.year - 1
+    stale_peers = [
+        _metric(
+            f"STALE-{index}",
+            financial_indicator_as_of="2010-12-31",
+            source_trade_date=trade_date.isoformat(),
+            revenue_years=[2008, 2009, 2010],
+            revenue_values=[100.0, 150.0, 225.0],
+            revenue_latest=225.0,
+        )
+        for index in range(MIN_SECTOR_COMPANIES)
+    ]
+    target = _metric(
+        "CURRENT-TARGET",
+        financial_indicator_as_of=f"{expected_latest_year}-12-31",
+        source_trade_date=trade_date.isoformat(),
+        revenue_years=[],
+        revenue_values=[],
+        revenue_latest=None,
+    )
+
+    context = build_company_contexts(
+        [*stale_peers, target],
+        target_codes={"CURRENT-TARGET"},
+    )["CURRENT-TARGET"]
+    revenue = context["revenue"]
+
+    assert context["latest_complete_financial_year"] == expected_latest_year
+    assert revenue["expected_latest_year"] == expected_latest_year
+    assert revenue["years"] == [
+        expected_latest_year - 2,
+        expected_latest_year - 1,
+        expected_latest_year,
+    ]
+    assert revenue["reporting_period_eligible_count"] == 0
+    assert revenue["cohort_count"] == 0
+    assert revenue["available"] is False
+    assert revenue["reason"] == "stale_or_missing_reporting_period"
+    assert context["aggregate_revenue_cagr"] is None
+    assert context["aggregate_revenue_cagr_count"] == 0
 
 
 def test_enrichment_uses_leave_one_out_peers_for_each_target() -> None:
@@ -248,6 +381,26 @@ def test_durability_and_runway_history_use_the_latest_consecutive_common_suffix(
     assert runway["evidence_cap"] == 6.0
 
 
+def test_moat_replay_does_not_claim_historical_spreads_without_wacc() -> None:
+    years = list(range(2021, 2026))
+    target = _metric(
+        "NO-WACC",
+        wacc=None,
+        indicator_roic_years=years,
+        indicator_roic_history=[0.18] * len(years),
+        gross_margin_years=years,
+        gross_margin_history=[0.60] * len(years),
+    )
+
+    payload = derive_company_evidence(target, _context())["moat_score"]
+    details = payload["details"]
+
+    assert details["recent_roic_spread_history_years"] == []
+    assert details["recent_roic_spread_history_count"] == 0
+    assert details["recent_operating_evidence_years"] == 0
+    assert validate_quantitative_evidence_record(payload, key="moat_score", code="NO-WACC")["score"] == payload["score"]
+
+
 def test_durability_history_requires_roic_and_gross_margin_in_the_same_latest_years() -> None:
     roic_years = list(range(2016, 2026))
     gross_years = [*range(2016, 2024), 2025]
@@ -333,7 +486,12 @@ def test_optimized_company_contexts_are_exactly_json_equivalent_to_materialised_
     ]
 
     optimized = build_company_contexts(metrics)
-    base = build_sector_context(metrics)["TEST"]
+    latest_complete_year = quantitative_evidence._latest_complete_financial_year(metrics[0])
+    base = build_sector_context(
+        metrics,
+        latest_complete_year=latest_complete_year,
+        enforce_reporting_period_anchor=True,
+    )["TEST"]
     plain_base = materialize(base)
     assert isinstance(plain_base, dict)
     peer_count = len(metrics) - 1
@@ -347,6 +505,7 @@ def test_optimized_company_contexts_are_exactly_json_equivalent_to_materialised_
         )
         reference["target_code"] = code
         reference["target_excluded"] = True
+        reference["latest_complete_financial_year"] = latest_complete_year
 
         assert optimized[code] == reference
 
@@ -504,13 +663,266 @@ def test_all_derived_scores_emit_metadata_accepted_by_the_scoring_boundary() -> 
         assert 0 < len(evidence["summary"]) <= 1_000
         assert f"evidence_level={payload['evidence_level']}" in evidence["summary"]
         assert not any(ord(character) < 32 for character in evidence["summary"])
+        assert (
+            quantitative_evidence.validate_quantitative_evidence_record(
+                payload,
+                key=key,
+                code="META",
+            )["score"]
+            == payload["score"]
+        )
 
         score, normalised = buy_screener._normalise_score_evidence(
-            {key: payload["score"], f"{key}_evidence": evidence},
+            {
+                key: payload["score"],
+                f"{key}_evidence": evidence,
+                f"{key}_evidence_level": payload["evidence_level"],
+            },
             key,
         )
-        assert score == payload["score"]
-        assert normalised == evidence
+        if payload["evidence_level"] == "derived_proxy":
+            assert score == payload["score"]
+            assert normalised == evidence
+        else:
+            assert score is None
+            assert normalised is None
+
+
+def test_quantitative_validator_rejects_a_score_even_when_its_summary_is_tampered_to_match() -> None:
+    payload = copy.deepcopy(derive_company_evidence(_metric("TAMPER"), _context())["accounting_integrity_score"])
+    payload["score"] = 1.0
+    payload["evidence"]["summary"] = (
+        f"accounting_integrity_score=1.0;model={MODEL_ID};evidence_level={payload['evidence_level']}"
+    )
+
+    with pytest.raises(ValueError, match="does not replay"):
+        quantitative_evidence.validate_quantitative_evidence_record(
+            payload,
+            key="accounting_integrity_score",
+            code="TAMPER",
+        )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "industry_durability_score",
+        "accounting_integrity_score",
+        "management_alignment_score",
+        "moat_score",
+        "moat_durability_score",
+        "growth_quality_score",
+        "growth_sustainability_score",
+        "industry_bubble_score",
+        "type3_bubble_score",
+        "catalyst_score",
+        "technology_score",
+        "business_model_score",
+    ],
+)
+def test_quantitative_validator_rejects_synchronised_score_and_component_tampering(key: str) -> None:
+    payload = copy.deepcopy(derive_company_evidence(_metric("SYNC-TAMPER"), _context())[key])
+    for component in payload["details"]["components"]:
+        payload["details"]["components"][component] = 0.0
+    payload["score"] = 0.0
+    payload["evidence"]["summary"] = f"{key}=0.0;model={MODEL_ID};evidence_level={payload['evidence_level']}"
+
+    with pytest.raises(ValueError, match="component does not replay"):
+        validate_quantitative_evidence_record(payload, key=key, code="SYNC-TAMPER")
+
+
+def test_quantitative_validator_rejects_synchronised_runway_score_horizon_and_cap_tampering() -> None:
+    key = "runway_score"
+    payload = copy.deepcopy(derive_company_evidence(_metric("RUNWAY-TAMPER"), _context())[key])
+    payload["details"]["observable_runway_years"] = 100.0
+    payload["details"]["evidence_cap"] = 10.0
+    payload["score"] = 9.5
+    payload["evidence"]["summary"] = f"{key}=9.5;model={MODEL_ID};evidence_level={payload['evidence_level']}"
+
+    with pytest.raises(ValueError, match="does not replay"):
+        validate_quantitative_evidence_record(payload, key=key, code="RUNWAY-TAMPER")
+
+
+@pytest.mark.parametrize(
+    ("key", "cap_field", "forged_cap"),
+    [
+        ("technology_score", "score_cap_without_reported_rd_intensity", 10.0),
+        ("moat_durability_score", "history_cap", 10.0),
+    ],
+)
+def test_quantitative_validator_rejects_formula_cap_tampering(
+    key: str,
+    cap_field: str,
+    forged_cap: float,
+) -> None:
+    payload = copy.deepcopy(derive_company_evidence(_metric("CAP-TAMPER"), _context())[key])
+    payload["details"][cap_field] = forged_cap
+
+    with pytest.raises(ValueError, match="does not replay"):
+        validate_quantitative_evidence_record(payload, key=key, code="CAP-TAMPER")
+
+
+def test_discontinuous_revenue_years_cannot_complete_runway_evidence() -> None:
+    metric = _metric(
+        "GAPPED-RUNWAY",
+        revenue_years=[2020, 2023, 2025],
+        revenue_values=[80.0, 100.0, 121.0],
+    )
+
+    runway = derive_company_evidence(metric, _context())["runway_score"]
+
+    assert runway["details"]["financial_history_years"] == 1
+    assert runway["evidence_level"] == "partial"
+    assert "revenue_history" in runway["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_old_consecutive_fcf_history_cannot_become_complete_under_a_new_trade_date() -> None:
+    metric = _metric(
+        "STALE-FCF",
+        financial_indicator_as_of=None,
+        source_trade_date=date.today().isoformat(),
+        fcf_years=[2008, 2009, 2010],
+        fcf_history=[7.0, 8.0, 9.0],
+    )
+
+    accounting = derive_company_evidence(metric, _context())["accounting_integrity_score"]
+
+    assert accounting["evidence"]["as_of"] == date.today().isoformat()
+    assert accounting["evidence_level"] == "partial"
+    assert "free_cash_flow_history" in accounting["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_stale_financial_as_of_is_not_masked_by_a_newer_trade_date() -> None:
+    metric = _metric(
+        "STALE-FINANCIAL-AS-OF",
+        financial_indicator_as_of="2010-12-31",
+        source_trade_date=date.today().isoformat(),
+        fcf_years=[2008, 2009, 2010],
+        fcf_history=[7.0, 8.0, 9.0],
+    )
+
+    accounting = derive_company_evidence(metric, _context())["accounting_integrity_score"]
+
+    assert accounting["evidence"]["as_of"] == "2010-12-31"
+    assert accounting["evidence_level"] == "partial"
+    assert "free_cash_flow_history" in accounting["details"]["evidence_quality"]["missing_inputs"]
+
+
+@pytest.mark.parametrize(
+    ("years", "values"),
+    [
+        ([2023, 2024, 2025], [7.0, 8.0]),
+        ([2023, 2025, 2025], [7.0, 8.0, 9.0]),
+        ([2023, 2024, 2025], [7.0, 8.0, float("inf")]),
+    ],
+)
+def test_fcf_years_and_finite_values_must_form_a_one_to_one_annual_ledger(
+    years: list[int],
+    values: list[float],
+) -> None:
+    metric = _metric("INVALID-FCF-LEDGER", fcf_years=years, fcf_history=values)
+
+    accounting = derive_company_evidence(metric, _context())["accounting_integrity_score"]
+
+    assert accounting["evidence_level"] == "partial"
+    assert "free_cash_flow_history" in accounting["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_old_consecutive_revenue_asset_years_cannot_complete_latest_growth_quality() -> None:
+    metric = _metric(
+        "GAPPED-GROWTH-QUALITY",
+        revenue_years=[2018, 2019, 2020, 2022, 2025],
+        revenue_values=[70.0, 80.0, 90.0, 105.0, 121.0],
+        total_assets_years=[2018, 2019, 2020, 2022, 2025],
+        total_assets_history=[65.0, 75.0, 85.0, 100.0, 110.0],
+    )
+
+    growth_quality = derive_company_evidence(metric, _context())["growth_quality_score"]
+
+    assert growth_quality["details"]["revenue_minus_asset_cagr"] is None
+    assert growth_quality["evidence_level"] == "partial"
+    assert "revenue_asset_history" in growth_quality["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_explicit_proxy_score_is_rederived_without_being_upgraded_to_primary() -> None:
+    target = _metric(
+        "PROXY",
+        moat_score=9.9,
+        moat_score_evidence={
+            "source": "旧代理结果",
+            "evidence_id": "proxy:moat:PROXY:20251231",
+            "as_of": "2025-12-31",
+            "summary": "旧代理结果",
+        },
+        moat_score_evidence_level="derived_proxy",
+    )
+    metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
+
+    _contexts, evidence_by_code = enrich_metrics(metrics, {})
+
+    assert target["moat_score_evidence_level"] == "derived_proxy"
+    assert evidence_by_code["PROXY"]["moat_score"]["evidence_level"] == "derived_proxy"
+    assert target["moat_score"] == evidence_by_code["PROXY"]["moat_score"]["score"]
+    assert target["moat_score"] != 9.9
+
+
+def test_unlabelled_internal_proxy_cannot_be_upgraded_to_primary() -> None:
+    seed = _metric("UNLABELLED")
+    proxy = derive_company_evidence(seed, _context())["moat_score"]
+    target = _metric(
+        "UNLABELLED",
+        moat_score=proxy["score"],
+        moat_score_evidence=copy.deepcopy(proxy["evidence"]),
+    )
+    metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
+
+    _contexts, evidence_by_code = enrich_metrics(metrics, {})
+
+    assert target["moat_score_evidence_level"] == "derived_proxy"
+    assert evidence_by_code["UNLABELLED"]["moat_score"]["evidence_level"] == "derived_proxy"
+    assert target["moat_score_evidence"]["evidence_id"].startswith(f"{MODEL_ID}:moat_score:")
+
+
+def test_relabelled_internal_proxy_is_rejected_as_primary() -> None:
+    payload = derive_company_evidence(_metric("RELABEL"), _context())["moat_score"]
+    payload = copy.deepcopy(payload)
+    payload["evidence_level"] = "primary"
+    payload["evidence"]["summary"] = f"moat_score={payload['score']:.1f};model={MODEL_ID};evidence_level=primary"
+    payload["details"] = {
+        "basis": "dated_primary_source_score",
+        "source_summary": "derived_proxy result relabelled as primary",
+        "evidence_quality": {
+            "level": "primary",
+            "input_coverage": 1.0,
+            "required_inputs": ["primary_source_score"],
+            "available_inputs": ["primary_source_score"],
+            "missing_inputs": [],
+        },
+    }
+
+    with pytest.raises(ValueError, match="primary quantitative evidence source binding"):
+        validate_quantitative_evidence_record(payload, key="moat_score", code="RELABEL")
+
+
+def test_invalid_primary_score_fails_closed_and_cannot_block_a_complete_proxy() -> None:
+    target = _metric(
+        "BAD-PRIMARY",
+        moat_score=9.9,
+        moat_score_evidence={
+            "source": "伪造一手结果",
+            "evidence_id": "primary:moat:OTHER:20251231",
+            "as_of": "2025-12-31",
+            "summary": "代码未绑定",
+        },
+        moat_score_evidence_level="primary",
+    )
+    metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
+
+    _contexts, evidence_by_code = enrich_metrics(metrics, {})
+
+    assert target["moat_score_evidence_level"] == "derived_proxy"
+    assert target["moat_score"] == evidence_by_code["BAD-PRIMARY"]["moat_score"]["score"]
+    assert target["moat_score"] != 9.9
 
 
 def test_missing_raw_inputs_remain_diagnostic_and_never_attach_as_complete_scores() -> None:
@@ -566,10 +978,11 @@ def test_fully_observed_proxy_is_attached_with_explicit_derived_level() -> None:
     assert target["accounting_integrity_score_evidence_level"] == "derived_proxy"
 
 
-def test_enrichment_does_not_overwrite_an_existing_valid_score_and_evidence() -> None:
+def test_enrichment_preserves_only_a_strictly_bound_trusted_primary_score() -> None:
+    digest = "a" * 64
     authoritative_evidence = {
         "source": "2025 annual report research adapter",
-        "evidence_id": "primary:moat:KEEP:20251231",
+        "evidence_id": f"primary:moat_score:KEEP:20251231:sha256:{digest}",
         "as_of": "2025-12-31",
         "summary": "Primary-source moat assessment",
     }
@@ -577,13 +990,79 @@ def test_enrichment_does_not_overwrite_an_existing_valid_score_and_evidence() ->
         "KEEP",
         moat_score=9.7,
         moat_score_evidence=copy.deepcopy(authoritative_evidence),
+        moat_score_evidence_level="primary",
+        _quantitative_primary_validation_token=quantitative_evidence.PRIMARY_EVIDENCE_VALIDATION_TOKEN,
     )
     metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
 
     _contexts, evidence_by_code = enrich_metrics(metrics, {})
 
     assert target["moat_score"] == 9.7
-    assert target["moat_score_evidence"] == authoritative_evidence
     assert target["moat_score_evidence_level"] == "primary"
-    assert evidence_by_code["KEEP"]["moat_score"]["evidence"] != authoritative_evidence
+    assert evidence_by_code["KEEP"]["moat_score"]["evidence_level"] == "primary"
+    assert evidence_by_code["KEEP"]["moat_score"]["evidence"]["evidence_id"] == authoritative_evidence["evidence_id"]
+    assert evidence_by_code["KEEP"]["moat_score"]["details"]["basis"] == "dated_primary_source_score"
+    assert evidence_by_code["KEEP"]["moat_score"]["details"]["adapter_contract"] == (
+        "validated-primary-quantitative-evidence-v1"
+    )
+    assert evidence_by_code["KEEP"]["moat_score"]["details"]["source_binding_sha256"] == digest
+    assert evidence_by_code["KEEP"]["moat_score"]["details"]["source_summary"] == authoritative_evidence["summary"]
+    assert (
+        validate_quantitative_evidence_record(
+            evidence_by_code["KEEP"]["moat_score"],
+            key="moat_score",
+            code="KEEP",
+            primary_validation_token=quantitative_evidence.PRIMARY_EVIDENCE_VALIDATION_TOKEN,
+        )["score"]
+        == 9.7
+    )
+    with pytest.raises(ValueError, match="primary quantitative evidence source binding"):
+        validate_quantitative_evidence_record(
+            copy.deepcopy(evidence_by_code["KEEP"]["moat_score"]),
+            key="moat_score",
+            code="KEEP",
+        )
     assert target["quantitative_evidence"] == evidence_by_code["KEEP"]
+
+
+def test_plausible_primary_strings_without_a_trusted_adapter_token_fail_closed() -> None:
+    target = _metric(
+        "UNTRUSTED",
+        moat_score=9.9,
+        moat_score_evidence={
+            "source": "Plausible but unvalidated annual report adapter",
+            "evidence_id": f"primary:moat_score:UNTRUSTED:20251231:sha256:{'b' * 64}",
+            "as_of": "2025-12-31",
+            "summary": "Looks correctly bound but did not pass an adapter",
+        },
+        moat_score_evidence_level="primary",
+    )
+    metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
+
+    _contexts, evidence_by_code = enrich_metrics(metrics, {})
+
+    assert target["moat_score_evidence_level"] == "derived_proxy"
+    assert target["moat_score"] == evidence_by_code["UNTRUSTED"]["moat_score"]["score"]
+    assert target["moat_score"] != 9.9
+
+
+def test_stale_primary_evidence_fails_closed_even_with_a_trusted_adapter_token() -> None:
+    target = _metric(
+        "STALE",
+        moat_score=9.9,
+        moat_score_evidence={
+            "source": "Validated but stale annual report adapter",
+            "evidence_id": f"primary:moat_score:STALE:20240101:sha256:{'c' * 64}",
+            "as_of": "2024-01-01",
+            "summary": "The source is older than the primary evidence freshness window",
+        },
+        moat_score_evidence_level="primary",
+        _quantitative_primary_validation_token=quantitative_evidence.PRIMARY_EVIDENCE_VALIDATION_TOKEN,
+    )
+    metrics = [target, *[_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]]
+
+    _contexts, evidence_by_code = enrich_metrics(metrics, {})
+
+    assert target["moat_score_evidence_level"] == "derived_proxy"
+    assert target["moat_score"] == evidence_by_code["STALE"]["moat_score"]["score"]
+    assert target["moat_score"] != 9.9

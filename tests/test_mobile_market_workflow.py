@@ -272,7 +272,11 @@ def test_old_main_reruns_are_noops_before_build_and_immediately_before_publicati
     release = release_step["run"]
 
     for script in (guard, release):
+        assert "function Get-RemoteMainRevision" in script
         assert "git ls-remote --exit-code origin refs/heads/main" in script
+        assert "$attemptLimit = 3" in script
+        assert "attempt $attempt of $attemptLimit failed: $lastFailure" in script
+        assert "failed after $attemptLimit attempts: $lastFailure" in script
         assert "$remoteMainSha -cne $env:GITHUB_SHA" in script
     assert guard.index("$remoteMainSha -cne $env:GITHUB_SHA") < guard.index("mobile_market_workflow_guard.ps1")
     assert "reason=stale_main_workflow_run" in guard
@@ -314,6 +318,15 @@ def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch()
     assert '"${GITHUB_REF}" != "refs/heads/main"' in branch_setup
     assert '"$(git rev-parse HEAD)" != "${GITHUB_SHA}"' in branch_setup
     assert "git ls-remote --exit-code --heads origin refs/heads/mobile-data" in branch_setup
+    assert "lookup_attempt_limit=3" in branch_setup
+    assert (
+        "Remote mobile-data branch lookup attempt ${attempt} of ${lookup_attempt_limit} failed with exit "
+        "${lookup_status}: ${lookup_error_detail}"
+    ) in branch_setup
+    assert (
+        "Could not determine whether the remote data audit branch exists after ${lookup_attempt_limit} attempts"
+        in branch_setup
+    )
     assert "lookup_status} -eq 0" in branch_setup
     assert "lookup_status} -eq 2" in branch_setup
     assert "git fetch --no-tags --depth=1 origin refs/heads/mobile-data" in branch_setup
@@ -339,11 +352,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     parsed = _workflow(MOBILE_WORKFLOW)
     triggers = parsed.get("on", parsed.get(True))
 
-    assert triggers["schedule"] == [
-        {"cron": "17 8 * * 1-5"},
-        {"cron": "47 8 * * 1-5"},
-        {"cron": "17 9 * * 1-5"},
-    ]
+    assert triggers["schedule"] == [{"cron": "17 8 * * 1-5"}]
     preflight = parsed["jobs"]["preflight"]
     guard = next(step for step in preflight["steps"] if step.get("id") == "guard")
     assert "mobile_market_workflow_guard.ps1" in guard["run"]
@@ -361,12 +370,14 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/cache/quality_history",
         "data/cache/growth_evidence",
         "data/cache/research_reports",
+        "data/cache/patch4_evidence",
     ):
         assert workflow.count(path) == 2
     for contract in (
         "data/growth_evidence.py",
         "data/quality_history.py",
         "data/research_reports.py",
+        "data/patch4_evidence.py",
     ):
         assert workflow.count(contract) == 3
 
@@ -421,15 +432,87 @@ def test_every_bash_workflow_script_parses_with_bash(tmp_path):
 
 def test_pages_action_revisions_and_release_patterns_are_pinned_and_bounded():
     workflow = _workflow_text(MOBILE_WORKFLOW)
+    parsed = _workflow(MOBILE_WORKFLOW)
+    verify_cleanup = parsed["jobs"]["verify_cleanup"]
+    public_verification = next(
+        step
+        for step in verify_cleanup["steps"]
+        if step.get("name") == "Verify the public Pages switch and immutable downloads"
+    )["run"]
 
     assert re.search(r"actions/configure-pages@[0-9a-f]{40}", workflow)
     assert re.search(r"actions/upload-pages-artifact@[0-9a-f]{40}", workflow)
     assert re.search(r"actions/deploy-pages@[0-9a-f]{40}", workflow)
     assert "$attempt -le 6" in workflow
     assert "Start-Sleep -Seconds (5 * $attempt)" in workflow
-    assert "Public immutable asset $name could not be verified after four attempts" in workflow
+    attempts_match = re.search(r"\$assetVerificationAttempts = (?P<value>\d+)", public_verification)
+    delay_match = re.search(r"\$assetVerificationBaseDelaySeconds = (?P<value>\d+)", public_verification)
+    assert attempts_match is not None
+    assert delay_match is not None
+    attempts = int(attempts_match.group("value"))
+    base_delay_seconds = int(delay_match.group("value"))
+    total_wait_seconds = base_delay_seconds * sum(range(1, attempts))
+    assert 240 <= total_wait_seconds <= 300
+    assert verify_cleanup["timeout-minutes"] == 60
+    assert "for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++)" in public_verification
+    assert "Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)" in public_verification
+    assert (
+        "verification attempt $attempt of $assetVerificationAttempts failed: $lastAssetFailure" in public_verification
+    )
+    assert "could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure" in public_verification
     assert "gh release delete-asset $tag $name --repo $env:GH_REPO --yes" in workflow
     assert "manifest\\.json" in workflow
+
+
+def test_critical_remote_and_release_queries_use_bounded_retries_with_diagnostics():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    jobs = parsed["jobs"]
+    release = next(step for step in jobs["publish"]["steps"] if step.get("id") == "release")["run"]
+    cleanup = next(
+        step
+        for step in jobs["verify_cleanup"]["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )["run"]
+
+    assert "$releaseQueryAttemptLimit = 3" in release
+    assert "Mobile data release lookup attempt $attempt of $releaseQueryAttemptLimit failed:" in release
+    assert "Mobile data release creation attempt $attempt of $releaseQueryAttemptLimit failed:" in release
+    assert "Mobile release asset query attempt $attempt of $attemptLimit failed:" in release
+    assert "after $releaseQueryAttemptLimit attempts: $lastReleaseCreateFailure" in release
+    assert "$attemptLimit = 3" in cleanup
+    assert "Mobile retention asset query attempt $attempt of $attemptLimit failed:" in cleanup
+    assert "after $attemptLimit attempts: $lastFailure" in cleanup
+
+
+def test_public_release_asset_url_preserves_the_filename_during_powershell_interpolation():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    public_verification = next(
+        step
+        for step in parsed["jobs"]["verify_cleanup"]["steps"]
+        if step.get("name") == "Verify the public Pages switch and immutable downloads"
+    )["run"]
+    assignment = next(
+        line.strip() for line in public_verification.splitlines() if '$url = "https://github.com/' in line
+    )
+    script = (
+        "$env:GH_REPO='owner/repository';"
+        "$env:GITHUB_RUN_ID='12345';"
+        "$name='catalog-0123456789abcdef.json.gz';"
+        "$attempt=2;"
+        f"{assignment};"
+        "[Console]::Out.Write($url)"
+    )
+    result = subprocess.run(
+        [_pwsh_executable(), "-NoProfile", "-NonInteractive", "-Command", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.stdout == (
+        "https://github.com/owner/repository/releases/download/mobile-market-data/"
+        "catalog-0123456789abcdef.json.gz?run_id=12345&attempt=2"
+    )
 
 
 def test_previous_manifest_errors_skip_cleanup_and_only_verified_first_publication_allows_cleanup():

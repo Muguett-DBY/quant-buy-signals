@@ -15,6 +15,7 @@ import random
 import re
 import shutil
 import stat
+import statistics
 
 # Fixed-argv local Git provenance checks only; no shell is involved.
 import subprocess  # nosec B404
@@ -25,6 +26,10 @@ from urllib.parse import urlsplit
 from zipfile import BadZipFile, ZipFile
 from zoneinfo import ZoneInfo
 
+from engine.quantitative_evidence import (
+    MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
+    validate_quantitative_evidence_record,
+)
 from tools.run_full_audit import (
     _canonical_market_coldness_json,
     _replay_market_coldness_reference_artifact,
@@ -106,6 +111,7 @@ _REQUIRED_FILES = {
     "data/industry_exchange_new_listings_2026.json",
     "data/market_coldness.py",
     "data/market_history.py",
+    "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
     "data/snapshot.py",
@@ -190,6 +196,48 @@ _AUDIT_TYPE_WEIGHTS = {
     "type7": {"7a": 1.0 / 3.0, "7b": 1.0 / 3.0, "7c": 1.0 / 3.0},
 }
 _AUDIT_TYPE_DIMENSIONS = {type_key: set(weights) for type_key, weights in _AUDIT_TYPE_WEIGHTS.items()}
+_AUDIT_QUANTITATIVE_EVIDENCE_KEYS = frozenset(
+    {
+        "industry_durability_score",
+        "accounting_integrity_score",
+        "management_alignment_score",
+        "moat_score",
+        "moat_durability_score",
+        "growth_quality_score",
+        "growth_sustainability_score",
+        "runway_score",
+        "industry_bubble_score",
+        "type3_bubble_score",
+        "catalyst_score",
+        "technology_score",
+        "business_model_score",
+    }
+)
+_AUDIT_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing"})
+_AUDIT_COMPLETE_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy"})
+_AUDIT_DECISION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "model_id",
+        "decision_complete",
+        "decision_basis",
+        "score_lower_bound",
+        "score_upper_bound",
+        "veto_state",
+        "potentially_triggerable",
+        "missing_dimensions",
+    }
+)
+_AUDIT_DECISION_POTENTIAL_VETO_DIMENSIONS = {
+    "type1": frozenset({"1a", "1b"}),
+    "type2": frozenset({"2a", "2b", "2c"}),
+    "type3": frozenset({"3a", "3d", "3e"}),
+    "type4": frozenset({"4c", "4e", "4f"}),
+    "type5": frozenset(),
+    "type6": frozenset({"6a", "6b", "6c", "6d"}),
+    "type7": frozenset({"7c"}),
+}
+_AUDIT_DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
 _AUDIT_TYPE_PRIORITY = ("type1", "type2", "type5", "type3", "type4", "type6", "type7")
 _AUDIT_TYPE_NAMES = {
     "type1": "1️⃣ 估值买入区",
@@ -246,8 +294,101 @@ _AUDIT_TYPE_STATUSES = {
 }
 _AUDIT_NON_DIAGNOSTIC_STATUSES = {"not_applicable", "insufficient_evidence"}
 _AUDIT_TYPE7_FINANCIAL_INDUSTRIES = {"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"}
-_AUDIT_TYPE7_SCHEMA_VERSION = 5
-_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v5"
+_AUDIT_TYPE7_SCHEMA_VERSION = 6
+_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v6"
+_AUDIT_TYPE7_SHAREHOLDER_RETURN_FORMULA = "total=end_hfq/start_hfq-1;cagr=(end_hfq/start_hfq)^(365.2425/days)-1"
+_AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA = "percentile=(count(x<current)+0.5*count(x=current))/historical_count"
+_AUDIT_TYPE7_TEN_YEAR_TARGET_DAYS = 3_652
+_AUDIT_TYPE7_TEN_YEAR_START_TOLERANCE_DAYS = 62
+_AUDIT_TYPE7_FIVE_YEAR_TARGET_DAYS = 1_826
+_AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS = 62
+_AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS = 21
+_AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS = 500
+_AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS = 2_000
+_AUDIT_TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION = 1
+_AUDIT_TYPE5_BOTTOM_EVIDENCE_MODEL_ID = "type5-bottom-observables-v1"
+_AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS = 1_743
+_AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
+_AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
+_AUDIT_TYPE5_MAX_COLDNESS_SCORE = 8.0
+_AUDIT_TYPE5_MAX_COLDNESS_SCORE_WITHOUT_VOLUME = 7.5
+_AUDIT_TYPE5_COLDNESS_WEIGHTS = {
+    "change_60d_pct": 0.45,
+    "change_ytd_pct": 0.25,
+    "turnover_rate_pct": 0.20,
+    "volume_ratio": 0.10,
+}
+_AUDIT_TYPE5_COLDNESS_BANDS = {
+    "change_60d_pct": (
+        (-35.0, 9.5),
+        (-25.0, 9.0),
+        (-15.0, 8.0),
+        (-8.0, 7.0),
+        (0.0, 5.5),
+        (10.0, 4.0),
+        (20.0, 3.0),
+        (35.0, 2.0),
+        (60.0, 1.0),
+    ),
+    "change_ytd_pct": (
+        (-45.0, 9.5),
+        (-30.0, 9.0),
+        (-20.0, 8.0),
+        (-10.0, 7.0),
+        (0.0, 5.5),
+        (15.0, 4.5),
+        (30.0, 3.0),
+        (50.0, 2.0),
+        (80.0, 1.0),
+    ),
+    "turnover_rate_pct": (
+        (0.30, 9.0),
+        (0.70, 8.0),
+        (1.50, 7.0),
+        (3.00, 5.5),
+        (5.00, 4.5),
+        (8.00, 3.5),
+        (15.0, 2.0),
+        (30.0, 1.0),
+    ),
+    "volume_ratio": (
+        (0.40, 9.0),
+        (0.70, 8.0),
+        (0.90, 6.5),
+        (1.10, 5.5),
+        (1.50, 4.0),
+        (2.50, 2.5),
+        (5.00, 1.0),
+    ),
+}
+_AUDIT_PATCH4_SCHEMA_VERSION = 1
+_AUDIT_PATCH4_MODEL_ID = "patch4-technology-shareholder-culture-v1"
+_AUDIT_PATCH4_FORMULA_VERSION = "patch4-two-layer-weighted-v1"
+_AUDIT_PATCH4_MAX_EVIDENCE_AGE_DAYS = 1_095
+_AUDIT_PATCH4_EVIDENCE_SOURCE = "东方财富上市公司公告正文"
+_AUDIT_PATCH4_EVIDENCE_ID = re.compile(
+    r"^eastmoney-notice:(?P<code>[036][0-9]{5}):"
+    r"(?P<art_code>AN[0-9]{18}):sha256:(?P<digest>[0-9a-f]{16})$"
+)
+_AUDIT_PATCH4_DETAIL_PREFIX = "https://data.eastmoney.com/notices/detail/"
+_AUDIT_PATCH4_COMPONENT_WEIGHTS = {
+    "p4_defensive_fairness": 25.0,
+    "p4_defensive_governance": 15.0,
+    "p4_core_rd_ownership": 15.0,
+    "p4_esop_coverage": 15.0,
+    "p4_long_term_rd_link": 15.0,
+    "p4_frontline_rd_equity": 10.0,
+    "p4_short_term_binding": 5.0,
+}
+_AUDIT_PATCH4_COMPONENT_LABELS = {
+    "p4_defensive_fairness": "大小股东公平",
+    "p4_defensive_governance": "治理透明与分红约束",
+    "p4_core_rd_ownership": "核心研发持股",
+    "p4_esop_coverage": "核心人才持股覆盖",
+    "p4_long_term_rd_link": "长期研发指标绑定",
+    "p4_frontline_rd_equity": "一线研发权益",
+    "p4_short_term_binding": "短期股价绑定防范",
+}
 _AUDIT_TYPE7_CONTENT_MODEL_ID = "type7-report-body-crosscheck-v2"
 _AUDIT_TYPE7_RESEARCH_MAX_AGE_DAYS = 365
 _AUDIT_TYPE7_RESEARCH_RECENT_AGE_DAYS = 183
@@ -499,6 +640,7 @@ _RULE_FILES = {
     "data/industry.py",
     "data/market_coldness.py",
     "data/market_history.py",
+    "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
     "data/trading_calendar.py",
@@ -720,6 +862,667 @@ def _finite_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _audit_type7_history_date(value: Any) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.isoformat() == value else None
+
+
+def _audit_type7_history_integer(value: Any, *, minimum: int = 0) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        return None
+    return value
+
+
+def _audit_type7_years_before(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year - years)
+    except ValueError:
+        return value.replace(year=value.year - years, day=28)
+
+
+def _audit_type7_shareholder_history_valid(value: Any, as_of: date) -> bool:
+    """Independently replay the embedded ten-year total-return contract."""
+
+    if not isinstance(value, Mapping) or value.get("available") is not True:
+        return False
+    start = _audit_type7_history_date(value.get("start_date"))
+    end = _audit_type7_history_date(value.get("end_date"))
+    span_days = _audit_type7_history_integer(value.get("span_days"), minimum=1)
+    observations = _audit_type7_history_integer(value.get("observations"), minimum=2)
+    start_close = _finite_number(value.get("start_close_hfq"))
+    end_close = _finite_number(value.get("end_close_hfq"))
+    total_return = _finite_number(value.get("total_return"))
+    cagr = _finite_number(value.get("cagr"))
+    if (
+        value.get("target_years") != 10
+        or value.get("formula") != _AUDIT_TYPE7_SHAREHOLDER_RETURN_FORMULA
+        or start is None
+        or end is None
+        or span_days is None
+        or observations is None
+        or start_close is None
+        or start_close <= 0
+        or end_close is None
+        or end_close <= 0
+        or total_return is None
+        or cagr is None
+    ):
+        return False
+    target = _audit_type7_years_before(as_of, 10)
+    if (
+        span_days != (end - start).days
+        or span_days
+        < _AUDIT_TYPE7_TEN_YEAR_TARGET_DAYS
+        - _AUDIT_TYPE7_TEN_YEAR_START_TOLERANCE_DAYS
+        - _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
+        or not 0 <= (start - target).days <= _AUDIT_TYPE7_TEN_YEAR_START_TOLERANCE_DAYS
+        or not 0 <= (as_of - end).days <= _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
+    ):
+        return False
+    ratio = end_close / start_close
+    return math.isclose(total_return, ratio - 1.0, rel_tol=1e-9, abs_tol=1e-9) and math.isclose(
+        cagr,
+        ratio ** (365.2425 / span_days) - 1.0,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    )
+
+
+def _audit_type7_replay_valuation_distribution(
+    value: Any,
+    current: Any,
+) -> dict[str, float | int | None] | None:
+    """Replay one compact weighted distribution without production helpers."""
+
+    if not isinstance(value, Mapping) or set(value) != {"values", "counts"}:
+        return None
+    values = value.get("values")
+    counts = value.get("counts")
+    if (
+        not isinstance(values, list)
+        or not isinstance(counts, list)
+        or len(values) != len(counts)
+        or len(values) > _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
+    ):
+        return None
+    clean_values: list[float] = []
+    clean_counts: list[int] = []
+    previous: float | None = None
+    for raw_value, raw_count in zip(values, counts, strict=True):
+        number = _finite_number(raw_value)
+        if (
+            number is None
+            or number <= 0
+            or (previous is not None and number <= previous)
+            or isinstance(raw_count, bool)
+            or not isinstance(raw_count, int)
+            or raw_count <= 0
+        ):
+            return None
+        clean_values.append(number)
+        clean_counts.append(raw_count)
+        previous = number
+    observations = sum(clean_counts)
+    if observations > _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS or (clean_values and observations <= 0):
+        return None
+    if not clean_values:
+        return {"observations": 0, "median": None, "percentile": None}
+
+    def value_at(rank: int) -> float:
+        cumulative = 0
+        for number, count in zip(clean_values, clean_counts, strict=True):
+            cumulative += count
+            if rank < cumulative:
+                return number
+        raise ValueError("weighted valuation rank exceeds the distribution")
+
+    lower = value_at((observations - 1) // 2)
+    upper = value_at(observations // 2)
+    current_value = _finite_number(current)
+    percentile = None
+    if current_value is not None and current_value > 0:
+        below = sum(count for number, count in zip(clean_values, clean_counts, strict=True) if number < current_value)
+        equal = sum(count for number, count in zip(clean_values, clean_counts, strict=True) if number == current_value)
+        percentile = (below + 0.5 * equal) / observations
+    return {
+        "observations": observations,
+        "median": (lower + upper) / 2.0,
+        "percentile": percentile,
+    }
+
+
+def _audit_type7_valuation_history_replay(
+    value: Any,
+    as_of: date,
+) -> dict[str, dict[str, float | int]] | None:
+    """Validate and replay both raw PE/PB distributions in an embedded contract."""
+
+    if not isinstance(value, Mapping) or value.get("available") is not True:
+        return None
+    start = _audit_type7_history_date(value.get("start_date"))
+    end = _audit_type7_history_date(value.get("end_date"))
+    target_start = _audit_type7_history_date(value.get("target_start_date"))
+    span_days = _audit_type7_history_integer(value.get("span_days"), minimum=1)
+    start_delay = _audit_type7_history_integer(value.get("start_delay_days"), minimum=0)
+    row_count = _audit_type7_history_integer(value.get("row_count"), minimum=1)
+    expected_target = _audit_type7_years_before(as_of, 5)
+    if (
+        value.get("window_years") != 5
+        or value.get("formula") != _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA
+        or start is None
+        or end is None
+        or target_start != expected_target
+        or span_days is None
+        or start_delay is None
+        or row_count is None
+        or row_count > _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
+        or span_days != (end - start).days
+        or start_delay != (start - expected_target).days
+        or span_days
+        < _AUDIT_TYPE7_FIVE_YEAR_TARGET_DAYS
+        - _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS
+        - _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
+        or not 0 <= start_delay <= _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS
+        or not 0 <= (as_of - end).days <= _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
+    ):
+        return None
+
+    usable: dict[str, dict[str, float | int]] = {}
+    for prefix, current_key, median_key in (
+        ("pe", "current_pe_ttm", "median_pe_ttm"),
+        ("pb", "current_pb_mrq", "median_pb_mrq"),
+    ):
+        observations = _audit_type7_history_integer(value.get(f"{prefix}_observations"), minimum=0)
+        current = _finite_number(value.get(current_key))
+        declared_median = _finite_number(value.get(median_key))
+        declared_percentile = _finite_number(value.get(f"{prefix}_percentile"))
+        replay = _audit_type7_replay_valuation_distribution(value.get(f"{prefix}_distribution"), current)
+        if (
+            observations is None
+            or replay is None
+            or observations != replay["observations"]
+            or row_count < observations + 1
+            or (current is not None and current <= 0)
+        ):
+            return None
+        series_usable = bool(
+            observations >= _AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS and current is not None and current > 0
+        )
+        if series_usable:
+            replay_median = replay["median"]
+            replay_percentile = replay["percentile"]
+            if (
+                declared_median is None
+                or declared_median <= 0
+                or declared_percentile is None
+                or not 0 <= declared_percentile <= 1
+                or replay_median is None
+                or replay_percentile is None
+                or not math.isclose(declared_median, float(replay_median), rel_tol=0.0, abs_tol=1e-9)
+                or not math.isclose(
+                    declared_percentile,
+                    float(replay_percentile),
+                    rel_tol=0.0,
+                    abs_tol=1e-12,
+                )
+            ):
+                return None
+            usable[prefix] = {
+                "observations": observations,
+                "median": declared_median,
+                "percentile": declared_percentile,
+            }
+        elif value.get(median_key) is not None or value.get(f"{prefix}_percentile") is not None:
+            return None
+    return usable or None
+
+
+def _audit_type5_pb_bottom_score(percentile: float, current_pb: float) -> float:
+    percentile_score = (
+        10.0
+        if percentile <= 0.10
+        else 8.0
+        if percentile <= 0.20
+        else 6.0
+        if percentile <= 0.30
+        else 4.0
+        if percentile <= 0.50
+        else 2.0
+    )
+    absolute_score = (
+        10.0
+        if current_pb <= 1.0
+        else 8.0
+        if current_pb <= 1.2
+        else 6.0
+        if current_pb <= 1.5
+        else 4.0
+        if current_pb <= 2.0
+        else 2.0
+    )
+    return min(percentile_score, absolute_score)
+
+
+def _audit_type5_valuation_replay(value: Any, as_of: date) -> tuple[float, float] | None:
+    if not isinstance(value, Mapping) or value.get("available") is not True:
+        return None
+    observations = _audit_type7_history_integer(value.get("pb_observations"), minimum=0)
+    span_days = _audit_type7_history_integer(value.get("span_days"), minimum=0)
+    start_delay = _audit_type7_history_integer(value.get("start_delay_days"), minimum=0)
+    end = _audit_type7_history_date(value.get("end_date"))
+    current_pb = _finite_number(value.get("current_pb_mrq"))
+    declared_median = _finite_number(value.get("median_pb_mrq"))
+    declared_percentile = _finite_number(value.get("pb_percentile"))
+    replay = _audit_type7_replay_valuation_distribution(value.get("pb_distribution"), current_pb)
+    if (
+        value.get("window_years") != 5
+        or value.get("formula") != _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA
+        or observations is None
+        or not _AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS <= observations <= _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
+        or span_days is None
+        or span_days < _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS
+        or start_delay is None
+        or start_delay > _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS
+        or end is None
+        or not 0 <= (as_of - end).days <= _AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
+        or current_pb is None
+        or current_pb <= 0
+        or declared_median is None
+        or declared_median <= 0
+        or declared_percentile is None
+        or not 0 <= declared_percentile <= 1
+        or replay is None
+        or replay["observations"] != observations
+        or replay["median"] is None
+        or replay["percentile"] is None
+        or not math.isclose(declared_median, float(replay["median"]), rel_tol=0.0, abs_tol=1e-9)
+        or not math.isclose(
+            declared_percentile,
+            float(replay["percentile"]),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        return None
+    return declared_percentile, current_pb
+
+
+def _audit_type5_coldness_interpolate(value: float, bands: Sequence[tuple[float, float]]) -> float:
+    if value <= bands[0][0]:
+        return bands[0][1]
+    for (left_x, left_score), (right_x, right_score) in zip(bands, bands[1:]):
+        if value <= right_x:
+            fraction = (value - left_x) / (right_x - left_x)
+            return left_score + fraction * (right_score - left_score)
+    return bands[-1][1]
+
+
+def _audit_type5_close(actual: Any, expected: float, *, tolerance: float = 1e-6) -> bool:
+    value = _finite_number(actual)
+    return value is not None and math.isclose(value, expected, rel_tol=0.0, abs_tol=tolerance)
+
+
+def _audit_type5_market_replay(value: Any, *, code: str, as_of: str) -> float | None:
+    if not isinstance(value, Mapping) or set(value) != {
+        "score",
+        "evidence_level",
+        "evidence",
+        "components",
+    }:
+        return None
+    score = _finite_number(value.get("score"))
+    evidence = value.get("evidence")
+    components = value.get("components")
+    if (
+        score is None
+        or not 0 <= score <= 10
+        or value.get("evidence_level") not in {"primary", "derived_proxy"}
+        or not isinstance(evidence, Mapping)
+        or not isinstance(components, Mapping)
+    ):
+        return None
+    if set(evidence) - {"source", "evidence_id", "as_of", "summary"}:
+        return None
+    source = evidence.get("source")
+    evidence_id = evidence.get("evidence_id")
+    evidence_as_of = evidence.get("as_of")
+    summary = evidence.get("summary")
+    tokens = (
+        {
+            token.upper()
+            for token in re.split(r"[^A-Za-z0-9._]+", evidence_id)
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", token)
+        }
+        if isinstance(evidence_id, str)
+        else set()
+    )
+    if (
+        not isinstance(source, str)
+        or not source.strip()
+        or len(source.strip()) > 200
+        or not isinstance(evidence_id, str)
+        or not evidence_id.strip()
+        or len(evidence_id.strip()) > 200
+        or code.upper() not in tokens
+        or evidence_as_of != as_of
+        or (summary is not None and (not isinstance(summary, str) or len(summary.strip()) > 1_000))
+        or components.get("as_of_session") != as_of
+    ):
+        return None
+    raw_values = components.get("raw_values")
+    if not isinstance(raw_values, Mapping):
+        return None
+    full_components = "absolute" in components
+    expected_raw_keys = (
+        set(_AUDIT_TYPE5_COLDNESS_WEIGHTS)
+        if full_components
+        else {
+            "change_60d_pct",
+            "change_ytd_pct",
+        }
+    )
+    if set(raw_values) != expected_raw_keys:
+        return None
+    values = {key: _finite_number(raw_values.get(key)) for key in expected_raw_keys}
+    change_60d = values.get("change_60d_pct")
+    change_ytd = values.get("change_ytd_pct")
+    if change_60d is None or change_ytd is None or not -100 <= change_60d <= 1_000 or not -100 <= change_ytd <= 1_000:
+        return None
+    if full_components:
+        if values.get("turnover_rate_pct") is None or values["turnover_rate_pct"] < 0:
+            return None
+        if raw_values.get("volume_ratio") is None:
+            values["volume_ratio"] = None
+        elif values.get("volume_ratio") is None or values["volume_ratio"] < 0:
+            return None
+        available = [key for key in _AUDIT_TYPE5_COLDNESS_WEIGHTS if values.get(key) is not None]
+        absolute = components.get("absolute")
+        relative = components.get("relative")
+        relative_samples = components.get("relative_sample_sizes")
+        metric_scores = components.get("metric_scores")
+        weights = components.get("weights")
+        if (
+            not isinstance(absolute, Mapping)
+            or set(absolute) != set(available)
+            or not isinstance(relative, Mapping)
+            or not set(relative).issubset(available)
+            or not isinstance(relative_samples, Mapping)
+            or set(relative_samples) != set(relative)
+            or not isinstance(metric_scores, Mapping)
+            or set(metric_scores) != set(available)
+            or not isinstance(weights, Mapping)
+            or set(weights) != set(available)
+        ):
+            return None
+        expected_absolute = {
+            key: _audit_type5_coldness_interpolate(float(values[key]), _AUDIT_TYPE5_COLDNESS_BANDS[key])
+            for key in available
+        }
+        expected_metric_scores: dict[str, float] = {}
+        for key in available:
+            relative_value = _finite_number(relative.get(key)) if key in relative else None
+            sample_size = relative_samples.get(key) if key in relative else None
+            if key in relative and (
+                relative_value is None
+                or not 1 <= relative_value <= 9
+                or isinstance(sample_size, bool)
+                or not isinstance(sample_size, int)
+                or sample_size < 2
+            ):
+                return None
+            expected_metric_scores[key] = (
+                0.8 * expected_absolute[key] + 0.2 * float(relative_value)
+                if relative_value is not None
+                else expected_absolute[key]
+            )
+        ytd_reliability = _finite_number(components.get("ytd_reliability"))
+        if ytd_reliability is None or not 0 <= ytd_reliability <= 1:
+            return None
+        expected_weights = dict(_AUDIT_TYPE5_COLDNESS_WEIGHTS)
+        expected_weights["change_ytd_pct"] *= ytd_reliability
+        if any(
+            not _audit_type5_close(absolute.get(key), round(expected_absolute[key], 6))
+            or not _audit_type5_close(metric_scores.get(key), round(expected_metric_scores[key], 6))
+            or not _audit_type5_close(weights.get(key), round(expected_weights[key], 6))
+            for key in available
+        ):
+            return None
+        total_weight = math.fsum(expected_weights[key] for key in available)
+        raw_score = math.fsum(expected_metric_scores[key] * expected_weights[key] for key in available) / total_weight
+        price_weight = expected_weights["change_60d_pct"] + expected_weights["change_ytd_pct"]
+        price_score = (
+            expected_metric_scores["change_60d_pct"] * expected_weights["change_60d_pct"]
+            + expected_metric_scores["change_ytd_pct"] * expected_weights["change_ytd_pct"]
+        ) / price_weight
+        score_cap = (
+            _AUDIT_TYPE5_MAX_COLDNESS_SCORE
+            if values.get("volume_ratio") is not None
+            else _AUDIT_TYPE5_MAX_COLDNESS_SCORE_WITHOUT_VOLUME
+        )
+        caps = [f"evidence_cap={score_cap:.1f}"]
+        if expected_absolute["change_60d_pct"] <= 3.0:
+            score_cap = min(score_cap, 3.0)
+            caps.append("60d_hot_cap=3.0")
+        elif price_score < 5.0:
+            score_cap = min(score_cap, 4.9)
+            caps.append("price_coldness_lt5_cap=4.9")
+        elif price_score < 6.0:
+            score_cap = min(score_cap, 6.9)
+            caps.append("price_coldness_lt6_cap=6.9")
+        if (
+            not _audit_type5_close(components.get("raw_score"), round(raw_score, 6))
+            or not _audit_type5_close(components.get("price_score"), round(price_score, 6))
+            or not _audit_type5_close(components.get("score_cap"), score_cap)
+            or components.get("caps") != caps
+            or not math.isclose(score, round(max(1.0, min(score_cap, raw_score)), 1), rel_tol=0.0, abs_tol=1e-9)
+        ):
+            return None
+    confirmed_decline = max(change_60d, change_ytd)
+    drawdown_score = (
+        10.0
+        if confirmed_decline <= -30
+        else 9.0
+        if confirmed_decline <= -20
+        else 7.0
+        if confirmed_decline <= -10
+        else 5.0
+        if confirmed_decline <= -5
+        else 3.0
+        if confirmed_decline < 0
+        else 1.0
+    )
+    return min(score, drawdown_score)
+
+
+def _audit_type5_cycle_series(values: Any, years: Any, *, as_of: date) -> tuple[list[float], list[int]] | None:
+    if not isinstance(values, list) or not isinstance(years, list) or len(values) != len(years):
+        return None
+    if not values and not years:
+        return [], []
+    if not 4 <= len(values) <= 10:
+        return None
+    clean_values: list[float] = []
+    clean_years: list[int] = []
+    for raw_value, raw_year in zip(values, years, strict=True):
+        number = _finite_number(raw_value)
+        if number is None or isinstance(raw_year, bool) or not isinstance(raw_year, int):
+            return None
+        clean_values.append(number)
+        clean_years.append(raw_year)
+    if (
+        clean_years != sorted(set(clean_years))
+        or any(current - prior != 1 for prior, current in zip(clean_years, clean_years[1:]))
+        or clean_years[-1] != as_of.year - 1
+    ):
+        return None
+    return clean_values, clean_years
+
+
+def _audit_type5_cycle_low_score(values: Sequence[float]) -> float | None:
+    spread = max(values) - min(values) if len(values) >= 4 else 0.0
+    if spread <= 0:
+        return None
+    position = (values[-1] - min(values)) / spread
+    return (
+        10.0
+        if position <= 0.10
+        else 8.0
+        if position <= 0.25
+        else 6.0
+        if position <= 0.40
+        else 4.0
+        if position <= 0.60
+        else 2.0
+    )
+
+
+def _audit_type5_financial_replay(value: Any, *, as_of: date) -> tuple[float, str] | None:
+    if not isinstance(value, Mapping) or set(value) != {
+        "gross_margin_history",
+        "gross_margin_years",
+        "net_profit_history",
+        "net_profit_years",
+    }:
+        return None
+    margins = _audit_type5_cycle_series(
+        value.get("gross_margin_history"),
+        value.get("gross_margin_years"),
+        as_of=as_of,
+    )
+    profits = _audit_type5_cycle_series(
+        value.get("net_profit_history"),
+        value.get("net_profit_years"),
+        as_of=as_of,
+    )
+    if margins is None or profits is None:
+        return None
+    candidates: list[tuple[float, str]] = []
+    margin_values, _margin_years = margins
+    if margin_values:
+        changes = [current - prior for prior, current in zip(margin_values, margin_values[1:])]
+        if (
+            max(margin_values) - min(margin_values) > 0.15
+            and any(change < 0 for change in changes)
+            and any(change > 0 for change in changes)
+        ):
+            score = _audit_type5_cycle_low_score(margin_values)
+            if score is not None:
+                candidates.append((score, "毛"))
+    profit_values, _profit_years = profits
+    if profit_values:
+        changes = [current - prior for prior, current in zip(profit_values, profit_values[1:])]
+        scale = max(abs(float(statistics.median(profit_values))), 1.0)
+        if (
+            any(change < 0 for change in changes)
+            and any(change > 0 for change in changes)
+            and (max(profit_values) - min(profit_values)) / scale >= 0.50
+        ):
+            score = _audit_type5_cycle_low_score(profit_values)
+            if score is not None:
+                candidates.append((score, "利"))
+    return max(candidates, default=None, key=lambda item: (item[0], item[1]))
+
+
+def _audit_type5_bottom_contract_replay(
+    contract: Any,
+    *,
+    code: str,
+    as_of: Any,
+    row_pb: Any,
+) -> tuple[float, str] | None:
+    if not isinstance(contract, Mapping) or set(contract) != {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "quote_pb",
+        "valuation_history",
+        "market_coldness_record",
+        "financial_cycle",
+    }:
+        return None
+    reference = _audit_type7_history_date(as_of)
+    quote_pb = _finite_number(contract.get("quote_pb"))
+    published_pb = _finite_number(row_pb)
+    quote_binding_valid = (
+        contract.get("quote_pb") is None
+        and row_pb is None
+        or quote_pb is not None
+        and quote_pb > 0
+        and published_pb is not None
+        and published_pb > 0
+        and math.isclose(quote_pb, published_pb, rel_tol=0.0, abs_tol=1e-9)
+    )
+    if (
+        contract.get("schema_version") != _AUDIT_TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION
+        or contract.get("model_id") != _AUDIT_TYPE5_BOTTOM_EVIDENCE_MODEL_ID
+        or contract.get("code") != code
+        or contract.get("as_of") != as_of
+        or reference is None
+        or reference > date.today()
+        or not quote_binding_valid
+    ):
+        return None
+    valuation = _audit_type5_valuation_replay(contract.get("valuation_history"), reference)
+    market_score = _audit_type5_market_replay(contract.get("market_coldness_record"), code=code, as_of=as_of)
+    financial = _audit_type5_financial_replay(contract.get("financial_cycle"), as_of=reference)
+    if valuation is None or market_score is None or financial is None:
+        return None
+    percentile, current_pb = valuation
+    if quote_pb is not None and abs(quote_pb - current_pb) / max(quote_pb, current_pb) > 0.20:
+        return None
+    valuation_score = _audit_type5_pb_bottom_score(percentile, current_pb)
+    financial_score, financial_basis = financial
+    raw_score = 0.40 * valuation_score + 0.30 * market_score + 0.30 * financial_score
+    resonant_sources = sum(score >= 6.0 for score in (valuation_score, market_score, financial_score))
+    if resonant_sources < 2:
+        raw_score = min(raw_score, 4.0)
+    elif resonant_sources < 3:
+        raw_score = min(raw_score, 6.0)
+    score = round(raw_score, 1)
+    reason = f"PB{percentile:.0%}/{current_pb:.2f};冷{market_score:.0f};{financial_basis}{financial_score:.0f}"
+    return score, reason
+
+
+def _audit_type5_bottom_evidence_valid(
+    code: str,
+    company: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> bool:
+    reasons = payload.get("reasons")
+    sub_scores = payload.get("sub_scores")
+    reason = reasons.get("5b") if isinstance(reasons, Mapping) else None
+    mode = payload.get("bottom_evidence_mode")
+    contract = payload.get("bottom_evidence_contract")
+    if mode not in {"automatic_replay", "trusted_external", "incomplete", "not_applicable"}:
+        return False
+    status = payload.get("status")
+    if (status == "not_applicable") != (mode == "not_applicable"):
+        return False
+    if mode != "automatic_replay":
+        return contract is None
+    if contract is None:
+        return False
+    replay = _audit_type5_bottom_contract_replay(
+        contract,
+        code=code,
+        as_of=company.get("source_trade_date"),
+        row_pb=company.get("pb"),
+    )
+    score = _finite_number(sub_scores.get("5b")) if isinstance(sub_scores, Mapping) else None
+    return bool(
+        replay is not None
+        and score is not None
+        and math.isclose(score, replay[0], rel_tol=0.0, abs_tol=1e-9)
+        and reason == replay[1]
+    )
 
 
 def _type7_linear(value: float | None, anchors: Sequence[tuple[float, float]], *, missing: float = 2.0) -> float:
@@ -1031,7 +1834,243 @@ def _audit_type7_content_valid(
     return value["passed"] is expected_passed and bool(reason) is not expected_passed
 
 
-def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
+def _audit_patch4_close(actual: Any, expected: float, *, tolerance: float = 0.0001) -> bool:
+    value = _finite_number(actual)
+    return value is not None and math.isclose(value, expected, rel_tol=0.0, abs_tol=tolerance)
+
+
+def _audit_patch4_linear(value: float, anchors: Sequence[tuple[float, float]]) -> float:
+    if value <= anchors[0][0]:
+        return round(anchors[0][1], 2)
+    if value >= anchors[-1][0]:
+        return round(anchors[-1][1], 2)
+    for (left_x, left_y), (right_x, right_y) in zip(anchors, anchors[1:]):
+        if left_x <= value <= right_x:
+            fraction = (value - left_x) / (right_x - left_x)
+            return round(left_y + fraction * (right_y - left_y), 2)
+    raise AssertionError("Patch 4 anchors do not cover value")
+
+
+def _audit_patch4_evidence_valid(
+    evidence: Any,
+    *,
+    code: str,
+    as_of: date,
+    allowed_bindings: Mapping[str, Mapping[str, str]] | None = None,
+) -> bool:
+    fields = {"source", "evidence_id", "url", "as_of", "summary"}
+    if (
+        not isinstance(evidence, Mapping)
+        or set(evidence) != fields
+        or any(not isinstance(evidence.get(field), str) for field in fields)
+    ):
+        return False
+    clean = {field: str(evidence[field]).strip() for field in fields}
+    if any(not text or len(text) > 1_000 or any(ord(character) < 32 for character in text) for text in clean.values()):
+        return False
+    match = _AUDIT_PATCH4_EVIDENCE_ID.fullmatch(clean["evidence_id"])
+    try:
+        evidence_date = date.fromisoformat(clean["as_of"])
+    except (TypeError, ValueError):
+        return False
+    if evidence_date.isoformat() != clean["as_of"] or match is None:
+        return False
+    art_code = match.group("art_code")
+    digest = match.group("digest")
+    binding = allowed_bindings.get(clean["evidence_id"]) if isinstance(allowed_bindings, Mapping) else None
+    return bool(
+        isinstance(binding, Mapping)
+        and set(binding) == {"evidence_id", "url", "as_of", "content_sha256"}
+        and binding.get("evidence_id") == clean["evidence_id"]
+        and binding.get("url") == clean["url"]
+        and binding.get("as_of") == clean["as_of"]
+        and isinstance(binding.get("content_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", str(binding["content_sha256"]))
+        and str(binding["content_sha256"])[:16] == digest
+        and clean["source"] == _AUDIT_PATCH4_EVIDENCE_SOURCE
+        and match.group("code") == code
+        and clean["url"] == f"{_AUDIT_PATCH4_DETAIL_PREFIX}{code}/{art_code}.html"
+        and f"正文SHA-256前16位：{digest}" in clean["summary"]
+        and evidence_date <= as_of
+        and (as_of - evidence_date).days <= _AUDIT_PATCH4_MAX_EVIDENCE_AGE_DAYS
+    )
+
+
+def _audit_patch4_ledger_valid(
+    assessment: Any,
+    *,
+    code: str,
+    as_of: str,
+    fairness_item: Mapping[str, Any],
+    governance_component: Mapping[str, Any],
+    allowed_bindings: Mapping[str, Mapping[str, str]] | None,
+) -> bool:
+    top_fields = {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "formula_version",
+        "score",
+        "complete",
+        "components",
+    }
+    try:
+        reference = date.fromisoformat(as_of)
+    except (TypeError, ValueError):
+        return False
+    if (
+        not isinstance(assessment, Mapping)
+        or set(assessment) != top_fields
+        or assessment.get("schema_version") != _AUDIT_PATCH4_SCHEMA_VERSION
+        or assessment.get("model_id") != _AUDIT_PATCH4_MODEL_ID
+        or assessment.get("formula_version") != _AUDIT_PATCH4_FORMULA_VERSION
+        or assessment.get("code") != code
+        or assessment.get("as_of") != as_of
+        or reference > date.today()
+        or not isinstance(assessment.get("complete"), bool)
+    ):
+        return False
+    components = assessment.get("components")
+    if not isinstance(components, list) or len(components) != len(_AUDIT_PATCH4_COMPONENT_WEIGHTS):
+        return False
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for component in components:
+        fields = {
+            "key",
+            "label",
+            "weight",
+            "score",
+            "points",
+            "complete",
+            "formula",
+            "inputs",
+            "evidence",
+        }
+        key = component.get("key") if isinstance(component, Mapping) else None
+        score = _finite_number(component.get("score")) if isinstance(component, Mapping) else None
+        points = _finite_number(component.get("points")) if isinstance(component, Mapping) else None
+        weight = _AUDIT_PATCH4_COMPONENT_WEIGHTS.get(key) if isinstance(key, str) else None
+        if (
+            not isinstance(component, Mapping)
+            or set(component) != fields
+            or weight is None
+            or key in indexed
+            or score is None
+            or not 0 <= score <= 10
+            or points is None
+            or not isinstance(component.get("complete"), bool)
+            or not isinstance(component.get("formula"), str)
+            or not isinstance(component.get("inputs"), Mapping)
+            or component.get("label") != _AUDIT_PATCH4_COMPONENT_LABELS[key]
+            or not _audit_patch4_close(component.get("weight"), weight)
+            or not _audit_patch4_close(points, round(score * weight / 10.0, 4))
+        ):
+            return False
+        indexed[key] = component
+    if set(indexed) != set(_AUDIT_PATCH4_COMPONENT_WEIGHTS):
+        return False
+
+    fairness = indexed["p4_defensive_fairness"]
+    governance = indexed["p4_defensive_governance"]
+    fairness_score = _finite_number(fairness_item.get("score"))
+    governance_score = _finite_number(governance_component.get("score"))
+    if (
+        fairness_score is None
+        or governance_score is None
+        or fairness.get("formula") != "source_score(template1.t1_08)"
+        or fairness.get("inputs")
+        != {
+            "source_item": "template1.t1_08",
+            "evidence_level": fairness_item.get("evidence_level"),
+        }
+        or fairness.get("evidence") is not None
+        or not _audit_patch4_close(fairness.get("score"), fairness_score)
+        or fairness.get("complete") is not fairness_item.get("complete")
+    ):
+        return False
+    governance_inputs = governance.get("inputs")
+    if (
+        governance.get("formula") != "verified_governance_or_capped_management_proxy"
+        or not isinstance(governance_inputs, Mapping)
+        or set(governance_inputs) != {"source_item", "evidence_level"}
+        or governance_inputs.get("source_item") != "patch5.p5_c4"
+        or governance_inputs.get("evidence_level") not in {"primary", "derived_proxy", "missing"}
+        or governance.get("evidence") is not None
+        or not _audit_patch4_close(governance.get("score"), governance_score)
+        or governance.get("complete") is not governance_component.get("complete")
+    ):
+        return False
+
+    percentage_specs = {
+        "p4_core_rd_ownership": (
+            "piecewise(core_rd_ownership_pct;5%+=10)",
+            [(0.0, 0.0), (1.0, 2.0), (3.0, 6.0), (5.0, 9.0), (5.000001, 10.0)],
+        ),
+        "p4_esop_coverage": (
+            "piecewise(esop_core_talent_coverage_pct;30%+=10)",
+            [(0.0, 0.0), (10.0, 3.0), (20.0, 6.0), (30.0, 9.0), (30.000001, 10.0)],
+        ),
+    }
+    for key, (formula, anchors) in percentage_specs.items():
+        component = indexed[key]
+        inputs = component.get("inputs")
+        value = _finite_number(inputs.get("value")) if isinstance(inputs, Mapping) else None
+        if (
+            not isinstance(inputs, Mapping)
+            or set(inputs) != {"value", "unit"}
+            or inputs.get("unit") != "percentage_points"
+            or value is None
+            or not 0 <= value <= 100
+            or component.get("formula") != formula
+            or component.get("complete") is not True
+            or not _audit_patch4_evidence_valid(
+                component.get("evidence"),
+                code=code,
+                as_of=reference,
+                allowed_bindings=allowed_bindings,
+            )
+            or not _audit_patch4_close(component.get("score"), _audit_patch4_linear(value, anchors))
+        ):
+            return False
+    boolean_specs = {
+        "p4_long_term_rd_link": ("10 if long_term_rd_metrics else 0", False),
+        "p4_frontline_rd_equity": ("10 if frontline_rd_equity else 0", False),
+        "p4_short_term_binding": ("0 if short_term_price_binding else 10", True),
+    }
+    for key, (formula, inverse) in boolean_specs.items():
+        component = indexed[key]
+        inputs = component.get("inputs")
+        value = inputs.get("value") if isinstance(inputs, Mapping) else None
+        expected_score = (0.0 if value else 10.0) if inverse else (10.0 if value else 0.0)
+        if (
+            not isinstance(inputs, Mapping)
+            or set(inputs) != {"value"}
+            or not isinstance(value, bool)
+            or component.get("formula") != formula
+            or component.get("complete") is not True
+            or not _audit_patch4_evidence_valid(
+                component.get("evidence"),
+                code=code,
+                as_of=reference,
+                allowed_bindings=allowed_bindings,
+            )
+            or not _audit_patch4_close(component.get("score"), expected_score)
+        ):
+            return False
+    expected_score = round(math.fsum(float(component["points"]) for component in indexed.values()) / 10.0, 2)
+    expected_complete = all(component.get("complete") is True for component in indexed.values())
+    return bool(
+        _audit_patch4_close(assessment.get("score"), expected_score) and assessment.get("complete") is expected_complete
+    )
+
+
+def _audit_type7_ledger_valid_impl(
+    code: str,
+    ledger: Any,
+    status: Any,
+    patch4_bindings: Mapping[str, Mapping[str, str]] | None,
+) -> bool:
     """Independently replay the Type 7 formula ledger in a release artifact."""
 
     def close(actual: Any, expected: float, *, tolerance: float = 0.0001) -> bool:
@@ -1269,34 +2308,139 @@ def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
     core_prerequisite = prerequisites.get("core_modules_80pct")
     template1_coverage = _finite_number(sections["template1"].get("coverage"))
     core_actual = _finite_number(core_prerequisite.get("actual")) if isinstance(core_prerequisite, Mapping) else None
+    incomplete_required_items = [
+        f"{section_key}.{item_key}"
+        for section_key in ("template1", "template5")
+        for item_key in _AUDIT_TYPE7_TEMPLATE_WEIGHTS[section_key]
+        if template_items.get(section_key, {}).get(item_key, {}).get("complete") is not True
+    ]
+    for section_key, component_weights in _AUDIT_TYPE7_PATCH_WEIGHTS.items():
+        section = patch_sections.get(section_key, {})
+        components = {
+            component.get("key"): component
+            for component in section.get("components", [])
+            if isinstance(component, Mapping) and isinstance(component.get("key"), str)
+        }
+        incomplete_required_items.extend(
+            f"patch5.{section_key}.{component_key}"
+            for component_key in component_weights
+            if components.get(component_key, {}).get("complete") is not True
+        )
+    required_items_complete = not incomplete_required_items
+    expected_core_passed = bool(core_actual is not None and core_actual >= 0.80 and required_items_complete)
     if (
         not isinstance(core_prerequisite, Mapping)
-        or set(core_prerequisite) != {"passed", "actual", "required"}
+        or set(core_prerequisite)
+        != {
+            "passed",
+            "actual",
+            "required",
+            "required_items_complete",
+            "incomplete_required_items",
+        }
         or template1_coverage is None
         or core_actual is None
         or not close(core_actual, template1_coverage)
         or not close(core_prerequisite.get("required"), 0.80)
-        or core_prerequisite.get("passed") is not (core_actual >= 0.80)
+        or core_prerequisite.get("required_items_complete") is not required_items_complete
+        or core_prerequisite.get("incomplete_required_items") != incomplete_required_items
+        or core_prerequisite.get("passed") is not expected_core_passed
     ):
         return False
 
     technology_prerequisite = prerequisites.get("technology_patch4")
     technology_item = template_items["template1"].get("t1_17")
     technology_score = _finite_number(technology_item.get("score")) if isinstance(technology_item, Mapping) else None
+    technology_complete = technology_item.get("complete") if isinstance(technology_item, Mapping) else None
     technology_applicable = (
         technology_prerequisite.get("applicable") if isinstance(technology_prerequisite, Mapping) else None
     )
+    applicability = (
+        technology_prerequisite.get("applicability") if isinstance(technology_prerequisite, Mapping) else None
+    )
+    assessment = technology_prerequisite.get("assessment") if isinstance(technology_prerequisite, Mapping) else None
+    rd_intensity = _finite_number(applicability.get("rd_intensity")) if isinstance(applicability, Mapping) else None
+    published_technology_score = (
+        _finite_number(applicability.get("technology_score")) if isinstance(applicability, Mapping) else None
+    )
+    published_technology_complete = (
+        applicability.get("technology_score_complete") if isinstance(applicability, Mapping) else None
+    )
+    expected_technology_applicable = not bool(
+        rd_intensity is not None
+        and 0 <= rd_intensity < 0.05
+        and technology_complete is True
+        and technology_score is not None
+        and technology_score < 7.0
+    )
+    patch4_score = _finite_number(assessment.get("score")) if isinstance(assessment, Mapping) else None
+    patch4_complete = bool(isinstance(assessment, Mapping) and assessment.get("complete") is True)
     expected_technology_status = (
-        "missing_validated_patch4_assessment" if technology_applicable is True else "not_applicable"
+        "not_applicable"
+        if not expected_technology_applicable
+        else "validated_replayable_assessment"
+        if patch4_complete
+        else "incomplete_replayable_assessment"
+        if assessment is not None
+        else "missing_validated_patch4_assessment"
+    )
+    culture_components = {
+        component.get("key"): component
+        for component in patch_sections.get("p5_culture", {}).get("components", [])
+        if isinstance(component, Mapping)
+    }
+    incentive_component = culture_components.get("p5_c2", {})
+    governance_component = culture_components.get("p5_c4", {})
+    raw_patch4_as_of = (
+        prerequisites.get("latest_quote_and_valuation", {}).get("as_of")
+        if isinstance(prerequisites.get("latest_quote_and_valuation"), Mapping)
+        else None
+    )
+    patch4_valid = bool(
+        assessment is None
+        or _audit_patch4_ledger_valid(
+            assessment,
+            code=code,
+            as_of=str(raw_patch4_as_of or ""),
+            fairness_item=template_items["template1"].get("t1_08", {}),
+            governance_component=governance_component,
+            allowed_bindings=patch4_bindings,
+        )
+    )
+    expected_incentive_score = (
+        patch4_score
+        if expected_technology_applicable and patch4_score is not None
+        else 2.0
+        if expected_technology_applicable
+        else _finite_number(template_items["template1"].get("t1_08", {}).get("score"))
+    )
+    expected_incentive_complete = (
+        patch4_complete
+        if expected_technology_applicable
+        else template_items["template1"].get("t1_08", {}).get("complete") is True
     )
     if (
         not isinstance(technology_prerequisite, Mapping)
-        or set(technology_prerequisite) != {"passed", "applicable", "score", "validation_status"}
+        or set(technology_prerequisite)
+        != {"passed", "applicable", "score", "validation_status", "applicability", "assessment"}
         or not isinstance(technology_applicable, bool)
-        or technology_prerequisite.get("score") is not None
+        or not isinstance(applicability, Mapping)
+        or set(applicability) != {"technology_score", "technology_score_complete", "rd_intensity", "rule"}
+        or applicability.get("rule")
+        != "Patch4 waived only if reported_rd_intensity<0.05 AND validated_technology_score<7"
+        or technology_score is None
+        or published_technology_score is None
+        or not close(published_technology_score, technology_score)
+        or published_technology_complete is not technology_complete
+        or (rd_intensity is not None and not 0 <= rd_intensity <= 1)
+        or technology_applicable is not expected_technology_applicable
+        or technology_prerequisite.get("score") != (patch4_score if patch4_complete else None)
         or technology_prerequisite.get("validation_status") != expected_technology_status
-        or technology_prerequisite.get("passed") is not (technology_applicable is False)
-        or (technology_score is not None and technology_score >= 7.0 and technology_applicable is not True)
+        or technology_prerequisite.get("passed") is not (not expected_technology_applicable or patch4_complete)
+        or not patch4_valid
+        or expected_incentive_score is None
+        or not close(incentive_component.get("score"), expected_incentive_score)
+        or incentive_component.get("complete") is not expected_incentive_complete
     ):
         return False
 
@@ -1435,18 +2579,51 @@ def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
     history_prerequisite = prerequisites.get("ten_year_return_and_five_year_valuation")
     history_inputs = t1_items.get("t1_19", {}).get("inputs", {})
     shareholder_input = history_inputs.get("shareholder_return") if isinstance(history_inputs, Mapping) else None
-    expected_history_pass = bool(
-        isinstance(shareholder_input, Mapping)
-        and shareholder_input.get("available") is True
-        and template_items.get("template5", {}).get("t5_v1", {}).get("complete") is True
+    valuation_history_input = (
+        shareholder_input.get("valuation_history_contract") if isinstance(shareholder_input, Mapping) else None
     )
     if not isinstance(history_prerequisite, Mapping) or set(history_prerequisite) != {"passed", "as_of"}:
         return False
     history_as_of = history_prerequisite.get("as_of")
-    try:
-        history_date = date.fromisoformat(history_as_of) if isinstance(history_as_of, str) else None
-    except ValueError:
-        history_date = None
+    history_date = _audit_type7_history_date(history_as_of)
+    shareholder_history_valid = bool(
+        history_date is not None and _audit_type7_shareholder_history_valid(shareholder_input, history_date)
+    )
+    valuation_history_replay = (
+        _audit_type7_valuation_history_replay(valuation_history_input, history_date)
+        if history_date is not None
+        else None
+    )
+    t5_history_item = template_items.get("template5", {}).get("t5_v1", {})
+    expected_history_pass = bool(
+        shareholder_history_valid and valuation_history_replay is not None and t5_history_item.get("complete") is True
+    )
+    embedded_history_claimed = bool(
+        isinstance(shareholder_input, Mapping)
+        and (
+            shareholder_input.get("available") is True
+            or (isinstance(valuation_history_input, Mapping) and valuation_history_input.get("available") is True)
+        )
+    )
+    if embedded_history_claimed and (not shareholder_history_valid or valuation_history_replay is None):
+        return False
+    if valuation_history_replay is not None:
+        combined_percentile = statistics.median(
+            float(series["percentile"]) for series in valuation_history_replay.values()
+        )
+        expected_history_score = _type7_linear(
+            combined_percentile,
+            [(0.0, 10), (0.10, 9), (0.30, 8), (0.50, 6.5), (0.70, 5), (0.90, 2), (1.0, 0)],
+            missing=0,
+        )
+    else:
+        expected_history_score = 0.0
+    if (
+        not isinstance(t5_history_item, Mapping)
+        or t5_history_item.get("complete") is not (valuation_history_replay is not None)
+        or not close(t5_history_item.get("score"), expected_history_score)
+    ):
+        return False
     if not (
         history_prerequisite.get("passed") is expected_history_pass
         and (history_as_of is None or history_date is not None)
@@ -1588,13 +2765,28 @@ def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
         or any(not close(published_upper.get(key), value) for key, value in expected_upper.items())
     ):
         return False
+    history_request_core_ready = bool(
+        template1_coverage is not None
+        and template1_coverage >= 0.80
+        and set(incomplete_required_items).issubset(
+            {
+                "template1.t1_18",
+                "template1.t1_19",
+                "template5.t5_v1",
+                "template5.t5_v3",
+                "patch5.p5_safety.p5_s1",
+            }
+        )
+    )
     expected_request = bool(
         not pass_flags["ten_year_return_and_five_year_valuation"]
+        and history_request_core_ready
         and all(
             value
             for key, value in pass_flags.items()
             if key
             not in {
+                "core_modules_80pct",
                 "three_external_reports",
                 "external_report_content_verification",
                 "ten_year_return_and_five_year_valuation",
@@ -1620,11 +2812,17 @@ def _audit_type7_ledger_valid_impl(code: str, ledger: Any, status: Any) -> bool:
     )
 
 
-def _audit_type7_ledger_valid(code: str, ledger: Any, status: Any) -> bool:
+def _audit_type7_ledger_valid(
+    code: str,
+    ledger: Any,
+    status: Any,
+    *,
+    patch4_bindings: Mapping[str, Mapping[str, str]] | None = None,
+) -> bool:
     """Fail closed when release JSON contains hostile Type 7 values."""
 
     try:
-        return _audit_type7_ledger_valid_impl(code, ledger, status)
+        return _audit_type7_ledger_valid_impl(code, ledger, status, patch4_bindings)
     except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
         return False
 
@@ -1666,7 +2864,446 @@ def _expected_audit_bear_case(
     return expected
 
 
-def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
+def _audit_quantitative_evidence_valid(company: Mapping[str, Any], code: str) -> bool:
+    """Replay all 13 records without converting honest gaps into scores."""
+
+    records = company.get("quantitative_evidence")
+    levels = company.get("quantitative_evidence_levels")
+    if (
+        not isinstance(records, Mapping)
+        or set(records) != _AUDIT_QUANTITATIVE_EVIDENCE_KEYS
+        or not isinstance(levels, Mapping)
+        or set(levels) != _AUDIT_QUANTITATIVE_EVIDENCE_KEYS
+    ):
+        return False
+    effective_levels: list[str] = []
+    for key in sorted(_AUDIT_QUANTITATIVE_EVIDENCE_KEYS):
+        record = records.get(key)
+        level = levels.get(key)
+        if (
+            not isinstance(record, Mapping)
+            or level not in _AUDIT_QUANTITATIVE_LEVELS
+            or record.get("evidence_level") != level
+            or company.get(f"{key}_evidence_level") != level
+        ):
+            return False
+        try:
+            normalized = validate_quantitative_evidence_record(record, key=key, code=code)
+        except (TypeError, ValueError):
+            return False
+        attached_score = _finite_number(company.get(key))
+        attached_evidence = company.get(f"{key}_evidence")
+        if level in _AUDIT_COMPLETE_QUANTITATIVE_LEVELS:
+            if (
+                attached_score is None
+                or not math.isclose(attached_score, float(normalized["score"]), rel_tol=0.0, abs_tol=1e-12)
+                or attached_evidence != normalized["evidence"]
+            ):
+                return False
+        elif attached_score is not None or isinstance(attached_evidence, Mapping):
+            return False
+        effective_levels.append(str(level))
+    expected_status = (
+        "complete"
+        if all(level in _AUDIT_COMPLETE_QUANTITATIVE_LEVELS for level in effective_levels)
+        else "missing"
+        if all(level == "missing" for level in effective_levels)
+        else "partial"
+    )
+    return company.get("quantitative_evidence_status") == expected_status
+
+
+def _audit_compact_decision_reason(value: Any) -> str:
+    text = " ".join(str(value or "数据不足").split())
+    if len(text) <= _AUDIT_REASON_MAX_LENGTH:
+        return text
+    best_boundary = ""
+    for match in re.finditer(r"[；;。！？!?，,]", text):
+        candidate = text[: match.start()].rstrip()
+        if len(candidate) > _AUDIT_REASON_MAX_LENGTH - 1:
+            break
+        if candidate:
+            best_boundary = candidate
+    if best_boundary:
+        return best_boundary + "…"
+    prefix = text[: _AUDIT_REASON_MAX_LENGTH - 1].rstrip()
+    word_boundary = prefix.rfind(" ")
+    if word_boundary >= max(4, (_AUDIT_REASON_MAX_LENGTH - 1) // 2):
+        prefix = prefix[:word_boundary].rstrip()
+    return prefix + "…"
+
+
+def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) -> bool:
+    """Duplicate the bounded decision model and compare all serialized fields."""
+
+    weights = _AUDIT_TYPE_WEIGHTS[type_key]
+    sub_scores = payload.get("sub_scores")
+    reasons = payload.get("reasons")
+    decision = payload.get("decision")
+    if (
+        not isinstance(sub_scores, Mapping)
+        or set(sub_scores) != set(weights)
+        or not isinstance(reasons, Mapping)
+        or not isinstance(decision, Mapping)
+        or set(decision) != _AUDIT_DECISION_FIELDS
+    ):
+        return False
+    scores: dict[str, float] = {}
+    for dimension in weights:
+        value = _finite_number(sub_scores.get(dimension))
+        if value is None or not 0.0 <= value <= 10.0:
+            return False
+        scores[dimension] = value
+
+    status = reasons.get("_status")
+    applicable_marker = reasons.get("_applicable")
+    evidence_marker = reasons.get("_evidence")
+    if applicable_marker not in {"yes", "no"} or evidence_marker not in {"complete", "incomplete"}:
+        return False
+    applicable = applicable_marker == "yes"
+    evidence_complete = evidence_marker == "complete"
+    raw_missing = reasons.get("_decision_missing_dimensions")
+    if not isinstance(raw_missing, list):
+        return False
+    missing = [dimension for dimension in weights if dimension in raw_missing]
+    if not evidence_complete and not missing:
+        missing = list(weights)
+    action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
+    if action_condition and "6e" not in missing:
+        missing.append("6e")
+        missing = [dimension for dimension in weights if dimension in missing]
+
+    lower_dimensions = dict(scores)
+    upper_dimensions = dict(scores)
+    for dimension in missing:
+        lower_dimensions[dimension] = 0.0
+        upper_dimensions[dimension] = 10.0
+    if type_key == "type7" and missing:
+        ledger = payload.get("ledger")
+        raw_upper = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
+        mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
+        if not isinstance(raw_upper, Mapping):
+            return False
+        for dimension in missing:
+            value = _finite_number(raw_upper.get(mapping[dimension]))
+            if value is None or not 0.0 <= value <= 100.0:
+                return False
+            upper_dimensions[dimension] = min(10.0, value / 10.0)
+
+    lower = round(math.fsum(lower_dimensions[key] * weights[key] for key in weights), 1)
+    upper = round(math.fsum(upper_dimensions[key] * weights[key] for key in weights), 1)
+    if type_key == "type3" and "3e" not in missing and upper_dimensions["3e"] <= 3.0:
+        lower = min(lower, 4.9)
+        upper = min(upper, 4.9)
+
+    if type_key == "type2":
+        possible_veto = "2c" in missing
+        if set(missing).intersection({"2a", "2b"}):
+            lower_hot = math.fsum(0.0 if key in missing else upper_dimensions[key] for key in ("2a", "2b")) / 2.0
+            possible_veto = possible_veto or lower_hot <= 4.0
+        bounded_veto = False
+    elif type_key == "type4":
+        possible_veto = bool(
+            "4c" in missing
+            or (
+                set(missing).intersection({"4e", "4f"})
+                and (0.0 if "4e" in missing else upper_dimensions["4e"]) <= 3.0
+                and (0.0 if "4f" in missing else upper_dimensions["4f"]) <= 3.0
+            )
+        )
+        bounded_veto = False
+    elif type_key == "type6":
+        core = ("6a", "6b", "6c", "6d")
+        known_high = sum(key not in missing and upper_dimensions[key] >= 5.0 for key in core)
+        maximum_high = known_high + sum(key in missing for key in core)
+        bounded_veto = maximum_high < 2
+        possible_veto = not bounded_veto and known_high < 2
+    else:
+        bounded_veto = False
+        possible_veto = bool(set(missing).intersection(_AUDIT_DECISION_POTENTIAL_VETO_DIMENSIONS[type_key]))
+
+    market_context = payload.get("decision_market_context")
+    if (
+        not isinstance(market_context, Mapping)
+        or set(market_context) != _AUDIT_DECISION_MARKET_CONTEXT_FIELDS
+        or (market_context.get("tradable") is not None and type(market_context.get("tradable")) is not bool)
+        or type(market_context.get("reference_price")) is not bool
+        or not isinstance(market_context.get("risk_status"), str)
+    ):
+        return False
+    risk_status = str(market_context["risk_status"]).strip()
+    market_block_reason = (
+        "标的不可交易"
+        if market_context["tradable"] is False
+        else "仅参考价不得触发买入"
+        if market_context["reference_price"]
+        else f"风险状态:{risk_status}"
+        if risk_status and risk_status.lower() not in {"正常", "normal", "active", "ok"}
+        else None
+    )
+    market_blocked = market_block_reason is not None
+    if bool(reasons.get("_decision_market_block")) != market_blocked or (
+        market_blocked and reasons.get("_decision_market_block") != _audit_compact_decision_reason(market_block_reason)
+    ):
+        return False
+
+    missing_set = set(missing)
+
+    def known(key: str) -> bool:
+        return key not in missing_set
+
+    if type_key == "type1":
+        confirmed_hard_veto = bool(
+            (known("1a") and upper_dimensions["1a"] <= 2.0) or (known("1b") and upper_dimensions["1b"] <= 3.0)
+        )
+    elif type_key == "type2":
+        confirmed_hard_veto = bool(
+            (known("2a") and known("2b") and (upper_dimensions["2a"] + upper_dimensions["2b"]) / 2.0 <= 4.0)
+            or (known("2c") and upper_dimensions["2c"] <= 3.0)
+        )
+    elif type_key == "type3":
+        confirmed_hard_veto = bool(
+            (known("3a") and upper_dimensions["3a"] <= 3.0) or (known("3d") and upper_dimensions["3d"] <= 3.0)
+        )
+    elif type_key == "type4":
+        confirmed_hard_veto = bool(
+            (known("4c") and upper_dimensions["4c"] <= 3.0)
+            or (known("4e") and known("4f") and upper_dimensions["4e"] <= 3.0 and upper_dimensions["4f"] <= 3.0)
+        )
+    elif type_key == "type5":
+        confirmed_hard_veto = False
+    elif type_key == "type6":
+        confirmed_hard_veto = bool(
+            all(known(key) for key in ("6a", "6b", "6c", "6d"))
+            and sum(upper_dimensions[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) < 2
+        )
+    else:
+        ledger = payload.get("ledger")
+        patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
+        safety_score = _finite_number(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
+        confirmed_hard_veto = bool(
+            isinstance(patch5, Mapping)
+            and patch5.get("safety_margin_complete") is True
+            and safety_score is not None
+            and safety_score < 8.0
+        )
+    if not applicable:
+        lower = upper = 0.0
+        complete, basis, veto_state, potential = True, "scope_exclusion", "none", False
+        missing = []
+    elif confirmed_hard_veto or bounded_veto:
+        complete, basis, veto_state, potential = True, "confirmed_veto", "confirmed", False
+    elif market_blocked:
+        complete, basis, veto_state, potential = True, "market_block", "none", False
+    else:
+        veto_state = "possible" if possible_veto else "none"
+        theoretical = upper >= _AUDIT_QUALIFY_THRESHOLD
+        if type_key == "type1":
+            theoretical = theoretical and ("1a" in missing or upper_dimensions["1a"] >= 5.0)
+        elif type_key == "type2":
+            hot_upper = (upper_dimensions["2a"] + upper_dimensions["2b"]) / 2.0
+            valuation_possible = bool(
+                upper_dimensions["2d"] >= 5.0
+                or (hot_upper >= 7.0 and upper_dimensions["2c"] >= 7.0 and 4.0 <= upper_dimensions["2d"] <= 5.0)
+            )
+            theoretical = theoretical and valuation_possible
+        elif type_key == "type6":
+            theoretical = theoretical and sum(upper_dimensions[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) >= 2
+            if "6e" not in missing:
+                theoretical = theoretical and (upper_dimensions["6e"] >= 8.0 and not reasons.get("_condition"))
+        elif type_key == "type7":
+            theoretical = all(upper_dimensions[key] > _AUDIT_QUALIFY_THRESHOLD for key in weights)
+
+        if action_condition:
+            complete = not theoretical
+            basis = "action_condition" if theoretical else "conservative_upper_bound"
+            potential = theoretical
+        elif evidence_complete:
+            complete, basis, potential = True, "full_evidence", theoretical
+        elif not theoretical:
+            complete, basis, potential = True, "conservative_upper_bound", False
+        else:
+            complete, basis, potential = False, "unresolved_missing_evidence", True
+
+    expected = {
+        "schema_version": 1,
+        "model_id": "buy-decision-bounds-v1",
+        "decision_complete": complete,
+        "decision_basis": basis,
+        "score_lower_bound": lower,
+        "score_upper_bound": upper,
+        "veto_state": veto_state,
+        "potentially_triggerable": potential,
+        "missing_dimensions": missing,
+    }
+    for key, value in expected.items():
+        actual = decision.get(key)
+        if key in {"score_lower_bound", "score_upper_bound"}:
+            numeric = _finite_number(actual)
+            if numeric is None or not math.isclose(numeric, float(value), rel_tol=0.0, abs_tol=1e-12):
+                return False
+        elif actual != value:
+            return False
+    expected_trigger = bool(basis == "full_evidence" and potential)
+    market_rewrite_veto = bool(market_blocked and status == "blocked" and not reasons.get("_blocked"))
+    if (
+        payload.get("triggered") is not expected_trigger
+        or (bool(reasons.get("_veto")) and not confirmed_hard_veto and not market_rewrite_veto)
+        or (status == "vetoed" and not confirmed_hard_veto)
+    ):
+        return False
+    return bool(
+        payload.get("status") == status
+        and payload.get("applicable") is applicable
+        and payload.get("evidence_complete") is evidence_complete
+        and payload.get("veto") is bool(reasons.get("_veto"))
+        and payload.get("triggered") is (status == "triggered")
+    )
+
+
+def _valid_full_market_screening_coverage(value: Any, eligible_universe_size: Any) -> bool:
+    """Replay full-market integrity and visibility separately from ideal data."""
+
+    if (
+        isinstance(eligible_universe_size, bool)
+        or not isinstance(eligible_universe_size, int)
+        or eligible_universe_size <= 0
+        or not isinstance(value, Mapping)
+    ):
+        return False
+    readiness_keys = {
+        "all_framework_payloads_present",
+        "all_sub_scores_valid",
+        "all_applicable_frameworks_evidence_complete",
+        "all_incomplete_frameworks_explained",
+        "all_quantitative_evidence_records_valid",
+        "no_missing_quantitative_evidence",
+        "no_partial_quantitative_evidence",
+        "all_decision_contracts_valid",
+        "all_potential_candidates_visible",
+        "all_candidate_recall_paths_safe",
+        "artifact_integrity_ready",
+        "candidate_visibility_ready",
+        "candidate_recall_ready",
+        "ideal_zero_gap_ready",
+        "ready",
+    }
+    readiness = value.get("goal_readiness")
+    if not isinstance(readiness, Mapping) or set(readiness) != readiness_keys:
+        return False
+    framework_contract = value.get("framework_evidence_contract")
+    if not isinstance(framework_contract, Mapping) or set(framework_contract) != set(_AUDIT_TYPE_WEIGHTS):
+        return False
+    for contract in framework_contract.values():
+        decision_count_fields = (
+            "decision_complete",
+            "decision_incomplete",
+            "decision_visible",
+            "decision_hidden",
+            "recall_safe",
+            "recall_unsafe",
+            "potentially_triggerable",
+        )
+        if not isinstance(contract, Mapping) or any(
+            type(contract.get(field)) is not int or contract.get(field) < 0 for field in decision_count_fields
+        ):
+            return False
+        if (
+            contract.get("rows") != eligible_universe_size
+            or contract.get("valid_sub_scores") != eligible_universe_size
+            or contract.get("valid_decision") != eligible_universe_size
+            or contract.get("decision_complete", 0) + contract.get("decision_incomplete", 0) != eligible_universe_size
+            or contract.get("decision_visible", 0) + contract.get("decision_hidden", 0) != eligible_universe_size
+            or contract.get("recall_safe", 0) + contract.get("recall_unsafe", 0) != eligible_universe_size
+            or not 0 <= contract.get("potentially_triggerable") <= eligible_universe_size
+            or any(
+                contract.get(field) != 0
+                for field in (
+                    "invalid_payload",
+                    "invalid_sub_scores",
+                    "invalid_applicability",
+                    "invalid_evidence_complete",
+                    "incomplete_without_reason",
+                    "invalid_decision",
+                    "decision_hidden",
+                    "recall_unsafe",
+                )
+            )
+        ):
+            return False
+    contract = value.get("quantitative_evidence_contract")
+    if (
+        not isinstance(contract, Mapping)
+        or contract.get("model_id") != QUANTITATIVE_EVIDENCE_MODEL_ID
+        or contract.get("expected_metrics") != sorted(_AUDIT_QUANTITATIVE_EVIDENCE_KEYS)
+        or contract.get("expected_metrics_per_row") != len(_AUDIT_QUANTITATIVE_EVIDENCE_KEYS)
+        or contract.get("summary_columns_present") is not True
+        or contract.get("rows") != eligible_universe_size
+        or contract.get("valid_rows") != eligible_universe_size
+        or contract.get("invalid_rows") != 0
+        or contract.get("invalid_examples") != []
+        or any(
+            contract.get(field) != 0
+            for field in (
+                "missing_column",
+                "non_mapping",
+                "key_mismatch",
+                "invalid_record",
+                "invalid_level",
+                "attachment_mismatch",
+                "summary_columns_missing",
+                "summary_columns_mismatch",
+                "levels_mismatch",
+                "status_mismatch",
+            )
+        )
+    ):
+        return False
+    level_counts = value.get("quantitative_evidence_level_counts")
+    if not isinstance(level_counts, Mapping) or any(
+        key not in _AUDIT_QUANTITATIVE_LEVELS or isinstance(count, bool) or not isinstance(count, int) or count < 0
+        for key, count in level_counts.items()
+    ):
+        return False
+    if sum(level_counts.values()) != eligible_universe_size * len(_AUDIT_QUANTITATIVE_EVIDENCE_KEYS) or not isinstance(
+        value.get("quantitative_evidence_gap_examples"), list
+    ):
+        return False
+
+    all_applicable_complete = all(
+        contract.get("applicable_evidence_incomplete") == 0 for contract in framework_contract.values()
+    )
+    no_missing = level_counts.get("missing", 0) == 0
+    no_partial = level_counts.get("partial", 0) == 0
+    expected = {
+        "all_framework_payloads_present": True,
+        "all_sub_scores_valid": True,
+        "all_applicable_frameworks_evidence_complete": all_applicable_complete,
+        "all_incomplete_frameworks_explained": True,
+        "all_quantitative_evidence_records_valid": True,
+        "no_missing_quantitative_evidence": no_missing,
+        "no_partial_quantitative_evidence": no_partial,
+        "all_decision_contracts_valid": True,
+        "all_potential_candidates_visible": True,
+        "all_candidate_recall_paths_safe": True,
+        "artifact_integrity_ready": True,
+        "candidate_visibility_ready": True,
+        "candidate_recall_ready": True,
+        "ideal_zero_gap_ready": all_applicable_complete and no_missing and no_partial,
+        "ready": all_applicable_complete and no_missing and no_partial,
+    }
+    return bool(
+        all(readiness.get(key) is expected_value for key, expected_value in expected.items())
+        and readiness.get("artifact_integrity_ready") is True
+        and readiness.get("candidate_visibility_ready") is True
+    )
+
+
+def _audit_company_codes(
+    payload: Mapping[str, Any],
+    *,
+    patch4_bindings: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
+) -> list[str] | None:
     companies = payload.get("companies")
     if not isinstance(companies, list) or len(companies) != 100:
         return None
@@ -1680,6 +3317,7 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
         required_fields = {
             "name",
             "industry",
+            "source_trade_date",
             "price",
             "market_cap",
             "buy_types",
@@ -1697,7 +3335,12 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
             return None
         if not str(company.get("name") or "").strip() or str(company.get("industry") or "").strip() in {"", "DEFAULT"}:
             return None
+        source_trade_date = _audit_type7_history_date(company.get("source_trade_date"))
+        if source_trade_date is None or source_trade_date > date.today():
+            return None
         if (_finite_number(company.get("price")) or 0) <= 0 or (_finite_number(company.get("market_cap")) or 0) <= 0:
+            return None
+        if not _audit_quantitative_evidence_valid(company, code):
             return None
 
         triggered_set: set[str] = set()
@@ -1738,7 +3381,7 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
                 or any(
                     not str(value or "").strip() or len(str(value)) > _AUDIT_REASON_MAX_LENGTH
                     for key, value in reasons.items()
-                    if key not in {"_status", "_applicable", "_evidence"}
+                    if key not in {"_status", "_applicable", "_evidence", "_decision_missing_dimensions"}
                 )
             ):
                 return None
@@ -1768,9 +3411,18 @@ def _audit_company_codes(payload: Mapping[str, Any]) -> list[str] | None:
             evidence_complete = type_payload["evidence_complete"]
             triggered = type_payload["triggered"]
             condition = bool(reasons.get("_condition"))
+            if not _audit_decision_contract_valid(type_key, type_payload):
+                return None
+            if type_key == "type5" and not _audit_type5_bottom_evidence_valid(code, company, type_payload):
+                return None
             if type_key == "type7":
                 ledger = type_payload.get("ledger")
-                if not _audit_type7_ledger_valid(code, ledger, status):
+                if not _audit_type7_ledger_valid(
+                    code,
+                    ledger,
+                    status,
+                    patch4_bindings=(patch4_bindings.get(code) if isinstance(patch4_bindings, Mapping) else None),
+                ):
                     return None
                 if status != "not_applicable" and isinstance(ledger, Mapping):
                     source_scores = ledger.get("scores")
@@ -2359,6 +4011,68 @@ def _valid_optional_evidence_provenance(value: object, eligible_universe_size: o
         and re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is not None
         and len(set(evidence_sha256)) >= 8
     )
+
+
+def _patch4_bindings_from_provenance(
+    value: object,
+    eligible_universe_size: object,
+) -> dict[str, dict[str, dict[str, str]]] | None:
+    """Validate and index the exact announcement hashes used by Type 7 ledgers."""
+
+    if not isinstance(value, Mapping) or "assessment_evidence_bindings" not in value:
+        return None
+    base_summary = dict(value)
+    raw_bindings = base_summary.pop("assessment_evidence_bindings")
+    if not _valid_optional_evidence_provenance(base_summary, eligible_universe_size):
+        return None
+    if not isinstance(raw_bindings, Mapping):
+        return None
+    evidence_count = int(base_summary["evidence_count"])
+    if len(raw_bindings) > evidence_count:
+        return None
+    normalized: dict[str, dict[str, dict[str, str]]] = {}
+    for raw_code, records in raw_bindings.items():
+        code = str(raw_code)
+        if (
+            re.fullmatch(r"[036][0-9]{5}", code) is None
+            or code in normalized
+            or not isinstance(records, list)
+            or not records
+        ):
+            return None
+        company: dict[str, dict[str, str]] = {}
+        for record in records:
+            if (
+                not isinstance(record, Mapping)
+                or set(record) != {"evidence_id", "url", "as_of", "content_sha256"}
+                or any(not isinstance(record.get(field), str) for field in record)
+            ):
+                return None
+            clean = {field: str(record[field]).strip() for field in record}
+            match = _AUDIT_PATCH4_EVIDENCE_ID.fullmatch(clean["evidence_id"])
+            try:
+                evidence_date = date.fromisoformat(clean["as_of"])
+            except ValueError:
+                return None
+            if (
+                match is None
+                or match.group("code") != code
+                or clean["evidence_id"] in company
+                or clean["url"] != f"{_AUDIT_PATCH4_DETAIL_PREFIX}{code}/{match.group('art_code')}.html"
+                or evidence_date.isoformat() != clean["as_of"]
+                or re.fullmatch(r"[0-9a-f]{64}", clean["content_sha256"]) is None
+                or clean["content_sha256"][:16] != match.group("digest")
+                or any(
+                    not text or len(text) > 1_000 or any(ord(character) < 32 for character in text)
+                    for text in clean.values()
+                )
+            ):
+                return None
+            company[clean["evidence_id"]] = clean
+        if list(company) != sorted(company):
+            return None
+        normalized[code] = company
+    return normalized
 
 
 def _valid_release_quote_session(validation: Mapping[str, Any]) -> str | None:
@@ -3595,14 +5309,28 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     caller = caller if isinstance(caller, Mapping) else {}
                     git_state = provenance.get("git", {})
                     git_state = git_state if isinstance(git_state, Mapping) else {}
-                    if provenance.get("audit_schema_version") != 3:
-                        errors.append("audit schema version is not 3")
+                    if provenance.get("audit_schema_version") != 4:
+                        errors.append("audit schema version is not 4")
                     if provenance.get("patch6_source") != _EXPECTED_PATCH6_SOURCE:
                         errors.append("audit is not bound to the authoritative Patch 6 source hash")
                     if provenance.get("type7_source_documents") != _EXPECTED_TYPE7_SOURCE_DOCUMENTS:
                         errors.append("audit is not bound to all authoritative Type 7 source hashes")
                     if caller.get("snapshot_schema_version") != 8:
                         errors.append("snapshot schema version is not 8")
+                    strict_evidence_required = caller.get("strict_evidence_required")
+                    screening_coverage = caller.get("screening_coverage")
+                    if not isinstance(strict_evidence_required, bool) or not _valid_full_market_screening_coverage(
+                        screening_coverage,
+                        payload.get("eligible_universe_size"),
+                    ):
+                        errors.append("audit does not preserve full-market artifact integrity and candidate visibility")
+                    elif (
+                        strict_evidence_required
+                        and isinstance(screening_coverage, Mapping)
+                        and isinstance(screening_coverage.get("goal_readiness"), Mapping)
+                        and screening_coverage["goal_readiness"].get("ready") is not True
+                    ):
+                        errors.append("audit requested strict ideal-zero-gap evidence but did not achieve it")
                     validation = caller.get("validation", {})
                     validation = validation if isinstance(validation, Mapping) else {}
                     reporting_period_contract = _valid_reporting_period_contract(
@@ -3659,7 +5387,17 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     ):
                         if payload.get(field) != []:
                             errors.append(f"audit field {field} is not empty")
-                    company_codes = _audit_company_codes(payload)
+                    patch4_bindings = _patch4_bindings_from_provenance(
+                        provenance.get("patch4_evidence"),
+                        payload.get("eligible_universe_size"),
+                    )
+                    if patch4_bindings is None:
+                        errors.append("audit Type 7 Patch 4 provenance bindings are missing or invalid")
+                        patch4_bindings = {}
+                    company_codes = _audit_company_codes(
+                        payload,
+                        patch4_bindings=patch4_bindings,
+                    )
                     if company_codes is None:
                         errors.append("audit does not contain 100 complete company rows")
                     elif company_codes != sample_codes:

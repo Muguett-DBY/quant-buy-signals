@@ -244,6 +244,13 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
             dcf_results={},
         ),
     )
+    monkeypatch.setattr(
+        publisher,
+        "_analysis_coverage_summary",
+        lambda _scores: {
+            "goal_readiness": {gate: True for gate in publisher._MOBILE_STRUCTURAL_EVIDENCE_GATES} | {"ready": False}
+        },
+    )
 
     manifest = publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=False)
 
@@ -253,6 +260,48 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert (tmp_path / manifest["signals"]["filename"]).is_file()
     assert manifest["provenance"]["snapshot_source"] == "cache"
     assert manifest["provenance"]["source_commit"] == "a" * 40
+    assert manifest["provenance"]["screening_coverage"]["publication_readiness"]["artifact_integrity_ready"] is True
+
+
+def test_mobile_screening_gate_publishes_honest_gaps_but_rejects_broken_records(monkeypatch):
+    readiness = {
+        "all_framework_payloads_present": True,
+        "all_sub_scores_valid": True,
+        "all_applicable_frameworks_evidence_complete": False,
+        "all_incomplete_frameworks_explained": True,
+        "all_quantitative_evidence_records_valid": True,
+        "no_missing_quantitative_evidence": False,
+        "no_partial_quantitative_evidence": False,
+        "artifact_integrity_ready": True,
+        "candidate_visibility_ready": True,
+        "candidate_recall_ready": True,
+        "ideal_zero_gap_ready": False,
+        "ready": False,
+    }
+    monkeypatch.setattr(
+        publisher,
+        "_analysis_coverage_summary",
+        lambda _scores: {"goal_readiness": dict(readiness), "quantitative_evidence_gap_examples": []},
+    )
+
+    published = publisher._mobile_screening_coverage(pd.DataFrame([{"code": "000001"}]))
+    assert published["publication_readiness"] == {
+        "artifact_integrity_ready": True,
+        "candidate_visibility_ready": True,
+        "candidate_recall_ready": True,
+        "ideal_zero_gap_ready": False,
+    }
+
+    for gate in publisher._MOBILE_STRUCTURAL_EVIDENCE_GATES:
+        broken = dict(readiness)
+        broken[gate] = False
+        monkeypatch.setattr(
+            publisher,
+            "_analysis_coverage_summary",
+            lambda _scores, payload=broken: {"goal_readiness": payload},
+        )
+        with pytest.raises(RuntimeError, match=gate):
+            publisher._mobile_screening_coverage(pd.DataFrame([{"code": "000001"}]))
 
 
 def test_mobile_publication_keeps_existing_files_when_coldness_coverage_is_zero(monkeypatch, tmp_path):

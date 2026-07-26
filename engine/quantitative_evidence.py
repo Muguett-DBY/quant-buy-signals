@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
@@ -27,8 +28,10 @@ from datetime import date
 from typing import Any
 
 
-MODEL_ID = "patch6-observable-outcomes-v1"
-SOURCE_LABEL = "Eastmoney reported data; Patch6 observable-outcome formula v1"
+MODEL_ID = "patch6-observable-outcomes-v2"
+SOURCE_LABEL = "Eastmoney reported data; Patch6 observable-outcome formula v2"
+_INTERNAL_PROXY_ID_PREFIX = "patch6-observable-outcomes-v"
+_INTERNAL_PROXY_SOURCE_PREFIX = "Eastmoney reported data; Patch6 observable-outcome formula v"
 
 # ``primary`` is reserved for a dated score supplied by an external research
 # adapter.  This module emits the other three levels.  Keeping the level
@@ -36,14 +39,38 @@ SOURCE_LABEL = "Eastmoney reported data; Patch6 observable-outcome formula v1"
 # defaults can still be useful for debugging, but must never acquire the same
 # authority as a fully observed proxy merely because it is a finite number.
 EVIDENCE_LEVELS = ("primary", "derived_proxy", "partial", "missing")
+SCORE_KEYS = (
+    "industry_durability_score",
+    "accounting_integrity_score",
+    "management_alignment_score",
+    "moat_score",
+    "moat_durability_score",
+    "growth_quality_score",
+    "growth_sustainability_score",
+    "runway_score",
+    "industry_bubble_score",
+    "type3_bubble_score",
+    "catalyst_score",
+    "technology_score",
+    "business_model_score",
+)
 
 MIN_SECTOR_COMPANIES = 10
 MIN_COMPARABLE_COVERAGE = 0.70
 RUNWAY_TERMINAL_GROWTH = 0.02
+PRIMARY_EVIDENCE_MAX_AGE_DAYS = 550
+FINANCIAL_EVIDENCE_MAX_AGE_DAYS = 550
 # Object identity, rather than a serializable flag, marks records that passed
 # ``data.growth_evidence.validate_growth_evidence_record`` at the production
 # boundary.  A JSON/CSV/manual fin_map payload cannot forge this token.
 TYPE3_GROWTH_VALIDATION_TOKEN = object()
+# The same fail-closed boundary applies to external qualitative scores.  A
+# research adapter must validate its dated primary document, bind the score to
+# the exact company/key/document digest, and attach this in-memory token.  The
+# token deliberately cannot survive JSON/CSV serialization, so arbitrary input
+# data cannot promote itself to ``primary`` by choosing plausible strings.
+PRIMARY_EVIDENCE_VALIDATION_TOKEN = object()
+_PRIMARY_ADAPTER_CONTRACT = "validated-primary-quantitative-evidence-v1"
 
 
 class _SortedFinitePopulation(list[float]):
@@ -718,16 +745,42 @@ def _cohort_aggregate(
     *,
     window: int,
     require_positive: bool,
+    latest_complete_year: int | None = None,
+    enforce_reporting_period_anchor: bool = False,
 ) -> dict[str, Any]:
     histories = {str(member.get("code")): _series(member, values_key, years_key) for member in members}
-    all_years = sorted({year for history in histories.values() for year in history})
-    if len(all_years) < window:
-        return {"available": False, "reason": "insufficient_years"}
-    selected_years = all_years[-window:]
-    if any(current - prior != 1 for prior, current in zip(selected_years, selected_years[1:])):
-        return {"available": False, "reason": "nonconsecutive_years"}
+    reporting_years = (
+        {str(member.get("code")): _latest_complete_financial_year(member) for member in members}
+        if enforce_reporting_period_anchor
+        else {}
+    )
+    if enforce_reporting_period_anchor:
+        if latest_complete_year is None:
+            return {
+                "available": False,
+                "reason": "missing_reporting_period_anchor",
+                "cohort_count": 0,
+                "population_count": len(members),
+                "coverage": 0.0,
+                "years": [],
+                "aggregates": {},
+                "cagr": None,
+                "cohort_codes": [],
+                "expected_latest_year": None,
+                "reporting_period_eligible_count": 0,
+            }
+        selected_years = list(range(latest_complete_year - window + 1, latest_complete_year + 1))
+    else:
+        all_years = sorted({year for history in histories.values() for year in history})
+        if len(all_years) < window:
+            return {"available": False, "reason": "insufficient_years"}
+        selected_years = all_years[-window:]
+        if any(current - prior != 1 for prior, current in zip(selected_years, selected_years[1:])):
+            return {"available": False, "reason": "nonconsecutive_years"}
     cohort: list[str] = []
     for code, history in histories.items():
+        if enforce_reporting_period_anchor and reporting_years.get(code) != latest_complete_year:
+            continue
         values = [history.get(year) for year in selected_years]
         if any(value is None for value in values):
             continue
@@ -736,6 +789,11 @@ def _cohort_aggregate(
         if not require_positive and any(float(value) < 0 for value in values if value is not None):
             continue
         cohort.append(code)
+    reporting_period_eligible_count = (
+        sum(year == latest_complete_year for year in reporting_years.values())
+        if enforce_reporting_period_anchor
+        else len(members)
+    )
     coverage = len(cohort) / max(len(members), 1)
     aggregates = {year: math.fsum(histories[code][year] for code in cohort) for year in selected_years}
     growth = _cagr(aggregates[selected_years[0]], aggregates[selected_years[-1]], window - 1) if cohort else None
@@ -750,6 +808,14 @@ def _cohort_aggregate(
             "aggregates": aggregates,
             "cagr": growth,
             "cohort_codes": cohort,
+            **(
+                {
+                    "expected_latest_year": latest_complete_year,
+                    "reporting_period_eligible_count": reporting_period_eligible_count,
+                }
+                if enforce_reporting_period_anchor
+                else {}
+            ),
         }
     return {
         "available": growth is not None,
@@ -761,6 +827,14 @@ def _cohort_aggregate(
         "aggregates": aggregates,
         "cagr": growth,
         "cohort_codes": cohort,
+        **(
+            {
+                "expected_latest_year": latest_complete_year,
+                "reporting_period_eligible_count": reporting_period_eligible_count,
+            }
+            if enforce_reporting_period_anchor
+            else {}
+        ),
     }
 
 
@@ -773,6 +847,8 @@ def _cohort_ratio_aggregate(
     *,
     window: int,
     numerator_nonnegative: bool,
+    latest_complete_year: int | None = None,
+    enforce_reporting_period_anchor: bool = False,
 ) -> dict[str, Any]:
     """Aggregate a ratio on one fixed, comparable peer cohort."""
     numerators = {
@@ -781,16 +857,41 @@ def _cohort_ratio_aggregate(
     denominators = {
         str(member.get("code")): _series(member, denominator_values_key, denominator_years_key) for member in members
     }
-    all_years = sorted(
-        {year for code in numerators for year in set(numerators[code]) & set(denominators.get(code, {}))}
+    reporting_years = (
+        {str(member.get("code")): _latest_complete_financial_year(member) for member in members}
+        if enforce_reporting_period_anchor
+        else {}
     )
-    if len(all_years) < window:
-        return {"available": False, "reason": "insufficient_years"}
-    selected_years = all_years[-window:]
-    if any(current - prior != 1 for prior, current in zip(selected_years, selected_years[1:])):
-        return {"available": False, "reason": "nonconsecutive_years"}
+    if enforce_reporting_period_anchor:
+        if latest_complete_year is None:
+            return {
+                "available": False,
+                "reason": "missing_reporting_period_anchor",
+                "cohort_count": 0,
+                "population_count": len(members),
+                "coverage": 0.0,
+                "years": [],
+                "numerator_aggregates": {},
+                "denominator_aggregates": {},
+                "ratios": {},
+                "cohort_codes": [],
+                "expected_latest_year": None,
+                "reporting_period_eligible_count": 0,
+            }
+        selected_years = list(range(latest_complete_year - window + 1, latest_complete_year + 1))
+    else:
+        all_years = sorted(
+            {year for code in numerators for year in set(numerators[code]) & set(denominators.get(code, {}))}
+        )
+        if len(all_years) < window:
+            return {"available": False, "reason": "insufficient_years"}
+        selected_years = all_years[-window:]
+        if any(current - prior != 1 for prior, current in zip(selected_years, selected_years[1:])):
+            return {"available": False, "reason": "nonconsecutive_years"}
     cohort: list[str] = []
     for code, numerator_history in numerators.items():
+        if enforce_reporting_period_anchor and reporting_years.get(code) != latest_complete_year:
+            continue
         denominator_history = denominators.get(code, {})
         numerator_values = [numerator_history.get(year) for year in selected_years]
         denominator_values = [denominator_history.get(year) for year in selected_years]
@@ -801,6 +902,11 @@ def _cohort_ratio_aggregate(
         if any(float(value) <= 0 for value in denominator_values if value is not None):
             continue
         cohort.append(code)
+    reporting_period_eligible_count = (
+        sum(year == latest_complete_year for year in reporting_years.values())
+        if enforce_reporting_period_anchor
+        else len(members)
+    )
     coverage = len(cohort) / max(len(members), 1)
     numerator_aggregates = {year: math.fsum(numerators[code][year] for code in cohort) for year in selected_years}
     denominator_aggregates = {year: math.fsum(denominators[code][year] for code in cohort) for year in selected_years}
@@ -821,6 +927,14 @@ def _cohort_ratio_aggregate(
             "denominator_aggregates": denominator_aggregates,
             "ratios": ratios,
             "cohort_codes": cohort,
+            **(
+                {
+                    "expected_latest_year": latest_complete_year,
+                    "reporting_period_eligible_count": reporting_period_eligible_count,
+                }
+                if enforce_reporting_period_anchor
+                else {}
+            ),
         }
     return {
         "available": True,
@@ -833,6 +947,14 @@ def _cohort_ratio_aggregate(
         "denominator_aggregates": denominator_aggregates,
         "ratios": ratios,
         "cohort_codes": cohort,
+        **(
+            {
+                "expected_latest_year": latest_complete_year,
+                "reporting_period_eligible_count": reporting_period_eligible_count,
+            }
+            if enforce_reporting_period_anchor
+            else {}
+        ),
     }
 
 
@@ -881,7 +1003,12 @@ def _sector_price_context(members: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
-def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+def build_sector_context(
+    metrics: Sequence[Mapping[str, Any]],
+    *,
+    latest_complete_year: int | None = None,
+    enforce_reporting_period_anchor: bool = False,
+) -> dict[str, dict[str, Any]]:
     """Build comparable-cohort sector aggregates from the complete universe."""
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for metric in metrics:
@@ -889,12 +1016,42 @@ def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict
 
     contexts: dict[str, dict[str, Any]] = {}
     for industry, members in grouped.items():
+        financially_current_members = (
+            [
+                member
+                for member in members
+                if latest_complete_year is not None and _latest_complete_financial_year(member) == latest_complete_year
+            ]
+            if enforce_reporting_period_anchor
+            else members
+        )
+
+        def latest_annual_growth(
+            member: Mapping[str, Any],
+            values_key: str,
+            years_key: str,
+        ) -> float | None:
+            history = _series(member, values_key, years_key)
+            if enforce_reporting_period_anchor:
+                if latest_complete_year is None:
+                    return None
+                previous_year = latest_complete_year - 1
+                previous = history.get(previous_year)
+                current = history.get(latest_complete_year)
+                if previous is None or previous <= 0 or current is None:
+                    return None
+                return current / previous - 1.0
+            rates = _growth_rates(history)
+            return rates[-1] if rates else None
+
         revenue = _cohort_aggregate(
             members,
             "revenue_values",
             "revenue_years",
             window=3,
             require_positive=True,
+            latest_complete_year=latest_complete_year,
+            enforce_reporting_period_anchor=enforce_reporting_period_anchor,
         )
         capex = _cohort_aggregate(
             members,
@@ -902,6 +1059,8 @@ def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict
             "capex_years",
             window=3,
             require_positive=False,
+            latest_complete_year=latest_complete_year,
+            enforce_reporting_period_anchor=enforce_reporting_period_anchor,
         )
         assets = _cohort_aggregate(
             members,
@@ -909,6 +1068,8 @@ def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict
             "total_assets_years",
             window=3,
             require_positive=True,
+            latest_complete_year=latest_complete_year,
+            enforce_reporting_period_anchor=enforce_reporting_period_anchor,
         )
         capex_intensity = _cohort_ratio_aggregate(
             members,
@@ -918,6 +1079,8 @@ def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict
             "revenue_years",
             window=4,
             numerator_nonnegative=True,
+            latest_complete_year=latest_complete_year,
+            enforce_reporting_period_anchor=enforce_reporting_period_anchor,
         )
         profit_margin = _cohort_ratio_aggregate(
             members,
@@ -927,50 +1090,82 @@ def build_sector_context(metrics: Sequence[Mapping[str, Any]]) -> dict[str, dict
             "revenue_years",
             window=3,
             numerator_nonnegative=False,
+            latest_complete_year=latest_complete_year,
+            enforce_reporting_period_anchor=enforce_reporting_period_anchor,
         )
         gross_values = sorted(
-            value for value in (_finite(member.get("gross_margin")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("gross_margin")) for member in financially_current_members)
+            if value is not None
         )
         gross_medians = sorted(
             value
-            for value in (_median(member.get("gross_margin_history", [])) for member in members)
+            for value in (_median(member.get("gross_margin_history", [])) for member in financially_current_members)
             if value is not None
         )
         roic_values = sorted(
-            value for value in (_finite(member.get("roic")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("roic")) for member in financially_current_members)
+            if value is not None
         )
         margin_trajectories = sorted(
-            value for value in (_finite(member.get("margin_trajectory")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("margin_trajectory")) for member in financially_current_members)
+            if value is not None
         )
         rd_intensities = sorted(
-            value for value in (_finite(member.get("rd_intensity")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("rd_intensity")) for member in financially_current_members)
+            if value is not None
         )
         profit_values = sorted(
-            value for value in (_finite(member.get("net_profit")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("net_profit")) for member in financially_current_members)
+            if value is not None
         )
         fcf_values = sorted(
-            value for value in (_finite(member.get("free_cash_flow")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("free_cash_flow")) for member in financially_current_members)
+            if value is not None
         )
         latest_revenues = sorted(
             value
-            for value in (_finite(member.get("revenue_latest")) for member in members)
+            for value in (_finite(member.get("revenue_latest")) for member in financially_current_members)
             if value is not None and value > 0
         )
         latest_revenue_growth = sorted(
-            rates[-1]
-            for member in members
-            if (rates := _growth_rates(_series(member, "revenue_values", "revenue_years")))
+            value
+            for member in financially_current_members
+            if (
+                value := latest_annual_growth(
+                    member,
+                    "revenue_values",
+                    "revenue_years",
+                )
+            )
+            is not None
         )
         latest_profit_growth = sorted(
-            rates[-1]
-            for member in members
-            if (rates := _growth_rates(_series(member, "net_profit_history", "net_profit_years")))
+            value
+            for member in financially_current_members
+            if (
+                value := latest_annual_growth(
+                    member,
+                    "net_profit_history",
+                    "net_profit_years",
+                )
+            )
+            is not None
         )
         interim_revenue_growth = sorted(
-            value for value in (_finite(member.get("interim_revenue_yoy")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("interim_revenue_yoy")) for member in financially_current_members)
+            if value is not None
         )
         interim_profit_growth = sorted(
-            value for value in (_finite(member.get("interim_profit_yoy")) for member in members) if value is not None
+            value
+            for value in (_finite(member.get("interim_profit_yoy")) for member in financially_current_members)
+            if value is not None
         )
         gross_values = _SortedFinitePopulation.from_sorted(gross_values)
         gross_medians = _SortedFinitePopulation.from_sorted(gross_medians)
@@ -1059,6 +1254,7 @@ def _exclude_from_aggregate(
     if (
         not isinstance(years, Sequence)
         or isinstance(years, (str, bytes))
+        or len(years) == 0
         or not isinstance(cohort_codes, Sequence)
         or isinstance(cohort_codes, (str, bytes))
         or not isinstance(aggregates, Mapping)
@@ -1069,6 +1265,16 @@ def _exclude_from_aggregate(
     code = str(target.get("code") or "")
     cohort = [str(item) for item in cohort_codes]
     totals = {int(year): _finite(aggregates.get(year)) for year in years}
+    expected_latest_year = aggregate.get("expected_latest_year")
+    reporting_period_eligible_count = aggregate.get("reporting_period_eligible_count")
+    if (
+        isinstance(reporting_period_eligible_count, int)
+        and not isinstance(reporting_period_eligible_count, bool)
+        and isinstance(expected_latest_year, int)
+        and not isinstance(expected_latest_year, bool)
+        and _latest_complete_financial_year(target) == expected_latest_year
+    ):
+        reporting_period_eligible_count = max(0, reporting_period_eligible_count - 1)
     if code in cohort:
         history = _series(target, values_key, years_key)
         if all(int(year) in history and totals.get(int(year)) is not None for year in years):
@@ -1081,10 +1287,17 @@ def _exclude_from_aggregate(
     elapsed = int(years[-1]) - int(years[0]) if len(years) >= 2 else 0
     growth = _cagr(totals.get(int(years[0])), totals.get(int(years[-1])), elapsed)
     available = bool(len(cohort) >= MIN_SECTOR_COMPANIES and coverage >= MIN_COMPARABLE_COVERAGE and growth is not None)
+    reason = (
+        "available"
+        if available
+        else "stale_or_missing_reporting_period"
+        if isinstance(reporting_period_eligible_count, int) and reporting_period_eligible_count == 0
+        else "insufficient_comparable_cohort"
+    )
     result.update(
         {
             "available": available,
-            "reason": "available" if available else "insufficient_comparable_cohort",
+            "reason": reason,
             "cohort_count": len(cohort),
             "population_count": peer_count,
             "coverage": coverage,
@@ -1093,6 +1306,8 @@ def _exclude_from_aggregate(
             "cohort_codes": cohort,
         }
     )
+    if isinstance(reporting_period_eligible_count, int):
+        result["reporting_period_eligible_count"] = reporting_period_eligible_count
     return result
 
 
@@ -1114,6 +1329,7 @@ def _exclude_from_ratio_aggregate(
     if (
         not isinstance(years, Sequence)
         or isinstance(years, (str, bytes))
+        or len(years) == 0
         or not isinstance(cohort_codes, Sequence)
         or isinstance(cohort_codes, (str, bytes))
         or not isinstance(numerators, Mapping)
@@ -1126,6 +1342,16 @@ def _exclude_from_ratio_aggregate(
     cohort = [str(item) for item in cohort_codes]
     numerator_totals = {int(year): _finite(numerators.get(year)) for year in years}
     denominator_totals = {int(year): _finite(denominators.get(year)) for year in years}
+    expected_latest_year = aggregate.get("expected_latest_year")
+    reporting_period_eligible_count = aggregate.get("reporting_period_eligible_count")
+    if (
+        isinstance(reporting_period_eligible_count, int)
+        and not isinstance(reporting_period_eligible_count, bool)
+        and isinstance(expected_latest_year, int)
+        and not isinstance(expected_latest_year, bool)
+        and _latest_complete_financial_year(target) == expected_latest_year
+    ):
+        reporting_period_eligible_count = max(0, reporting_period_eligible_count - 1)
     if code in cohort:
         numerator_history = _series(target, numerator_values_key, numerator_years_key)
         denominator_history = _series(target, denominator_values_key, denominator_years_key)
@@ -1156,10 +1382,17 @@ def _exclude_from_ratio_aggregate(
     available = bool(
         len(cohort) >= MIN_SECTOR_COMPANIES and coverage >= MIN_COMPARABLE_COVERAGE and len(ratios) == len(years)
     )
+    reason = (
+        "available"
+        if available
+        else "stale_or_missing_reporting_period"
+        if isinstance(reporting_period_eligible_count, int) and reporting_period_eligible_count == 0
+        else "insufficient_comparable_cohort"
+    )
     result.update(
         {
             "available": available,
-            "reason": "available" if available else "insufficient_comparable_cohort",
+            "reason": reason,
             "cohort_count": len(cohort),
             "population_count": peer_count,
             "coverage": coverage,
@@ -1169,6 +1402,8 @@ def _exclude_from_ratio_aggregate(
             "cohort_codes": cohort,
         }
     )
+    if isinstance(reporting_period_eligible_count, int):
+        result["reporting_period_eligible_count"] = reporting_period_eligible_count
     return result
 
 
@@ -1330,15 +1565,24 @@ def build_company_contexts(
         grouped[str(metric.get("industry") or "DEFAULT")].append(metric)
     contexts: dict[str, dict[str, Any]] = {}
     for industry, members in grouped.items():
-        base = build_sector_context(members).get(industry, {})
         peer_count = max(0, len(members) - 1)
+        bases_by_latest_year: dict[int | None, dict[str, Any]] = {}
         for target in members:
             code = str(target.get("code") or "")
             if selected is not None and code not in selected:
                 continue
+            latest_complete_year = _latest_complete_financial_year(target)
+            if latest_complete_year not in bases_by_latest_year:
+                bases_by_latest_year[latest_complete_year] = build_sector_context(
+                    members,
+                    latest_complete_year=latest_complete_year,
+                    enforce_reporting_period_anchor=True,
+                ).get(industry, {})
+            base = bases_by_latest_year[latest_complete_year]
             context = _context_without_target(base, target, peer_count=peer_count)
             context["target_code"] = code
             context["target_excluded"] = True
+            context["latest_complete_financial_year"] = latest_complete_year
             contexts[code] = context
     return contexts
 
@@ -1385,6 +1629,7 @@ def _score_historical_roic_spread(metric: Mapping[str, Any]) -> tuple[float, dic
     recent_years = _latest_consecutive_years(set(roic_history))[-5:]
     history = [roic_history[year] for year in recent_years]
     wacc = _finite(metric.get("wacc"))
+    spread_years = recent_years if wacc is not None else []
     spreads = [value - wacc for value in history] if wacc is not None else []
     spread_median = _median(spreads)
     score = _linear_score(
@@ -1397,7 +1642,7 @@ def _score_historical_roic_spread(metric: Mapping[str, Any]) -> tuple[float, dic
     return score, {
         "roic_wacc_spread_median": spread_median,
         "recent_roic_spread_history_count": len(spreads),
-        "recent_roic_spread_history_years": recent_years,
+        "recent_roic_spread_history_years": spread_years,
         "recent_roic_spread_window_years": 5,
         "positive_spread_count": positive_count,
         "wacc": wacc,
@@ -1421,11 +1666,17 @@ def _score_adjusted_profit(metric: Mapping[str, Any]) -> float:
     return _linear_score(ratio, [(0.0, 0), (0.5, 2), (0.7, 5), (0.85, 8), (0.95, 10)])
 
 
+def _recent_fcf_formula_inputs(metric: Mapping[str, Any]) -> tuple[list[int], list[float]]:
+    history = _series(metric, "fcf_history", "fcf_years")
+    years = _latest_consecutive_years(set(history))[-3:]
+    return years, [history[year] for year in years]
+
+
 def _score_fcf_history(metric: Mapping[str, Any]) -> float:
-    values = [value for value in (_finite(item) for item in metric.get("fcf_history", [])) if value is not None]
-    if not values:
+    years, values = _recent_fcf_formula_inputs(metric)
+    if len(years) < 3:
         return 1.0
-    return _round_score(10.0 * sum(value > 0 for value in values[-3:]) / min(len(values), 3))
+    return _round_score(10.0 * sum(value > 0 for value in values) / 3.0)
 
 
 def _score_balance_discipline(metric: Mapping[str, Any]) -> float:
@@ -1491,11 +1742,14 @@ def _score_accounting(metric: Mapping[str, Any]) -> tuple[float, dict[str, Any]]
     adjusted = _score_adjusted_profit(metric)
     cash = _score_cash_conversion(metric)
     fcf = _score_fcf_history(metric)
+    fcf_years, fcf_values = _recent_fcf_formula_inputs(metric)
     dilution = _score_dilution(metric)
     score = _round_score(0.30 * adjusted + 0.35 * cash + 0.20 * fcf + 0.15 * dilution)
     return score, {
         "adjusted_profit_ratio": _finite(metric.get("adjusted_profit_ratio")),
         "ocf_to_net_profit": _finite(metric.get("ocf_np_ratio")),
+        "recent_fcf_years": fcf_years,
+        "recent_fcf_values": fcf_values,
         "positive_fcf_score": fcf,
         "share_dilution_1yr": _finite(metric.get("share_dilution_1yr")),
         "components": {"adjusted": adjusted, "cash": cash, "fcf": fcf, "dilution": dilution},
@@ -1506,12 +1760,17 @@ def _score_management_outcomes(metric: Mapping[str, Any]) -> tuple[float, dict[s
     dilution = _score_dilution(metric)
     spread_score, spread = _score_roic_spread(metric)
     fcf = _score_fcf_history(metric)
+    fcf_years, fcf_values = _recent_fcf_formula_inputs(metric)
     balance = _score_balance_discipline(metric)
     score = _round_score(0.30 * dilution + 0.30 * spread_score + 0.20 * fcf + 0.20 * balance)
     return score, {
         "scope": "capital_allocation_outcomes_not_management_character",
         "roic_wacc_spread": spread,
         "share_dilution_1yr": _finite(metric.get("share_dilution_1yr")),
+        "recent_fcf_years": fcf_years,
+        "recent_fcf_values": fcf_values,
+        "interest_bearing_debt_ratio": _finite(metric.get("interest_bearing_debt_ratio")),
+        "debt_ratio": _finite(metric.get("debt_ratio")),
         "components": {"dilution": dilution, "excess_return": spread_score, "fcf": fcf, "balance": balance},
     }
 
@@ -1542,6 +1801,7 @@ def _score_moat(
     if len(gross_history) >= 3 and gross_history[-1] - gross_history[-3] < -0.05:
         margin_power = min(margin_power, 4.0)
     fcf_score = _score_fcf_history(metric)
+    fcf_years, fcf_values = _recent_fcf_formula_inputs(metric)
     cash_outcome = _round_score(0.60 * accounting_score + 0.40 * fcf_score)
     latest_share, share_change = _company_share_change(metric, context)
     revenue_percentile = _percentile_rank(
@@ -1563,7 +1823,7 @@ def _score_moat(
     recent_operating_evidence_years = min(
         5,
         _latest_consecutive_year_count(
-            set(gross_history_by_year) & set(_series(metric, "indicator_roic_history", "indicator_roic_years"))
+            set(gross_history_by_year) & set(spread_details["recent_roic_spread_history_years"])
         ),
     )
     if recent_operating_evidence_years < 5:
@@ -1581,8 +1841,12 @@ def _score_moat(
         "listed_peer_revenue_percentile": revenue_percentile,
         "recent_gross_margin_history_count": len(gross_history),
         "recent_gross_margin_history_years": recent_gross_years,
+        "recent_gross_margin_history": gross_history,
         "recent_operating_evidence_years": recent_operating_evidence_years,
         "recent_operating_window_years": 5,
+        "accounting_integrity_score": accounting_score,
+        "recent_fcf_years": fcf_years,
+        "recent_fcf_values": fcf_values,
         "components": {
             "excess_return": spread_score,
             "margin_power": margin_power,
@@ -1592,9 +1856,194 @@ def _score_moat(
     }
 
 
+def _insurance_history(
+    metric: Mapping[str, Any],
+    metric_name: str,
+    *,
+    window: int = 5,
+) -> tuple[list[int], list[float]]:
+    """Return a recent consecutive insurance-specific annual series.
+
+    Insurance companies deliberately do not expose industrial ROIC, gross
+    margin or FCFF in the scoring record.  Their observable franchise evidence
+    therefore has to stay on the insurer-specific statement fields already
+    normalised by ``financial_indicator_evidence``.
+    """
+
+    history = _series(metric, f"{metric_name}_history", f"{metric_name}_years")
+    years = _latest_consecutive_years(set(history))[-window:]
+    return years, [history[year] for year in years]
+
+
+def _score_insurance_moat(metric: Mapping[str, Any]) -> tuple[float, dict[str, Any]]:
+    """Score observable insurance-franchise outcomes without industrial proxies."""
+
+    solvency_years, solvency = _insurance_history(metric, "solvency_adequacy_ratio")
+    nbv_years, nbv = _insurance_history(metric, "new_business_value")
+    premium_years, premium = _insurance_history(metric, "earned_premium")
+    surrender_years, surrender = _insurance_history(metric, "life_surrender_rate")
+    roe_years, roe = _insurance_history(metric, "indicator_weighted_roe")
+    adjusted_years, adjusted = _insurance_history(metric, "adjusted_profit_ratio")
+
+    solvency_median = _median(solvency)
+    nbv_cagr = (
+        _cagr(nbv[0], nbv[-1], nbv_years[-1] - nbv_years[0]) if len(nbv) >= 3 and len(nbv_years) == len(nbv) else None
+    )
+    # IFRS 17 presentation changes can create a single discontinuity in earned
+    # premium.  The median of observed consecutive YoY rates is reproducible
+    # and robust to that one accounting break without deleting it.
+    premium_growth_median = _median(_growth_rates(dict(zip(premium_years, premium))))
+    surrender_median = _median(surrender)
+    roe_median = _median(roe)
+    adjusted_profit_median = _median(adjusted)
+
+    solvency_score = _linear_score(
+        solvency_median,
+        [(1.0, 2), (1.2, 4), (1.5, 6), (2.0, 8), (2.5, 9), (3.0, 10)],
+    )
+    nbv_score = _linear_score(
+        nbv_cagr,
+        [(-0.20, 0), (-0.10, 2), (0.0, 5), (0.05, 6), (0.10, 8), (0.20, 10)],
+    )
+    premium_score = _linear_score(
+        premium_growth_median,
+        [(-0.10, 1), (-0.05, 3), (0.0, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+    )
+    retention_score = _linear_score(
+        -surrender_median if surrender_median is not None else None,
+        [(-0.08, 0), (-0.05, 2), (-0.03, 5), (-0.02, 7), (-0.01, 9), (0.0, 10)],
+    )
+    roe_score = _linear_score(
+        roe_median,
+        [(0.0, 1), (0.05, 3), (0.08, 5), (0.12, 7), (0.16, 9), (0.20, 10)],
+    )
+    adjusted_profit_score = _linear_score(
+        min(adjusted_profit_median, 1.0) if adjusted_profit_median is not None else None,
+        [(0.0, 0), (0.50, 2), (0.70, 5), (0.85, 8), (0.95, 10)],
+    )
+    score = _round_score(
+        0.20 * solvency_score
+        + 0.20 * nbv_score
+        + 0.15 * premium_score
+        + 0.15 * retention_score
+        + 0.20 * roe_score
+        + 0.10 * adjusted_profit_score
+    )
+    return score, {
+        "scope": "observable_insurance_franchise_outcomes",
+        "basis": "insurance_specific_not_industrial_roic_margin_or_fcff",
+        "solvency_adequacy_median": solvency_median,
+        "new_business_value_cagr": nbv_cagr,
+        "earned_premium_yoy_median": premium_growth_median,
+        "life_surrender_rate_median": surrender_median,
+        "weighted_roe_median": roe_median,
+        "adjusted_profit_ratio_median": adjusted_profit_median,
+        "history_years": {
+            "solvency_adequacy": solvency_years,
+            "new_business_value": nbv_years,
+            "earned_premium": premium_years,
+            "life_surrender_rate": surrender_years,
+            "weighted_roe": roe_years,
+            "adjusted_profit_ratio": adjusted_years,
+        },
+        "components": {
+            "solvency_resilience": solvency_score,
+            "new_business_value_growth": nbv_score,
+            "earned_premium_growth": premium_score,
+            "policyholder_retention": retention_score,
+            "weighted_roe": roe_score,
+            "adjusted_profit_quality": adjusted_profit_score,
+        },
+    }
+
+
+def _score_insurance_moat_durability(
+    metric: Mapping[str, Any],
+    moat_score: float,
+) -> tuple[float, dict[str, Any]]:
+    """Score persistence of the same insurer-specific observable outcomes."""
+
+    histories: dict[str, dict[int, float]] = {
+        metric_name: _series(metric, f"{metric_name}_history", f"{metric_name}_years")
+        for metric_name in (
+            "solvency_adequacy_ratio",
+            "new_business_value",
+            "earned_premium",
+            "life_surrender_rate",
+            "indicator_weighted_roe",
+            "adjusted_profit_ratio",
+        )
+    }
+    common_years = set.intersection(*(set(history) for history in histories.values()))
+    consecutive_common_years = _latest_consecutive_years(common_years)
+    recent_years = consecutive_common_years[-5:]
+
+    solvency = [histories["solvency_adequacy_ratio"][year] for year in recent_years]
+    nbv = {year: histories["new_business_value"][year] for year in recent_years}
+    premium = {year: histories["earned_premium"][year] for year in recent_years}
+    surrender = [histories["life_surrender_rate"][year] for year in recent_years]
+    roe = [histories["indicator_weighted_roe"][year] for year in recent_years]
+
+    solvency_floor = min(solvency) if solvency else None
+    surrender_ceiling = max(surrender) if surrender else None
+    roe_floor = min(roe) if roe else None
+    nbv_positive_share = _positive_share(_growth_rates(nbv))
+    premium_positive_share = _positive_share(_growth_rates(premium))
+
+    solvency_persistence = _linear_score(
+        solvency_floor,
+        [(1.0, 2), (1.2, 4), (1.5, 6), (2.0, 8), (2.5, 9), (3.0, 10)],
+    )
+    nbv_persistence = _round_score(10.0 * nbv_positive_share) if nbv_positive_share is not None else 2.0
+    premium_persistence = _round_score(10.0 * premium_positive_share) if premium_positive_share is not None else 2.0
+    roe_persistence = _linear_score(
+        roe_floor,
+        [(0.0, 1), (0.05, 3), (0.08, 5), (0.12, 7), (0.16, 9), (0.20, 10)],
+    )
+    retention_persistence = _linear_score(
+        -surrender_ceiling if surrender_ceiling is not None else None,
+        [(-0.08, 0), (-0.05, 2), (-0.03, 5), (-0.02, 7), (-0.01, 9), (0.0, 10)],
+    )
+    score = _round_score(
+        0.45 * moat_score
+        + 0.15 * solvency_persistence
+        + 0.15 * nbv_persistence
+        + 0.10 * premium_persistence
+        + 0.10 * roe_persistence
+        + 0.05 * retention_persistence
+    )
+    history_count = len(consecutive_common_years)
+    history_cap = 2.0 if history_count < 3 else 4.0 if history_count <= 5 else 6.0 if history_count <= 9 else 10.0
+    score = min(score, history_cap)
+    return score, {
+        "scope": "observable_insurance_franchise_persistence",
+        "basis": "insurance_specific_not_industrial_roic_margin_or_fcff",
+        "durability_history_years": history_count,
+        "history_count": history_count,
+        "common_history_years": consecutive_common_years,
+        "recent_persistence_years": recent_years,
+        "history_cap": history_cap,
+        "solvency_adequacy_floor": solvency_floor,
+        "new_business_value_positive_growth_share": nbv_positive_share,
+        "earned_premium_positive_growth_share": premium_positive_share,
+        "weighted_roe_floor": roe_floor,
+        "life_surrender_rate_ceiling": surrender_ceiling,
+        "current_moat_score": moat_score,
+        "components": {
+            "current_insurance_moat": moat_score,
+            "solvency_persistence": solvency_persistence,
+            "new_business_value_persistence": nbv_persistence,
+            "earned_premium_persistence": premium_persistence,
+            "weighted_roe_persistence": roe_persistence,
+            "policyholder_retention_persistence": retention_persistence,
+        },
+    }
+
+
 def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tuple[float, dict[str, Any]]:
     roic_history = _series(metric, "indicator_roic_history", "indicator_roic_years")
     gross_history = _series(metric, "gross_margin_history", "gross_margin_years")
+    revenue_growth_rates = _growth_rates(_series(metric, "revenue_values", "revenue_years"))
     roic_positive = _positive_share(list(roic_history.values()))
     roic_history_score = _round_score(10.0 * roic_positive) if roic_positive is not None else 3.0
     margin_stability = _linear_score(
@@ -1619,6 +2068,8 @@ def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tupl
         "history_count": history_count,
         "common_history_years": sorted(common_history_years),
         "history_cap": 2.0 if history_count < 3 else 4.0 if history_count <= 5 else 6.0 if history_count <= 9 else 10.0,
+        "current_moat_score": moat_score,
+        "revenue_growth_rates": revenue_growth_rates,
         "components": {
             "current_moat": moat_score,
             "roic_history": roic_history_score,
@@ -1631,6 +2082,7 @@ def _score_moat_durability(metric: Mapping[str, Any], moat_score: float) -> tupl
 def _score_growth_quality(metric: Mapping[str, Any], accounting_score: float) -> tuple[float, dict[str, Any]]:
     dilution = _score_dilution(metric)
     balance = _score_balance_discipline(metric)
+    fcf_years, fcf_values = _recent_fcf_formula_inputs(metric)
     revenue = _series(metric, "revenue_values", "revenue_years")
     assets = _series(metric, "total_assets_history", "total_assets_years")
     common = sorted(set(revenue) & set(assets))
@@ -1692,6 +2144,11 @@ def _score_growth_quality(metric: Mapping[str, Any], accounting_score: float) ->
         "external_growth_proxy": external_inputs,
         "score_cap_without_acquisition_and_goodwill_evidence": 6.0,
         "claims_not_supported": ["exact_acquisition_revenue_share", "complete_transaction_census"],
+        "accounting_integrity_score": accounting_score,
+        "interest_bearing_debt_ratio": _finite(metric.get("interest_bearing_debt_ratio")),
+        "debt_ratio": _finite(metric.get("debt_ratio")),
+        "recent_fcf_years": fcf_years,
+        "recent_fcf_values": fcf_values,
         "components": {
             "accounting": accounting_score,
             "dilution": dilution,
@@ -1710,6 +2167,7 @@ def _score_growth_sustainability(
     persistence = _score_growth_persistence(metric)
     trend = _score_growth_trend(metric)
     spread_score, spread = _score_roic_spread(metric)
+    revenue_growth_rates = _growth_rates(_series(metric, "revenue_values", "revenue_years"))
     score_before_evidence_cap = _round_score(
         0.25 * persistence + 0.25 * trend + 0.25 * moat_score + 0.15 * industry_score + 0.10 * spread_score
     )
@@ -1761,6 +2219,9 @@ def _score_growth_sustainability(
         "segment_growth_proxy": segment_inputs,
         "score_cap_without_segment_revenue_history": 4.0,
         "claims_not_supported": ["source_replicability", "unreported_segment_attribution"],
+        "revenue_growth_rates": revenue_growth_rates,
+        "current_moat_score": moat_score,
+        "industry_durability_score": industry_score,
         "components": {
             "persistence": persistence,
             "trend": trend,
@@ -1943,6 +2404,7 @@ def _score_type3_bubble(metric: Mapping[str, Any], industry_bubble_score: float)
         "change_60d_pct": change_60d,
         "change_ytd_pct": change_ytd,
         "volume_ratio": volume_ratio,
+        "industry_bubble_score": industry_bubble_score,
         "components": {"industry": industry_bubble_score, "company_price": price_score},
     }
 
@@ -2068,7 +2530,9 @@ def _score_catalyst(metric: Mapping[str, Any], context: Mapping[str, Any]) -> tu
         score = 0.0
         company_score = 0.0
         band = "no_interim_comparison"
-    if metric.get("interim_profit_warning") or metric.get("interim_ocf_warning"):
+    profit_warning = metric.get("interim_profit_warning") is True
+    cash_flow_warning = metric.get("interim_ocf_warning") is True
+    if profit_warning or cash_flow_warning:
         score = min(score, 3.0)
     return score, {
         "scope": "confirmed_operating_catalyst_only_no_unevidenced_event_claim",
@@ -2083,6 +2547,13 @@ def _score_catalyst(metric: Mapping[str, Any], context: Mapping[str, Any]) -> tu
         "price_confirmed": price_confirmed,
         "decision_band": band,
         "company_composite": company_score,
+        "interim_profit_warning": profit_warning,
+        "interim_ocf_warning": cash_flow_warning,
+        "interim_current_revenue": current_revenue,
+        "interim_current_profit": current_profit,
+        "interim_current_ocf": _finite(metric.get("interim_current_ocf")),
+        "industry_target_excluded": context.get("target_excluded") is True,
+        "industry_peer_count": int(context.get("peer_count") or 0),
         "components": {"revenue": revenue, "profit": profit, "cash": cash, "margin": margin},
         "industry": {
             "interim_revenue_yoy_median": industry_revenue_yoy,
@@ -2094,6 +2565,8 @@ def _score_catalyst(metric: Mapping[str, Any], context: Mapping[str, Any]) -> tu
             "company_60d_pct": change_60d,
             "peer_median_60d_pct": peer_change_60d,
             "volume_ratio": volume_ratio,
+            "peer_sample_count": int(peer_price.get("sample_count") or 0),
+            "peer_coverage": _finite(peer_price.get("coverage")),
         },
     }
 
@@ -2121,7 +2594,10 @@ def _score_technology(metric: Mapping[str, Any], context: Mapping[str, Any]) -> 
         "scope": "rd_and_commercialisation_outcomes_not_patent_or_product_breakthrough_proof",
         "rd_intensity": intensity,
         "rd_sector_percentile": percentile,
+        "trend_growth": _finite(metric.get("trend_growth")),
+        "growth_slope": _finite(metric.get("growth_slope")),
         "roic_wacc_spread": spread_value,
+        "gross_margin": gross,
         "components": {"rd_absolute": absolute, "rd_relative": relative, "commercial_outcome": commercial},
         "score_cap_without_primary_technology_evidence": 8.0,
         "score_cap_without_reported_rd_intensity": score_cap,
@@ -2153,6 +2629,8 @@ def _score_business_model(metric: Mapping[str, Any], accounting_score: float) ->
         "scope": "scale_economics_proxy_not_business_model_novelty_claim",
         "revenue_minus_asset_cagr": operating_leverage,
         "margin_trajectory": _finite(metric.get("margin_trajectory")),
+        "accounting_integrity_score": accounting_score,
+        "share_dilution_1yr": _finite(metric.get("share_dilution_1yr")),
         "components": {
             "operating_leverage": leverage_score,
             "margin": margin,
@@ -2171,23 +2649,138 @@ def _has_common_consecutive_history(
     right_years_key: str,
     *,
     minimum_years: int = 3,
+    expected_latest_year: int | None = None,
 ) -> bool:
-    left = _series(metric, left_values_key, left_years_key)
-    right = _series(metric, right_values_key, right_years_key)
+    left = _strict_series(metric, left_values_key, left_years_key)
+    right = _strict_series(metric, right_values_key, right_years_key)
+    if left is None or right is None or expected_latest_year is None:
+        return False
     common = sorted(set(left) & set(right))
     if len(common) < minimum_years:
         return False
-    return any(
-        all(current - prior == 1 for prior, current in zip(window, window[1:]))
-        for start in range(len(common) - minimum_years + 1)
-        for window in (common[start : start + minimum_years],)
+    latest = common[-minimum_years:]
+    return latest[-1] == expected_latest_year and all(
+        current - prior == 1 for prior, current in zip(latest, latest[1:])
     )
 
 
-def _ratio_history_ready(context: Mapping[str, Any], key: str, minimum_count: int) -> bool:
+def _latest_complete_financial_year(metric: Mapping[str, Any]) -> int | None:
+    """Return the annual-history endpoint justified by dated source metadata."""
+
+    parsed_dates: dict[str, date] = {}
+    for key in ("financial_indicator_as_of", "source_trade_date"):
+        raw_date = metric.get(key)
+        if not isinstance(raw_date, str):
+            continue
+        try:
+            parsed = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if parsed.isoformat() != raw_date or parsed > date.today():
+            continue
+        parsed_dates[key] = parsed
+    financial_date = parsed_dates.get("financial_indicator_as_of")
+    trade_date = parsed_dates.get("source_trade_date")
+    if financial_date is not None:
+        if trade_date is not None and (
+            financial_date > trade_date or (trade_date - financial_date).days > FINANCIAL_EVIDENCE_MAX_AGE_DAYS
+        ):
+            return None
+        if (financial_date.month, financial_date.day) == (12, 31):
+            return financial_date.year
+        return financial_date.year - 1
+    if trade_date is not None:
+        return trade_date.year - 1
+    return None
+
+
+def _strict_series(
+    metric: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+) -> dict[int, float] | None:
+    """Require a one-to-one, unique, finite annual year/value ledger."""
+
+    values = metric.get(values_key)
+    years = metric.get(years_key)
+    if (
+        not isinstance(values, Sequence)
+        or isinstance(values, (str, bytes))
+        or not isinstance(years, Sequence)
+        or isinstance(years, (str, bytes))
+        or not values
+        or len(values) != len(years)
+    ):
+        return None
+    result: dict[int, float] = {}
+    for raw_year, raw_value in zip(years, values):
+        if isinstance(raw_year, bool):
+            return None
+        try:
+            year = int(raw_year)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        value = _finite(raw_value)
+        if not 1900 <= year <= 9999 or year in result or value is None:
+            return None
+        result[year] = value
+    return result
+
+
+def _history_ready(
+    metric: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+    *,
+    minimum_years: int,
+    expected_latest_year: int | None,
+) -> bool:
+    history = _strict_series(metric, values_key, years_key)
+    if history is None or expected_latest_year is None:
+        return False
+    suffix = _latest_consecutive_years(set(history))
+    return len(suffix) >= minimum_years and suffix[-1] == expected_latest_year
+
+
+def _context_history_ready(
+    context: Mapping[str, Any],
+    key: str,
+    *,
+    minimum_years: int,
+    expected_latest_year: int | None,
+    values_field: str,
+) -> bool:
     payload = context.get(key)
-    ratios = payload.get("ratios") if isinstance(payload, Mapping) else None
-    return isinstance(ratios, Mapping) and _finite_sequence_count(list(ratios.values())) >= minimum_count
+    values = payload.get(values_field) if isinstance(payload, Mapping) else None
+    raw_years = payload.get("years") if isinstance(payload, Mapping) else None
+    if (
+        expected_latest_year is None
+        or not isinstance(values, Mapping)
+        or not isinstance(raw_years, list)
+        or any(isinstance(year, bool) or not isinstance(year, int) for year in raw_years)
+        or raw_years != sorted(set(raw_years))
+        or set(values) != set(raw_years)
+        or any(_finite(values[year]) is None for year in raw_years)
+    ):
+        return False
+    suffix = _latest_consecutive_years(set(raw_years))
+    return len(suffix) >= minimum_years and suffix[-1] == expected_latest_year
+
+
+def _ratio_history_ready(
+    context: Mapping[str, Any],
+    key: str,
+    minimum_count: int,
+    *,
+    expected_latest_year: int | None,
+) -> bool:
+    return _context_history_ready(
+        context,
+        key,
+        minimum_years=minimum_count,
+        expected_latest_year=expected_latest_year,
+        values_field="ratios",
+    )
 
 
 def _build_evidence_qualities(
@@ -2207,22 +2800,52 @@ def _build_evidence_qualities(
     def finite(key: str) -> bool:
         return _finite(metric.get(key)) is not None
 
-    fcf_ready = _finite_sequence_count(metric.get("fcf_history")) > 0
-    revenue_history = _series(metric, "revenue_values", "revenue_years")
-    profit_history = _series(metric, "net_profit_history", "net_profit_years")
-    roic_history = _series(metric, "indicator_roic_history", "indicator_roic_years")
-    gross_history = _series(metric, "gross_margin_history", "gross_margin_years")
-    gross_history_count = _latest_consecutive_year_count(set(gross_history))
-    common_roic_gross_history_count = _latest_consecutive_year_count(set(roic_history) & set(gross_history))
+    expected_latest_year = _latest_complete_financial_year(metric)
+    fcf_ready = _history_ready(
+        metric,
+        "fcf_history",
+        "fcf_years",
+        minimum_years=3,
+        expected_latest_year=expected_latest_year,
+    )
+    revenue_history_3y_ready = _history_ready(
+        metric,
+        "revenue_values",
+        "revenue_years",
+        minimum_years=3,
+        expected_latest_year=expected_latest_year,
+    )
+    profit_history_2y_ready = _history_ready(
+        metric,
+        "net_profit_history",
+        "net_profit_years",
+        minimum_years=2,
+        expected_latest_year=expected_latest_year,
+    )
+    roic_history_3y_ready = _history_ready(
+        metric,
+        "indicator_roic_history",
+        "indicator_roic_years",
+        minimum_years=3,
+        expected_latest_year=expected_latest_year,
+    )
+    gross_history_3y_ready = _history_ready(
+        metric,
+        "gross_margin_history",
+        "gross_margin_years",
+        minimum_years=3,
+        expected_latest_year=expected_latest_year,
+    )
     balance_ready = finite("interest_bearing_debt_ratio") or finite("debt_ratio")
     roic_wacc_ready = finite("roic") and finite("wacc")
-    historical_roic_ready = _latest_consecutive_year_count(set(roic_history)) >= 3 and finite("wacc")
+    historical_roic_ready = roic_history_3y_ready and finite("wacc")
     revenue_asset_ready = _has_common_consecutive_history(
         metric,
         "revenue_values",
         "revenue_years",
         "total_assets_history",
         "total_assets_years",
+        expected_latest_year=expected_latest_year,
     )
     latest_share, share_change = _company_share_change(metric, context)
     peer_count = int(context.get("peer_count") or 0)
@@ -2232,15 +2855,40 @@ def _build_evidence_qualities(
         and _finite_sequence_count(context.get("revenue_latest_population")) >= MIN_SECTOR_COMPANIES
     )
     industry_growth_ready = (
-        _finite(context.get("aggregate_revenue_cagr")) is not None or fallback_industry_growth is not None
-    )
+        _finite(context.get("aggregate_revenue_cagr")) is not None
+        and _context_history_ready(
+            context,
+            "revenue",
+            minimum_years=3,
+            expected_latest_year=expected_latest_year,
+            values_field="aggregates",
+        )
+    ) or fallback_industry_growth is not None
 
     qualities: dict[str, dict[str, Any]] = {}
     qualities["industry_durability_score"] = _quality_record(
         {
             "industry_revenue_growth": industry_growth_ready,
-            "industry_loss_share": _finite(context.get("loss_share")) is not None,
-            "industry_margin_trajectory": _finite(context.get("median_margin_trajectory")) is not None,
+            "industry_loss_share": (
+                _finite(context.get("loss_share")) is not None
+                and _context_history_ready(
+                    context,
+                    "revenue",
+                    minimum_years=2,
+                    expected_latest_year=expected_latest_year,
+                    values_field="aggregates",
+                )
+            ),
+            "industry_margin_trajectory": (
+                _finite(context.get("median_margin_trajectory")) is not None
+                and _context_history_ready(
+                    context,
+                    "profit_margin",
+                    minimum_years=2,
+                    expected_latest_year=expected_latest_year,
+                    values_field="ratios",
+                )
+            ),
         }
     )
     qualities["accounting_integrity_score"] = _quality_record(
@@ -2261,25 +2909,165 @@ def _build_evidence_qualities(
     )
 
     accounting_complete = qualities["accounting_integrity_score"]["level"] == "derived_proxy"
-    qualities["moat_score"] = _quality_record(
-        {
-            "historical_roic_and_wacc": historical_roic_ready,
-            "gross_margin_history": gross_history_count >= 3,
-            "peer_gross_margin_history": peer_gross_ready,
-            "accounting_outcomes": accounting_complete,
-            "free_cash_flow_history": fcf_ready,
-            "listed_peer_revenue_scale": peer_revenue_scale_ready,
+    if str(metric.get("industry") or "") == "INSURANCE":
+        insurance_histories = {
+            metric_name: _series(metric, f"{metric_name}_history", f"{metric_name}_years")
+            for metric_name in (
+                "solvency_adequacy_ratio",
+                "new_business_value",
+                "earned_premium",
+                "life_surrender_rate",
+                "indicator_weighted_roe",
+                "adjusted_profit_ratio",
+            )
         }
-    )
+        qualities["moat_score"] = _quality_record(
+            {
+                "solvency_adequacy_history": (
+                    _history_ready(
+                        metric,
+                        "solvency_adequacy_ratio_history",
+                        "solvency_adequacy_ratio_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "new_business_value_history": (
+                    _history_ready(
+                        metric,
+                        "new_business_value_history",
+                        "new_business_value_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "earned_premium_history": (
+                    _history_ready(
+                        metric,
+                        "earned_premium_history",
+                        "earned_premium_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "life_surrender_rate_history": (
+                    _history_ready(
+                        metric,
+                        "life_surrender_rate_history",
+                        "life_surrender_rate_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "weighted_roe_history": (
+                    _history_ready(
+                        metric,
+                        "indicator_weighted_roe_history",
+                        "indicator_weighted_roe_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "adjusted_profit_history": (
+                    _history_ready(
+                        metric,
+                        "adjusted_profit_ratio_history",
+                        "adjusted_profit_ratio_years",
+                        minimum_years=3,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+            }
+        )
+    else:
+        insurance_histories = {}
+        qualities["moat_score"] = _quality_record(
+            {
+                "historical_roic_and_wacc": historical_roic_ready,
+                "gross_margin_history": gross_history_3y_ready,
+                "peer_gross_margin_history": peer_gross_ready,
+                "accounting_outcomes": accounting_complete,
+                "free_cash_flow_history": fcf_ready,
+                "listed_peer_revenue_scale": peer_revenue_scale_ready,
+            }
+        )
     moat_complete = qualities["moat_score"]["level"] == "derived_proxy"
-    qualities["moat_durability_score"] = _quality_record(
-        {
-            "current_moat_proxy": moat_complete,
-            "roic_and_gross_margin_common_history": common_roic_gross_history_count >= 3,
-            "gross_margin_stability": finite("gross_margin_cv"),
-            "revenue_growth_history": _latest_consecutive_year_count(set(revenue_history)) >= 3,
-        }
-    )
+    if insurance_histories:
+        insurance_common_years = set.intersection(*(set(history) for history in insurance_histories.values()))
+        insurance_common_suffix = _latest_consecutive_years(insurance_common_years)
+        insurance_common_ready = (
+            expected_latest_year is not None
+            and len(insurance_common_suffix) >= 5
+            and insurance_common_suffix[-1] == expected_latest_year
+        )
+        qualities["moat_durability_score"] = _quality_record(
+            {
+                "current_insurance_moat_proxy": moat_complete,
+                "five_year_common_insurance_history": insurance_common_ready,
+                "solvency_adequacy_history": (
+                    _history_ready(
+                        metric,
+                        "solvency_adequacy_ratio_history",
+                        "solvency_adequacy_ratio_years",
+                        minimum_years=5,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "new_business_value_history": (
+                    _history_ready(
+                        metric,
+                        "new_business_value_history",
+                        "new_business_value_years",
+                        minimum_years=5,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "earned_premium_history": (
+                    _history_ready(
+                        metric,
+                        "earned_premium_history",
+                        "earned_premium_years",
+                        minimum_years=5,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "life_surrender_rate_history": (
+                    _history_ready(
+                        metric,
+                        "life_surrender_rate_history",
+                        "life_surrender_rate_years",
+                        minimum_years=5,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+                "weighted_roe_history": (
+                    _history_ready(
+                        metric,
+                        "indicator_weighted_roe_history",
+                        "indicator_weighted_roe_years",
+                        minimum_years=5,
+                        expected_latest_year=expected_latest_year,
+                    )
+                ),
+            }
+        )
+    else:
+        qualities["moat_durability_score"] = _quality_record(
+            {
+                "current_moat_proxy": moat_complete,
+                "roic_and_gross_margin_common_history": _has_common_consecutive_history(
+                    metric,
+                    "indicator_roic_history",
+                    "indicator_roic_years",
+                    "gross_margin_history",
+                    "gross_margin_years",
+                    minimum_years=3,
+                    expected_latest_year=expected_latest_year,
+                ),
+                "gross_margin_stability": finite("gross_margin_cv"),
+                "revenue_growth_history": revenue_history_3y_ready,
+            }
+        )
     qualities["growth_quality_score"] = _quality_record(
         {
             "accounting_outcomes": accounting_complete,
@@ -2296,7 +3084,7 @@ def _build_evidence_qualities(
     industry_complete = qualities["industry_durability_score"]["level"] == "derived_proxy"
     qualities["growth_sustainability_score"] = _quality_record(
         {
-            "revenue_growth_history": len(_growth_rates(revenue_history)) >= 2,
+            "revenue_growth_history": revenue_history_3y_ready,
             "trend_growth": finite("trend_growth"),
             "growth_slope": finite("growth_slope"),
             "roic_and_wacc": roic_wacc_ready,
@@ -2313,7 +3101,7 @@ def _build_evidence_qualities(
         "growth_slope": finite("growth_slope"),
         "peer_industry_growth": _finite(context.get("aggregate_revenue_cagr")) is not None,
         "listed_peer_revenue_share": latest_share is not None and share_change is not None,
-        "revenue_history": len(revenue_history) >= 3,
+        "revenue_history": revenue_history_3y_ready,
     }
     qualities["runway_score"] = _quality_record(
         runway_inputs,
@@ -2321,10 +3109,38 @@ def _build_evidence_qualities(
     )
     bubble_inputs = {
         "peer_cohort": context.get("target_excluded") is True and peer_count >= MIN_SECTOR_COMPANIES,
-        "industry_revenue_growth": _finite(context.get("aggregate_revenue_cagr")) is not None,
-        "industry_asset_growth": _finite(context.get("aggregate_assets_cagr")) is not None,
-        "capex_intensity_history": _ratio_history_ready(context, "capex_intensity", 4),
-        "profit_margin_history": _ratio_history_ready(context, "profit_margin", 2),
+        "industry_revenue_growth": (
+            _finite(context.get("aggregate_revenue_cagr")) is not None
+            and _context_history_ready(
+                context,
+                "revenue",
+                minimum_years=3,
+                expected_latest_year=expected_latest_year,
+                values_field="aggregates",
+            )
+        ),
+        "industry_asset_growth": (
+            _finite(context.get("aggregate_assets_cagr")) is not None
+            and _context_history_ready(
+                context,
+                "assets",
+                minimum_years=3,
+                expected_latest_year=expected_latest_year,
+                values_field="aggregates",
+            )
+        ),
+        "capex_intensity_history": _ratio_history_ready(
+            context,
+            "capex_intensity",
+            4,
+            expected_latest_year=expected_latest_year,
+        ),
+        "profit_margin_history": _ratio_history_ready(
+            context,
+            "profit_margin",
+            2,
+            expected_latest_year=expected_latest_year,
+        ),
         "industry_pressure_breadth": any(
             _finite(context.get(key)) is not None for key in ("loss_share", "negative_fcf_share")
         ),
@@ -2349,8 +3165,14 @@ def _build_evidence_qualities(
         "interim_profit_comparison": profit_yoy_ready,
         "interim_cash_flow_comparison": ocf_yoy_ready,
         "current_revenue_and_profit": finite("interim_current_revenue") and finite("interim_current_profit"),
-        "annual_revenue_baseline": len(_growth_rates(revenue_history)) > 0,
-        "annual_profit_baseline": len(_growth_rates(profit_history)) > 0,
+        "annual_revenue_baseline": _history_ready(
+            metric,
+            "revenue_values",
+            "revenue_years",
+            minimum_years=2,
+            expected_latest_year=expected_latest_year,
+        ),
+        "annual_profit_baseline": profit_history_2y_ready,
         "peer_interim_and_annual_context": (
             peer_count >= MIN_SECTOR_COMPANIES
             and all(
@@ -2422,6 +3244,1240 @@ def _evidence_record(
     }
 
 
+def _replay_components(details: Mapping[str, Any], expected: set[str]) -> dict[str, float]:
+    components = details.get("components")
+    if not isinstance(components, Mapping) or set(components) != expected:
+        raise ValueError("quantitative evidence formula component shape is invalid")
+    normalized: dict[str, float] = {}
+    for component, raw_value in components.items():
+        value = _finite(raw_value)
+        if value is None or not 0.0 <= value <= 10.0:
+            raise ValueError("quantitative evidence formula component is invalid")
+        normalized[str(component)] = value
+    return normalized
+
+
+def _required_detail_number(
+    details: Mapping[str, Any],
+    field: str,
+    *,
+    minimum: float = 0.0,
+    maximum: float = 10.0,
+) -> float:
+    value = _finite(details.get(field))
+    if value is None or not minimum <= value <= maximum:
+        raise ValueError(f"quantitative evidence formula field is invalid: {field}")
+    return value
+
+
+def _optional_detail_number(details: Mapping[str, Any], field: str) -> float | None:
+    raw_value = details.get(field)
+    if raw_value is None:
+        return None
+    value = _finite(raw_value)
+    if value is None:
+        raise ValueError(f"quantitative evidence optional formula field is invalid: {field}")
+    return value
+
+
+def _assert_replayed_detail(actual: Any, expected: float, field: str) -> None:
+    value = _finite(actual)
+    if value is None or not math.isclose(value, expected, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"quantitative evidence formula field does not replay: {field}")
+
+
+def _assert_optional_replayed_detail(actual: Any, expected: float | None, field: str) -> None:
+    if actual is None and expected is None:
+        return
+    if expected is None:
+        raise ValueError(f"quantitative evidence formula field does not replay: {field}")
+    _assert_replayed_detail(actual, expected, field)
+
+
+def _assert_replayed_component(components: Mapping[str, float], field: str, expected: float) -> None:
+    if not math.isclose(components[field], expected, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"quantitative evidence formula component does not replay: {field}")
+
+
+def _detail_number_list(
+    details: Mapping[str, Any],
+    field: str,
+    *,
+    maximum_length: int = 100,
+) -> list[float]:
+    raw_values = details.get(field)
+    if (
+        not isinstance(raw_values, list)
+        or len(raw_values) > maximum_length
+        or any(_finite(item) is None for item in raw_values)
+    ):
+        raise ValueError(f"quantitative evidence formula list is invalid: {field}")
+    return [float(item) for item in raw_values]
+
+
+def _replay_recent_fcf_score(details: Mapping[str, Any]) -> float:
+    raw_years = details.get("recent_fcf_years")
+    values = _detail_number_list(details, "recent_fcf_values", maximum_length=3)
+    if (
+        not isinstance(raw_years, list)
+        or len(raw_years) != len(values)
+        or len(raw_years) > 3
+        or any(isinstance(year, bool) or not isinstance(year, int) for year in raw_years)
+        or raw_years != sorted(set(raw_years))
+        or any(current - prior != 1 for prior, current in zip(raw_years, raw_years[1:]))
+    ):
+        raise ValueError("quantitative evidence recent FCF formula ledger is invalid")
+    if len(values) < 3:
+        return 1.0
+    return _round_score(10.0 * sum(value > 0 for value in values) / 3.0)
+
+
+def _replay_growth_persistence_from_rates(rates: Sequence[float]) -> float:
+    if not rates:
+        return 1.0
+    positive = sum(rate > 0 for rate in rates) / len(rates)
+    deep_declines = sum(rate <= -0.10 for rate in rates)
+    return _round_score(positive * 10.0 - deep_declines * 2.0)
+
+
+def _replay_growth_trend_from_values(growth: float | None, slope: float | None) -> float:
+    base = _linear_score(growth, [(-0.10, 0), (0.0, 2), (0.05, 5), (0.10, 7), (0.20, 9), (0.35, 10)])
+    if slope is None:
+        return _round_score(base - 1.0)
+    if slope <= -0.15:
+        adjustment = -3.0
+    elif slope >= 0.15:
+        adjustment = 2.0
+    else:
+        adjustment = -3.0 + (slope + 0.15) / 0.30 * 5.0
+    return _round_score(base + adjustment)
+
+
+def _durability_history_cap(history_count: int) -> float:
+    return 2.0 if history_count < 3 else 4.0 if history_count <= 5 else 6.0 if history_count <= 9 else 10.0
+
+
+def _replay_history_cap(details: Mapping[str, Any]) -> float:
+    raw_count = details.get("history_count")
+    raw_years = details.get("common_history_years")
+    if (
+        isinstance(raw_count, bool)
+        or not isinstance(raw_count, int)
+        or raw_count < 0
+        or not isinstance(raw_years, list)
+        or any(isinstance(year, bool) or not isinstance(year, int) for year in raw_years)
+        or raw_years != sorted(set(raw_years))
+        or _latest_consecutive_year_count(set(raw_years)) != raw_count
+        or details.get("durability_history_years") != raw_count
+    ):
+        raise ValueError("quantitative evidence durability history ledger is invalid")
+    expected_cap = _durability_history_cap(raw_count)
+    _assert_replayed_detail(details.get("history_cap"), expected_cap, "history_cap")
+    return expected_cap
+
+
+def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
+    """Recompute one derived diagnostic only from its exported formula ledger."""
+
+    if key == "industry_durability_score":
+        components = _replay_components(details, {"growth", "loss_health", "margin_health"})
+        growth = _optional_detail_number(details, "aggregate_revenue_cagr")
+        loss_share = _optional_detail_number(details, "loss_share")
+        margin_trend = _optional_detail_number(details, "median_margin_trajectory")
+        expected_components = {
+            "growth": _linear_score(
+                growth,
+                [
+                    (-0.15, 0),
+                    (-0.10, 1),
+                    (-0.03, 3),
+                    (0.0, 4.5),
+                    (0.03, 6),
+                    (0.08, 8),
+                    (0.15, 9),
+                    (0.25, 10),
+                ],
+            ),
+            "loss_health": _linear_score(
+                loss_share,
+                [(0.0, 10), (0.15, 8), (0.30, 6), (0.50, 3), (0.75, 0)],
+            ),
+            "margin_health": _linear_score(
+                margin_trend,
+                [(-0.30, 0), (-0.15, 2), (-0.05, 4), (0.0, 6), (0.10, 8), (0.25, 10)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        return _round_score(
+            0.60 * components["growth"] + 0.20 * components["loss_health"] + 0.20 * components["margin_health"]
+        )
+    if key == "accounting_integrity_score":
+        components = _replay_components(details, {"adjusted", "cash", "fcf", "dilution"})
+        adjusted_ratio = _optional_detail_number(details, "adjusted_profit_ratio")
+        if adjusted_ratio is not None:
+            adjusted_ratio = min(adjusted_ratio, 1.0)
+        expected_components = {
+            "adjusted": _linear_score(
+                adjusted_ratio,
+                [(0.0, 0), (0.5, 2), (0.7, 5), (0.85, 8), (0.95, 10)],
+            ),
+            "cash": _linear_score(
+                _optional_detail_number(details, "ocf_to_net_profit"),
+                [(-0.2, 0), (0.0, 1), (0.4, 3), (0.6, 6), (0.8, 8), (1.0, 10), (1.5, 10)],
+            ),
+            "fcf": _replay_recent_fcf_score(details),
+            "dilution": _linear_score(
+                _optional_detail_number(details, "share_dilution_1yr"),
+                [(-0.05, 10), (0.0, 10), (0.02, 8), (0.05, 5), (0.10, 2), (0.20, 0)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        _assert_replayed_detail(details.get("positive_fcf_score"), expected_components["fcf"], "positive_fcf_score")
+        return _round_score(
+            0.30 * components["adjusted"]
+            + 0.35 * components["cash"]
+            + 0.20 * components["fcf"]
+            + 0.15 * components["dilution"]
+        )
+    if key == "management_alignment_score":
+        components = _replay_components(details, {"dilution", "excess_return", "fcf", "balance"})
+        debt_ratio = _optional_detail_number(details, "interest_bearing_debt_ratio")
+        if debt_ratio is None:
+            debt_ratio = _optional_detail_number(details, "debt_ratio")
+        expected_components = {
+            "dilution": _linear_score(
+                _optional_detail_number(details, "share_dilution_1yr"),
+                [(-0.05, 10), (0.0, 10), (0.02, 8), (0.05, 5), (0.10, 2), (0.20, 0)],
+            ),
+            "excess_return": _linear_score(
+                _optional_detail_number(details, "roic_wacc_spread"),
+                [(-0.05, 0), (0.0, 2), (0.02, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+            ),
+            "fcf": _replay_recent_fcf_score(details),
+            "balance": _linear_score(
+                debt_ratio,
+                [(0.0, 10), (0.20, 10), (0.40, 7), (0.60, 4), (0.80, 1), (1.0, 0)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        return _round_score(
+            0.30 * components["dilution"]
+            + 0.30 * components["excess_return"]
+            + 0.20 * components["fcf"]
+            + 0.20 * components["balance"]
+        )
+    if key == "moat_score":
+        raw_components = details.get("components")
+        component_keys = set(raw_components) if isinstance(raw_components, Mapping) else set()
+        if component_keys == {
+            "solvency_resilience",
+            "new_business_value_growth",
+            "earned_premium_growth",
+            "policyholder_retention",
+            "weighted_roe",
+            "adjusted_profit_quality",
+        }:
+            components = _replay_components(details, component_keys)
+            adjusted_profit_ratio = _optional_detail_number(details, "adjusted_profit_ratio_median")
+            if adjusted_profit_ratio is not None:
+                adjusted_profit_ratio = min(adjusted_profit_ratio, 1.0)
+            surrender_rate = _optional_detail_number(details, "life_surrender_rate_median")
+            expected_components = {
+                "solvency_resilience": _linear_score(
+                    _optional_detail_number(details, "solvency_adequacy_median"),
+                    [(1.0, 2), (1.2, 4), (1.5, 6), (2.0, 8), (2.5, 9), (3.0, 10)],
+                ),
+                "new_business_value_growth": _linear_score(
+                    _optional_detail_number(details, "new_business_value_cagr"),
+                    [(-0.20, 0), (-0.10, 2), (0.0, 5), (0.05, 6), (0.10, 8), (0.20, 10)],
+                ),
+                "earned_premium_growth": _linear_score(
+                    _optional_detail_number(details, "earned_premium_yoy_median"),
+                    [(-0.10, 1), (-0.05, 3), (0.0, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+                ),
+                "policyholder_retention": _linear_score(
+                    -surrender_rate if surrender_rate is not None else None,
+                    [(-0.08, 0), (-0.05, 2), (-0.03, 5), (-0.02, 7), (-0.01, 9), (0.0, 10)],
+                ),
+                "weighted_roe": _linear_score(
+                    _optional_detail_number(details, "weighted_roe_median"),
+                    [(0.0, 1), (0.05, 3), (0.08, 5), (0.12, 7), (0.16, 9), (0.20, 10)],
+                ),
+                "adjusted_profit_quality": _linear_score(
+                    adjusted_profit_ratio,
+                    [(0.0, 0), (0.50, 2), (0.70, 5), (0.85, 8), (0.95, 10)],
+                ),
+            }
+            for component, expected in expected_components.items():
+                _assert_replayed_component(components, component, expected)
+            return _round_score(
+                0.20 * components["solvency_resilience"]
+                + 0.20 * components["new_business_value_growth"]
+                + 0.15 * components["earned_premium_growth"]
+                + 0.15 * components["policyholder_retention"]
+                + 0.20 * components["weighted_roe"]
+                + 0.10 * components["adjusted_profit_quality"]
+            )
+        components = _replay_components(
+            details,
+            {"excess_return", "margin_power", "cash_outcome", "share_durability"},
+        )
+        spread_years = details.get("recent_roic_spread_history_years")
+        spread_count = details.get("recent_roic_spread_history_count")
+        positive_spread_count = details.get("positive_spread_count")
+        gross_years = details.get("recent_gross_margin_history_years")
+        gross_values = _detail_number_list(details, "recent_gross_margin_history", maximum_length=5)
+        if (
+            not isinstance(spread_years, list)
+            or any(isinstance(year, bool) or not isinstance(year, int) for year in spread_years)
+            or spread_years != sorted(set(spread_years))
+            or len(spread_years) > 5
+            or spread_count != len(spread_years)
+            or isinstance(positive_spread_count, bool)
+            or not isinstance(positive_spread_count, int)
+            or not 0 <= positive_spread_count <= len(spread_years)
+            or not isinstance(gross_years, list)
+            or any(isinstance(year, bool) or not isinstance(year, int) for year in gross_years)
+            or gross_years != sorted(set(gross_years))
+            or len(gross_years) != len(gross_values)
+            or len(gross_years) > 5
+            or details.get("recent_gross_margin_history_count") != len(gross_values)
+        ):
+            raise ValueError("quantitative evidence moat history ledger is invalid")
+        spread_score = _linear_score(
+            _optional_detail_number(details, "roic_wacc_spread_median"),
+            [(0.0, 1), (0.02, 3), (0.05, 5), (0.10, 7), (0.20, 9), (0.30, 10)],
+        )
+        if len(spread_years) >= 3 and positive_spread_count < 2:
+            spread_score = min(spread_score, 3.0)
+        gross_median = _median(gross_values)
+        peer_gross = _optional_detail_number(details, "peer_gross_margin_median")
+        gross_advantage = gross_median - peer_gross if gross_median is not None and peer_gross is not None else None
+        _assert_optional_replayed_detail(details.get("gross_margin_5y_median"), gross_median, "gross_margin_5y_median")
+        _assert_optional_replayed_detail(
+            details.get("gross_margin_advantage"),
+            gross_advantage,
+            "gross_margin_advantage",
+        )
+        margin_power = _round_score(
+            _linear_score(
+                gross_advantage,
+                [(-0.10, 1), (-0.05, 3), (0.0, 5), (0.05, 7), (0.10, 9), (0.20, 10)],
+            )
+            + (
+                1.0
+                if (gross_cv := _optional_detail_number(details, "gross_margin_cv")) is not None and gross_cv <= 0.05
+                else 0.5
+                if gross_cv is not None and gross_cv <= 0.10
+                else 0.0
+            )
+        )
+        if gross_cv is not None and gross_cv > 0.30:
+            margin_power = min(margin_power, 3.0)
+        if len(gross_values) >= 3 and gross_values[-1] - gross_values[-3] < -0.05:
+            margin_power = min(margin_power, 4.0)
+        accounting_score = _required_detail_number(details, "accounting_integrity_score")
+        cash_outcome = _round_score(0.60 * accounting_score + 0.40 * _replay_recent_fcf_score(details))
+        revenue_percentile = _optional_detail_number(details, "listed_peer_revenue_percentile")
+        if revenue_percentile is not None and not 0.0 <= revenue_percentile <= 1.0:
+            raise ValueError("quantitative evidence moat revenue percentile is invalid")
+        share_score = _linear_score(
+            revenue_percentile,
+            [(0.0, 1), (0.25, 3), (0.50, 5), (0.75, 7), (0.90, 9), (0.98, 10)],
+        )
+        latest_share = _optional_detail_number(details, "listed_peer_revenue_share")
+        share_change = _optional_detail_number(details, "listed_peer_share_change")
+        expected_relative_share_change = (
+            share_change / (latest_share - share_change)
+            if share_change is not None and latest_share is not None and latest_share - share_change > 0
+            else None
+        )
+        _assert_optional_replayed_detail(
+            details.get("listed_peer_relative_share_change"),
+            expected_relative_share_change,
+            "listed_peer_relative_share_change",
+        )
+        if expected_relative_share_change is not None:
+            if expected_relative_share_change >= 0.10:
+                share_score = min(10.0, share_score + 1.0)
+            elif expected_relative_share_change <= -0.15:
+                share_score = max(0.0, share_score - 2.0)
+        expected_components = {
+            "excess_return": spread_score,
+            "margin_power": margin_power,
+            "cash_outcome": cash_outcome,
+            "share_durability": share_score,
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        score = _round_score(
+            0.35 * components["excess_return"]
+            + 0.25 * components["margin_power"]
+            + 0.20 * components["cash_outcome"]
+            + 0.20 * components["share_durability"]
+        )
+        expected_history_years = min(5, _latest_consecutive_year_count(set(spread_years) & set(gross_years)))
+        history_years = _required_detail_number(details, "recent_operating_evidence_years", maximum=5.0)
+        if history_years != expected_history_years:
+            raise ValueError("quantitative evidence moat history cap does not replay")
+        _assert_replayed_detail(details.get("recent_operating_window_years"), 5.0, "recent_operating_window_years")
+        return min(score, 6.0) if history_years < 5 else score
+    if key == "moat_durability_score":
+        raw_components = details.get("components")
+        component_keys = set(raw_components) if isinstance(raw_components, Mapping) else set()
+        current_moat = _required_detail_number(details, "current_moat_score")
+        if component_keys == {
+            "current_insurance_moat",
+            "solvency_persistence",
+            "new_business_value_persistence",
+            "earned_premium_persistence",
+            "weighted_roe_persistence",
+            "policyholder_retention_persistence",
+        }:
+            components = _replay_components(details, component_keys)
+            expected_components = {
+                "current_insurance_moat": current_moat,
+                "solvency_persistence": _linear_score(
+                    _optional_detail_number(details, "solvency_adequacy_floor"),
+                    [(1.0, 2), (1.2, 4), (1.5, 6), (2.0, 8), (2.5, 9), (3.0, 10)],
+                ),
+                "new_business_value_persistence": (
+                    _round_score(10.0 * share)
+                    if (share := _optional_detail_number(details, "new_business_value_positive_growth_share"))
+                    is not None
+                    else 2.0
+                ),
+                "earned_premium_persistence": (
+                    _round_score(10.0 * share)
+                    if (share := _optional_detail_number(details, "earned_premium_positive_growth_share")) is not None
+                    else 2.0
+                ),
+                "weighted_roe_persistence": _linear_score(
+                    _optional_detail_number(details, "weighted_roe_floor"),
+                    [(0.0, 1), (0.05, 3), (0.08, 5), (0.12, 7), (0.16, 9), (0.20, 10)],
+                ),
+                "policyholder_retention_persistence": _linear_score(
+                    (
+                        -surrender_ceiling
+                        if (
+                            surrender_ceiling := _optional_detail_number(
+                                details,
+                                "life_surrender_rate_ceiling",
+                            )
+                        )
+                        is not None
+                        else None
+                    ),
+                    [(-0.08, 0), (-0.05, 2), (-0.03, 5), (-0.02, 7), (-0.01, 9), (0.0, 10)],
+                ),
+            }
+            for component, expected in expected_components.items():
+                _assert_replayed_component(components, component, expected)
+            score = _round_score(
+                0.45 * components["current_insurance_moat"]
+                + 0.15 * components["solvency_persistence"]
+                + 0.15 * components["new_business_value_persistence"]
+                + 0.10 * components["earned_premium_persistence"]
+                + 0.10 * components["weighted_roe_persistence"]
+                + 0.05 * components["policyholder_retention_persistence"]
+            )
+        else:
+            components = _replay_components(
+                details,
+                {"current_moat", "roic_history", "margin_stability", "revenue_persistence"},
+            )
+            positive_share = _optional_detail_number(details, "roic_history_positive_share")
+            revenue_rates = _detail_number_list(details, "revenue_growth_rates")
+            expected_components = {
+                "current_moat": current_moat,
+                "roic_history": _round_score(10.0 * positive_share) if positive_share is not None else 3.0,
+                "margin_stability": _linear_score(
+                    _optional_detail_number(details, "gross_margin_cv"),
+                    [(0.0, 10), (0.03, 9), (0.08, 7), (0.15, 4), (0.30, 1)],
+                ),
+                "revenue_persistence": _replay_growth_persistence_from_rates(revenue_rates),
+            }
+            for component, expected in expected_components.items():
+                _assert_replayed_component(components, component, expected)
+            score = _round_score(
+                0.65 * components["current_moat"]
+                + 0.15 * components["roic_history"]
+                + 0.10 * components["margin_stability"]
+                + 0.10 * components["revenue_persistence"]
+            )
+        history_cap = _replay_history_cap(details)
+        return min(score, history_cap)
+    if key == "growth_quality_score":
+        components = _replay_components(
+            details,
+            {"accounting", "dilution", "balance", "asset_efficiency", "fcf"},
+        )
+        debt_ratio = _optional_detail_number(details, "interest_bearing_debt_ratio")
+        if debt_ratio is None:
+            debt_ratio = _optional_detail_number(details, "debt_ratio")
+        expected_components = {
+            "accounting": _required_detail_number(details, "accounting_integrity_score"),
+            "dilution": _linear_score(
+                _optional_detail_number(details, "share_dilution_1yr"),
+                [(-0.05, 10), (0.0, 10), (0.02, 8), (0.05, 5), (0.10, 2), (0.20, 0)],
+            ),
+            "balance": _linear_score(
+                debt_ratio,
+                [(0.0, 10), (0.20, 10), (0.40, 7), (0.60, 4), (0.80, 1), (1.0, 0)],
+            ),
+            "asset_efficiency": _linear_score(
+                _optional_detail_number(details, "revenue_minus_asset_cagr"),
+                [(-0.20, 0), (-0.10, 2), (-0.03, 4), (0.0, 6), (0.05, 8), (0.15, 10)],
+            ),
+            "fcf": _replay_recent_fcf_score(details),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        score_before_cap = _round_score(
+            0.30 * components["accounting"]
+            + 0.25 * components["dilution"]
+            + 0.20 * components["balance"]
+            + 0.15 * components["asset_efficiency"]
+            + 0.10 * components["fcf"]
+        )
+        _assert_replayed_detail(details.get("score_before_evidence_cap"), score_before_cap, "score_before_evidence_cap")
+        external_complete = details.get("external_growth_evidence_complete")
+        proxy = details.get("external_growth_proxy")
+        if not isinstance(external_complete, bool):
+            raise ValueError("quantitative evidence external growth completeness is invalid")
+        if proxy is None:
+            if external_complete:
+                raise ValueError("quantitative evidence external growth proxy is missing")
+            evidence_cap = 6.0
+        else:
+            if (
+                not external_complete
+                or not isinstance(proxy, Mapping)
+                or set(proxy)
+                != {
+                    "acquisition_intensity",
+                    "goodwill_to_revenue_latest",
+                    "goodwill_change_to_revenue",
+                }
+            ):
+                raise ValueError("quantitative evidence external growth proxy is invalid")
+            normalized_proxy = {
+                field: _optional_detail_number(proxy, field)
+                for field in (
+                    "acquisition_intensity",
+                    "goodwill_to_revenue_latest",
+                    "goodwill_change_to_revenue",
+                )
+            }
+            if any(value is None or value < 0 for value in normalized_proxy.values()):
+                raise ValueError("quantitative evidence external growth proxy is invalid")
+            acquisition_intensity = float(normalized_proxy["acquisition_intensity"])
+            goodwill_ratio = float(normalized_proxy["goodwill_to_revenue_latest"])
+            goodwill_change = float(normalized_proxy["goodwill_change_to_revenue"])
+            evidence_cap = 6.0
+            if acquisition_intensity > 0.30 or goodwill_change > 0.30:
+                evidence_cap = 4.0
+            elif acquisition_intensity > 0.20 or goodwill_change > 0.20:
+                evidence_cap = 4.5
+            elif acquisition_intensity > 0.10 or goodwill_change > 0.10 or goodwill_ratio > 0.50:
+                evidence_cap = 5.0
+            elif acquisition_intensity > 0.05 or goodwill_change > 0.05 or goodwill_ratio > 0.30:
+                evidence_cap = 5.5
+        _assert_replayed_detail(details.get("external_growth_score_cap"), evidence_cap, "external_growth_score_cap")
+        _assert_replayed_detail(
+            details.get("score_cap_without_acquisition_and_goodwill_evidence"),
+            6.0,
+            "score_cap_without_acquisition_and_goodwill_evidence",
+        )
+        return min(score_before_cap, evidence_cap)
+    if key == "growth_sustainability_score":
+        components = _replay_components(
+            details,
+            {"persistence", "trend", "moat", "industry", "excess_return"},
+        )
+        expected_components = {
+            "persistence": _replay_growth_persistence_from_rates(_detail_number_list(details, "revenue_growth_rates")),
+            "trend": _replay_growth_trend_from_values(
+                _optional_detail_number(details, "trend_growth"),
+                _optional_detail_number(details, "growth_slope"),
+            ),
+            "moat": _required_detail_number(details, "current_moat_score"),
+            "industry": _required_detail_number(details, "industry_durability_score"),
+            "excess_return": _linear_score(
+                _optional_detail_number(details, "roic_wacc_spread"),
+                [(-0.05, 0), (0.0, 2), (0.02, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        score_before_cap = _round_score(
+            0.25 * components["persistence"]
+            + 0.25 * components["trend"]
+            + 0.25 * components["moat"]
+            + 0.15 * components["industry"]
+            + 0.10 * components["excess_return"]
+        )
+        _assert_replayed_detail(details.get("score_before_evidence_cap"), score_before_cap, "score_before_evidence_cap")
+        segment_complete = details.get("segment_growth_sources_complete")
+        if not isinstance(segment_complete, bool):
+            raise ValueError("quantitative evidence segment completeness is invalid")
+        if segment_complete:
+            segment_proxy = details.get("segment_growth_proxy")
+            if not isinstance(segment_proxy, Mapping) or set(segment_proxy) != {
+                "history_years",
+                "growth_source_count",
+                "raw_growth_source_count",
+                "positive_growth_share",
+                "revenue_hhi",
+                "matched_latest_share",
+            }:
+                raise ValueError("quantitative evidence segment growth proxy is invalid")
+            history_years = _required_detail_number(segment_proxy, "history_years", maximum=1_000.0)
+            source_count = _required_detail_number(segment_proxy, "growth_source_count", maximum=1_000.0)
+            positive_growth_share = _required_detail_number(
+                segment_proxy,
+                "positive_growth_share",
+                maximum=1.0,
+            )
+            revenue_hhi = _required_detail_number(segment_proxy, "revenue_hhi", maximum=1.0)
+            if source_count >= 4 and history_years >= 10:
+                segment_band = 9.5
+            elif source_count >= 3 and history_years >= 5:
+                segment_band = 7.5
+            elif source_count >= 2 and history_years >= 3:
+                segment_band = 5.5
+            elif source_count >= 1:
+                segment_band = 3.5
+            else:
+                segment_band = 1.5
+            segment_band = _round_score(segment_band + (positive_growth_share - 0.5) * 1.0 + (0.5 - revenue_hhi) * 0.5)
+            _assert_replayed_detail(details.get("segment_band_score"), segment_band, "segment_band_score")
+            return min(score_before_cap, segment_band)
+        if details.get("segment_band_score") is not None:
+            raise ValueError("quantitative evidence missing segment history has a score band")
+        if details.get("segment_growth_proxy") is not None:
+            raise ValueError("quantitative evidence missing segment history has a proxy")
+        _assert_replayed_detail(
+            details.get("score_cap_without_segment_revenue_history"),
+            4.0,
+            "score_cap_without_segment_revenue_history",
+        )
+        return min(score_before_cap, 4.0)
+    if key == "runway_score":
+        growth = _optional_detail_number(details, "trend_growth")
+        industry_growth = _optional_detail_number(details, "peer_aggregate_revenue_cagr")
+        share = _optional_detail_number(details, "listed_peer_revenue_share")
+        share_change = _optional_detail_number(details, "listed_peer_share_change")
+        share_credit = min(0.05, max(0.0, share_change or 0.0))
+        _assert_replayed_detail(details.get("share_growth_credit"), share_credit, "share_growth_credit")
+        constrained_growth = growth
+        if constrained_growth is not None and industry_growth is not None:
+            constrained_growth = min(constrained_growth, industry_growth + share_credit)
+        _assert_optional_replayed_detail(
+            details.get("constrained_growth"),
+            constrained_growth,
+            "constrained_growth",
+        )
+        slope = _optional_detail_number(details, "growth_slope")
+        if constrained_growth is None or constrained_growth <= RUNWAY_TERMINAL_GROWTH:
+            years = 0.0
+        else:
+            years = max(
+                0.0,
+                (constrained_growth - RUNWAY_TERMINAL_GROWTH) / max(0.01, -(slope or 0.0)),
+            )
+        tam_years = _optional_detail_number(details, "tam_runway_years")
+        if tam_years is not None:
+            years = min(years, max(0.0, tam_years))
+        _assert_replayed_detail(details.get("observable_runway_years"), years, "observable_runway_years")
+        periods = details.get("financial_history_periods")
+        if (
+            not isinstance(periods, list)
+            or any(isinstance(year, bool) or not isinstance(year, int) for year in periods)
+            or periods != sorted(set(periods))
+        ):
+            raise ValueError("quantitative evidence runway history ledger is invalid")
+        history_count = _latest_consecutive_year_count(set(periods))
+        if details.get("financial_history_years") != history_count:
+            raise ValueError("quantitative evidence runway history count does not replay")
+        evidence_cap = 10.0
+        if tam_years is None and history_count < 10:
+            evidence_cap = 6.0
+        if industry_growth is not None and industry_growth <= 0 and share is not None and share >= 0.40:
+            evidence_cap = min(evidence_cap, 4.0)
+        if growth is not None and growth <= 0:
+            evidence_cap = min(evidence_cap, 3.0)
+        _assert_replayed_detail(details.get("evidence_cap"), evidence_cap, "evidence_cap")
+        return min(_runway_band_score(years), evidence_cap)
+    if key == "industry_bubble_score":
+        components = _replay_components(
+            details,
+            {
+                "supply_mismatch_risk",
+                "capex_acceleration_risk",
+                "profit_squeeze_risk",
+                "pressure_breadth_risk",
+                "bubble_risk",
+            },
+        )
+        revenue_growth = _optional_detail_number(details, "aggregate_revenue_cagr")
+        asset_growth = _optional_detail_number(details, "aggregate_assets_cagr")
+        asset_gap = asset_growth - revenue_growth if asset_growth is not None and revenue_growth is not None else None
+        _assert_optional_replayed_detail(
+            details.get("assets_minus_revenue_growth"),
+            asset_gap,
+            "assets_minus_revenue_growth",
+        )
+        capex_acceleration = _optional_detail_number(details, "capex_intensity_acceleration")
+        margin_decline = _optional_detail_number(details, "aggregate_margin_decline")
+        loss_share = _optional_detail_number(details, "loss_share")
+        negative_fcf_share = _optional_detail_number(details, "negative_fcf_share")
+        pressure_share = max(value for value in (loss_share, negative_fcf_share, 0.0) if value is not None)
+        expected_components = {
+            "supply_mismatch_risk": _linear_score(
+                asset_gap,
+                [(-0.05, 0), (0.0, 1), (0.05, 3), (0.10, 6), (0.20, 8), (0.30, 10)],
+                missing=5.0,
+            ),
+            "capex_acceleration_risk": _linear_score(
+                capex_acceleration,
+                [(0.0, 0), (0.20, 2), (0.50, 5), (1.0, 8), (2.0, 10)],
+                missing=5.0,
+            ),
+            "profit_squeeze_risk": _linear_score(
+                margin_decline,
+                [(0.0, 0), (0.02, 2), (0.05, 5), (0.10, 8), (0.15, 10)],
+                missing=5.0,
+            ),
+            "pressure_breadth_risk": _linear_score(
+                pressure_share,
+                [(0.10, 0), (0.20, 2), (0.35, 5), (0.50, 7), (0.70, 9), (0.80, 10)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        bubble_risk = _round_score(
+            0.35 * components["supply_mismatch_risk"]
+            + 0.25 * components["capex_acceleration_risk"]
+            + 0.20 * components["profit_squeeze_risk"]
+            + 0.20 * components["pressure_breadth_risk"]
+        )
+        _assert_replayed_detail(components["bubble_risk"], bubble_risk, "bubble_risk")
+        score = _round_score(10.0 - bubble_risk)
+        severe = [
+            components["supply_mismatch_risk"],
+            components["capex_acceleration_risk"],
+            components["profit_squeeze_risk"],
+            components["pressure_breadth_risk"],
+        ]
+        if (
+            asset_gap is not None
+            and asset_gap >= 0.10
+            and (
+                (capex_acceleration is not None and capex_acceleration >= 0.50)
+                or (margin_decline is not None and margin_decline >= 0.05)
+            )
+            and pressure_share >= 0.35
+        ):
+            return min(score, 2.0)
+        if sum(component >= 6.0 for component in severe) >= 2:
+            return min(score, 4.0)
+        return score
+    if key == "type3_bubble_score":
+        components = _replay_components(details, {"industry", "company_price"})
+        industry_score = _required_detail_number(details, "industry_bubble_score")
+        coldness = _optional_detail_number(details, "market_coldness_score")
+        peg = _optional_detail_number(details, "peg")
+        price_score = (
+            coldness if coldness is not None else _linear_score(peg, [(0.0, 9), (0.8, 8), (1.2, 6), (2.0, 3), (3.0, 1)])
+        )
+        change_60d = _optional_detail_number(details, "change_60d_pct")
+        change_ytd = _optional_detail_number(details, "change_ytd_pct")
+        volume_ratio = _optional_detail_number(details, "volume_ratio")
+        if change_ytd is not None and change_60d is not None:
+            if change_ytd > 50 and change_60d > 25 and volume_ratio is not None and volume_ratio > 1.5:
+                price_score = min(price_score, 3.0)
+            elif change_ytd > 30 and change_60d > 15:
+                price_score = min(price_score, 5.0)
+        _assert_replayed_component(components, "industry", industry_score)
+        _assert_replayed_component(components, "company_price", price_score)
+        return _round_score(min(components["industry"], components["company_price"]))
+    if key == "catalyst_score":
+        components = _replay_components(details, {"revenue", "profit", "cash", "margin"})
+        revenue_yoy = _optional_detail_number(details, "interim_revenue_yoy")
+        profit_yoy = _optional_detail_number(details, "interim_profit_yoy")
+        ocf_yoy = _optional_detail_number(details, "interim_ocf_yoy")
+        annual_revenue_growth = _optional_detail_number(details, "annual_revenue_growth_median")
+        annual_profit_growth = _optional_detail_number(details, "annual_profit_growth_median")
+        revenue_level = _linear_score(
+            revenue_yoy,
+            [(-0.10, 0), (-0.03, 2), (0.05, 5), (0.10, 7), (0.20, 9), (0.30, 10)],
+            missing=0,
+        )
+        revenue_acceleration = (
+            revenue_yoy - annual_revenue_growth
+            if revenue_yoy is not None and annual_revenue_growth is not None
+            else None
+        )
+        revenue_component = _round_score(
+            0.50 * revenue_level
+            + 0.50
+            * _linear_score(
+                revenue_acceleration,
+                [(-0.10, 0), (-0.03, 2), (0.01, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+                missing=0,
+            )
+        )
+        profit_level = _linear_score(
+            profit_yoy,
+            [(-0.20, 0), (-0.05, 2), (0.10, 5), (0.20, 7), (0.40, 9), (0.80, 10)],
+            missing=0,
+        )
+        profit_acceleration = (
+            profit_yoy - annual_profit_growth if profit_yoy is not None and annual_profit_growth is not None else None
+        )
+        profit_component = _round_score(
+            0.50 * profit_level
+            + 0.50
+            * _linear_score(
+                profit_acceleration,
+                [(-0.20, 0), (-0.05, 2), (0.02, 5), (0.10, 7), (0.25, 9), (0.50, 10)],
+                missing=0,
+            )
+        )
+        cash_component = _linear_score(
+            ocf_yoy,
+            [(-0.50, 0), (-0.20, 2), (0.0, 5), (0.20, 7), (0.50, 9), (1.0, 10)],
+            missing=0,
+        )
+        current_ocf = _optional_detail_number(details, "interim_current_ocf")
+        if (current_ocf or 0.0) <= 0:
+            cash_component = 0.0
+        margin_component = _linear_score(
+            _optional_detail_number(details, "margin_trajectory"),
+            [(-0.05, 0), (-0.02, 2), (0.0, 5), (0.01, 7), (0.03, 9), (0.05, 10)],
+            missing=0,
+        )
+        expected_components = {
+            "revenue": revenue_component,
+            "profit": profit_component,
+            "cash": cash_component,
+            "margin": margin_component,
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        composite = _round_score(
+            0.25 * components["revenue"]
+            + 0.30 * components["profit"]
+            + 0.25 * components["cash"]
+            + 0.20 * components["margin"]
+        )
+        current_revenue = _optional_detail_number(details, "interim_current_revenue")
+        current_profit = _optional_detail_number(details, "interim_current_profit")
+        company_turn = bool(
+            sum(component >= 6.0 for component in (revenue_component, profit_component, cash_component)) >= 2
+            and current_revenue is not None
+            and current_revenue > 0
+            and current_profit is not None
+            and current_profit > 0
+            and revenue_yoy is not None
+            and revenue_yoy >= -0.10
+            and profit_yoy is not None
+            and profit_yoy >= -0.10
+        )
+        industry = details.get("industry")
+        if not isinstance(industry, Mapping):
+            raise ValueError("quantitative catalyst industry ledger is invalid")
+        industry_revenue_yoy = _optional_detail_number(industry, "interim_revenue_yoy_median")
+        industry_profit_yoy = _optional_detail_number(industry, "interim_profit_yoy_median")
+        industry_revenue_base = _optional_detail_number(industry, "annual_revenue_growth_median")
+        industry_profit_base = _optional_detail_number(industry, "annual_profit_growth_median")
+        industry_accelerations = [
+            current - prior
+            for current, prior in (
+                (industry_revenue_yoy, industry_revenue_base),
+                (industry_profit_yoy, industry_profit_base),
+            )
+            if current is not None and prior is not None
+        ]
+        target_excluded = details.get("industry_target_excluded")
+        peer_count = details.get("industry_peer_count")
+        if (
+            not isinstance(target_excluded, bool)
+            or isinstance(peer_count, bool)
+            or not isinstance(peer_count, int)
+            or peer_count < 0
+        ):
+            raise ValueError("quantitative catalyst industry cohort ledger is invalid")
+        industry_turn = bool(
+            target_excluded
+            and peer_count >= MIN_SECTOR_COMPANIES
+            and industry_revenue_yoy is not None
+            and industry_revenue_yoy > 0
+            and industry_profit_yoy is not None
+            and industry_profit_yoy > 0
+            and industry_accelerations
+            and max(industry_accelerations) >= 0.03
+        )
+        market_confirmation = details.get("market_confirmation")
+        if not isinstance(market_confirmation, Mapping):
+            raise ValueError("quantitative catalyst market ledger is invalid")
+        company_change_60d = _optional_detail_number(market_confirmation, "company_60d_pct")
+        peer_change_60d = _optional_detail_number(market_confirmation, "peer_median_60d_pct")
+        volume_ratio = _optional_detail_number(market_confirmation, "volume_ratio")
+        peer_sample_count = market_confirmation.get("peer_sample_count")
+        peer_coverage = _optional_detail_number(market_confirmation, "peer_coverage")
+        if isinstance(peer_sample_count, bool) or not isinstance(peer_sample_count, int) or peer_sample_count < 0:
+            raise ValueError("quantitative catalyst market cohort ledger is invalid")
+        price_confirmed = bool(
+            company_change_60d is not None
+            and company_change_60d > 0
+            and peer_change_60d is not None
+            and company_change_60d - peer_change_60d >= 5.0
+            and volume_ratio is not None
+            and 0.8 <= volume_ratio <= 2.0
+            and peer_sample_count >= MIN_SECTOR_COMPANIES
+            and (peer_coverage or 0.0) >= MIN_COMPARABLE_COVERAGE
+        )
+        if all(value is None for value in (revenue_yoy, profit_yoy, ocf_yoy)):
+            composite = 0.0
+            band = "no_interim_comparison"
+            expected = 0.0
+        elif not company_turn:
+            band = "no_confirmed_company_turn"
+            expected = min(4.0, _round_score(0.40 * composite))
+        elif not industry_turn:
+            band = "company_turn_only"
+            expected = _round_score(5.0 + _clip((composite - 5.0) / 5.0, 0.0, 1.0))
+        elif not price_confirmed:
+            band = "company_and_industry_turn"
+            expected = _round_score(7.0 + _clip((composite - 5.0) / 5.0, 0.0, 1.0))
+        else:
+            band = "company_industry_and_price_confirmed"
+            expected = _round_score(9.0 + _clip((composite - 7.0) / 3.0, 0.0, 1.0))
+        if (
+            details.get("decision_band") != band
+            or details.get("company_turn") is not company_turn
+            or details.get("industry_turn") is not industry_turn
+            or details.get("price_confirmed") is not price_confirmed
+        ):
+            raise ValueError("quantitative catalyst decision ledger does not replay")
+        profit_warning = details.get("interim_profit_warning")
+        cash_warning = details.get("interim_ocf_warning")
+        if not isinstance(profit_warning, bool) or not isinstance(cash_warning, bool):
+            raise ValueError("quantitative catalyst decision flags are invalid")
+        _assert_replayed_detail(details.get("company_composite"), composite, "company_composite")
+        return min(expected, 3.0) if profit_warning or cash_warning else expected
+    if key == "technology_score":
+        components = _replay_components(details, {"rd_absolute", "rd_relative", "commercial_outcome"})
+        intensity = _optional_detail_number(details, "rd_intensity")
+        percentile = _optional_detail_number(details, "rd_sector_percentile")
+        if percentile is not None and not 0.0 <= percentile <= 1.0:
+            raise ValueError("quantitative evidence technology percentile is invalid")
+        growth = _replay_growth_trend_from_values(
+            _optional_detail_number(details, "trend_growth"),
+            _optional_detail_number(details, "growth_slope"),
+        )
+        spread = _linear_score(
+            _optional_detail_number(details, "roic_wacc_spread"),
+            [(-0.05, 0), (0.0, 2), (0.02, 5), (0.05, 7), (0.10, 9), (0.15, 10)],
+        )
+        gross = _linear_score(
+            _optional_detail_number(details, "gross_margin"),
+            [(0.0, 0), (0.20, 3), (0.40, 6), (0.70, 9)],
+        )
+        expected_components = {
+            "rd_absolute": _linear_score(
+                intensity,
+                [(0.0, 1), (0.01, 2), (0.03, 4), (0.06, 6), (0.10, 8), (0.20, 10)],
+                missing=1,
+            ),
+            "rd_relative": 10.0 * percentile if percentile is not None else 2.0,
+            "commercial_outcome": _round_score(0.45 * growth + 0.35 * spread + 0.20 * gross),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        score_cap = 8.0 if intensity is not None else 4.0
+        _assert_replayed_detail(
+            details.get("score_cap_without_primary_technology_evidence"),
+            8.0,
+            "score_cap_without_primary_technology_evidence",
+        )
+        _assert_replayed_detail(
+            details.get("score_cap_without_reported_rd_intensity"),
+            score_cap,
+            "score_cap_without_reported_rd_intensity",
+        )
+        return min(
+            score_cap,
+            _round_score(
+                0.45 * components["rd_absolute"]
+                + 0.20 * components["rd_relative"]
+                + 0.35 * components["commercial_outcome"]
+            ),
+        )
+    if key == "business_model_score":
+        components = _replay_components(details, {"operating_leverage", "margin", "accounting", "dilution"})
+        expected_components = {
+            "operating_leverage": _linear_score(
+                _optional_detail_number(details, "revenue_minus_asset_cagr"),
+                [(-0.20, 0), (-0.10, 2), (-0.03, 4), (0.0, 6), (0.05, 8), (0.15, 10)],
+            ),
+            "margin": _linear_score(
+                _optional_detail_number(details, "margin_trajectory"),
+                [(-0.30, 0), (-0.10, 2), (-0.03, 4), (0.0, 6), (0.10, 8), (0.25, 10)],
+            ),
+            "accounting": _required_detail_number(details, "accounting_integrity_score"),
+            "dilution": _linear_score(
+                _optional_detail_number(details, "share_dilution_1yr"),
+                [(-0.05, 10), (0.0, 10), (0.02, 8), (0.05, 5), (0.10, 2), (0.20, 0)],
+            ),
+        }
+        for component, expected in expected_components.items():
+            _assert_replayed_component(components, component, expected)
+        _assert_replayed_detail(
+            details.get("score_cap_without_primary_model_evidence"),
+            8.0,
+            "score_cap_without_primary_model_evidence",
+        )
+        return min(
+            8.0,
+            _round_score(
+                0.35 * components["operating_leverage"]
+                + 0.25 * components["margin"]
+                + 0.25 * components["accounting"]
+                + 0.15 * components["dilution"]
+            ),
+        )
+    raise ValueError(f"unknown quantitative evidence score key: {key}")
+
+
+def _primary_evidence_record(
+    *,
+    code: str,
+    key: str,
+    score: float,
+    evidence: Mapping[str, Any],
+    reference_as_of: str,
+    validation_token: Any,
+) -> dict[str, Any] | None:
+    """Normalize a dated external score into the same auditable record shape."""
+
+    if (
+        validation_token is not PRIMARY_EVIDENCE_VALIDATION_TOKEN
+        or not math.isfinite(score)
+        or not 0.0 <= score <= 10.0
+        or not math.isclose(score, round(score, 1), rel_tol=0.0, abs_tol=1e-12)
+        or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
+    ):
+        return None
+    if any(not isinstance(evidence.get(field), str) for field in evidence):
+        return None
+    clean = {field: str(evidence[field]).strip() for field in evidence}
+    if (
+        any(not value or any(ord(character) < 32 for character in value) for value in clean.values())
+        or len(clean["source"]) > 200
+        or len(clean["evidence_id"]) > 200
+        or len(clean["summary"]) > 1_000
+        or clean["source"].startswith(_INTERNAL_PROXY_SOURCE_PREFIX)
+        or clean["evidence_id"].startswith(_INTERNAL_PROXY_ID_PREFIX)
+        or "derived_proxy" in clean["summary"].lower()
+    ):
+        return None
+    try:
+        evidence_date = date.fromisoformat(clean["as_of"])
+        reference_date = date.fromisoformat(reference_as_of)
+    except ValueError:
+        return None
+    if (
+        evidence_date.isoformat() != clean["as_of"]
+        or reference_date.isoformat() != reference_as_of
+        or reference_date > date.today()
+        or evidence_date > reference_date
+        or (reference_date - evidence_date).days > PRIMARY_EVIDENCE_MAX_AGE_DAYS
+    ):
+        return None
+    evidence_id_pattern = (
+        rf"primary:{re.escape(key)}:{re.escape(code)}:"
+        rf"{re.escape(clean['as_of'].replace('-', ''))}:sha256:([0-9a-f]{{64}})"
+    )
+    evidence_id_match = re.fullmatch(evidence_id_pattern, clean["evidence_id"])
+    if evidence_id_match is None:
+        return None
+    source_binding_sha256 = evidence_id_match.group(1)
+    level = "primary"
+    summary = f"{key}={score:.1f};model={MODEL_ID};evidence_level={level}"
+    return {
+        "score": score,
+        "evidence_level": level,
+        "evidence": {
+            "source": clean["source"],
+            "evidence_id": clean["evidence_id"],
+            "as_of": clean["as_of"],
+            "summary": summary,
+        },
+        "details": {
+            "basis": "dated_primary_source_score",
+            "adapter_contract": _PRIMARY_ADAPTER_CONTRACT,
+            "source_summary": clean["summary"],
+            "source_evidence_id": clean["evidence_id"],
+            "source_binding_sha256": source_binding_sha256,
+            "evidence_quality": {
+                "level": level,
+                "input_coverage": 1.0,
+                "required_inputs": ["primary_source_score"],
+                "available_inputs": ["primary_source_score"],
+                "missing_inputs": [],
+            },
+        },
+    }
+
+
+def validate_quantitative_evidence_record(
+    value: Any,
+    *,
+    key: str,
+    code: str,
+    primary_validation_token: Any = None,
+) -> dict[str, Any]:
+    """Replay one score record, rejecting serialized primary claims by default.
+
+    Derived records are independently replayed from their exported raw formula
+    ledger.  A primary record additionally requires the same non-serializable
+    adapter token used at ingestion; the public/release validator intentionally
+    receives no token and therefore fails closed for hand-built JSON records.
+    """
+
+    if not isinstance(key, str) or not key or not isinstance(code, str) or not code:
+        raise ValueError("quantitative evidence identity is invalid")
+    if not isinstance(value, Mapping) or set(value) != {"score", "evidence_level", "evidence", "details"}:
+        raise ValueError("quantitative evidence record shape is invalid")
+    score = value.get("score")
+    level = value.get("evidence_level")
+    evidence = value.get("evidence")
+    details = value.get("details")
+    if (
+        isinstance(score, bool)
+        or not isinstance(score, (int, float))
+        or not math.isfinite(float(score))
+        or not 0 <= float(score) <= 10
+        or not math.isclose(float(score), round(float(score), 1), rel_tol=0.0, abs_tol=1e-12)
+        or level not in EVIDENCE_LEVELS
+        or not isinstance(evidence, Mapping)
+        or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
+        or not isinstance(details, Mapping)
+    ):
+        raise ValueError("quantitative evidence score, level, or payload is invalid")
+    as_of = evidence.get("as_of")
+    if not isinstance(as_of, str):
+        raise ValueError("quantitative evidence date is invalid")
+    try:
+        parsed_as_of = date.fromisoformat(as_of)
+    except ValueError as exc:
+        raise ValueError("quantitative evidence date is invalid") from exc
+    if parsed_as_of.isoformat() != as_of or parsed_as_of > date.today():
+        raise ValueError("quantitative evidence date is not canonical")
+    expected_summary = f"{key}={float(score):.1f};model={MODEL_ID};evidence_level={level}"
+    if any(
+        not isinstance(evidence.get(field), str)
+        or not str(evidence[field]).strip()
+        or str(evidence[field]) != str(evidence[field]).strip()
+        or any(ord(character) < 32 for character in str(evidence[field]))
+        for field in evidence
+    ):
+        raise ValueError("quantitative evidence source fields are invalid")
+    if (
+        len(str(evidence["source"])) > 200
+        or len(str(evidence["evidence_id"])) > 200
+        or len(str(evidence["summary"])) > 1_000
+        or evidence.get("summary") != expected_summary
+    ):
+        raise ValueError("quantitative evidence source binding is invalid")
+    if level == "primary":
+        source_summary = details.get("source_summary")
+        evidence_id_pattern = (
+            rf"primary:{re.escape(key)}:{re.escape(code)}:"
+            rf"{re.escape(as_of.replace('-', ''))}:sha256:([0-9a-f]{{64}})"
+        )
+        evidence_id_match = re.fullmatch(evidence_id_pattern, str(evidence["evidence_id"]))
+        if (
+            primary_validation_token is not PRIMARY_EVIDENCE_VALIDATION_TOKEN
+            or evidence_id_match is None
+            or (date.today() - parsed_as_of).days > PRIMARY_EVIDENCE_MAX_AGE_DAYS
+            or str(evidence["source"]).startswith(_INTERNAL_PROXY_SOURCE_PREFIX)
+            or str(evidence["evidence_id"]).startswith(_INTERNAL_PROXY_ID_PREFIX)
+            or details.get("basis") != "dated_primary_source_score"
+            or details.get("adapter_contract") != _PRIMARY_ADAPTER_CONTRACT
+            or details.get("source_evidence_id") != evidence.get("evidence_id")
+            or details.get("source_binding_sha256")
+            != (evidence_id_match.group(1) if evidence_id_match is not None else None)
+            or not isinstance(source_summary, str)
+            or not source_summary.strip()
+            or source_summary != source_summary.strip()
+            or len(source_summary) > 1_000
+            or any(ord(character) < 32 for character in source_summary)
+            or "derived_proxy" in source_summary.lower()
+        ):
+            raise ValueError("primary quantitative evidence source binding is invalid")
+    else:
+        expected_id = f"{MODEL_ID}:{key}:{code}:{as_of.replace('-', '')}"
+        if evidence.get("source") != SOURCE_LABEL or evidence.get("evidence_id") != expected_id:
+            raise ValueError("quantitative evidence source binding is invalid")
+    quality = details.get("evidence_quality")
+    if not isinstance(quality, Mapping) or set(quality) != {
+        "level",
+        "input_coverage",
+        "required_inputs",
+        "available_inputs",
+        "missing_inputs",
+    }:
+        raise ValueError("quantitative evidence quality shape is invalid")
+    required = quality.get("required_inputs")
+    available = quality.get("available_inputs")
+    missing = quality.get("missing_inputs")
+    coverage = quality.get("input_coverage")
+    valid_lists = all(
+        isinstance(items, list)
+        and all(isinstance(item, str) and item for item in items)
+        and len(items) == len(set(items))
+        for items in (required, available, missing)
+    )
+    if (
+        not valid_lists
+        or not required
+        or set(available) & set(missing)
+        or set(available) | set(missing) != set(required)
+        or quality.get("level") != level
+        or isinstance(coverage, bool)
+        or not isinstance(coverage, (int, float))
+        or not math.isfinite(float(coverage))
+        or not math.isclose(
+            float(coverage),
+            round(len(available) / len(required), 3),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or (level == "derived_proxy" and (missing or set(available) != set(required)))
+        or (level == "primary" and (required != ["primary_source_score"] or available != required or missing))
+        or (level == "partial" and (not available or not missing))
+        or (level == "missing" and not missing)
+    ):
+        raise ValueError("quantitative evidence quality partition is invalid")
+    if level != "primary":
+        replayed_score = _replay_quantitative_score(key, details)
+        if not math.isclose(float(score), replayed_score, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError("quantitative evidence score does not replay from its formula ledger")
+    return {
+        "score": float(score),
+        "evidence_level": str(level),
+        "evidence": dict(evidence),
+        "details": dict(details),
+    }
+
+
 def derive_company_evidence(
     metric: Mapping[str, Any],
     context: Mapping[str, Any],
@@ -2430,9 +4486,10 @@ def derive_company_evidence(
 ) -> dict[str, dict[str, Any]]:
     """Return every Patch 6 research score that can be derived observably."""
     code = str(metric.get("code") or "")
-    candidate_dates: list[date] = []
+    evidence_date: date | None = None
     for raw_date in (
         metric.get("financial_indicator_as_of"),
+        metric.get("source_trade_date"),
         (
             metric.get("market_coldness_score_evidence", {}).get("as_of")
             if isinstance(metric.get("market_coldness_score_evidence"), Mapping)
@@ -2441,23 +4498,32 @@ def derive_company_evidence(
     ):
         if isinstance(raw_date, str):
             try:
-                candidate_dates.append(date.fromisoformat(raw_date))
+                parsed_date = date.fromisoformat(raw_date)
             except ValueError:
-                pass
+                continue
+            if parsed_date.isoformat() == raw_date and parsed_date <= date.today():
+                evidence_date = parsed_date
+                break
     years = metric.get("revenue_years")
-    if isinstance(years, Sequence) and not isinstance(years, (str, bytes)):
+    if evidence_date is None and isinstance(years, Sequence) and not isinstance(years, (str, bytes)):
         valid_years = [int(year) for year in years if str(year).isdigit() and 1900 <= int(year) <= 9999]
         if valid_years:
-            candidate_dates.append(date(max(valid_years), 12, 31))
-    if not candidate_dates:
+            annual_date = date(max(valid_years), 12, 31)
+            if annual_date <= date.today():
+                evidence_date = annual_date
+    if evidence_date is None:
         raise ValueError(f"quantitative evidence has no valid as-of date:{code}")
-    as_of = max(candidate_dates).isoformat()
+    as_of = evidence_date.isoformat()
 
     industry_score, industry_details = _score_industry_durability(context, fallback_industry_growth)
     accounting_score, accounting_details = _score_accounting(metric)
     management_score, management_details = _score_management_outcomes(metric)
-    moat_score, moat_details = _score_moat(metric, context, accounting_score)
-    moat_durability_score, moat_durability_details = _score_moat_durability(metric, moat_score)
+    if str(metric.get("industry") or "") == "INSURANCE":
+        moat_score, moat_details = _score_insurance_moat(metric)
+        moat_durability_score, moat_durability_details = _score_insurance_moat_durability(metric, moat_score)
+    else:
+        moat_score, moat_details = _score_moat(metric, context, accounting_score)
+        moat_durability_score, moat_durability_details = _score_moat_durability(metric, moat_score)
     growth_quality_score, growth_quality_details = _score_growth_quality(metric, accounting_score)
     growth_sustainability_score, growth_sustainability_details = _score_growth_sustainability(
         metric, moat_score, industry_score
@@ -2549,7 +4615,7 @@ def enrich_metrics(
             metric["quantitative_evidence_levels"] = {}
             evidence_by_code[code] = {}
             continue
-        evidence_by_code[code] = evidence
+        normalized_evidence = dict(evidence)
         effective_levels: dict[str, str] = {}
         for key, payload in evidence.items():
             # A dated primary/research adapter remains authoritative.  This
@@ -2559,19 +4625,38 @@ def enrich_metrics(
             # score merely because missing inputs produced a finite default.
             existing_score = _finite(metric.get(key))
             existing_evidence = metric.get(f"{key}_evidence")
-            if existing_score is not None and isinstance(existing_evidence, Mapping):
-                existing_level = str(metric.get(f"{key}_evidence_level") or "primary")
-                effective_level = existing_level if existing_level in EVIDENCE_LEVELS else "primary"
+            raw_existing_level = metric.get(f"{key}_evidence_level")
+            existing_level = raw_existing_level if raw_existing_level in EVIDENCE_LEVELS else None
+            primary_record = None
+            if existing_score is not None and isinstance(existing_evidence, Mapping) and existing_level == "primary":
+                primary_record = _primary_evidence_record(
+                    code=code,
+                    key=key,
+                    score=existing_score,
+                    evidence=existing_evidence,
+                    reference_as_of=str(payload["evidence"]["as_of"]),
+                    validation_token=metric.get("_quantitative_primary_validation_token"),
+                )
+            if primary_record is not None:
+                normalized_evidence[key] = primary_record
+                metric[key] = primary_record["score"]
+                metric[f"{key}_evidence"] = primary_record["evidence"]
+                effective_level = "primary"
             else:
+                # An invalid or unlabelled external score is not allowed to
+                # block a complete formula fallback.  Explicit proxy inputs
+                # are re-derived here; partial/missing inputs never keep a
+                # stale numeric score alive.
+                metric.pop(key, None)
+                metric.pop(f"{key}_evidence", None)
                 effective_level = str(payload.get("evidence_level") or "missing")
-            if effective_level == "derived_proxy" and (
-                existing_score is None or not isinstance(existing_evidence, Mapping)
-            ):
+            if primary_record is None and effective_level == "derived_proxy":
                 metric[key] = payload["score"]
                 metric[f"{key}_evidence"] = payload["evidence"]
             metric[f"{key}_evidence_level"] = effective_level
             effective_levels[key] = effective_level
-        metric["quantitative_evidence"] = evidence
+        evidence_by_code[code] = normalized_evidence
+        metric["quantitative_evidence"] = normalized_evidence
         metric["quantitative_evidence_levels"] = effective_levels
         if effective_levels and all(level in {"primary", "derived_proxy"} for level in effective_levels.values()):
             metric["quantitative_evidence_status"] = "complete"
@@ -2585,10 +4670,13 @@ def enrich_metrics(
 __all__ = [
     "MIN_COMPARABLE_COVERAGE",
     "MIN_SECTOR_COMPANIES",
+    "PRIMARY_EVIDENCE_VALIDATION_TOKEN",
     "MODEL_ID",
     "EVIDENCE_LEVELS",
+    "SCORE_KEYS",
     "build_company_contexts",
     "build_sector_context",
     "derive_company_evidence",
     "enrich_metrics",
+    "validate_quantitative_evidence_record",
 ]

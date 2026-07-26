@@ -78,6 +78,113 @@ def test_bootstrap_installer_validates_then_installs_the_same_verified_zip(tmp_p
     assert installed.package.read_bytes() == package.read_bytes()
 
 
+def _write_installed_version(root: Path, version: str) -> None:
+    app = root / version / "app"
+    app.mkdir(parents=True)
+    (app / "DS_DCF.exe").write_bytes(b"MZ-installed")
+    (app / "release-manifest.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "product": "DS_DCF", "version": version, "entrypoint": "DS_DCF.exe"},
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_bootstrap_installer_refuses_to_downgrade_the_stable_shortcut(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    _write_bundled_release(bundle)
+    versions = tmp_path / "versions"
+    _write_installed_version(versions, "99.0.0")
+    install_called = False
+    monkeypatch.setattr(installer, "default_version_library_root", lambda: versions.resolve())
+
+    def unexpected_install(*_args, **_kwargs):
+        nonlocal install_called
+        install_called = True
+        raise AssertionError("a downgrade must stop before installation or shortcut creation")
+
+    monkeypatch.setattr(installer, "install_update_package", unexpected_install)
+
+    with pytest.raises(UpdateError, match=r"已安装较新版本 99\.0\.0"):
+        installer.install_bundled_release(
+            versions_root=versions,
+            create_shortcut=True,
+            resource_root=bundle,
+        )
+
+    assert install_called is False
+
+
+def test_custom_install_root_cannot_bypass_the_stable_shortcut_floor(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    _write_bundled_release(bundle)
+    custom_versions = tmp_path / "custom-versions"
+    stable_versions = tmp_path / "stable-versions"
+    _write_installed_version(stable_versions, "99.0.0")
+    monkeypatch.setattr(installer, "default_version_library_root", lambda: stable_versions.resolve())
+
+    with pytest.raises(UpdateError, match=r"已安装较新版本 99\.0\.0"):
+        installer.install_bundled_release(
+            versions_root=custom_versions,
+            create_shortcut=True,
+            resource_root=bundle,
+        )
+
+    assert not custom_versions.exists()
+
+
+def test_bootstrap_installer_uses_the_highest_complete_install_as_its_floor(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    package = _write_bundled_release(bundle)
+    versions = tmp_path / "versions"
+    _write_installed_version(versions, "11.1.0")
+    (versions / "999.0.0").mkdir()
+    captured = {}
+
+    def capture_install(package_path, manifest, **kwargs):
+        captured.update(package=package_path, manifest=manifest, **kwargs)
+        return object()
+
+    monkeypatch.setattr(installer, "install_update_package", capture_install)
+
+    installer.install_bundled_release(
+        versions_root=versions,
+        create_shortcut=False,
+        resource_root=bundle,
+    )
+
+    assert captured["package"] == package.resolve()
+    assert captured["current_version"] == "11.1.0"
+    assert captured["versions_root"] == versions.resolve()
+
+
+def test_bootstrap_installer_keeps_exact_version_reinstall_idempotent(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    _write_bundled_release(bundle)
+    versions = tmp_path / "versions"
+    _write_installed_version(versions, __version__)
+    captured = {}
+
+    def capture_install(_package, _manifest, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(installer, "install_update_package", capture_install)
+
+    installer.install_bundled_release(
+        versions_root=versions,
+        create_shortcut=False,
+        resource_root=bundle,
+    )
+
+    assert captured["current_version"] == "0.0.0"
+
+
 def test_bootstrap_installer_rejects_a_manifest_for_a_different_payload_name(tmp_path):
     bundle = tmp_path / "bundle"
     bundle.mkdir()

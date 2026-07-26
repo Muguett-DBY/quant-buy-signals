@@ -190,6 +190,50 @@ def _message_box(title: str, message: str, *, error: bool = False) -> None:
         write_console_message(f"{title}: {message}", error=True)
 
 
+def _public_update_error_message(error: object, *, operation: str) -> str:
+    """Translate updater diagnostics while keeping exact internals in the log."""
+    raw = str(error or "").casefold()
+    if any(
+        marker in raw
+        for marker in (
+            "http",
+            "request",
+            "redirect",
+            "timeout",
+            "timed out",
+            "connection",
+            "network",
+            "dns",
+        )
+    ):
+        return "暂时无法连接更新服务器，请稍后重试；当前版本仍可正常使用。"
+    if any(
+        marker in raw
+        for marker in (
+            "signature",
+            "sha-256",
+            "integrity",
+            "checksum",
+            "certificate",
+            "replay",
+            "downgrade",
+            "unsafe",
+            "does not match",
+            "differs",
+        )
+    ):
+        return "更新文件未通过安全校验，程序已停止更新并保留当前版本。"
+    if operation == "config" or any(
+        marker in raw for marker in ("update_config", "manifest_url", "semantic version", "invalid shape")
+    ):
+        return "当前安装包的更新配置无效，请重新安装官方版本。"
+    if operation == "install" or any(
+        marker in raw for marker in ("package", "archive", "zip", "extract", "install", "shortcut")
+    ):
+        return "更新包下载、校验或安装未完成；旧版本未被覆盖，请稍后重试。"
+    return "更新检查未完成，请稍后重试；当前版本仍可正常使用。"
+
+
 class DesktopController:
     def __init__(self, process: subprocess.Popen, port: int, data_root: Path, logger: logging.Logger):
         import tkinter as tk
@@ -232,7 +276,8 @@ class DesktopController:
         try:
             manifest_url = load_update_manifest_url(_resource_root())
         except UpdateError as exc:
-            self._show_error("更新配置无效", str(exc))
+            self.logger.warning("update config invalid: %s", exc)
+            self._show_error("更新配置无效", _public_update_error_message(exc, operation="config"))
             return
         if manifest_url is None:
             self._show_info("尚未配置更新源", "当前安装包没有配置 HTTPS 更新清单地址。")
@@ -247,12 +292,12 @@ class DesktopController:
                 )
             except UpdateError as exc:
                 self.logger.warning("update check failed: %s", exc)
-                message = str(exc)
+                message = _public_update_error_message(exc, operation="check")
                 self.root.after(0, lambda: self._update_check_failed(message))
                 return
             except Exception as exc:
                 self.logger.exception("unexpected update check failure")
-                message = f"更新检查发生内部异常：{type(exc).__name__}"
+                message = _public_update_error_message(exc, operation="check")
                 self.root.after(0, lambda: self._update_check_failed(message))
                 return
             self.root.after(0, lambda: self._update_check_complete(result, manifest_url))
@@ -295,12 +340,12 @@ class DesktopController:
                 installed = install_update_package(package, result.manifest)
             except UpdateError as exc:
                 self.logger.warning("update install failed: %s", exc)
-                message = str(exc)
+                message = _public_update_error_message(exc, operation="install")
                 self.root.after(0, lambda: self._update_install_failed(message))
                 return
             except Exception as exc:
                 self.logger.exception("unexpected update install failure")
-                message = f"更新安装发生内部异常：{type(exc).__name__}"
+                message = _public_update_error_message(exc, operation="install")
                 self.root.after(0, lambda: self._update_install_failed(message))
                 return
             self.root.after(0, lambda: self._update_install_complete(installed))

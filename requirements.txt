@@ -1,6 +1,9 @@
 pandas==3.0.3
 numpy==2.4.6
 streamlit==1.59.2
+# Streamlit permits older GitPython releases; require the first version that
+# fixes all currently known path-traversal and unsafe-clone advisories.
+gitpython==3.1.55
 plotly==6.9.0
 requests==2.34.2
 # Explicit security floor for Streamlit's image dependency.

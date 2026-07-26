@@ -12,13 +12,19 @@ from engine.buy_screener import (
     score_type7_quality_equity as _score_type7_quality_equity,
 )
 from engine.quality_equity import (
+    PATCH4_MODEL_ID,
+    PATCH4_SCHEMA_VERSION,
     RESEARCH_MAX_AGE_DAYS,
     RESEARCH_RECENT_AGE_DAYS,
     TYPE7_DIRECT_SCORE_KEYS,
     QualityEquityError,
+    _valid_valuation_history,
+    _valid_valuation_series,
+    _valuation_reversion_return,
     assess_quality_equity as _assess_quality_equity,
     decisive_score_upper_bounds,
     normalise_research_sources,
+    normalise_patch4_assessment,
     research_metadata_precheck,
     validate_quality_equity_ledger,
 )
@@ -140,6 +146,51 @@ def _research_content_verification():
     }
 
 
+def _patch4_assessment():
+    art_code = "AN202607160000000001"
+    digest = "0123456789abcdef"
+
+    def criterion(value, suffix):
+        return {
+            "value": value,
+            "evidence": {
+                "source": "东方财富上市公司公告正文",
+                "evidence_id": f"eastmoney-notice:600519:{art_code}:sha256:{digest}",
+                "url": f"https://data.eastmoney.com/notices/detail/600519/{art_code}.html",
+                "as_of": "2026-07-16",
+                "summary": f"公告正文明确陈述：补充核验事实{suffix}（正文SHA-256前16位：{digest}）",
+            },
+        }
+
+    return {
+        "schema_version": PATCH4_SCHEMA_VERSION,
+        "model_id": PATCH4_MODEL_ID,
+        "code": "600519",
+        "as_of": "2026-07-17",
+        "criteria": {
+            "core_rd_ownership_pct": criterion(6.0, "ownership"),
+            "esop_core_talent_coverage_pct": criterion(40.0, "coverage"),
+            "long_term_rd_metrics": criterion(True, "long-term"),
+            "frontline_rd_equity": criterion(True, "frontline"),
+            "short_term_price_binding": criterion(False, "short-term"),
+        },
+    }
+
+
+def _patch4_allowed_bindings():
+    assessment = _patch4_assessment()
+    evidence = assessment["criteria"]["core_rd_ownership_pct"]["evidence"]
+    digest = evidence["evidence_id"].rsplit(":", 1)[-1]
+    return {
+        evidence["evidence_id"]: {
+            "evidence_id": evidence["evidence_id"],
+            "url": evidence["url"],
+            "as_of": evidence["as_of"],
+            "content_sha256": digest + "0" * 48,
+        }
+    }
+
+
 def _metric():
     metric = {
         "code": "600519",
@@ -150,6 +201,7 @@ def _metric():
         "net_profit_years": [2021, 2022, 2023, 2024, 2025],
         "fcf_history": [90, 108, 130, 158, 190],
         "fcf_years": [2021, 2022, 2023, 2024, 2025],
+        "revenue_values": [100, 120, 145, 175, 210],
         "revenue_years": [2021, 2022, 2023, 2024, 2025],
         "equity_history": [100, 120, 144, 172.8, 207.36],
         "equity_years": [2021, 2022, 2023, 2024, 2025],
@@ -197,21 +249,55 @@ def _type1(score=9.0):
 
 
 def _history():
+    shareholder_span_days = 3_652
+    start_close = 100.0
+    end_close = start_close * (1.18 ** (shareholder_span_days / 365.2425))
     return {
         "available": True,
         "code": "600519",
         "as_of": "2026-07-17",
         "model_id": "type7-market-history-v1",
-        "shareholder_return": {"available": True, "cagr": 0.18, "total_return": 4.2},
+        "shareholder_return": {
+            "available": True,
+            "method": "Tencent backward-adjusted weekly close total-return proxy",
+            "target_years": 10,
+            "start_date": "2016-07-17",
+            "end_date": "2026-07-17",
+            "observations": 521,
+            "span_days": shareholder_span_days,
+            "start_close_hfq": start_close,
+            "end_close_hfq": end_close,
+            "total_return": end_close / start_close - 1.0,
+            "cagr": (end_close / start_close) ** (365.2425 / shareholder_span_days) - 1.0,
+            "formula": "total=end_hfq/start_hfq-1;cagr=(end_hfq/start_hfq)^(365.2425/days)-1",
+            "reason": "",
+        },
         "valuation_history": {
             "available": True,
+            "window_years": 5,
+            "target_start_date": "2021-07-17",
+            "start_date": "2021-07-17",
+            "end_date": "2026-07-17",
+            "row_count": 801,
+            "span_days": 1_826,
+            "start_delay_days": 0,
+            "pe_observations": 800,
+            "pb_observations": 800,
             "current_pe_ttm": 20.0,
             "median_pe_ttm": 25.0,
             "current_pb_mrq": 6.0,
             "median_pb_mrq": 7.0,
             "pe_percentile": 0.10,
             "pb_percentile": 0.12,
+            "pe_distribution": {"values": [10.0, 25.0], "counts": [80, 720]},
+            "pb_distribution": {"values": [5.0, 7.0], "counts": [96, 704]},
+            "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+            "reason": "",
         },
+        "sources": [],
+        "cache_hit": False,
+        "cache_diagnostic": "disabled",
+        "reason": "",
     }
 
 
@@ -266,6 +352,8 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
     assert outcome[0]
     assert ledger["triggered"]
     assert ledger["prerequisites_complete"]
+    assert ledger["prerequisites"]["core_modules_80pct"]["required_items_complete"]
+    assert ledger["prerequisites"]["core_modules_80pct"]["incomplete_required_items"] == []
     assert ledger["prerequisites"]["external_report_content_verification"]["passed"]
     assert ledger["prerequisites"]["external_report_content_verification"]["cross_check"] == {
         "passed": True,
@@ -280,6 +368,68 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
     assert validate_quality_equity_ledger(ledger) == []
     assert _audit_type7_ledger("600519", ledger, "triggered") == []
     assert _audit_type7_ledger_valid("600519", ledger, "triggered")
+
+
+@pytest.mark.parametrize(
+    "missing_field, expected_incomplete_item",
+    (
+        ("business_model_score", "template1.t1_05"),
+        ("moat_score", "template1.t1_09"),
+        ("runway_score", "template1.t1_01"),
+        ("growth_sustainability_score", "template1.t1_02"),
+        ("trend_growth", "template1.t1_03"),
+        ("fcf_history", "template1.t1_04"),
+        ("roic", "template1.t1_06"),
+        ("wacc", "template1.t1_06"),
+    ),
+)
+def test_type7_never_triggers_when_any_required_source_item_is_incomplete(
+    missing_field,
+    expected_incomplete_item,
+):
+    metric = _metric()
+    metric["type7_research_content_verification"] = _research_content_verification()
+    metric.pop(missing_field)
+
+    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+    core = ledger["prerequisites"]["core_modules_80pct"]
+
+    # These fixtures deliberately retain enough weighted score and at least 80%
+    # Template 1 coverage.  The decision must nevertheless fail closed because
+    # a required source item has no complete evidence.
+    assert ledger["all_scores_strictly_above_70"]
+    assert core["actual"] >= 0.80
+    assert not core["required_items_complete"]
+    assert expected_incomplete_item in core["incomplete_required_items"]
+    assert not core["passed"]
+    assert not ledger["prerequisites_complete"]
+    assert not ledger["triggered"]
+    assert not outcome[0]
+    assert outcome[3]["_status"] == STATUS_INSUFFICIENT_EVIDENCE
+    assert outcome[3]["_evidence"] == "incomplete"
+    assert validate_quality_equity_ledger(ledger) == []
+    assert _audit_type7_ledger("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE) == []
+    assert _audit_type7_ledger_valid("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE)
+
+
+def test_type7_three_validators_reject_a_forged_required_item_completeness_gate():
+    metric = _metric()
+    metric["type7_research_content_verification"] = _research_content_verification()
+    metric.pop("fcf_history")
+    ledger = score_type7_quality_equity(metric, _type1(), _history())[1]
+    forged = deepcopy(ledger)
+    core = forged["prerequisites"]["core_modules_80pct"]
+    core["required_items_complete"] = True
+    core["incomplete_required_items"] = []
+    core["passed"] = True
+
+    assert "core coverage prerequisite mismatch" in validate_quality_equity_ledger(forged)
+    assert "600519:type7:core coverage prerequisite mismatch" in _audit_type7_ledger(
+        "600519",
+        forged,
+        STATUS_INSUFFICIENT_EVIDENCE,
+    )
+    assert not _audit_type7_ledger_valid("600519", forged, STATUS_INSUFFICIENT_EVIDENCE)
 
 
 def test_type7_valid_valuation_is_independent_from_partial_type1_catalyst_evidence():
@@ -320,6 +470,19 @@ def test_type7_valid_valuation_is_independent_from_partial_type1_catalyst_eviden
     assert validate_quality_equity_ledger(missing) == []
 
 
+def test_type7_does_not_promote_an_unlabelled_direct_research_score_to_primary():
+    metric = _metric()
+    metric.pop("business_clarity_score_evidence_level")
+
+    ledger = assess_quality_equity(metric, _type1(), _history())
+
+    business = next(item for item in ledger["patch5"]["dimensions"] if item["key"] == "p5_business")
+    clarity = next(item for item in business["components"] if item["key"] == "p5_b1")
+    assert clarity["score"] == 7.0
+    assert clarity["inputs"]["source"] == "primary"
+    assert metric["business_clarity_score"] == 9.0
+
+
 def test_type7_valuation_evidence_boundary_rejects_non_boolean_values():
     with pytest.raises(QualityEquityError, match="must be boolean"):
         _assess_quality_equity(
@@ -344,8 +507,8 @@ def test_type7_is_explicitly_not_applicable_to_financial_industries(industry):
 
     assert outcome[3]["_status"] == "not_applicable"
     assert ledger == {
-        "schema_version": 5,
-        "model_id": "patch6-type7-quality-equity-v5",
+        "schema_version": 6,
+        "model_id": "patch6-type7-quality-equity-v6",
         "code": "600519",
         "applicable": False,
         "reason": "金融需专属优质股权模型",
@@ -416,7 +579,15 @@ def test_type7_preflight_upper_bound_includes_both_history_based_expected_return
 
 def test_type7_independent_audit_and_release_replay_reject_forged_history_preflight():
     ledger = assess_quality_equity(_metric(), _type1(), None)
-    assert _audit_type7_ledger("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE) == []
+    assert (
+        _audit_type7_ledger(
+            "600519",
+            ledger,
+            STATUS_INSUFFICIENT_EVIDENCE,
+            patch4_bindings=_patch4_allowed_bindings(),
+        )
+        == []
+    )
     assert _audit_type7_ledger_valid("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE)
 
     forged_upper = deepcopy(ledger)
@@ -466,7 +637,27 @@ def test_type7_technology_company_requires_patch4_culture_evidence():
     assert not ledger["prerequisites"]["technology_patch4"]["passed"]
     assert ledger["prerequisites"]["technology_patch4"]["score"] is None
     assert ledger["prerequisites"]["technology_patch4"]["validation_status"] == "missing_validated_patch4_assessment"
+    assert ledger["prerequisites"]["technology_patch4"]["assessment"] is None
     assert not ledger["triggered"]
+
+
+def test_type7_missing_technology_applicability_evidence_cannot_waive_patch4():
+    metric = _metric()
+    metric["type7_research_content_verification"] = _research_content_verification()
+    metric.pop("rd_intensity")
+    metric.pop("technology_score")
+    metric.pop("technology_score_evidence")
+    metric.pop("technology_score_evidence_level")
+
+    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+
+    prerequisite = ledger["prerequisites"]["technology_patch4"]
+    assert prerequisite["applicable"] is True
+    assert prerequisite["passed"] is False
+    assert prerequisite["validation_status"] == "missing_validated_patch4_assessment"
+    assert outcome[0] is False
+    assert outcome[3]["_status"] == STATUS_INSUFFICIENT_EVIDENCE
+    assert validate_quality_equity_ledger(ledger) == []
 
 
 def test_type7_technology_patch4_rejects_naked_score_and_generic_evidence_wrapper():
@@ -481,13 +672,107 @@ def test_type7_technology_patch4_rejects_naked_score_and_generic_evidence_wrappe
 
     ledger = assess_quality_equity(metric, _type1(), _history())
 
-    assert ledger["prerequisites"]["technology_patch4"] == {
-        "passed": False,
-        "applicable": True,
-        "score": None,
-        "validation_status": "missing_validated_patch4_assessment",
-    }
+    prerequisite = ledger["prerequisites"]["technology_patch4"]
+    assert not prerequisite["passed"]
+    assert prerequisite["applicable"]
+    assert prerequisite["score"] is None
+    assert prerequisite["assessment"] is None
+    assert prerequisite["validation_status"] == "missing_validated_patch4_assessment"
     assert validate_quality_equity_ledger(ledger) == []
+
+
+def test_type7_technology_patch4_is_replayed_and_flows_into_patch5_incentive_alignment():
+    metric = _metric()
+    metric["rd_intensity"] = 0.08
+    metric["type7_patch4_assessment"] = _patch4_assessment()
+
+    ledger = assess_quality_equity(metric, _type1(), _history())
+    prerequisite = ledger["prerequisites"]["technology_patch4"]
+    assert prerequisite["passed"]
+    assert prerequisite["validation_status"] == "validated_replayable_assessment"
+    assert prerequisite["score"] == 9.6
+    culture = next(item for item in ledger["patch5"]["dimensions"] if item["key"] == "p5_culture")
+    incentive = next(item for item in culture["components"] if item["key"] == "p5_c2")
+    assert incentive["score"] == prerequisite["score"]
+    assert incentive["complete"]
+    assert validate_quality_equity_ledger(ledger) == []
+    assert (
+        _audit_type7_ledger(
+            "600519",
+            ledger,
+            STATUS_INSUFFICIENT_EVIDENCE,
+            patch4_bindings=_patch4_allowed_bindings(),
+        )
+        == []
+    )
+    assert any(
+        "technology prerequisite mismatch" in error
+        for error in _audit_type7_ledger(
+            "600519",
+            ledger,
+            STATUS_INSUFFICIENT_EVIDENCE,
+        )
+    )
+    assert _audit_type7_ledger_valid(
+        "600519",
+        ledger,
+        STATUS_INSUFFICIENT_EVIDENCE,
+        patch4_bindings=_patch4_allowed_bindings(),
+    )
+    assert not _audit_type7_ledger_valid(
+        "600519",
+        ledger,
+        STATUS_INSUFFICIENT_EVIDENCE,
+    )
+
+
+def test_patch4_raw_contract_rejects_unbound_and_non_atomic_inputs():
+    valid = _patch4_assessment()
+    assert normalise_patch4_assessment(valid, security_code="600519", as_of="2026-07-17") == valid
+
+    naked = deepcopy(valid)
+    naked["score"] = 10.0
+    with pytest.raises(QualityEquityError, match="schema"):
+        normalise_patch4_assessment(naked, security_code="600519", as_of="2026-07-17")
+
+    unbound = deepcopy(valid)
+    unbound["criteria"]["core_rd_ownership_pct"]["evidence"]["evidence_id"] = "fixture:000001:patch4"
+    with pytest.raises(QualityEquityError, match="unbound"):
+        normalise_patch4_assessment(unbound, security_code="600519", as_of="2026-07-17")
+
+
+def test_patch4_evidence_id_requires_the_exact_six_digit_security_token():
+    short_token = _patch4_assessment()
+    short_token["code"] = "000001"
+    for record in short_token["criteria"].values():
+        record["evidence"]["evidence_id"] = record["evidence"]["evidence_id"].replace(":600519:", ":1:")
+
+    with pytest.raises(QualityEquityError, match="unbound"):
+        normalise_patch4_assessment(short_token, security_code="000001", as_of="2026-07-17")
+
+
+def test_each_valuation_side_must_replay_before_it_can_affect_percentile_or_return():
+    history = _history()
+    valuation = history["valuation_history"]
+    forged = deepcopy(valuation)
+    forged["median_pb_mrq"] = 999.0
+    forged["pb_percentile"] = 1.0
+
+    assert _valid_valuation_history(forged, date(2026, 7, 17))
+    assert _valid_valuation_series(forged, "pe")
+    assert not _valid_valuation_series(forged, "pb")
+    score, complete, inputs = _valuation_reversion_return(0.10, 0.10, forged)
+
+    assert complete
+    assert score > 0
+    assert [item["basis"] for item in inputs["valuation_inputs"]] == ["PE_TTM"]
+
+    history["valuation_history"] = forged
+    ledger = assess_quality_equity(_metric(), _type1(), history)
+    historical = next(item for item in ledger["template5"]["items"] if item["key"] == "t5_v1")
+    expected_return = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_18")
+    assert historical["score"] == 9.0
+    assert [item["basis"] for item in expected_return["inputs"]["valuation_inputs"]] == ["PE_TTM"]
 
 
 def test_research_source_validation_rejects_duplicate_or_insecure_metadata():
@@ -581,6 +866,63 @@ def test_market_history_prerequisite_is_independent_of_terminal_profit_projectio
     assert validate_quality_equity_ledger(ledger) == []
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda history: history["shareholder_return"].pop("cagr"),
+        lambda history: history["shareholder_return"].update(cagr=float("nan")),
+        lambda history: history["shareholder_return"].update(
+            start_date="2020-07-17",
+            span_days=2_191,
+        ),
+        lambda history: history["valuation_history"].update(
+            pe_percentile=None,
+            pb_percentile=None,
+        ),
+        lambda history: history["valuation_history"].update(
+            pe_observations=499,
+            pb_observations=499,
+        ),
+        lambda history: history["valuation_history"].update(pe_percentile=0.90, pb_percentile=0.90),
+        lambda history: history["valuation_history"].update(
+            end_date="2026-06-01",
+            span_days=1_780,
+        ),
+    ),
+)
+def test_history_available_flag_cannot_replace_complete_period_and_finite_values(mutation):
+    history = _history()
+    mutation(history)
+
+    ledger = assess_quality_equity(_metric(), _type1(), history)
+    item19 = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_19")
+
+    assert not ledger["prerequisites"]["ten_year_return_and_five_year_valuation"]["passed"]
+    assert not item19["complete"]
+    assert not ledger["triggered"]
+    assert validate_quality_equity_ledger(ledger) == []
+
+
+def test_type7_ledger_validator_replays_raw_financial_and_market_history_contracts():
+    ledger = assess_quality_equity(_metric(), _type1(), _history())
+    forged_valuation = deepcopy(ledger)
+    history_inputs = next(item for item in forged_valuation["template1"]["items"] if item["key"] == "t1_19")["inputs"][
+        "shareholder_return"
+    ]
+    history_inputs["valuation_history_contract"]["pe_percentile"] = 1.5
+    history_inputs["valuation_history_contract"]["pb_percentile"] = 1.5
+
+    assert "market history prerequisite mismatch" in validate_quality_equity_ledger(forged_valuation)
+
+    forged_financials = deepcopy(ledger)
+    financial_inputs = next(item for item in forged_financials["template1"]["items"] if item["key"] == "t1_19")[
+        "inputs"
+    ]["shareholder_return"]["annual_financial_history_contract"]
+    financial_inputs["revenue_values"].pop()
+
+    assert "financial history prerequisite mismatch" in validate_quality_equity_ledger(forged_financials)
+
+
 def test_pb_reversion_uses_book_value_growth_instead_of_earnings_growth():
     metric = _metric()
     metric["equity_history"] = [100, 105, 110.25, 115.7625, 121.550625]
@@ -591,6 +933,8 @@ def test_pb_reversion_uses_book_value_growth_instead_of_earnings_growth():
         pe_percentile=None,
         current_pb_mrq=6.0,
         median_pb_mrq=6.0,
+        pb_percentile=0.50,
+        pb_distribution={"values": [6.0], "counts": [800]},
     )
 
     ledger = assess_quality_equity(metric, _type1(), history)
@@ -656,7 +1000,7 @@ def test_type7_source_threshold_uses_unrounded_percent_scores(monkeypatch):
     patch5["score"] = 70.01
     monkeypatch.setattr("engine.quality_equity._make_template1", lambda _values: template1)
     monkeypatch.setattr("engine.quality_equity._make_template5", lambda _values: template5)
-    monkeypatch.setattr("engine.quality_equity._make_patch5", lambda _metric, _values: patch5)
+    monkeypatch.setattr("engine.quality_equity._make_patch5", lambda _metric, _values, **_kwargs: patch5)
 
     ledger = assess_quality_equity(_metric(), _type1(), _history())
     assert ledger["scores"] == {"template1": 70.01, "template5": 70.01, "patch5": 70.01}

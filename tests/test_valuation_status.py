@@ -191,6 +191,9 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
         research_report_evidence,
         research_report_loader,
         research_report_progress_cb,
+        patch4_evidence,
+        patch4_loader,
+        patch4_progress_cb,
     ):
         captured["dcf_results"] = dcf_results
         captured["dcf_skip_classifications"] = dcf_skip_classifications
@@ -203,6 +206,9 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
         captured["research_report_evidence"] = research_report_evidence
         captured["research_report_loader"] = research_report_loader
         captured["research_report_progress_cb"] = research_report_progress_cb
+        captured["patch4_evidence"] = patch4_evidence
+        captured["patch4_loader"] = patch4_loader
+        captured["patch4_progress_cb"] = patch4_progress_cb
         return pd.DataFrame([{"code": code} for code in financials])
 
     monkeypatch.setattr(buy_screener, "screen_all_types", capture_screen)
@@ -226,6 +232,8 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
     assert captured["type3_growth_loader"] is None
     assert captured["research_report_evidence"] is None
     assert captured["research_report_loader"] is None
+    assert captured["patch4_evidence"] is None
+    assert captured["patch4_loader"] is None
 
 
 def test_screen_rejects_malformed_or_conflicting_skip_classifications():

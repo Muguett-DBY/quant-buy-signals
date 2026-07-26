@@ -64,6 +64,8 @@ public final class MarketRepository {
     private static final int MAX_UNCOMPRESSED_ASSET_BYTES = 16_000_000;
     private static final int MAX_UPDATE_MANIFEST_BYTES = 1_000_000;
     private static final int MAX_PUBLIC_REASON_LENGTH = 200;
+    private static final int DECISION_SCHEMA_VERSION = 1;
+    private static final String DECISION_MODEL_ID = "buy-decision-bounds-v1";
     private static final long MAX_APK_BYTES = 50L * 1024L * 1024L;
     private static final int MIN_SH_SZ_COMPANY_COUNT = 4_500;
     private static final int MAX_SH_SZ_COMPANY_COUNT = 6_500;
@@ -102,6 +104,28 @@ public final class MarketRepository {
             "blocked",
             "not_triggered",
             "not_applicable"
+    )));
+    private static final Set<String> VALID_DECISION_BASES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "full_evidence",
+            "scope_exclusion",
+            "confirmed_veto",
+            "conservative_upper_bound",
+            "action_condition",
+            "market_block",
+            "unresolved_missing_evidence"
+    )));
+    private static final Set<String> VALID_DECISION_VETO_STATES =
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList("none", "possible", "confirmed")));
+    private static final Set<String> DECISION_FIELDS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "schema_version",
+            "model_id",
+            "decision_complete",
+            "decision_basis",
+            "score_lower_bound",
+            "score_upper_bound",
+            "veto_state",
+            "potentially_triggerable",
+            "missing_dimensions"
     )));
 
     private final File cacheDirectory;
@@ -524,18 +548,32 @@ public final class MarketRepository {
             entries.add(entry);
         }
         Collections.sort(entries);
+        boolean decisionContractPresent = !entries.isEmpty() && entries.get(0).hasDecisionContract();
+        for (MarketEntry entry : entries) {
+            if (entry.hasDecisionContract() != decisionContractPresent) {
+                throw new IOException("市场目录混合了不同版本的候选边界合同。");
+            }
+        }
         JSONObject summary = manifest.optJSONObject("summary");
         if (summary == null || summary.optInt("company_count", -1) != entries.size()) {
             throw new IOException("市场清单的公司总数与目录不一致。");
         }
         int triggered = 0;
         int conditional = 0;
+        int conditionalOnly = 0;
+        int pending = 0;
         for (MarketEntry entry : entries) {
             if (entry.hasTriggeredSignal()) {
                 triggered++;
             }
             if (entry.hasConditionalCandidate()) {
                 conditional++;
+            }
+            if (entry.hasConditionalOnlyCandidate()) {
+                conditionalOnly++;
+            }
+            if (entry.hasPendingEvidenceCandidate()) {
+                pending++;
             }
         }
         Set<String> candidateCodes = new HashSet<>();
@@ -547,13 +585,46 @@ public final class MarketRepository {
         if (!candidateCodes.equals(signalDetails.keySet())
                 || signals.optInt("candidate_detail_count", -1) != signalDetails.size()
                 || signals.optInt("triggered_company_count", -1) != triggered
-                || signals.optInt("conditional_company_count", -1) != conditional) {
+                || signals.optInt("conditional_company_count", -1) != conditional
+                || signals.optInt("conditional_only_company_count", -1) != conditionalOnly
+                || (
+                        signals.has("pending_company_count")
+                                && signals.optInt("pending_company_count", -1) != pending
+                )) {
             throw new IOException("候选详情与市场目录不属于同一批完整数据。");
         }
         if (summary.optInt("triggered_company_count", -1) != triggered
                 || summary.optInt("conditional_company_count", -1) != conditional
-                || summary.optInt("candidate_detail_count", -1) != signalDetails.size()) {
+                || summary.optInt("conditional_only_company_count", -1) != conditionalOnly
+                || summary.optInt("candidate_detail_count", -1) != signalDetails.size()
+                || (
+                        summary.has("pending_company_count")
+                                && summary.optInt("pending_company_count", -1) != pending
+                )) {
             throw new IOException("市场清单的买入信号数量与公司目录不一致。");
+        }
+        int visibleCandidates = 0;
+        for (MarketEntry entry : entries) {
+            if (entry.hasTriggeredSignal()
+                    || entry.hasConditionalCandidate()
+                    || entry.hasPendingEvidenceCandidate()) {
+                visibleCandidates++;
+            }
+        }
+        if ((summary.has("visible_candidate_company_count")
+                && summary.optInt("visible_candidate_company_count", -1) != visibleCandidates)
+                || (signals.has("visible_candidate_company_count")
+                && signals.optInt("visible_candidate_company_count", -1) != visibleCandidates)) {
+            throw new IOException("市场清单的可见候选数量不一致。");
+        }
+        if (decisionContractPresent
+                && (
+                        !summary.has("pending_company_count")
+                                || !summary.has("visible_candidate_company_count")
+                                || !signals.has("pending_company_count")
+                                || !signals.has("visible_candidate_company_count")
+                )) {
+            throw new IOException("市场清单缺少候选可见性计数。");
         }
         Map<String, Map<String, Integer>> typeCoverage = validateTypeCoverage(
                 entries,
@@ -568,6 +639,7 @@ public final class MarketRepository {
                 companyCount,
                 triggered,
                 conditional,
+                pending,
                 typeNames,
                 typeCoverage,
                 entries
@@ -959,12 +1031,14 @@ public final class MarketRepository {
     static boolean matchesSignalFilter(
             List<String> buyTypes,
             List<String> conditionalTypes,
+            List<String> pendingTypes,
             Map<String, TypeScore> typeScores,
             int displayMode,
             int typeNumber
     ) {
         if (buyTypes == null
                 || conditionalTypes == null
+                || pendingTypes == null
                 || typeScores == null
                 || displayMode < 0
                 || displayMode > 3
@@ -977,7 +1051,7 @@ public final class MarketRepository {
                 return !buyTypes.isEmpty();
             }
             if (displayMode == 1) {
-                return !conditionalTypes.isEmpty();
+                return !conditionalTypes.isEmpty() || !pendingTypes.isEmpty();
             }
             if (displayMode == 2) {
                 return hasTypeStatus(typeScores, "observe");
@@ -989,13 +1063,30 @@ public final class MarketRepository {
             return buyTypes.contains(selectedType);
         }
         if (displayMode == 1) {
-            return conditionalTypes.contains(selectedType);
+            return conditionalTypes.contains(selectedType) || pendingTypes.contains(selectedType);
         }
         TypeScore score = typeScores.get(selectedType);
         if (displayMode == 2) {
             return score != null && "observe".equals(score.status);
         }
         return score != null && !"not_applicable".equals(score.status);
+    }
+
+    static boolean matchesSignalFilter(
+            List<String> buyTypes,
+            List<String> conditionalTypes,
+            Map<String, TypeScore> typeScores,
+            int displayMode,
+            int typeNumber
+    ) {
+        return matchesSignalFilter(
+                buyTypes,
+                conditionalTypes,
+                Collections.emptyList(),
+                typeScores,
+                displayMode,
+                typeNumber
+        );
     }
 
     private static boolean hasTypeStatus(Map<String, TypeScore> typeScores, String status) {
@@ -1111,6 +1202,7 @@ public final class MarketRepository {
         if (types == null || types.length() != 7) {
             throw new IOException("公司记录缺少七种买入情况的评分状态。");
         }
+        int decisionContractCount = 0;
         for (int number = 1; number <= 7; number++) {
             String key = "type" + number;
             JSONObject type = types.optJSONObject(key);
@@ -1133,15 +1225,51 @@ public final class MarketRepository {
             if (reason.length() > MAX_PUBLIC_REASON_LENGTH) {
                 throw new IOException("公司记录包含过长的买入情况说明。");
             }
-            typeScores.put(key, new TypeScore(status, score, reason));
+            DecisionSummary decision = null;
+            if (type.has("decision")) {
+                Object rawDecision = type.opt("decision");
+                if (!(rawDecision instanceof JSONObject)) {
+                    throw new IOException("公司记录包含格式错误的候选边界合同。");
+                }
+                decision = parseDecisionSummary((JSONObject) rawDecision, key);
+            }
+            if (decision != null) {
+                decisionContractCount++;
+            }
+            typeScores.put(key, new TypeScore(status, score, reason, decision));
+        }
+        if (decisionContractCount != 0 && decisionContractCount != 7) {
+            throw new IOException("公司记录的候选边界合同不完整。");
         }
         List<String> buyTypes = toTypeKeyList(company.optJSONArray("buy_types"), "实际买入类型");
         List<String> conditionalTypes = toTypeKeyList(company.optJSONArray("conditional_types"), "待确认类型");
+        List<String> pendingTypes;
+        if (decisionContractCount == 7) {
+            pendingTypes = toTypeKeyList(company.optJSONArray("pending_types"), "待补证据类型");
+        } else {
+            // Backward compatibility for a still-valid signed 11.2 cache.
+            // New server generations always publish all seven decisions and
+            // the exact pending partition.
+            pendingTypes = Collections.emptyList();
+            if (company.has("pending_types")) {
+                List<String> legacyPending =
+                        toTypeKeyList(company.optJSONArray("pending_types"), "待补证据类型");
+                if (!legacyPending.isEmpty()) {
+                    throw new IOException("旧版市场目录不能声明待补证据类型。");
+                }
+            }
+        }
         for (int number = 1; number <= 7; number++) {
             String key = "type" + number;
-            String status = typeScores.get(key).status;
+            TypeScore typeScore = typeScores.get(key);
+            String status = typeScore.status;
             if (buyTypes.contains(key) != "triggered".equals(status)
-                    || conditionalTypes.contains(key) != "conditional".equals(status)) {
+                    || conditionalTypes.contains(key) != "conditional".equals(status)
+                    || pendingTypes.contains(key) != (
+                            typeScore.potentiallyTriggerable
+                                    && !"triggered".equals(status)
+                                    && !"conditional".equals(status)
+                    )) {
                 throw new IOException("公司记录的买入标记与七类评分状态不一致。");
             }
         }
@@ -1152,9 +1280,70 @@ public final class MarketRepository {
                 nullableDouble(company, "price"),
                 buyTypes,
                 conditionalTypes,
+                pendingTypes,
                 typeScores,
                 typeNames,
                 detailText
+        );
+    }
+
+    private static DecisionSummary parseDecisionSummary(JSONObject decision, String typeKey) throws IOException {
+        if (decision == null) {
+            return null;
+        }
+        Set<String> fields = new HashSet<>();
+        Iterator<String> keys = decision.keys();
+        while (keys.hasNext()) {
+            fields.add(keys.next());
+        }
+        Object rawSchemaVersion = decision.opt("schema_version");
+        Object rawLower = decision.opt("score_lower_bound");
+        Object rawUpper = decision.opt("score_upper_bound");
+        if (!fields.equals(DECISION_FIELDS)
+                || !(rawSchemaVersion instanceof Integer)
+                || ((Integer) rawSchemaVersion) != DECISION_SCHEMA_VERSION
+                || !DECISION_MODEL_ID.equals(decision.optString("model_id"))
+                || !(decision.opt("decision_complete") instanceof Boolean)
+                || !VALID_DECISION_BASES.contains(decision.optString("decision_basis"))
+                || !VALID_DECISION_VETO_STATES.contains(decision.optString("veto_state"))
+                || !(decision.opt("potentially_triggerable") instanceof Boolean)
+                || !(rawLower instanceof Number)
+                || !(rawUpper instanceof Number)) {
+            throw new IOException("公司记录包含无效的候选边界合同。");
+        }
+        double lower = ((Number) rawLower).doubleValue();
+        double upper = ((Number) rawUpper).doubleValue();
+        if (!Double.isFinite(lower) || !Double.isFinite(upper) || lower < 0.0 || lower > upper || upper > 10.0) {
+            throw new IOException("公司记录的候选分数边界无效。");
+        }
+        List<String> missingDimensions = new ArrayList<>();
+        JSONArray missing = decision.optJSONArray("missing_dimensions");
+        if (missing == null) {
+            throw new IOException("公司记录的候选边界缺少待补维度。");
+        }
+        Set<String> unique = new HashSet<>();
+        int typeNumber = Integer.parseInt(typeKey.substring(4));
+        int dimensionCount = new int[]{0, 4, 4, 5, 6, 5, 5, 3}[typeNumber];
+        String dimensionPattern = typeNumber + "[a-" + (char) ('a' + dimensionCount - 1) + "]";
+        for (int index = 0; index < missing.length(); index++) {
+            Object raw = missing.opt(index);
+            if (!(raw instanceof String)) {
+                throw new IOException("公司记录的待补维度格式不正确。");
+            }
+            String dimension = ((String) raw).trim();
+            if (!dimension.matches(dimensionPattern) || !unique.add(dimension)) {
+                throw new IOException("公司记录包含未知或重复的待补维度。");
+            }
+            missingDimensions.add(dimension);
+        }
+        return new DecisionSummary(
+                decision.optBoolean("decision_complete"),
+                decision.optString("decision_basis"),
+                lower,
+                upper,
+                decision.optString("veto_state"),
+                decision.optBoolean("potentially_triggerable"),
+                missingDimensions
         );
     }
 
@@ -1507,13 +1696,14 @@ public final class MarketRepository {
         public final int companyCount;
         public final int triggeredCompanyCount;
         public final int conditionalCompanyCount;
+        public final int pendingCompanyCount;
         public final Map<String, String> typeNames;
         public final Map<String, Map<String, Integer>> typeCoverage;
         public final List<MarketEntry> entries;
 
         MarketData(String marketAsOf, String dataTimestampUtc, LocalDate marketDate, Instant dataTimestamp,
                    int companyCount, int triggeredCompanyCount,
-                   int conditionalCompanyCount, Map<String, String> typeNames,
+                   int conditionalCompanyCount, int pendingCompanyCount, Map<String, String> typeNames,
                    Map<String, Map<String, Integer>> typeCoverage, List<MarketEntry> entries) {
             this.marketAsOf = marketAsOf;
             this.dataTimestampUtc = dataTimestampUtc;
@@ -1522,9 +1712,29 @@ public final class MarketRepository {
             this.companyCount = companyCount;
             this.triggeredCompanyCount = triggeredCompanyCount;
             this.conditionalCompanyCount = conditionalCompanyCount;
+            this.pendingCompanyCount = pendingCompanyCount;
             this.typeNames = Collections.unmodifiableMap(new HashMap<>(typeNames));
             this.typeCoverage = Collections.unmodifiableMap(new HashMap<>(typeCoverage));
             this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
+        }
+
+        MarketData(String marketAsOf, String dataTimestampUtc, LocalDate marketDate, Instant dataTimestamp,
+                   int companyCount, int triggeredCompanyCount,
+                   int conditionalCompanyCount, Map<String, String> typeNames,
+                   Map<String, Map<String, Integer>> typeCoverage, List<MarketEntry> entries) {
+            this(
+                    marketAsOf,
+                    dataTimestampUtc,
+                    marketDate,
+                    dataTimestamp,
+                    companyCount,
+                    triggeredCompanyCount,
+                    conditionalCompanyCount,
+                    0,
+                    typeNames,
+                    typeCoverage,
+                    entries
+            );
         }
 
         public String typeCoverageSummary() {
@@ -1535,9 +1745,15 @@ public final class MarketRepository {
                 int triggered = coverage == null ? 0 : coverage.getOrDefault("triggered", 0);
                 int conditional = coverage == null ? 0 : coverage.getOrDefault("conditional", 0);
                 int observe = coverage == null ? 0 : coverage.getOrDefault("observe", 0);
+                int pending = 0;
+                for (MarketEntry entry : entries) {
+                    if (entry.pendingTypes.contains(key)) {
+                        pending++;
+                    }
+                }
                 String label = typeNames.getOrDefault(key, number + "类");
                 parts.add(label + "：实际" + triggered + "家，待确认" + conditional
-                        + "家，观察" + observe + "家");
+                        + "家，待补证据" + pending + "家，观察" + observe + "家");
             }
             return "七类结果：\n" + String.join("\n", parts);
         }
@@ -1550,13 +1766,14 @@ public final class MarketRepository {
         public final Double price;
         public final List<String> buyTypes;
         public final List<String> conditionalTypes;
+        public final List<String> pendingTypes;
         public final Map<String, TypeScore> typeScores;
         public final String searchText;
         private final Map<String, String> typeNames;
         private final String detailText;
 
         MarketEntry(String code, String name, String industry, Double price, List<String> buyTypes,
-                    List<String> conditionalTypes, Map<String, TypeScore> typeScores,
+                    List<String> conditionalTypes, List<String> pendingTypes, Map<String, TypeScore> typeScores,
                     Map<String, String> typeNames, String detailText) {
             this.code = code;
             this.name = name;
@@ -1564,10 +1781,28 @@ public final class MarketRepository {
             this.price = price;
             this.buyTypes = Collections.unmodifiableList(new ArrayList<>(buyTypes));
             this.conditionalTypes = Collections.unmodifiableList(new ArrayList<>(conditionalTypes));
+            this.pendingTypes = Collections.unmodifiableList(new ArrayList<>(pendingTypes));
             this.typeScores = Collections.unmodifiableMap(new HashMap<>(typeScores));
             this.searchText = (code + " " + name + " " + this.industry).toLowerCase(Locale.ROOT);
             this.typeNames = typeNames;
             this.detailText = publicReasonText(detailText);
+        }
+
+        MarketEntry(String code, String name, String industry, Double price, List<String> buyTypes,
+                    List<String> conditionalTypes, Map<String, TypeScore> typeScores,
+                    Map<String, String> typeNames, String detailText) {
+            this(
+                    code,
+                    name,
+                    industry,
+                    price,
+                    buyTypes,
+                    conditionalTypes,
+                    Collections.emptyList(),
+                    typeScores,
+                    typeNames,
+                    detailText
+            );
         }
 
         private static String publicIndustryLabel(String value) {
@@ -1592,6 +1827,23 @@ public final class MarketRepository {
             return !conditionalTypes.isEmpty();
         }
 
+        public boolean hasConditionalOnlyCandidate() {
+            return hasConditionalCandidate() && !hasTriggeredSignal();
+        }
+
+        public boolean hasPendingEvidenceCandidate() {
+            return !pendingTypes.isEmpty();
+        }
+
+        public boolean hasDecisionContract() {
+            for (TypeScore score : typeScores.values()) {
+                if (score == null || score.decision == null) {
+                    return false;
+                }
+            }
+            return typeScores.size() == 7;
+        }
+
         public boolean hasObservedFramework() {
             return hasTypeStatus(typeScores, "observe");
         }
@@ -1604,6 +1856,9 @@ public final class MarketRepository {
             }
             if (hasConditionalCandidate()) {
                 labels.add("待确认：" + labels(conditionalTypes) + "（不是买入信号）");
+            }
+            if (hasPendingEvidenceCandidate()) {
+                labels.add("待补证据：" + labels(pendingTypes) + "（不是买入信号）");
             }
             List<String> observedTypes = typesWithStatus("observe");
             if (!observedTypes.isEmpty()) {
@@ -1652,9 +1907,17 @@ public final class MarketRepository {
 
         @Override
         public int compareTo(MarketEntry other) {
-            int priority = (hasTriggeredSignal() ? 0 : hasConditionalCandidate() ? 1 : hasObservedFramework() ? 2 : 3);
+            int priority = (
+                    hasTriggeredSignal()
+                            ? 0
+                            : hasConditionalCandidate()
+                                    ? 1
+                                    : hasPendingEvidenceCandidate() ? 2 : hasObservedFramework() ? 3 : 4
+            );
             int otherPriority = (other.hasTriggeredSignal() ? 0
-                    : other.hasConditionalCandidate() ? 1 : other.hasObservedFramework() ? 2 : 3);
+                    : other.hasConditionalCandidate()
+                            ? 1
+                            : other.hasPendingEvidenceCandidate() ? 2 : other.hasObservedFramework() ? 3 : 4);
             if (priority != otherPriority) {
                 return Integer.compare(priority, otherPriority);
             }
@@ -1666,14 +1929,22 @@ public final class MarketRepository {
         public final String status;
         public final Double score;
         public final String reason;
+        public final boolean potentiallyTriggerable;
+        public final DecisionSummary decision;
 
         TypeScore(String status, Double score, String reason) {
+            this(status, score, reason, null);
+        }
+
+        TypeScore(String status, Double score, String reason, DecisionSummary decision) {
             this.status = status;
             // Older signed server generations may still contain the scorer's
             // internal 0.0/0.9 placeholders.  Applicability and evidence state
             // are authoritative: neither state has a user-facing numeric score.
             this.score = isScorelessTypeStatus(status) ? null : score;
             this.reason = publicReasonText(reason);
+            this.decision = decision;
+            this.potentiallyTriggerable = decision != null && decision.potentiallyTriggerable;
         }
 
         String describe() {
@@ -1693,6 +1964,34 @@ public final class MarketRepository {
                     ? text
                     : String.format(Locale.CHINA, "%s，%.1f分", text, score);
             return reason == null || reason.isEmpty() ? scored : scored + "；" + reason;
+        }
+    }
+
+    public static final class DecisionSummary {
+        public final boolean complete;
+        public final String basis;
+        public final double lowerBound;
+        public final double upperBound;
+        public final String vetoState;
+        public final boolean potentiallyTriggerable;
+        public final List<String> missingDimensions;
+
+        DecisionSummary(
+                boolean complete,
+                String basis,
+                double lowerBound,
+                double upperBound,
+                String vetoState,
+                boolean potentiallyTriggerable,
+                List<String> missingDimensions
+        ) {
+            this.complete = complete;
+            this.basis = basis;
+            this.lowerBound = lowerBound;
+            this.upperBound = upperBound;
+            this.vetoState = vetoState;
+            this.potentiallyTriggerable = potentiallyTriggerable;
+            this.missingDimensions = Collections.unmodifiableList(new ArrayList<>(missingDimensions));
         }
     }
 }

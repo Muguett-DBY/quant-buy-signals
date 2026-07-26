@@ -7,7 +7,7 @@ import math
 import pytest
 
 from data.market_history import TencentWeeklyHistoryAdapter, WeeklyClose
-from data.quality_history import fetch_quality_history, fetch_quality_history_batch
+from data.quality_history import fetch_quality_history, fetch_quality_history_batch, replay_valuation_distribution
 
 
 class _WeeklyAdapter:
@@ -102,8 +102,40 @@ def test_quality_history_replays_ten_year_return_and_five_year_valuation():
     assert result.valuation_history["median_pb_mrq"] > 0
     assert result.valuation_history["start_delay_days"] <= 62
     assert 0 <= result.valuation_history["pe_percentile"] <= 0.10
+    pe_replay = replay_valuation_distribution(
+        result.valuation_history["pe_distribution"],
+        result.valuation_history["current_pe_ttm"],
+    )
+    assert pe_replay is not None
+    assert pe_replay["observations"] == result.valuation_history["pe_observations"]
+    assert pe_replay["median"] == result.valuation_history["median_pe_ttm"]
+    assert pe_replay["percentile"] == result.valuation_history["pe_percentile"]
     assert response.closed
     assert adapter.calls == [("sh600519", date(2026, 7, 17), True)]
+
+
+@pytest.mark.parametrize(
+    "redirect_url",
+    (
+        "https://attacker.example/api/data/v1/get",
+        "https://datacenter-web.eastmoney.com/forged-history",
+        "http://datacenter-web.eastmoney.com/api/data/v1/get",
+        "https://user@datacenter-web.eastmoney.com/api/data/v1/get",
+    ),
+)
+def test_quality_history_rejects_redirects_outside_the_official_https_endpoint(redirect_url):
+    response = _Response(_valuation_payload(), url=redirect_url)
+    result = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(response),
+        use_cache=False,
+    )
+
+    assert not result.available
+    assert "outside the official endpoint" in result.reason
+    assert response.closed
 
 
 @pytest.mark.parametrize(

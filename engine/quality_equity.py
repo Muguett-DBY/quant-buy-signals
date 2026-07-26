@@ -17,12 +17,18 @@ from statistics import mean, median
 from typing import Any
 from urllib.parse import urlsplit
 
+from data.quality_history import replay_valuation_distribution
 
-MODEL_ID = "patch6-type7-quality-equity-v5"
-SCHEMA_VERSION = 5
+
+MODEL_ID = "patch6-type7-quality-equity-v6"
+SCHEMA_VERSION = 6
 STRICT_THRESHOLD = 70.0
 PATCH5_SAFETY_VETO = 8.0
 MIN_CORE_COVERAGE = 0.80
+PATCH4_MODEL_ID = "patch4-technology-shareholder-culture-v1"
+PATCH4_SCHEMA_VERSION = 1
+PATCH4_FORMULA_VERSION = "patch4-two-layer-weighted-v1"
+PATCH4_MAX_EVIDENCE_AGE_DAYS = 1_095
 MIN_RESEARCH_SOURCES = 3
 RESEARCH_MAX_AGE_DAYS = 365
 RESEARCH_RECENT_AGE_DAYS = 183
@@ -41,6 +47,16 @@ TERMINAL_PROFIT_HORIZON_YEARS = 10
 TERMINAL_GROWTH_RATE = 0.03
 FORECAST_GROWTH_FLOOR = -0.10
 FORECAST_GROWTH_CAP = 0.20
+LONG_HORIZON_HISTORY_MODEL_ID = "type7-market-history-v1"
+FINANCIAL_EVIDENCE_MAX_AGE_DAYS = 550
+TEN_YEAR_TARGET_DAYS = 3_652
+TEN_YEAR_START_TOLERANCE_DAYS = 62
+FIVE_YEAR_TARGET_DAYS = 1_826
+FIVE_YEAR_START_TOLERANCE_DAYS = 62
+VALUATION_MIN_OBSERVATIONS = 500
+HISTORY_LATEST_MAX_AGE_DAYS = 21
+SHAREHOLDER_RETURN_FORMULA = "total=end_hfq/start_hfq-1;cagr=(end_hfq/start_hfq)^(365.2425/days)-1"
+VALUATION_PERCENTILE_FORMULA = "percentile=(count(x<current)+0.5*count(x=current))/historical_count"
 
 _TEMPLATE1_ITEM_WEIGHTS = {f"t1_{index:02d}": 5.0 for index in range(1, 21)}
 _TEMPLATE5_ITEM_WEIGHTS = {
@@ -174,6 +190,32 @@ _PATCH5_SOURCE_INPUT_COMPONENTS = {
     "p5_s3",
 }
 _PATCH5_SOURCE_LEVELS = {"missing", "primary", "derived_proxy"}
+_PATCH4_CRITERION_FIELDS = {
+    "core_rd_ownership_pct",
+    "esop_core_talent_coverage_pct",
+    "long_term_rd_metrics",
+    "frontline_rd_equity",
+    "short_term_price_binding",
+}
+_PATCH4_EVIDENCE_FIELDS = {"source", "evidence_id", "url", "as_of", "summary"}
+_PATCH4_COMPONENT_WEIGHTS = {
+    "p4_defensive_fairness": 25.0,
+    "p4_defensive_governance": 15.0,
+    "p4_core_rd_ownership": 15.0,
+    "p4_esop_coverage": 15.0,
+    "p4_long_term_rd_link": 15.0,
+    "p4_frontline_rd_equity": 10.0,
+    "p4_short_term_binding": 5.0,
+}
+_PATCH4_COMPONENT_LABELS = {
+    "p4_defensive_fairness": "大小股东公平",
+    "p4_defensive_governance": "治理透明与分红约束",
+    "p4_core_rd_ownership": "核心研发持股",
+    "p4_esop_coverage": "核心人才持股覆盖",
+    "p4_long_term_rd_link": "长期研发指标绑定",
+    "p4_frontline_rd_equity": "一线研发权益",
+    "p4_short_term_binding": "短期股价绑定防范",
+}
 _PREREQUISITE_KEYS = {
     "core_modules_80pct",
     "technology_patch4",
@@ -193,7 +235,6 @@ TYPE7_DIRECT_SCORE_KEYS = (
     "governance_score",
     "innovation_adaptability_score",
     "luxury_attribute_score",
-    "patch4_shareholder_culture_score",
     "pricing_power_score",
     "shareholder_fairness_score",
     "downside_protection_score",
@@ -337,10 +378,244 @@ def _verified_score(metric: Mapping[str, Any], key: str) -> tuple[float | None, 
     metric_as_of = _parse_evidence_date(metric.get("source_trade_date"))
     if evidence_date is None or metric_as_of is None or metric_as_of > date.today() or evidence_date > metric_as_of:
         return None, False, "missing"
-    level = str(metric.get(f"{key}_evidence_level") or "primary")
+    raw_level = metric.get(f"{key}_evidence_level")
+    level = str(raw_level) if isinstance(raw_level, str) else "missing"
     if level not in {"primary", "derived_proxy"}:
         return None, False, level
     return float(score), True, level
+
+
+def _patch4_evidence_id_is_bound(evidence_id: str, code: str) -> bool:
+    """Require every Patch 4 fact identifier to carry the assessed security."""
+
+    tokens = {token for token in re.split(r"[^0-9]+", evidence_id) if re.fullmatch(r"[0-9]{6}", token)}
+    return code in tokens
+
+
+def normalise_patch4_assessment(
+    value: Any,
+    *,
+    security_code: str,
+    as_of: str,
+) -> dict[str, Any]:
+    """Validate raw, source-bound Patch 4 facts before deriving any score.
+
+    Patch 4 asks questions that cannot be inferred from ordinary financial
+    statements: ownership by core researchers, ESOP coverage, and whether
+    vesting conditions reward long-horizon R&D rather than a short-term share
+    price.  The input contract therefore carries the atomic facts and their
+    public-document identities; callers are never allowed to submit a finished
+    0-10 score.
+    """
+
+    if not _A_SHARE_CODE.fullmatch(str(security_code or "")):
+        raise QualityEquityError("Patch 4 security code is invalid")
+    reference = _parse_evidence_date(as_of)
+    if reference is None or reference > date.today():
+        raise QualityEquityError("Patch 4 assessment date is invalid")
+    expected_fields = {"schema_version", "model_id", "code", "as_of", "criteria"}
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        raise QualityEquityError("Patch 4 assessment schema is invalid")
+    if (
+        value.get("schema_version") != PATCH4_SCHEMA_VERSION
+        or value.get("model_id") != PATCH4_MODEL_ID
+        or value.get("code") != security_code
+        or value.get("as_of") != as_of
+    ):
+        raise QualityEquityError("Patch 4 assessment identity is invalid")
+    criteria = value.get("criteria")
+    if not isinstance(criteria, Mapping) or set(criteria) != _PATCH4_CRITERION_FIELDS:
+        raise QualityEquityError("Patch 4 assessment criteria are incomplete")
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for key in sorted(_PATCH4_CRITERION_FIELDS):
+        record = criteria.get(key)
+        if not isinstance(record, Mapping) or set(record) != {"value", "evidence"}:
+            raise QualityEquityError(f"Patch 4 criterion schema is invalid: {key}")
+        raw_value = record.get("value")
+        if key in {"core_rd_ownership_pct", "esop_core_talent_coverage_pct"}:
+            number = _finite(raw_value)
+            if (
+                number is None
+                or isinstance(raw_value, bool)
+                or not isinstance(raw_value, (int, float))
+                or not 0 <= number <= 100
+            ):
+                raise QualityEquityError(f"Patch 4 percentage is invalid: {key}")
+            criterion_value: float | bool = round(number, 6)
+        else:
+            if not isinstance(raw_value, bool):
+                raise QualityEquityError(f"Patch 4 boolean is invalid: {key}")
+            criterion_value = raw_value
+
+        evidence = record.get("evidence")
+        if not isinstance(evidence, Mapping) or set(evidence) != _PATCH4_EVIDENCE_FIELDS:
+            raise QualityEquityError(f"Patch 4 evidence schema is invalid: {key}")
+        if any(not isinstance(evidence.get(field), str) for field in _PATCH4_EVIDENCE_FIELDS):
+            raise QualityEquityError(f"Patch 4 evidence fields must be strings: {key}")
+        clean_evidence = {field: str(evidence[field]).strip() for field in _PATCH4_EVIDENCE_FIELDS}
+        if any(
+            not text or len(text) > 1_000 or any(ord(character) < 32 for character in text)
+            for text in clean_evidence.values()
+        ):
+            raise QualityEquityError(f"Patch 4 evidence text is invalid: {key}")
+        parsed = urlsplit(clean_evidence["url"])
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise QualityEquityError(f"Patch 4 evidence URL is invalid: {key}") from exc
+        evidence_date = _parse_evidence_date(clean_evidence["as_of"])
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or port not in (None, 443)
+            or parsed.username is not None
+            or parsed.password is not None
+            or bool(parsed.fragment)
+            or evidence_date is None
+            or evidence_date > reference
+            or (reference - evidence_date).days > PATCH4_MAX_EVIDENCE_AGE_DAYS
+            or not _patch4_evidence_id_is_bound(clean_evidence["evidence_id"], security_code)
+        ):
+            raise QualityEquityError(f"Patch 4 evidence is unbound, stale, or unsafe: {key}")
+        normalized[key] = {"value": criterion_value, "evidence": clean_evidence}
+
+    return {
+        "schema_version": PATCH4_SCHEMA_VERSION,
+        "model_id": PATCH4_MODEL_ID,
+        "code": security_code,
+        "as_of": as_of,
+        "criteria": normalized,
+    }
+
+
+def _patch4_component(
+    key: str,
+    score: float,
+    *,
+    complete: bool,
+    formula: str,
+    inputs: Mapping[str, Any],
+    evidence: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    weight = _PATCH4_COMPONENT_WEIGHTS[key]
+    normalized = _round_score(score)
+    return {
+        "key": key,
+        "label": _PATCH4_COMPONENT_LABELS[key],
+        "weight": weight,
+        "score": normalized,
+        "points": round(normalized * weight / 10.0, 4),
+        "complete": bool(complete),
+        "formula": formula,
+        "inputs": dict(inputs),
+        "evidence": dict(evidence) if evidence is not None else None,
+    }
+
+
+def _build_patch4_ledger(
+    metric: Mapping[str, Any],
+    values: Mapping[str, tuple[float, bool, str, Mapping[str, Any]]],
+    *,
+    code: str,
+    as_of: str,
+) -> dict[str, Any] | None:
+    raw = metric.get("type7_patch4_assessment")
+    if raw is None:
+        return None
+    facts = normalise_patch4_assessment(raw, security_code=code, as_of=as_of)
+    criteria = facts["criteria"]
+
+    fairness_score, fairness_complete, fairness_level, _ = values["shareholder"]
+    governance_score, governance_complete, governance_level = _verified_score(metric, "governance_score")
+    if governance_score is None:
+        management_score, management_complete, management_level, _ = values["management"]
+        governance_score = min(management_score, 7.0)
+        governance_complete = management_complete
+        governance_level = "derived_proxy" if management_complete else management_level
+
+    ownership = criteria["core_rd_ownership_pct"]
+    coverage = criteria["esop_core_talent_coverage_pct"]
+    long_term = criteria["long_term_rd_metrics"]
+    frontline = criteria["frontline_rd_equity"]
+    short_term = criteria["short_term_price_binding"]
+    ownership_score = _linear(
+        float(ownership["value"]),
+        [(0.0, 0.0), (1.0, 2.0), (3.0, 6.0), (5.0, 9.0), (5.000001, 10.0)],
+    )
+    coverage_score = _linear(
+        float(coverage["value"]),
+        [(0.0, 0.0), (10.0, 3.0), (20.0, 6.0), (30.0, 9.0), (30.000001, 10.0)],
+    )
+    components = [
+        _patch4_component(
+            "p4_defensive_fairness",
+            fairness_score,
+            complete=fairness_complete,
+            formula="source_score(template1.t1_08)",
+            inputs={"source_item": "template1.t1_08", "evidence_level": fairness_level},
+            evidence=None,
+        ),
+        _patch4_component(
+            "p4_defensive_governance",
+            governance_score,
+            complete=governance_complete,
+            formula="verified_governance_or_capped_management_proxy",
+            inputs={"source_item": "patch5.p5_c4", "evidence_level": governance_level},
+            evidence=None,
+        ),
+        _patch4_component(
+            "p4_core_rd_ownership",
+            ownership_score,
+            complete=True,
+            formula="piecewise(core_rd_ownership_pct;5%+=10)",
+            inputs={"value": ownership["value"], "unit": "percentage_points"},
+            evidence=ownership["evidence"],
+        ),
+        _patch4_component(
+            "p4_esop_coverage",
+            coverage_score,
+            complete=True,
+            formula="piecewise(esop_core_talent_coverage_pct;30%+=10)",
+            inputs={"value": coverage["value"], "unit": "percentage_points"},
+            evidence=coverage["evidence"],
+        ),
+        _patch4_component(
+            "p4_long_term_rd_link",
+            10.0 if long_term["value"] else 0.0,
+            complete=True,
+            formula="10 if long_term_rd_metrics else 0",
+            inputs={"value": long_term["value"]},
+            evidence=long_term["evidence"],
+        ),
+        _patch4_component(
+            "p4_frontline_rd_equity",
+            10.0 if frontline["value"] else 0.0,
+            complete=True,
+            formula="10 if frontline_rd_equity else 0",
+            inputs={"value": frontline["value"]},
+            evidence=frontline["evidence"],
+        ),
+        _patch4_component(
+            "p4_short_term_binding",
+            0.0 if short_term["value"] else 10.0,
+            complete=True,
+            formula="0 if short_term_price_binding else 10",
+            inputs={"value": short_term["value"]},
+            evidence=short_term["evidence"],
+        ),
+    ]
+    score = round(math.fsum(float(component["points"]) for component in components) / 10.0, 2)
+    return {
+        "schema_version": PATCH4_SCHEMA_VERSION,
+        "model_id": PATCH4_MODEL_ID,
+        "code": code,
+        "as_of": as_of,
+        "formula_version": PATCH4_FORMULA_VERSION,
+        "score": score,
+        "complete": all(bool(component["complete"]) for component in components),
+        "components": components,
+    }
 
 
 def normalise_research_sources(
@@ -722,53 +997,117 @@ def normalise_research_content_verification(
     }
 
 
-def _growth_rate(values: Any, years: Any, *, minimum: int = 3) -> float | None:
-    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+def _latest_complete_financial_year(metric: Mapping[str, Any]) -> int | None:
+    """Return the annual endpoint justified by the quote/report snapshot."""
+
+    trade_date = _parse_evidence_date(metric.get("source_trade_date"))
+    financial_date = _parse_evidence_date(metric.get("financial_indicator_as_of"))
+    today = date.today()
+    if trade_date is not None and trade_date > today:
         return None
-    if not isinstance(years, Sequence) or isinstance(years, (str, bytes)) or len(values) != len(years):
+    if financial_date is not None:
+        if (
+            financial_date > today
+            or (trade_date is not None and financial_date > trade_date)
+            or (trade_date is not None and (trade_date - financial_date).days > FINANCIAL_EVIDENCE_MAX_AGE_DAYS)
+        ):
+            return None
+        return (
+            financial_date.year if (financial_date.month, financial_date.day) == (12, 31) else financial_date.year - 1
+        )
+    return trade_date.year - 1 if trade_date is not None else None
+
+
+def _strict_annual_series(
+    metric: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+) -> dict[int, float] | None:
+    """Require an exact, unique and finite year/value annual ledger."""
+
+    values = metric.get(values_key)
+    years = metric.get(years_key)
+    if (
+        not isinstance(values, Sequence)
+        or isinstance(values, (str, bytes))
+        or not isinstance(years, Sequence)
+        or isinstance(years, (str, bytes))
+        or not values
+        or len(values) != len(years)
+    ):
         return None
-    points: list[tuple[int, float]] = []
+    result: dict[int, float] = {}
     for raw_year, raw_value in zip(years, values):
-        value = _finite(raw_value)
+        if isinstance(raw_year, bool):
+            return None
         try:
             year = int(raw_year)
         except (TypeError, ValueError, OverflowError):
-            continue
-        if value is not None:
-            points.append((year, value))
-    points.sort()
-    if len(points) < minimum:
+            return None
+        value = _finite(raw_value)
+        if not 1900 <= year <= 9999 or year in result or value is None:
+            return None
+        result[year] = value
+    return result
+
+
+def _recent_consecutive_years(years: set[int], expected_latest_year: int | None) -> list[int]:
+    if not years or expected_latest_year is None or expected_latest_year not in years:
+        return []
+    result = [expected_latest_year]
+    while result[0] - 1 in years:
+        result.insert(0, result[0] - 1)
+    return result
+
+
+def _growth_rate(
+    metric: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+    *,
+    minimum: int = 3,
+) -> float | None:
+    history = _strict_annual_series(metric, values_key, years_key)
+    expected_latest_year = _latest_complete_financial_year(metric)
+    if history is None:
         return None
-    points = points[-max(minimum, min(5, len(points))) :]
-    if any(current[0] - prior[0] != 1 for prior, current in zip(points, points[1:])):
+    years = _recent_consecutive_years(set(history), expected_latest_year)
+    if len(years) < minimum:
         return None
-    if points[0][1] <= 0 or points[-1][1] <= 0:
+    years = years[-max(minimum, min(5, len(years))) :]
+    if history[years[0]] <= 0 or history[years[-1]] <= 0:
         return None
-    return (points[-1][1] / points[0][1]) ** (1.0 / (points[-1][0] - points[0][0])) - 1.0
+    return (history[years[-1]] / history[years[0]]) ** (1.0 / (years[-1] - years[0])) - 1.0
+
+
+def _recent_history_ready(
+    metric: Mapping[str, Any],
+    values_key: str,
+    years_key: str,
+    *,
+    minimum: int,
+) -> bool:
+    history = _strict_annual_series(metric, values_key, years_key)
+    if history is None:
+        return False
+    return (
+        len(
+            _recent_consecutive_years(
+                set(history),
+                _latest_complete_financial_year(metric),
+            )
+        )
+        >= minimum
+    )
 
 
 def _consecutive_year_count(metric: Mapping[str, Any]) -> int:
-    year_sets: list[set[int]] = []
-    for key in ("revenue_years", "net_profit_years"):
-        raw = metric.get(key)
-        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-            return 0
-        years: set[int] = set()
-        for value in raw:
-            try:
-                years.add(int(value))
-            except (TypeError, ValueError, OverflowError):
-                continue
-        year_sets.append(years)
-    common = sorted(set.intersection(*year_sets)) if year_sets else []
-    longest = 0
-    current = 0
-    previous: int | None = None
-    for year in common:
-        current = current + 1 if previous is not None and year - previous == 1 else 1
-        longest = max(longest, current)
-        previous = year
-    return longest
+    revenue = _strict_annual_series(metric, "revenue_values", "revenue_years")
+    profit = _strict_annual_series(metric, "net_profit_history", "net_profit_years")
+    if revenue is None or profit is None:
+        return 0
+    common = set(revenue) & set(profit)
+    return len(_recent_consecutive_years(common, _latest_complete_financial_year(metric)))
 
 
 def _growth_score(rate: float | None) -> float:
@@ -859,10 +1198,12 @@ def _valuation_reversion_return(
             },
         )
     candidates: list[tuple[str, float, float, float, float]] = []
-    for basis, current_key, median_key, growth_rate in (
-        ("PE_TTM", "current_pe_ttm", "median_pe_ttm", earnings_growth_rate),
-        ("PB_MRQ", "current_pb_mrq", "median_pb_mrq", book_value_growth_rate),
+    for prefix, basis, current_key, median_key, growth_rate in (
+        ("pe", "PE_TTM", "current_pe_ttm", "median_pe_ttm", earnings_growth_rate),
+        ("pb", "PB_MRQ", "current_pb_mrq", "median_pb_mrq", book_value_growth_rate),
     ):
+        if not _valid_valuation_series(valuation_history, prefix):
+            continue
         current = _finite(valuation_history.get(current_key))
         target = _finite(valuation_history.get(median_key))
         if growth_rate is not None and current is not None and current > 0 and target is not None and target > 0:
@@ -931,17 +1272,148 @@ def _margin_score(metric: Mapping[str, Any]) -> tuple[float, bool]:
     return _avg(absolute, stability), gross is not None and net is not None and cv is not None
 
 
+def _years_before(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year - years)
+    except ValueError:
+        return value.replace(year=value.year - years, day=28)
+
+
+def _history_integer(value: Any, *, minimum: int = 0) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        return None
+    return value
+
+
+def _history_date(value: Any) -> date | None:
+    parsed = _parse_evidence_date(value)
+    return parsed if parsed is not None and parsed.isoformat() == value else None
+
+
+def _valid_shareholder_return(value: Any, as_of: date) -> bool:
+    """Replay the complete ten-year shareholder-return evidence contract."""
+
+    if not isinstance(value, Mapping) or value.get("available") is not True:
+        return False
+    start = _history_date(value.get("start_date"))
+    end = _history_date(value.get("end_date"))
+    span_days = _history_integer(value.get("span_days"), minimum=1)
+    observations = _history_integer(value.get("observations"), minimum=2)
+    start_close = _finite(value.get("start_close_hfq"))
+    end_close = _finite(value.get("end_close_hfq"))
+    total_return = _finite(value.get("total_return"))
+    cagr = _finite(value.get("cagr"))
+    if (
+        value.get("target_years") != 10
+        or value.get("formula") != SHAREHOLDER_RETURN_FORMULA
+        or start is None
+        or end is None
+        or span_days is None
+        or observations is None
+        or start_close is None
+        or start_close <= 0
+        or end_close is None
+        or end_close <= 0
+        or total_return is None
+        or cagr is None
+    ):
+        return False
+    target = _years_before(as_of, 10)
+    start_delay = (start - target).days
+    latest_age = (as_of - end).days
+    if (
+        span_days != (end - start).days
+        or span_days < TEN_YEAR_TARGET_DAYS - TEN_YEAR_START_TOLERANCE_DAYS - HISTORY_LATEST_MAX_AGE_DAYS
+        or not 0 <= start_delay <= TEN_YEAR_START_TOLERANCE_DAYS
+        or not 0 <= latest_age <= HISTORY_LATEST_MAX_AGE_DAYS
+    ):
+        return False
+    ratio = end_close / start_close
+    expected_total = ratio - 1.0
+    expected_cagr = ratio ** (365.2425 / span_days) - 1.0
+    return math.isclose(total_return, expected_total, rel_tol=1e-9, abs_tol=1e-9) and math.isclose(
+        cagr,
+        expected_cagr,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    )
+
+
+def _valid_valuation_series(value: Any, prefix: str) -> bool:
+    """Validate and replay one PE or PB side without trusting its sibling."""
+
+    if not isinstance(value, Mapping) or prefix not in {"pe", "pb"}:
+        return False
+    row_count = _history_integer(value.get("row_count"), minimum=1)
+    observations = _history_integer(value.get(f"{prefix}_observations"), minimum=0)
+    current_key = "current_pe_ttm" if prefix == "pe" else "current_pb_mrq"
+    median_key = "median_pe_ttm" if prefix == "pe" else "median_pb_mrq"
+    current = _finite(value.get(current_key))
+    historical_median = _finite(value.get(median_key))
+    percentile = _finite(value.get(f"{prefix}_percentile"))
+    replay = replay_valuation_distribution(value.get(f"{prefix}_distribution"), current)
+    return bool(
+        row_count is not None
+        and observations is not None
+        and observations >= VALUATION_MIN_OBSERVATIONS
+        and row_count >= observations + 1
+        and current is not None
+        and current > 0
+        and historical_median is not None
+        and historical_median > 0
+        and percentile is not None
+        and 0 <= percentile <= 1
+        and replay is not None
+        and observations == replay["observations"]
+        and math.isclose(historical_median, float(replay["median"]), rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(percentile, float(replay["percentile"]), rel_tol=0.0, abs_tol=1e-12)
+    )
+
+
+def _valid_valuation_history(value: Any, as_of: date) -> bool:
+    """Validate the five-year window and at least one independently valid side."""
+
+    if not isinstance(value, Mapping) or value.get("available") is not True:
+        return False
+    start = _history_date(value.get("start_date"))
+    end = _history_date(value.get("end_date"))
+    target_start = _history_date(value.get("target_start_date"))
+    span_days = _history_integer(value.get("span_days"), minimum=1)
+    start_delay = _history_integer(value.get("start_delay_days"), minimum=0)
+    row_count = _history_integer(value.get("row_count"), minimum=1)
+    expected_target = _years_before(as_of, 5)
+    if (
+        value.get("window_years") != 5
+        or value.get("formula") != VALUATION_PERCENTILE_FORMULA
+        or start is None
+        or end is None
+        or target_start != expected_target
+        or span_days is None
+        or start_delay is None
+        or row_count is None
+        or span_days != (end - start).days
+        or start_delay != (start - expected_target).days
+        or span_days < FIVE_YEAR_TARGET_DAYS - FIVE_YEAR_START_TOLERANCE_DAYS - HISTORY_LATEST_MAX_AGE_DAYS
+        or not 0 <= start_delay <= FIVE_YEAR_START_TOLERANCE_DAYS
+        or not 0 <= (as_of - end).days <= HISTORY_LATEST_MAX_AGE_DAYS
+    ):
+        return False
+
+    return any(_valid_valuation_series(value, prefix) for prefix in ("pe", "pb"))
+
+
 def _history_record(value: Any, code: str, as_of: str | None) -> Mapping[str, Any] | None:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, Mapping) or value.get("available") is not True:
         return None
-    if value.get("model_id") != "type7-market-history-v1" or str(value.get("code") or "") != code:
+    if value.get("model_id") != LONG_HORIZON_HISTORY_MODEL_ID or str(value.get("code") or "") != code:
         return None
-    if _parse_evidence_date(as_of) is None:
-        return None
+    reference = _history_date(as_of)
     record_as_of = str(value.get("as_of") or "")
-    if record_as_of != as_of:
+    if reference is None or reference > date.today() or record_as_of != as_of:
         return None
-    if _parse_evidence_date(record_as_of) is None:
+    if not _valid_shareholder_return(value.get("shareholder_return"), reference):
+        return None
+    if not _valid_valuation_history(value.get("valuation_history"), reference):
         return None
     return value
 
@@ -1024,9 +1496,18 @@ def _template_inputs(
     catalyst = verified("catalyst_score")
     growth_sustainability = verified("growth_sustainability_score")
 
-    revenue_rate = _finite(metric.get("trend_growth"))
-    profit_rate = _growth_rate(metric.get("net_profit_history"), metric.get("net_profit_years"))
-    fcf_rate = _growth_rate(metric.get("fcf_history"), metric.get("fcf_years"))
+    revenue_rate = (
+        _finite(metric.get("trend_growth"))
+        if _recent_history_ready(
+            metric,
+            "revenue_values",
+            "revenue_years",
+            minimum=3,
+        )
+        else None
+    )
+    profit_rate = _growth_rate(metric, "net_profit_history", "net_profit_years")
+    fcf_rate = _growth_rate(metric, "fcf_history", "fcf_years")
     revenue_growth = _growth_score(revenue_rate)
     profit_fcf_growth = _avg(_growth_score(profit_rate), _growth_score(fcf_rate))
     balance, balance_complete = _balance_score(metric)
@@ -1092,16 +1573,25 @@ def _template_inputs(
     history_record = _history_record(history, str(metric.get("code") or ""), source_trade_date)
     shareholder_history = history_record.get("shareholder_return") if history_record else None
     valuation_history = history_record.get("valuation_history") if history_record else None
-    shareholder_available = isinstance(shareholder_history, Mapping) and shareholder_history.get("available") is True
-    valuation_available = isinstance(valuation_history, Mapping) and valuation_history.get("available") is True
+    reference_date = _history_date(source_trade_date)
+    shareholder_available = bool(
+        reference_date is not None and _valid_shareholder_return(shareholder_history, reference_date)
+    )
+    valuation_available = bool(
+        reference_date is not None and _valid_valuation_history(valuation_history, reference_date)
+    )
     return_cagr = _finite(shareholder_history.get("cagr")) if shareholder_available else None
     return_10y = _return_score(return_cagr)
     percentiles = []
+    valid_valuation_prefixes: set[str] = set()
     if valuation_available:
-        for key in ("pe_percentile", "pb_percentile"):
+        for prefix, key in (("pe", "pe_percentile"), ("pb", "pb_percentile")):
+            if not _valid_valuation_series(valuation_history, prefix):
+                continue
             value = _finite(valuation_history.get(key))
             if value is not None and 0 <= value <= 1:
                 percentiles.append(value)
+                valid_valuation_prefixes.add(prefix)
     valuation_percentile = median(percentiles) if percentiles else None
     historical_valuation = _linear(
         valuation_percentile,
@@ -1109,7 +1599,7 @@ def _template_inputs(
         missing=0,
     )
     forecast_growth = _forecast_growth_rate(revenue_rate, profit_rate, fcf_rate)
-    total_equity_growth = _growth_rate(metric.get("equity_history"), metric.get("equity_years"))
+    total_equity_growth = _growth_rate(metric, "equity_history", "equity_years")
     share_dilution = _finite(metric.get("share_dilution_1yr"))
     per_share_book_growth = (
         (1.0 + total_equity_growth) / (1.0 + share_dilution) - 1.0
@@ -1131,8 +1621,32 @@ def _template_inputs(
         forecast_growth,
     )
     return_and_terminal = _avg(return_10y, terminal_profit_score)
+    shareholder_ledger_input = dict(shareholder_history) if isinstance(shareholder_history, Mapping) else {}
+    shareholder_ledger_input["valuation_history_contract"] = (
+        dict(valuation_history) if isinstance(valuation_history, Mapping) else {}
+    )
+    shareholder_ledger_input["annual_financial_history_contract"] = {
+        "source_trade_date": metric.get("source_trade_date"),
+        "financial_indicator_as_of": metric.get("financial_indicator_as_of"),
+        "revenue_values": list(metric.get("revenue_values", []))
+        if isinstance(metric.get("revenue_values"), Sequence)
+        and not isinstance(metric.get("revenue_values"), (str, bytes))
+        else [],
+        "revenue_years": list(metric.get("revenue_years", []))
+        if isinstance(metric.get("revenue_years"), Sequence)
+        and not isinstance(metric.get("revenue_years"), (str, bytes))
+        else [],
+        "net_profit_history": list(metric.get("net_profit_history", []))
+        if isinstance(metric.get("net_profit_history"), Sequence)
+        and not isinstance(metric.get("net_profit_history"), (str, bytes))
+        else [],
+        "net_profit_years": list(metric.get("net_profit_years", []))
+        if isinstance(metric.get("net_profit_years"), Sequence)
+        and not isinstance(metric.get("net_profit_years"), (str, bytes))
+        else [],
+    }
     return_and_terminal_inputs = {
-        "shareholder_return": dict(shareholder_history) if isinstance(shareholder_history, Mapping) else {},
+        "shareholder_return": shareholder_ledger_input,
         "terminal_profit_projection": terminal_profit_inputs,
     }
 
@@ -1189,13 +1703,13 @@ def _template_inputs(
         ),
         "return_10y": (
             return_10y,
-            shareholder_available,
+            shareholder_available and return_cagr is not None,
             "independent_market_history",
             dict(shareholder_history) if isinstance(shareholder_history, Mapping) else {},
         ),
         "return_and_terminal_profit": (
             return_and_terminal,
-            shareholder_available and terminal_profit_complete,
+            shareholder_available and return_cagr is not None and terminal_profit_complete,
             "independent_market_history_plus_fading_growth_projection",
             return_and_terminal_inputs,
         ),
@@ -1206,10 +1720,10 @@ def _template_inputs(
             {
                 "combined_percentile": valuation_percentile,
                 "pe_percentile": valuation_history.get("pe_percentile")
-                if isinstance(valuation_history, Mapping)
+                if isinstance(valuation_history, Mapping) and "pe" in valid_valuation_prefixes
                 else None,
                 "pb_percentile": valuation_history.get("pb_percentile")
-                if isinstance(valuation_history, Mapping)
+                if isinstance(valuation_history, Mapping) and "pb" in valid_valuation_prefixes
                 else None,
             },
         ),
@@ -1390,7 +1904,11 @@ def _patch_component(
 
 
 def _make_patch5(
-    metric: Mapping[str, Any], values: Mapping[str, tuple[float, bool, str, Mapping[str, Any]]]
+    metric: Mapping[str, Any],
+    values: Mapping[str, tuple[float, bool, str, Mapping[str, Any]]],
+    *,
+    technology_company: bool,
+    patch4_ledger: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     clarity = _direct_or_proxy(metric, "business_clarity_score", values["business"], proxy_cap=7.0)
     scalability = (
@@ -1433,6 +1951,16 @@ def _make_patch5(
         ),
         proxy_cap=8.0,
     )
+    incentive_alignment = (
+        (
+            _finite(patch4_ledger.get("score")) or 0.0,
+            patch4_ledger.get("complete") is True,
+        )
+        if technology_company and isinstance(patch4_ledger, Mapping)
+        else (2.0, False)
+        if technology_company
+        else (values["shareholder"][0], values["shareholder"][1])
+    )
 
     sections = [
         {
@@ -1462,7 +1990,14 @@ def _make_patch5(
             "max_points": 20.0,
             "components": [
                 _patch_component("p5_c1", "管理诚信", 6, values["management"][0], values["management"][1], {}),
-                _patch_component("p5_c2", "激励一致", 5, values["shareholder"][0], values["shareholder"][1], {}),
+                _patch_component(
+                    "p5_c2",
+                    "激励一致",
+                    5,
+                    incentive_alignment[0],
+                    incentive_alignment[1],
+                    {},
+                ),
                 _patch_component("p5_c3", "创新适应", 5, innovation[0], innovation[1], {"source": innovation[2]}),
                 _patch_component("p5_c4", "治理透明", 4, governance[0], governance[1], {"source": governance[2]}),
             ],
@@ -1577,6 +2112,49 @@ def decisive_score_upper_bounds(
     }
 
 
+def _incomplete_required_item_ids(
+    template1: Mapping[str, Any],
+    template5: Mapping[str, Any],
+    patch5: Mapping[str, Any],
+) -> list[str]:
+    """List every required Type 7 source item that lacks complete evidence."""
+
+    incomplete: list[str] = []
+    template1_items = {
+        item.get("key"): item
+        for item in template1.get("items", [])
+        if isinstance(item, Mapping) and isinstance(item.get("key"), str)
+    }
+    template5_items = {
+        item.get("key"): item
+        for item in template5.get("items", [])
+        if isinstance(item, Mapping) and isinstance(item.get("key"), str)
+    }
+    for key in _TEMPLATE1_ITEM_WEIGHTS:
+        if template1_items.get(key, {}).get("complete") is not True:
+            incomplete.append(f"template1.{key}")
+    for key in _TEMPLATE5_ITEM_WEIGHTS:
+        if template5_items.get(key, {}).get("complete") is not True:
+            incomplete.append(f"template5.{key}")
+
+    patch_sections = {
+        section.get("key"): section
+        for section in patch5.get("dimensions", [])
+        if isinstance(section, Mapping) and isinstance(section.get("key"), str)
+    }
+    for section_key, component_weights in _PATCH5_COMPONENT_WEIGHTS.items():
+        section = patch_sections.get(section_key, {})
+        components = {
+            component.get("key"): component
+            for component in section.get("components", [])
+            if isinstance(component, Mapping) and isinstance(component.get("key"), str)
+        }
+        for component_key in component_weights:
+            if components.get(component_key, {}).get("complete") is not True:
+                incomplete.append(f"patch5.{section_key}.{component_key}")
+    return incomplete
+
+
 def assess_quality_equity(
     metric: Mapping[str, Any],
     type1_outcome: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
@@ -1595,12 +2173,40 @@ def assess_quality_equity(
         history_evidence,
         valuation_evidence_complete=valuation_evidence_complete,
     )
-    template1 = _make_template1(values)
-    template5 = _make_template5(values)
-    patch5 = _make_patch5(metric, values)
-
     metric_as_of = _parse_evidence_date(metric.get("source_trade_date"))
     quote_date_complete = metric_as_of is not None and metric_as_of <= date.today()
+    technology_score = values["technology"][0]
+    technology_score_complete = values["technology"][1]
+    rd_intensity = _finite(metric.get("rd_intensity"))
+    if rd_intensity is not None and not 0 <= rd_intensity <= 1:
+        rd_intensity = None
+    # Patch 4 is waived only when both independent applicability inputs
+    # affirmatively place the company below the technology thresholds.
+    # Missing R&D intensity or an incomplete technology score cannot prove
+    # that a company is non-technology.
+    proven_non_technology = bool(
+        rd_intensity is not None and rd_intensity < 0.05 and technology_score_complete and technology_score < 7.0
+    )
+    technology_company = not proven_non_technology
+    patch4_ledger = (
+        _build_patch4_ledger(
+            metric,
+            values,
+            code=code,
+            as_of=metric_as_of.isoformat() if metric_as_of is not None else "0001-01-01",
+        )
+        if technology_company
+        else None
+    )
+    template1 = _make_template1(values)
+    template5 = _make_template5(values)
+    patch5 = _make_patch5(
+        metric,
+        values,
+        technology_company=technology_company,
+        patch4_ledger=patch4_ledger,
+    )
+
     research = normalise_research_sources(
         metric.get("type7_research_sources"),
         today=metric_as_of if quote_date_complete else date.today(),
@@ -1646,29 +2252,42 @@ def assess_quality_equity(
         as_of=content_as_of,
     )
     financial_years = _consecutive_year_count(metric)
-    technology_score = values["technology"][0]
-    rd_intensity = _finite(metric.get("rd_intensity"))
-    technology_company = bool((rd_intensity is not None and rd_intensity >= 0.05) or technology_score >= 7.0)
-    # No production Patch 4 ledger/validator exists yet.  A naked 0-10 field,
-    # even with a generic evidence wrapper, cannot prove that Patch 4 was
-    # actually applied.  Technology candidates therefore fail closed until a
-    # structured, independently replayable Patch 4 assessment is introduced.
-    patch4_score = None
-    patch4_complete = False
+    patch4_complete = bool(isinstance(patch4_ledger, Mapping) and patch4_ledger.get("complete") is True)
+    patch4_score = _finite(patch4_ledger.get("score")) if patch4_complete and patch4_ledger is not None else None
+    patch4_status = (
+        "not_applicable"
+        if not technology_company
+        else "validated_replayable_assessment"
+        if patch4_complete
+        else "incomplete_replayable_assessment"
+        if patch4_ledger is not None
+        else "missing_validated_patch4_assessment"
+    )
     history_complete = values["return_10y"][1] and values["historical_valuation"][1]
     valuation_complete = values["dcf"][1]
     core_coverage = template1["coverage"]
+    incomplete_required_items = _incomplete_required_item_ids(template1, template5, patch5)
+    required_items_complete = not incomplete_required_items
     prerequisites = {
         "core_modules_80pct": {
-            "passed": core_coverage >= MIN_CORE_COVERAGE,
+            "passed": core_coverage >= MIN_CORE_COVERAGE and required_items_complete,
             "actual": core_coverage,
             "required": MIN_CORE_COVERAGE,
+            "required_items_complete": required_items_complete,
+            "incomplete_required_items": incomplete_required_items,
         },
         "technology_patch4": {
             "passed": not technology_company or patch4_complete,
             "applicable": technology_company,
             "score": patch4_score,
-            "validation_status": ("missing_validated_patch4_assessment" if technology_company else "not_applicable"),
+            "validation_status": patch4_status,
+            "applicability": {
+                "technology_score": technology_score,
+                "technology_score_complete": technology_score_complete,
+                "rd_intensity": rd_intensity,
+                "rule": ("Patch4 waived only if reported_rd_intensity<0.05 AND validated_technology_score<7"),
+            },
+            "assessment": patch4_ledger,
         },
         "three_year_financials": {"passed": financial_years >= 3, "consecutive_years": financial_years},
         "latest_quote_and_valuation": {
@@ -1733,7 +2352,20 @@ def assess_quality_equity(
         "patch5": round(patch5_upper, 2),
     }
     pre_history_prerequisites_complete = all(
-        bool(record["passed"])
+        (
+            core_coverage >= MIN_CORE_COVERAGE
+            and set(incomplete_required_items).issubset(
+                {
+                    "template1.t1_18",
+                    "template1.t1_19",
+                    "template5.t5_v1",
+                    "template5.t5_v3",
+                    "patch5.p5_safety.p5_s1",
+                }
+            )
+            if key == "core_modules_80pct"
+            else bool(record["passed"])
+        )
         for key, record in prerequisites.items()
         if key
         not in {
@@ -1833,6 +2465,196 @@ def _template_item_contract(
     if key == "t1_18" and "annual_return" in inputs:
         return True, _return_score(_finite(inputs.get("annual_return")))
     return True, None
+
+
+def _validate_patch4_ledger(
+    assessment: Any,
+    *,
+    code: str,
+    as_of: str,
+    fairness_item: Mapping[str, Any],
+    governance_component: Mapping[str, Any],
+) -> list[str]:
+    """Replay a published Patch 4 ledger from its atomic public facts."""
+
+    errors: list[str] = []
+    expected_top = {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "formula_version",
+        "score",
+        "complete",
+        "components",
+    }
+    if not isinstance(assessment, Mapping) or set(assessment) != expected_top:
+        return ["Patch 4 assessment structure invalid"]
+    if (
+        assessment.get("schema_version") != PATCH4_SCHEMA_VERSION
+        or assessment.get("model_id") != PATCH4_MODEL_ID
+        or assessment.get("formula_version") != PATCH4_FORMULA_VERSION
+        or assessment.get("code") != code
+        or assessment.get("as_of") != as_of
+    ):
+        errors.append("Patch 4 assessment identity invalid")
+    components = assessment.get("components")
+    if not isinstance(components, list) or len(components) != len(_PATCH4_COMPONENT_WEIGHTS):
+        return errors + ["Patch 4 component structure invalid"]
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for component in components:
+        expected_fields = {
+            "key",
+            "label",
+            "weight",
+            "score",
+            "points",
+            "complete",
+            "formula",
+            "inputs",
+            "evidence",
+        }
+        key = component.get("key") if isinstance(component, Mapping) else None
+        if (
+            not isinstance(component, Mapping)
+            or set(component) != expected_fields
+            or key not in _PATCH4_COMPONENT_WEIGHTS
+            or key in indexed
+        ):
+            errors.append("Patch 4 component identity invalid")
+            continue
+        score = _finite(component.get("score"))
+        points = _finite(component.get("points"))
+        weight = _PATCH4_COMPONENT_WEIGHTS[key]
+        if (
+            score is None
+            or not 0 <= score <= 10
+            or points is None
+            or not isinstance(component.get("complete"), bool)
+            or component.get("label") != _PATCH4_COMPONENT_LABELS[key]
+            or not math.isclose(float(component.get("weight", -1)), weight, abs_tol=1e-9)
+            or not math.isclose(points, round(score * weight / 10.0, 4), abs_tol=0.0001)
+            or not isinstance(component.get("formula"), str)
+            or not isinstance(component.get("inputs"), Mapping)
+        ):
+            errors.append(f"Patch 4 component arithmetic invalid: {key}")
+        indexed[key] = component
+    if set(indexed) != set(_PATCH4_COMPONENT_WEIGHTS):
+        return errors + ["Patch 4 component set invalid"]
+
+    fairness = indexed["p4_defensive_fairness"]
+    governance = indexed["p4_defensive_governance"]
+    expected_fairness_inputs = {
+        "source_item": "template1.t1_08",
+        "evidence_level": fairness_item.get("evidence_level"),
+    }
+    # Patch 5 stores the direct/proxy source level but not the full underlying
+    # evidence record.  The score and completeness bindings are independently
+    # sufficient here; the source level remains constrained to the same small
+    # vocabulary used by the published ledgers.
+    if (
+        fairness.get("formula") != "source_score(template1.t1_08)"
+        or fairness.get("inputs") != expected_fairness_inputs
+        or fairness.get("evidence") is not None
+        or not math.isclose(
+            float(fairness.get("score", -1)),
+            float(fairness_item.get("score", -2)),
+            abs_tol=0.0001,
+        )
+        or fairness.get("complete") is not fairness_item.get("complete")
+    ):
+        errors.append("Patch 4 defensive fairness binding invalid")
+    governance_inputs = governance.get("inputs")
+    if (
+        governance.get("formula") != "verified_governance_or_capped_management_proxy"
+        or not isinstance(governance_inputs, Mapping)
+        or set(governance_inputs) != {"source_item", "evidence_level"}
+        or governance_inputs.get("source_item") != "patch5.p5_c4"
+        or governance_inputs.get("evidence_level") not in {"primary", "derived_proxy", "missing"}
+        or governance.get("evidence") is not None
+        or not math.isclose(
+            float(governance.get("score", -1)),
+            float(governance_component.get("score", -2)),
+            abs_tol=0.0001,
+        )
+        or governance.get("complete") is not governance_component.get("complete")
+    ):
+        errors.append("Patch 4 defensive governance binding invalid")
+
+    raw_keys = {
+        "p4_core_rd_ownership": "core_rd_ownership_pct",
+        "p4_esop_coverage": "esop_core_talent_coverage_pct",
+        "p4_long_term_rd_link": "long_term_rd_metrics",
+        "p4_frontline_rd_equity": "frontline_rd_equity",
+        "p4_short_term_binding": "short_term_price_binding",
+    }
+    raw_criteria: dict[str, Any] = {}
+    for component_key, criterion_key in raw_keys.items():
+        component = indexed[component_key]
+        inputs = component.get("inputs")
+        evidence = component.get("evidence")
+        if not isinstance(inputs, Mapping) or not isinstance(evidence, Mapping):
+            errors.append(f"Patch 4 fact binding invalid: {component_key}")
+            continue
+        if criterion_key in {"core_rd_ownership_pct", "esop_core_talent_coverage_pct"}:
+            if set(inputs) != {"value", "unit"} or inputs.get("unit") != "percentage_points":
+                errors.append(f"Patch 4 percentage input invalid: {component_key}")
+                continue
+        elif set(inputs) != {"value"}:
+            errors.append(f"Patch 4 boolean input invalid: {component_key}")
+            continue
+        raw_criteria[criterion_key] = {"value": inputs.get("value"), "evidence": evidence}
+    raw = {
+        "schema_version": PATCH4_SCHEMA_VERSION,
+        "model_id": PATCH4_MODEL_ID,
+        "code": code,
+        "as_of": as_of,
+        "criteria": raw_criteria,
+    }
+    try:
+        normalized = normalise_patch4_assessment(raw, security_code=code, as_of=as_of)
+    except QualityEquityError:
+        normalized = None
+        errors.append("Patch 4 atomic evidence invalid")
+    if normalized is not None:
+        criteria = normalized["criteria"]
+        expected_scores = {
+            "p4_core_rd_ownership": _linear(
+                float(criteria["core_rd_ownership_pct"]["value"]),
+                [(0.0, 0.0), (1.0, 2.0), (3.0, 6.0), (5.0, 9.0), (5.000001, 10.0)],
+            ),
+            "p4_esop_coverage": _linear(
+                float(criteria["esop_core_talent_coverage_pct"]["value"]),
+                [(0.0, 0.0), (10.0, 3.0), (20.0, 6.0), (30.0, 9.0), (30.000001, 10.0)],
+            ),
+            "p4_long_term_rd_link": 10.0 if criteria["long_term_rd_metrics"]["value"] else 0.0,
+            "p4_frontline_rd_equity": 10.0 if criteria["frontline_rd_equity"]["value"] else 0.0,
+            "p4_short_term_binding": 0.0 if criteria["short_term_price_binding"]["value"] else 10.0,
+        }
+        expected_formulas = {
+            "p4_core_rd_ownership": "piecewise(core_rd_ownership_pct;5%+=10)",
+            "p4_esop_coverage": "piecewise(esop_core_talent_coverage_pct;30%+=10)",
+            "p4_long_term_rd_link": "10 if long_term_rd_metrics else 0",
+            "p4_frontline_rd_equity": "10 if frontline_rd_equity else 0",
+            "p4_short_term_binding": "0 if short_term_price_binding else 10",
+        }
+        for key, expected_score in expected_scores.items():
+            component = indexed[key]
+            if (
+                not math.isclose(float(component.get("score", -1)), expected_score, abs_tol=0.0001)
+                or component.get("complete") is not True
+                or component.get("formula") != expected_formulas[key]
+            ):
+                errors.append(f"Patch 4 fact score mismatch: {key}")
+
+    expected_score = round(math.fsum(float(component["points"]) for component in indexed.values()) / 10.0, 2)
+    expected_complete = all(component.get("complete") is True for component in indexed.values())
+    if (
+        not math.isclose(float(assessment.get("score", -1)), expected_score, abs_tol=0.0001)
+        or assessment.get("complete") is not expected_complete
+    ):
+        errors.append("Patch 4 total mismatch")
+    return errors
 
 
 def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
@@ -2141,44 +2963,159 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
         core = prerequisites["core_modules_80pct"]
         core_actual = _finite(core.get("actual")) if isinstance(core, Mapping) else None
         expected_core = _finite(template1.get("coverage")) if isinstance(template1, Mapping) else None
+        expected_incomplete_required_items = _incomplete_required_item_ids(
+            template1 if isinstance(template1, Mapping) else {},
+            template5 if isinstance(template5, Mapping) else {},
+            patch5 if isinstance(patch5, Mapping) else {},
+        )
+        expected_required_items_complete = not expected_incomplete_required_items
+        expected_core_passed = bool(
+            core_actual is not None and core_actual >= MIN_CORE_COVERAGE and expected_required_items_complete
+        )
         if (
             not isinstance(core, Mapping)
-            or set(core) != {"passed", "actual", "required"}
+            or set(core)
+            != {
+                "passed",
+                "actual",
+                "required",
+                "required_items_complete",
+                "incomplete_required_items",
+            }
             or core_actual is None
             or expected_core is None
             or not close(core_actual, expected_core, tolerance=0.0001)
             or not close(core.get("required"), MIN_CORE_COVERAGE)
-            or core["passed"] is not (core_actual >= MIN_CORE_COVERAGE)
+            or core.get("required_items_complete") is not expected_required_items_complete
+            or core.get("incomplete_required_items") != expected_incomplete_required_items
+            or core["passed"] is not expected_core_passed
         ):
             errors.append("core coverage prerequisite mismatch")
         technology = prerequisites["technology_patch4"]
         technology_applicable = technology.get("applicable") if isinstance(technology, Mapping) else None
-        template_technology_score = _finite(template1_items.get("t1_17", {}).get("score"))
+        applicability = technology.get("applicability") if isinstance(technology, Mapping) else None
+        assessment = technology.get("assessment") if isinstance(technology, Mapping) else None
+        template_technology = template1_items.get("t1_17", {})
+        template_technology_score = _finite(template_technology.get("score"))
+        template_technology_complete = template_technology.get("complete")
+        rd_intensity = _finite(applicability.get("rd_intensity")) if isinstance(applicability, Mapping) else None
+        published_technology_score = (
+            _finite(applicability.get("technology_score")) if isinstance(applicability, Mapping) else None
+        )
+        published_technology_complete = (
+            applicability.get("technology_score_complete") if isinstance(applicability, Mapping) else None
+        )
+        expected_technology_applicable = not bool(
+            rd_intensity is not None
+            and 0 <= rd_intensity < 0.05
+            and template_technology_complete is True
+            and template_technology_score is not None
+            and template_technology_score < 7.0
+        )
+        patch4_score = _finite(assessment.get("score")) if isinstance(assessment, Mapping) else None
+        patch4_complete = bool(isinstance(assessment, Mapping) and assessment.get("complete") is True)
         expected_technology_status = (
-            "missing_validated_patch4_assessment" if technology_applicable is True else "not_applicable"
+            "not_applicable"
+            if not expected_technology_applicable
+            else "validated_replayable_assessment"
+            if patch4_complete
+            else "incomplete_replayable_assessment"
+            if assessment is not None
+            else "missing_validated_patch4_assessment"
+        )
+        culture_components = {
+            component.get("key"): component
+            for component in patch_sections.get("p5_culture", {}).get("components", [])
+            if isinstance(component, Mapping)
+        }
+        incentive_component = culture_components.get("p5_c2", {})
+        governance_component = culture_components.get("p5_c4", {})
+        patch4_as_of = (
+            prerequisites.get("latest_quote_and_valuation", {}).get("as_of")
+            if isinstance(prerequisites.get("latest_quote_and_valuation"), Mapping)
+            else None
+        )
+        patch4_errors = (
+            _validate_patch4_ledger(
+                assessment,
+                code=str(ledger.get("code") or ""),
+                as_of=str(patch4_as_of or ""),
+                fairness_item=template1_items.get("t1_08", {}),
+                governance_component=governance_component,
+            )
+            if assessment is not None
+            else []
+        )
+        expected_incentive_score = (
+            patch4_score
+            if expected_technology_applicable and patch4_score is not None
+            else 2.0
+            if expected_technology_applicable
+            else _finite(template1_items.get("t1_08", {}).get("score"))
+        )
+        expected_incentive_complete = (
+            patch4_complete
+            if expected_technology_applicable
+            else template1_items.get("t1_08", {}).get("complete") is True
         )
         if (
             not isinstance(technology, Mapping)
-            or set(technology) != {"passed", "applicable", "score", "validation_status"}
+            or set(technology) != {"passed", "applicable", "score", "validation_status", "applicability", "assessment"}
             or not isinstance(technology_applicable, bool)
-            or technology.get("score") is not None
+            or not isinstance(applicability, Mapping)
+            or set(applicability) != {"technology_score", "technology_score_complete", "rd_intensity", "rule"}
+            or applicability.get("rule")
+            != "Patch4 waived only if reported_rd_intensity<0.05 AND validated_technology_score<7"
+            or template_technology_score is None
+            or published_technology_score is None
+            or not close(published_technology_score, template_technology_score)
+            or published_technology_complete is not template_technology_complete
+            or (rd_intensity is not None and not 0 <= rd_intensity <= 1)
+            or technology_applicable is not expected_technology_applicable
+            or technology.get("score") != (patch4_score if patch4_complete else None)
             or technology.get("validation_status") != expected_technology_status
-            or technology["passed"] is not (technology_applicable is False)
-            or (
-                template_technology_score is not None
-                and template_technology_score >= 7.0
-                and technology_applicable is not True
-            )
+            or technology["passed"] is not (not expected_technology_applicable or patch4_complete)
+            or bool(patch4_errors)
+            or expected_incentive_score is None
+            or not close(incentive_component.get("score"), expected_incentive_score)
+            or incentive_component.get("complete") is not expected_incentive_complete
         ):
             errors.append("technology prerequisite mismatch")
         financials = prerequisites["three_year_financials"]
         years = financials.get("consecutive_years") if isinstance(financials, Mapping) else None
+        financial_history_inputs = template1_items.get("t1_19", {}).get("inputs", {})
+        shareholder_financial_inputs = (
+            financial_history_inputs.get("shareholder_return")
+            if isinstance(financial_history_inputs, Mapping)
+            else None
+        )
+        annual_financial_contract = (
+            shareholder_financial_inputs.get("annual_financial_history_contract")
+            if isinstance(shareholder_financial_inputs, Mapping)
+            else None
+        )
+        expected_financial_fields = {
+            "source_trade_date",
+            "financial_indicator_as_of",
+            "revenue_values",
+            "revenue_years",
+            "net_profit_history",
+            "net_profit_years",
+        }
+        replayed_financial_years = (
+            _consecutive_year_count(annual_financial_contract)
+            if isinstance(annual_financial_contract, Mapping)
+            and set(annual_financial_contract) == expected_financial_fields
+            else None
+        )
         if (
             not isinstance(financials, Mapping)
             or set(financials) != {"passed", "consecutive_years"}
             or isinstance(years, bool)
             or not isinstance(years, int)
             or years < 0
+            or replayed_financial_years is None
+            or years != replayed_financial_years
             or financials["passed"] is not (years >= 3)
         ):
             errors.append("financial history prerequisite mismatch")
@@ -2260,13 +3197,17 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
         shareholder_input = (
             t1_history_inputs.get("shareholder_return") if isinstance(t1_history_inputs, Mapping) else None
         )
+        history_as_of = history.get("as_of") if isinstance(history, Mapping) else None
+        history_date = _history_date(history_as_of)
+        valuation_history_input = (
+            shareholder_input.get("valuation_history_contract") if isinstance(shareholder_input, Mapping) else None
+        )
         expected_history = bool(
-            isinstance(shareholder_input, Mapping)
-            and shareholder_input.get("available") is True
+            history_date is not None
+            and _valid_shareholder_return(shareholder_input, history_date)
+            and _valid_valuation_history(valuation_history_input, history_date)
             and template5_items.get("t5_v1", {}).get("complete") is True
         )
-        history_as_of = history.get("as_of") if isinstance(history, Mapping) else None
-        history_date = _parse_evidence_date(history_as_of)
         if (
             not isinstance(history, Mapping)
             or set(history) != {"passed", "as_of"}
@@ -2380,15 +3321,39 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
     ):
         errors.append("history upper bounds mismatch")
     history_passed = prerequisite_passes.get("ten_year_return_and_five_year_valuation", False)
-    pre_history_passed = len(prerequisite_passes) == len(_PREREQUISITE_KEYS) and all(
-        value
-        for key, value in prerequisite_passes.items()
-        if key
-        not in {
-            "three_external_reports",
-            "external_report_content_verification",
-            "ten_year_return_and_five_year_valuation",
-        }
+    history_request_incomplete_items = _incomplete_required_item_ids(
+        template1 if isinstance(template1, Mapping) else {},
+        template5 if isinstance(template5, Mapping) else {},
+        patch5 if isinstance(patch5, Mapping) else {},
+    )
+    history_request_core_coverage = _finite(template1.get("coverage")) if isinstance(template1, Mapping) else None
+    history_request_core_ready = bool(
+        history_request_core_coverage is not None
+        and history_request_core_coverage >= MIN_CORE_COVERAGE
+        and set(history_request_incomplete_items).issubset(
+            {
+                "template1.t1_18",
+                "template1.t1_19",
+                "template5.t5_v1",
+                "template5.t5_v3",
+                "patch5.p5_safety.p5_s1",
+            }
+        )
+    )
+    pre_history_passed = (
+        len(prerequisite_passes) == len(_PREREQUISITE_KEYS)
+        and history_request_core_ready
+        and all(
+            value
+            for key, value in prerequisite_passes.items()
+            if key
+            not in {
+                "core_modules_80pct",
+                "three_external_reports",
+                "external_report_content_verification",
+                "ten_year_return_and_five_year_valuation",
+            }
+        )
     )
     expected_request = bool(
         not history_passed
@@ -2437,6 +3402,10 @@ __all__ = [
     "MIN_CORE_COVERAGE",
     "MIN_RESEARCH_SOURCES",
     "MODEL_ID",
+    "PATCH4_FORMULA_VERSION",
+    "PATCH4_MAX_EVIDENCE_AGE_DAYS",
+    "PATCH4_MODEL_ID",
+    "PATCH4_SCHEMA_VERSION",
     "PATCH5_SAFETY_VETO",
     "RESEARCH_MAX_AGE_DAYS",
     "RESEARCH_RECENT_AGE_DAYS",
@@ -2464,6 +3433,7 @@ __all__ = [
     "decisive_score_upper_bounds",
     "normalise_research_sources",
     "normalise_research_content_verification",
+    "normalise_patch4_assessment",
     "research_metadata_precheck",
     "validate_quality_equity_ledger",
 ]

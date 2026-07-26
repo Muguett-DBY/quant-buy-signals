@@ -4,14 +4,26 @@ import json
 import hashlib
 from copy import deepcopy
 from dataclasses import replace
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import pytest
 
 from data.capex_evidence import resolve_capex_evidence
 from data.financial_source_evidence import zero_capex_evidence
+from data.market_coldness import (
+    EASTMONEY_CLIST_ENDPOINT,
+    EASTMONEY_SOURCE,
+    MarketColdnessCoverage,
+    MarketColdnessRecord,
+    MarketColdnessSnapshot,
+    MetricCoverage,
+)
 from engine.audit import (
     _audit_bear_case,
+    _audit_patch4_evidence_valid,
+    _audit_type5_bottom_evidence_errors,
+    _audit_type7_ledger,
     _audit_validate_capex_provenance,
     _independent_checks,
     _markdown_cell,
@@ -21,8 +33,15 @@ from engine.audit import (
     render_audit_markdown,
     write_audit_artifacts,
 )
-from engine.buy_screener import TYPE_NAMES, TYPE_WEIGHTS, _build_bear_case, screen_all_types
+from engine.buy_screener import (
+    TYPE_NAMES,
+    TYPE_WEIGHTS,
+    _build_bear_case,
+    score_type7_quality_equity,
+    screen_all_types,
+)
 from engine.dcf import ReportingPeriodContract
+from engine.market_coldness import build_market_coldness_evidence
 from engine.pipeline import PipelineIssue, run_market_analysis, validate_market_analysis_quality
 
 
@@ -40,18 +59,62 @@ def audit_random_sample(*args, **kwargs):
 
 
 def _market_coldness_evidence(codes):
-    return {
-        str(code): {
-            "market_coldness_score": 6.0,
-            "market_coldness_score_evidence": {
-                "source": "whole-market-test-source",
-                "evidence_id": f"coldness:{code}:20260331",
-                "as_of": "2026-03-31",
-                "summary": "whole-market fixture",
-            },
-        }
-        for code in codes
-    }
+    ordered_codes = tuple(sorted(str(code) for code in codes))
+    retrieved = "2026-03-31T08:20:00+00:00"
+    records = tuple(
+        MarketColdnessRecord(
+            code=code,
+            exchange="SZ",
+            eastmoney_market_id=0,
+            name=f"样本{code}",
+            change_60d_pct=-10.0,
+            change_ytd_pct=-10.0,
+            turnover_rate_pct=1.5,
+            volume_ratio=0.9,
+            listing_date="2001-08-27",
+            source_updated_at=retrieved,
+            source=EASTMONEY_SOURCE,
+            source_url=EASTMONEY_CLIST_ENDPOINT,
+            retrieved_at=retrieved,
+            upstream_fields={},
+            missing_reasons={},
+        )
+        for code in ordered_codes
+    )
+    metrics = (
+        "change_60d_pct",
+        "change_ytd_pct",
+        "turnover_rate_pct",
+        "volume_ratio",
+        "listing_date",
+        "source_updated_at",
+    )
+    coverage = {metric: MetricCoverage(present=len(records), missing=0, coverage_rate=1.0) for metric in metrics}
+    snapshot = MarketColdnessSnapshot(
+        available=True,
+        records=records,
+        source=EASTMONEY_SOURCE,
+        source_url=EASTMONEY_CLIST_ENDPOINT,
+        retrieved_at=retrieved,
+        total_expected=len(records),
+        fetched_count=len(records),
+        page_count=1,
+        response_bytes=1_000,
+        universe_coverage_rate=1.0,
+        coverage=MarketColdnessCoverage(len(records), len(records), 1.0, coverage),
+        cache_hit=False,
+        cache_diagnostic="",
+        reason="",
+        failure=None,
+    )
+    return build_market_coldness_evidence(
+        snapshot,
+        as_of_session="2026-03-31",
+        listed_quote_codes=ordered_codes,
+        now=datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc),
+        min_cross_section_records=len(records),
+        min_board_turnover_records=len(records),
+    )
 
 
 def _cashflow_row(report_date: str, operating_cash_flow: float, capex: float) -> dict:
@@ -62,6 +125,50 @@ def _cashflow_row(report_date: str, operating_cash_flow: float, capex: float) ->
         "CONSTRUCT_LONG_ASSET": value,
         "CAPEX_PROVENANCE": provenance,
     }
+
+
+def test_independent_patch4_evidence_requires_the_exact_pinned_announcement_identity():
+    code = "300750"
+    art_code = "AN202607140000000001"
+    digest = "0123456789abcdef"
+    evidence = {
+        "source": "东方财富上市公司公告正文",
+        "evidence_id": f"eastmoney-notice:{code}:{art_code}:sha256:{digest}",
+        "url": f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html",
+        "as_of": "2026-07-14",
+        "summary": f"公告正文明确陈述：测试（正文SHA-256前16位：{digest}）",
+    }
+    allowed = {
+        evidence["evidence_id"]: {
+            "evidence_id": evidence["evidence_id"],
+            "url": evidence["url"],
+            "as_of": evidence["as_of"],
+            "content_sha256": digest + "0" * 48,
+        }
+    }
+
+    assert _audit_patch4_evidence_valid(
+        evidence,
+        code=code,
+        as_of=date(2026, 7, 15),
+        allowed_bindings=allowed,
+    )
+    assert not _audit_patch4_evidence_valid(evidence, code=code, as_of=date(2026, 7, 15))
+    for field, invalid in (
+        ("source", "伪造公告源"),
+        ("evidence_id", f"malicious:{code}:{art_code}:sha256:{digest}"),
+        ("url", f"https://example.test/notices/{code}/{art_code}.html"),
+        ("summary", "公告正文明确陈述：测试"),
+        ("as_of", "2026-7-14"),
+    ):
+        tampered = dict(evidence)
+        tampered[field] = invalid
+        assert not _audit_patch4_evidence_valid(
+            tampered,
+            code=code,
+            as_of=date(2026, 7, 15),
+            allowed_bindings=allowed,
+        )
 
 
 def test_independent_audit_accepts_committed_exchange_filed_zero_capex_evidence():
@@ -158,6 +265,7 @@ def _market(count: int = 5):
 
 def test_random_audit_is_fixed_seed_and_input_order_independent():
     quotes, financials = _market()
+    quotes["source_trade_date"] = "2026-03-31"
     coldness = _market_coldness_evidence(financials)
     first = audit_random_sample(
         quotes,
@@ -195,7 +303,9 @@ def test_random_audit_is_fixed_seed_and_input_order_independent():
     }
     assert first.provenance["market_coldness_evidence"]["eligible_evidence_count"] == 5
     assert first.provenance["market_coldness_evidence"]["eligible_evidence_coverage"] == 1.0
-    assert first.provenance["market_coldness_evidence"]["sources"] == ["whole-market-test-source"]
+    assert first.provenance["market_coldness_evidence"]["sources"] == [
+        f"{EASTMONEY_SOURCE}; {EASTMONEY_CLIST_ENDPOINT}"
+    ]
     assert len(first.provenance["market_coldness_evidence"]["evidence_sha256"]) == 64
     assert all(value is not None for value in first.scores["market_coldness_score"])
 
@@ -554,6 +664,214 @@ def _forced_type2_row(row, score, *, triggered):
         changed["max_score"] = float(score)
         changed["bear_case"] = _audit_bear_case("type2", payload)
     return changed
+
+
+def _replayable_type7_history(code="000001", as_of="2026-07-15"):
+    shareholder_span_days = 3_652
+    shareholder_start_close = 100.0
+    shareholder_end_close = shareholder_start_close * (1.18 ** (shareholder_span_days / 365.2425))
+    return {
+        "available": True,
+        "code": code,
+        "as_of": as_of,
+        "model_id": "type7-market-history-v1",
+        "shareholder_return": {
+            "available": True,
+            "method": "Tencent backward-adjusted weekly close total-return proxy",
+            "target_years": 10,
+            "start_date": "2016-07-15",
+            "end_date": as_of,
+            "observations": 521,
+            "span_days": shareholder_span_days,
+            "start_close_hfq": shareholder_start_close,
+            "end_close_hfq": shareholder_end_close,
+            "total_return": shareholder_end_close / shareholder_start_close - 1.0,
+            "cagr": (shareholder_end_close / shareholder_start_close) ** (365.2425 / shareholder_span_days) - 1.0,
+            "formula": "total=end_hfq/start_hfq-1;cagr=(end_hfq/start_hfq)^(365.2425/days)-1",
+            "reason": "",
+        },
+        "valuation_history": {
+            "available": True,
+            "window_years": 5,
+            "target_start_date": "2021-07-15",
+            "start_date": "2021-07-15",
+            "end_date": as_of,
+            "row_count": 801,
+            "span_days": 1_826,
+            "start_delay_days": 0,
+            "pe_observations": 800,
+            "pb_observations": 800,
+            "current_pe_ttm": 20.0,
+            "median_pe_ttm": 25.0,
+            "current_pb_mrq": 6.0,
+            "median_pb_mrq": 7.0,
+            "pe_percentile": 0.10,
+            "pb_percentile": 0.12,
+            "pe_distribution": {"values": [10.0, 25.0], "counts": [80, 720]},
+            "pb_distribution": {"values": [5.0, 7.0], "counts": [96, 704]},
+            "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+            "reason": "",
+        },
+    }
+
+
+def _replayable_type7_ledger():
+    type1 = (
+        False,
+        5.0,
+        {"1a": 5.0, "1b": 5.0, "1c": 5.0, "1d": 5.0},
+        {"_status": "observe", "_evidence": "complete"},
+    )
+    outcome, ledger = score_type7_quality_equity(
+        {"code": "000001", "industry": "SOFTWARE", "source_trade_date": "2026-07-15"},
+        type1,
+        _replayable_type7_history(),
+        valuation_evidence_complete=True,
+    )
+    return outcome, ledger
+
+
+def _replayable_type5_bottom_contract():
+    return {
+        "schema_version": 1,
+        "model_id": "type5-bottom-observables-v1",
+        "code": "000001",
+        "as_of": "2026-07-15",
+        "quote_pb": 0.95,
+        "valuation_history": {
+            "available": True,
+            "window_years": 5,
+            "span_days": 1_800,
+            "start_delay_days": 1,
+            "end_date": "2026-07-15",
+            "pb_observations": 800,
+            "pb_percentile": 0.08,
+            "current_pb_mrq": 0.95,
+            "median_pb_mrq": 1.14,
+            "pb_distribution": {"values": [0.76, 1.14], "counts": [64, 736]},
+            "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+        },
+        "market_coldness_record": {
+            "score": 8.5,
+            "evidence_level": "derived_proxy",
+            "evidence": {
+                "source": "市场量价历史",
+                "evidence_id": "market-coldness:000001:20260715",
+                "as_of": "2026-07-15",
+                "summary": "同日量价冷度",
+            },
+            "components": {
+                "as_of_session": "2026-07-15",
+                "raw_values": {
+                    "change_60d_pct": -25.0,
+                    "change_ytd_pct": -30.0,
+                },
+            },
+        },
+        "financial_cycle": {
+            "gross_margin_history": [0.42, 0.30, 0.18, 0.25, 0.38, 0.45, 0.29, 0.35, 0.23, 0.17],
+            "gross_margin_years": list(range(2016, 2026)),
+            "net_profit_history": [100.0, 50.0, 20.0, 40.0, 80.0, 120.0, 60.0, 90.0, 50.0, 30.0],
+            "net_profit_years": list(range(2016, 2026)),
+        },
+    }
+
+
+def _replayable_type5_payload():
+    return {
+        "sub_scores": {"5a": 5.0, "5b": 9.6, "5c": 5.0, "5d": 5.0, "5e": 5.0},
+        "reasons": {
+            "5a": "审计夹具",
+            "5b": "PB8%/0.95;冷8;毛10",
+            "5c": "审计夹具",
+            "5d": "审计夹具",
+            "5e": "审计夹具",
+            "_status": "observe",
+            "_applicable": "yes",
+            "_evidence": "complete",
+        },
+        "status": "observe",
+        "bottom_evidence_mode": "automatic_replay",
+        "bottom_evidence_contract": _replayable_type5_bottom_contract(),
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda payload: payload.pop("bottom_evidence_contract"),
+        lambda payload: payload["bottom_evidence_contract"]["valuation_history"].update(pb_percentile=0.09),
+        lambda payload: payload["bottom_evidence_contract"]["valuation_history"].pop("pb_distribution"),
+        lambda payload: payload["bottom_evidence_contract"]["market_coldness_record"]["components"][
+            "raw_values"
+        ].update(change_60d_pct=-5.0),
+        lambda payload: payload["bottom_evidence_contract"]["financial_cycle"]["gross_margin_history"].pop(),
+        lambda payload: payload["sub_scores"].update({"5b": 9.5}),
+        lambda payload: payload["reasons"].update({"5b": "PB8%/0.95;冷9;毛10"}),
+    ),
+)
+def test_independent_type5_audit_replays_automatic_bottom_raw_contract(mutation):
+    row = {"source_trade_date": "2026-07-15", "pb": 0.95}
+    payload = _replayable_type5_payload()
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload) == []
+
+    mutation(payload)
+
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload)
+
+
+@pytest.mark.parametrize("mode", ("trusted_external", "incomplete", "not_applicable"))
+def test_independent_type5_audit_forbids_contracts_outside_automatic_path(mode):
+    row = {"source_trade_date": "2026-07-15", "pb": 0.95}
+    payload = _replayable_type5_payload()
+    payload["bottom_evidence_mode"] = mode
+    if mode == "not_applicable":
+        payload["status"] = "not_applicable"
+
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload)
+
+
+@pytest.mark.parametrize(
+    ("mode", "status"),
+    (
+        ("trusted_external", "observe"),
+        ("incomplete", "observe"),
+        ("not_applicable", "not_applicable"),
+    ),
+)
+def test_independent_type5_audit_does_not_require_automatic_contract_on_other_paths(mode, status):
+    row = {"source_trade_date": "2026-07-15", "pb": 0.95}
+    payload = _replayable_type5_payload()
+    payload.pop("bottom_evidence_contract")
+    payload["bottom_evidence_mode"] = mode
+    payload["status"] = status
+
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda valuation: valuation.update(pe_observations=799),
+        lambda valuation: valuation.update(median_pb_mrq=7.1),
+        lambda valuation: valuation.update(pe_percentile=0.11),
+        lambda valuation: valuation.pop("pe_distribution"),
+        lambda valuation: valuation.pop("pb_distribution"),
+    ),
+)
+def test_independent_type7_audit_replays_raw_valuation_distributions(mutation):
+    outcome, ledger = _replayable_type7_ledger()
+    status = outcome[3]["_status"]
+    assert _audit_type7_ledger("000001", ledger, status) == []
+    forged = deepcopy(ledger)
+    shareholder_input = next(item for item in forged["template1"]["items"] if item["key"] == "t1_19")["inputs"][
+        "shareholder_return"
+    ]
+    valuation = shareholder_input["valuation_history_contract"]
+
+    mutation(valuation)
+
+    assert any("raw market history replay mismatch" in error for error in _audit_type7_ledger("000001", forged, status))
 
 
 def test_independent_audit_binds_type7_valuation_to_the_actual_dcf_partition():

@@ -2,12 +2,10 @@ name: publish mobile market data
 
 on:
   schedule:
-    # Primary run at 16:17 Asia/Shanghai plus two same-day recovery windows.
-    # Recovery windows become successful no-ops after one complete signed
-    # generation is live; they retry only when the prior run did not publish.
+    # One weekday post-close refresh at 16:17 Asia/Shanghai. Reliability is
+    # handled inside this run so a transient publication delay cannot create
+    # several independent failed runs and notification emails.
     - cron: "17 8 * * 1-5"
-    - cron: "47 8 * * 1-5"
-    - cron: "17 9 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -39,14 +37,36 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $remoteMain = @(git ls-remote --exit-code origin refs/heads/main)
-          if ($LASTEXITCODE -ne 0 -or $remoteMain.Count -ne 1) {
-            throw 'Could not resolve the current remote main revision.'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
           }
-          $remoteMainSha = [string](($remoteMain[0] -split '\s+', 2)[0])
-          if ($remoteMainSha -notmatch '^[0-9a-f]{40}$') {
-            throw 'The current remote main revision is invalid.'
+          function Get-RemoteMainRevision([string]$label) {
+            $attemptLimit = 3
+            $lastFailure = 'the remote returned no usable revision'
+            for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+              $remoteMain = @(git ls-remote --exit-code origin refs/heads/main 2>&1)
+              $exitCode = $LASTEXITCODE
+              if ($exitCode -eq 0 -and $remoteMain.Count -eq 1) {
+                $line = [string]$remoteMain[0]
+                if ($line -match '^(?<sha>[0-9a-f]{40})\s+refs/heads/main$') {
+                  return [string]$Matches.sha
+                }
+                $lastFailure = 'the remote response did not contain one exact main revision'
+              } else {
+                $detail = (($remoteMain | ForEach-Object { [string]$_ }) -join ' ').Trim()
+                if ([string]::IsNullOrWhiteSpace($detail)) {
+                  $detail = 'no diagnostic output'
+                }
+                $lastFailure = "exit code $exitCode; $detail"
+              }
+              Write-Warning "$label attempt $attempt of $attemptLimit failed: $lastFailure"
+              if ($attempt -lt $attemptLimit) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw "$label failed after $attemptLimit attempts: $lastFailure"
           }
+          $remoteMainSha = Get-RemoteMainRevision 'Remote main revision lookup before preflight'
           if ($remoteMainSha -cne $env:GITHUB_SHA) {
             Write-Host 'This workflow run belongs to an older main revision; publication is a successful no-op.'
             'should_run=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -91,9 +111,10 @@ jobs:
             data/cache/quality_history
             data/cache/growth_evidence
             data/cache/research_reports
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py') }}-${{ github.run_id }}
+            data/cache/patch4_evidence
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
           restore-keys: |
-            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py') }}-
+            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
 
       - name: Install locked production dependencies
         run: |
@@ -362,7 +383,8 @@ jobs:
             data/cache/quality_history
             data/cache/growth_evidence
             data/cache/research_reports
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py') }}-${{ github.run_id }}
+            data/cache/patch4_evidence
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
 
   publish:
     if: github.ref == 'refs/heads/main'
@@ -479,14 +501,33 @@ jobs:
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          $remoteMain = @(git ls-remote --exit-code origin refs/heads/main)
-          if ($LASTEXITCODE -ne 0 -or $remoteMain.Count -ne 1) {
-            throw 'Could not resolve the current remote main revision immediately before publication.'
+          function Get-RemoteMainRevision([string]$label) {
+            $attemptLimit = 3
+            $lastFailure = 'the remote returned no usable revision'
+            for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+              $remoteMain = @(git ls-remote --exit-code origin refs/heads/main 2>&1)
+              $exitCode = $LASTEXITCODE
+              if ($exitCode -eq 0 -and $remoteMain.Count -eq 1) {
+                $line = [string]$remoteMain[0]
+                if ($line -match '^(?<sha>[0-9a-f]{40})\s+refs/heads/main$') {
+                  return [string]$Matches.sha
+                }
+                $lastFailure = 'the remote response did not contain one exact main revision'
+              } else {
+                $detail = (($remoteMain | ForEach-Object { [string]$_ }) -join ' ').Trim()
+                if ([string]::IsNullOrWhiteSpace($detail)) {
+                  $detail = 'no diagnostic output'
+                }
+                $lastFailure = "exit code $exitCode; $detail"
+              }
+              Write-Warning "$label attempt $attempt of $attemptLimit failed: $lastFailure"
+              if ($attempt -lt $attemptLimit) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw "$label failed after $attemptLimit attempts: $lastFailure"
           }
-          $remoteMainSha = [string](($remoteMain[0] -split '\s+', 2)[0])
-          if ($remoteMainSha -notmatch '^[0-9a-f]{40}$') {
-            throw 'The current remote main revision is invalid.'
-          }
+          $remoteMainSha = Get-RemoteMainRevision 'Remote main revision lookup before publication'
           if ($remoteMainSha -cne $env:GITHUB_SHA) {
             Write-Warning 'Main advanced while this run was building; the old analysis will not be published.'
             'published=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -495,38 +536,65 @@ jobs:
           $tag = 'mobile-market-data'
           $releaseExists = $false
           $releaseCreated = $false
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            gh release view $tag --repo $env:GH_REPO 2>$null
-            if ($LASTEXITCODE -eq 0) {
+          $releaseQueryAttemptLimit = 3
+          $lastReleaseProbeFailure = 'the release query returned no diagnostic output'
+          for ($attempt = 1; $attempt -le $releaseQueryAttemptLimit; $attempt++) {
+            $releaseProbe = @(gh release view $tag --repo $env:GH_REPO --json tagName 2>&1)
+            $releaseProbeExitCode = $LASTEXITCODE
+            if ($releaseProbeExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$releaseProbe)) {
               $releaseExists = $true
               break
             }
-            if ($attempt -lt 3) {
+            $releaseProbeDetail = (($releaseProbe | ForEach-Object { [string]$_ }) -join ' ').Trim()
+            if ([string]::IsNullOrWhiteSpace($releaseProbeDetail)) {
+              $releaseProbeDetail = 'no diagnostic output'
+            }
+            $lastReleaseProbeFailure = "exit code $releaseProbeExitCode; $releaseProbeDetail"
+            Write-Warning "Mobile data release lookup attempt $attempt of $releaseQueryAttemptLimit failed: $lastReleaseProbeFailure"
+            if ($attempt -lt $releaseQueryAttemptLimit) {
               Start-Sleep -Seconds (2 * $attempt)
             }
           }
           if (-not $releaseExists) {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF mobile market data' --notes 'Automated post-close market snapshot for the DS_DCF mobile client.'
-              if ($LASTEXITCODE -eq 0) {
+            $lastReleaseCreateFailure = $lastReleaseProbeFailure
+            for ($attempt = 1; $attempt -le $releaseQueryAttemptLimit; $attempt++) {
+              $createOutput = @(
+                gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF mobile market data' --notes 'Automated post-close market snapshot for the DS_DCF mobile client.' 2>&1
+              )
+              $createExitCode = $LASTEXITCODE
+              if ($createExitCode -eq 0) {
                 $releaseCreated = $true
                 $releaseExists = $true
                 break
               }
-              gh release view $tag --repo $env:GH_REPO 2>$null
-              if ($LASTEXITCODE -eq 0) {
+              $confirmation = @(gh release view $tag --repo $env:GH_REPO --json tagName 2>&1)
+              $confirmationExitCode = $LASTEXITCODE
+              if ($confirmationExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$confirmation)) {
                 # The release may have predated this run, or the create response
                 # may have been lost.  Treat it as existing for conservative
                 # first-publication cleanup classification.
                 $releaseExists = $true
                 break
               }
-              if ($attempt -lt 3) {
+              $createDetail = (($createOutput | ForEach-Object { [string]$_ }) -join ' ').Trim()
+              $confirmationDetail = (($confirmation | ForEach-Object { [string]$_ }) -join ' ').Trim()
+              if ([string]::IsNullOrWhiteSpace($createDetail)) {
+                $createDetail = 'no diagnostic output'
+              }
+              if ([string]::IsNullOrWhiteSpace($confirmationDetail)) {
+                $confirmationDetail = 'no diagnostic output'
+              }
+              $lastReleaseCreateFailure = (
+                "create exit code ${createExitCode}: $createDetail; " +
+                "confirmation exit code ${confirmationExitCode}: $confirmationDetail"
+              )
+              Write-Warning "Mobile data release creation attempt $attempt of $releaseQueryAttemptLimit failed: $lastReleaseCreateFailure"
+              if ($attempt -lt $releaseQueryAttemptLimit) {
                 Start-Sleep -Seconds (2 * $attempt)
               }
             }
             if (-not $releaseExists) {
-              throw 'Could not create or confirm the mobile data prerelease after three attempts.'
+              throw "Could not create or confirm the mobile data prerelease after $releaseQueryAttemptLimit attempts: $lastReleaseCreateFailure"
             }
           }
 
@@ -552,16 +620,25 @@ jobs:
           }
 
           function Get-ReleaseAssetsJson {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              $output = gh release view $tag --repo $env:GH_REPO --json assets
-              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
+            $attemptLimit = 3
+            $lastFailure = 'the release asset query returned no diagnostic output'
+            for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+              $output = @(gh release view $tag --repo $env:GH_REPO --json assets 2>&1)
+              $exitCode = $LASTEXITCODE
+              if ($exitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
                 return ($output -join [Environment]::NewLine)
               }
-              if ($attempt -lt 3) {
+              $detail = (($output | ForEach-Object { [string]$_ }) -join ' ').Trim()
+              if ([string]::IsNullOrWhiteSpace($detail)) {
+                $detail = 'no diagnostic output'
+              }
+              $lastFailure = "exit code $exitCode; $detail"
+              Write-Warning "Mobile release asset query attempt $attempt of $attemptLimit failed: $lastFailure"
+              if ($attempt -lt $attemptLimit) {
                 Start-Sleep -Seconds (2 * $attempt)
               }
             }
-            throw 'Could not inspect the mobile data prerelease after three attempts.'
+            throw "Could not inspect the mobile data prerelease after $attemptLimit attempts: $lastFailure"
           }
 
           function Receive-ReleaseAsset([string]$name, [string]$directory) {
@@ -884,7 +961,10 @@ jobs:
       - publish
       - deploy_pages
     runs-on: windows-latest
-    timeout-minutes: 20
+    # Three public assets are verified independently.  Leave explicit headroom
+    # beyond the worst-case bounded verification and cleanup retries so a slow
+    # CDN/network incident does not terminate the job before its own diagnosis.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -944,10 +1024,13 @@ jobs:
             $downloaded = Join-Path $env:RUNNER_TEMP "public-$name"
             $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
             $assetVerified = $false
-            for ($attempt = 1; $attempt -le 4; $attempt++) {
+            $lastAssetFailure = 'public release asset remained unavailable'
+            $assetVerificationAttempts = 8
+            $assetVerificationBaseDelaySeconds = 10
+            for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++) {
               try {
                 Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
-                $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/$name?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
+                $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/${name}?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
                 Invoke-WebRequest -Uri $url -OutFile $downloaded -MaximumRedirection 10 -TimeoutSec 45
                 $downloadedAssetHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
                 if ($downloadedAssetHash -cne $expectedAssetHash) {
@@ -956,14 +1039,15 @@ jobs:
                 $assetVerified = $true
                 break
               } catch {
-                Write-Warning "Public immutable asset $name verification attempt $attempt failed."
+                $lastAssetFailure = $_.Exception.Message
+                Write-Warning "Public immutable asset $name verification attempt $attempt of $assetVerificationAttempts failed: $lastAssetFailure"
               }
-              if ($attempt -lt 4) {
-                Start-Sleep -Seconds (3 * $attempt)
+              if ($attempt -lt $assetVerificationAttempts) {
+                Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)
               }
             }
             if (-not $assetVerified) {
-              throw "Public immutable asset $name could not be verified after four attempts."
+              throw "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure"
             }
           }
 
@@ -983,16 +1067,25 @@ jobs:
           }
           $tag = 'mobile-market-data'
           function Get-MobileRelease {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              $output = gh release view $tag --repo $env:GH_REPO --json assets
-              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
+            $attemptLimit = 3
+            $lastFailure = 'the retention asset query returned no diagnostic output'
+            for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+              $output = @(gh release view $tag --repo $env:GH_REPO --json assets 2>&1)
+              $exitCode = $LASTEXITCODE
+              if ($exitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
                 return (($output -join [Environment]::NewLine) | ConvertFrom-Json)
               }
-              if ($attempt -lt 3) {
+              $detail = (($output | ForEach-Object { [string]$_ }) -join ' ').Trim()
+              if ([string]::IsNullOrWhiteSpace($detail)) {
+                $detail = 'no diagnostic output'
+              }
+              $lastFailure = "exit code $exitCode; $detail"
+              Write-Warning "Mobile retention asset query attempt $attempt of $attemptLimit failed: $lastFailure"
+              if ($attempt -lt $attemptLimit) {
                 Start-Sleep -Seconds (2 * $attempt)
               }
             }
-            throw 'Could not inspect mobile assets for retention cleanup after three attempts.'
+            throw "Could not inspect mobile assets for retention cleanup after $attemptLimit attempts: $lastFailure"
           }
           function Remove-MobileReleaseAsset([string]$name) {
             for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -1066,16 +1159,21 @@ jobs:
         run: |
           set -euo pipefail
           retry() {
-            local attempt
-            for attempt in 1 2 3; do
+            local attempt status
+            local attempt_limit=3
+            for (( attempt=1; attempt<=attempt_limit; attempt++ )); do
               if "$@"; then
                 return 0
+              else
+                status=$?
               fi
-              if [[ ${attempt} -lt 3 ]]; then
+              echo "Command attempt ${attempt} of ${attempt_limit} failed with exit ${status}: $*" >&2
+              if [[ ${attempt} -lt ${attempt_limit} ]]; then
                 sleep $((2 * attempt))
               fi
             done
-            return 1
+            echo "Command failed after ${attempt_limit} attempts with exit ${status}: $*" >&2
+            return "${status}"
           }
           if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
             echo "The data audit branch may be prepared only by a main-branch run." >&2
@@ -1088,15 +1186,24 @@ jobs:
 
           remote_line=""
           lookup_status=1
-          for attempt in 1 2 3; do
+          lookup_attempt_limit=3
+          lookup_error="${RUNNER_TEMP}/mobile-data-ls-remote-error.txt"
+          lookup_error_detail="no diagnostic output"
+          for (( attempt=1; attempt<=lookup_attempt_limit; attempt++ )); do
+            : > "${lookup_error}"
             set +e
-            remote_line="$(git ls-remote --exit-code --heads origin refs/heads/mobile-data)"
+            remote_line="$(git ls-remote --exit-code --heads origin refs/heads/mobile-data 2>"${lookup_error}")"
             lookup_status=$?
             set -e
             if [[ ${lookup_status} -eq 0 || ( ${lookup_status} -eq 2 && -z "${remote_line}" ) ]]; then
               break
             fi
-            if [[ ${attempt} -lt 3 ]]; then
+            lookup_error_detail="$(tr '\r\n' '  ' < "${lookup_error}")"
+            if [[ -z "${lookup_error_detail//[[:space:]]/}" ]]; then
+              lookup_error_detail="no diagnostic output"
+            fi
+            echo "Remote mobile-data branch lookup attempt ${attempt} of ${lookup_attempt_limit} failed with exit ${lookup_status}: ${lookup_error_detail}" >&2
+            if [[ ${attempt} -lt ${lookup_attempt_limit} ]]; then
               sleep $((2 * attempt))
             fi
           done
@@ -1112,7 +1219,7 @@ jobs:
             # completed this run's publication and public verification chain.
             git switch --create mobile-data "${GITHUB_SHA}"
           else
-            echo "Could not determine whether the remote data audit branch exists." >&2
+            echo "Could not determine whether the remote data audit branch exists after ${lookup_attempt_limit} attempts (exit ${lookup_status}): ${lookup_error_detail}" >&2
             exit 1
           fi
           if [[ "$(git branch --show-current)" != "mobile-data" ]]; then
@@ -1131,16 +1238,21 @@ jobs:
         run: |
           set -euo pipefail
           retry() {
-            local attempt
-            for attempt in 1 2 3; do
+            local attempt status
+            local attempt_limit=3
+            for (( attempt=1; attempt<=attempt_limit; attempt++ )); do
               if "$@"; then
                 return 0
+              else
+                status=$?
               fi
-              if [[ ${attempt} -lt 3 ]]; then
+              echo "Command attempt ${attempt} of ${attempt_limit} failed with exit ${status}: $*" >&2
+              if [[ ${attempt} -lt ${attempt_limit} ]]; then
                 sleep $((2 * attempt))
               fi
             done
-            return 1
+            echo "Command failed after ${attempt_limit} attempts with exit ${status}: $*" >&2
+            return "${status}"
           }
           source_dir="${RUNNER_TEMP}/ds-dcf-mobile-market-data-release"
           manifest="${source_dir}/manifest.json"

@@ -3,7 +3,7 @@ import inspect
 import math
 import random
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import numpy as np
@@ -11,17 +11,25 @@ import pandas as pd
 
 from data.capex_evidence import resolve_capex_evidence
 from data.datacenter import RPT_MAIN_FINANCIAL_INDICATORS
+from data.market_coldness import (
+    MarketColdnessCoverage,
+    MarketColdnessRecord,
+    MarketColdnessSnapshot,
+    MetricCoverage,
+)
+from data.quality_history import replay_valuation_distribution
 from engine import buy_screener as bs
 from engine import scenarios
+from engine.market_coldness import build_market_coldness_evidence
 from engine.quantitative_evidence import MIN_SECTOR_COMPANIES
 
 
-def score_evidence(key: str, code: str = "000001") -> dict[str, str]:
+def score_evidence(key: str, code: str = "000001", as_of: str = "2026-07-15") -> dict[str, str]:
     normalized_code = str(code).zfill(6) if str(code).isdigit() else str(code)
     result = {
         "source": "unit-test-fixture",
         "evidence_id": f"fixture-{key}:{normalized_code}",
-        "as_of": "2026-07-15",
+        "as_of": as_of,
     }
     return result
 
@@ -31,6 +39,92 @@ TTM_CONTRACT = bs.ReportingPeriodContract(
     current_interim_report_date="2026-03-31",
     prior_interim_report_date="2025-03-31",
 )
+
+
+def production_coldness_fields(
+    *,
+    code: str = "000001",
+    as_of: str = "2026-07-15",
+    target_score: float = 8.0,
+) -> dict[str, object]:
+    """Build the same replayable evidence envelope used by production."""
+
+    if target_score <= 3.0:
+        values = (60.0, 80.0, 30.0, 5.0)
+    elif target_score < 6.0:
+        values = (0.0, 0.0, 3.0, 1.1)
+    elif target_score < 7.5:
+        values = (-10.0, -10.0, 1.5, 0.9)
+    else:
+        values = (-35.0, -45.0, 0.3, 0.4)
+    session = date.fromisoformat(as_of)
+    retrieved = datetime(
+        session.year,
+        session.month,
+        session.day,
+        8,
+        20,
+        tzinfo=timezone.utc,
+    )
+    retrieved_text = retrieved.isoformat()
+    exchange = "SH" if code.startswith("6") else "SZ"
+    record = MarketColdnessRecord(
+        code=code,
+        exchange=exchange,
+        eastmoney_market_id=1 if exchange == "SH" else 0,
+        name=f"样本{code}",
+        change_60d_pct=values[0],
+        change_ytd_pct=values[1],
+        turnover_rate_pct=values[2],
+        volume_ratio=values[3],
+        listing_date="2001-08-27",
+        source_updated_at=retrieved_text,
+        source="Eastmoney push2 clist",
+        source_url="https://push2delay.eastmoney.com/api/qt/clist/get",
+        retrieved_at=retrieved_text,
+        upstream_fields={},
+        missing_reasons={},
+    )
+    metrics = (
+        "change_60d_pct",
+        "change_ytd_pct",
+        "turnover_rate_pct",
+        "volume_ratio",
+        "listing_date",
+        "source_updated_at",
+    )
+    coverage = {metric: MetricCoverage(present=1, missing=0, coverage_rate=1.0) for metric in metrics}
+    snapshot = MarketColdnessSnapshot(
+        available=True,
+        records=(record,),
+        source=record.source,
+        source_url=record.source_url,
+        retrieved_at=retrieved_text,
+        total_expected=1,
+        fetched_count=1,
+        page_count=1,
+        response_bytes=100,
+        universe_coverage_rate=1.0,
+        coverage=MarketColdnessCoverage(1, 1, 1.0, coverage),
+        cache_hit=False,
+        cache_diagnostic="",
+        reason="",
+        failure=None,
+    )
+    produced = build_market_coldness_evidence(
+        snapshot,
+        as_of_session=session,
+        listed_quote_codes=(code,),
+        now=retrieved + timedelta(hours=10),
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+    )[code]
+    return {
+        "market_coldness_score": produced["market_coldness_score"],
+        "market_coldness_score_evidence_level": produced["market_coldness_score_evidence_level"],
+        "market_coldness_score_evidence": produced["market_coldness_score_evidence"],
+        "market_coldness_components": produced["components"],
+    }
 
 
 def _cashflow_row(report_date, operating_cash_flow, capex):
@@ -71,6 +165,8 @@ def base_metrics(**overrides):
         "code": "000001",
         "name": "样本",
         "industry": "SOFTWARE",
+        "source_trade_date": "2026-07-15",
+        "financial_indicator_as_of": "2025-12-31",
         "price": 50.0,
         "pe": 15.0,
         "pb": 1.0,
@@ -169,7 +265,34 @@ def base_metrics(**overrides):
         metrics["roic_wacc_basis"] = "NOPAT/平均投入资本代理"
     for key in bs.QUALITATIVE_SCORE_KEYS:
         if metrics.get(key) is not None and f"{key}_evidence" not in overrides:
-            metrics[f"{key}_evidence"] = score_evidence(key, metrics["code"])
+            metrics[f"{key}_evidence"] = score_evidence(
+                key,
+                metrics["code"],
+                str(metrics.get("source_trade_date") or "2026-07-15"),
+            )
+        if metrics.get(key) is not None and f"{key}_evidence_level" not in overrides:
+            metrics[f"{key}_evidence_level"] = "derived_proxy"
+    if metrics.get("market_coldness_score") is not None and not any(
+        key in overrides
+        for key in (
+            "market_coldness_score_evidence",
+            "market_coldness_score_evidence_level",
+            "market_coldness_components",
+        )
+    ):
+        try:
+            metrics.update(
+                production_coldness_fields(
+                    code=metrics["code"],
+                    as_of=str(metrics.get("source_trade_date") or "2026-07-15"),
+                    target_score=float(metrics["market_coldness_score"]),
+                )
+            )
+        except (KeyError, ValueError):
+            # Some non-coldness tests deliberately use synthetic peer IDs or
+            # non-trading dates.  Their generic fixture must not masquerade as
+            # a valid production coldness record.
+            pass
     return metrics
 
 
@@ -221,6 +344,7 @@ def benchmarks(**overrides):
     bucket = {
         "median_pe": 25.0,
         "median_pb": 2.0,
+        "median_pb_count": 20,
         "median_roe": 0.12,
         "median_cagr": 0.10,
         "median_margin": 0.08,
@@ -232,6 +356,16 @@ def benchmarks(**overrides):
     return {"SOFTWARE": bucket, "ALL": dict(bucket)}
 
 
+def trusted_type5_scores(*, code="000001", **scores):
+    """Build scores as if the strict UI evidence boundary validated them."""
+    result = {"_type5_external_validation_token": bs._TYPE5_EXTERNAL_VALIDATION_TOKEN}
+    for key, value in scores.items():
+        result[key] = value
+        result[f"{key}_evidence"] = score_evidence(key, code)
+        result[f"{key}_evidence_level"] = "primary"
+    return result
+
+
 def type5_history_evidence(
     *,
     code="000001",
@@ -239,6 +373,26 @@ def type5_history_evidence(
     pb_percentile=0.08,
     current_pb=0.95,
 ):
+    observation_count = 800
+    below_count = round(float(pb_percentile) * observation_count)
+    if not math.isclose(
+        below_count / observation_count,
+        float(pb_percentile),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("test percentile must replay exactly at 800 observations")
+    values = []
+    counts = []
+    if below_count:
+        values.append(current_pb * 0.8)
+        counts.append(below_count)
+    if below_count < observation_count:
+        values.append(current_pb * 1.2)
+        counts.append(observation_count - below_count)
+    distribution = {"values": values, "counts": counts}
+    replay = replay_valuation_distribution(distribution, current_pb)
+    assert replay is not None
     return {
         "available": True,
         "code": code,
@@ -251,9 +405,11 @@ def type5_history_evidence(
             "span_days": 1_800,
             "start_delay_days": 1,
             "end_date": as_of,
-            "pb_observations": 800,
+            "pb_observations": observation_count,
             "pb_percentile": pb_percentile,
             "current_pb_mrq": current_pb,
+            "median_pb_mrq": replay["median"],
+            "pb_distribution": distribution,
             "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
         },
         "sources": [{"name": "Eastmoney historical valuation", "url": "https://example.test/valuation"}],
@@ -354,22 +510,10 @@ def type5_coldness_fields(
     change_60d=-25.0,
     change_ytd=-30.0,
 ):
-    return {
-        "market_coldness_score": score,
-        "market_coldness_score_evidence": {
-            "source": "市场量价历史",
-            "evidence_id": f"market-coldness:{code}:{as_of.replace('-', '')}",
-            "as_of": as_of,
-            "summary": "同日量价冷度",
-        },
-        "market_coldness_components": {
-            "as_of_session": as_of,
-            "raw_values": {
-                "change_60d_pct": change_60d,
-                "change_ytd_pct": change_ytd,
-            },
-        },
-    }
+    target_score = score
+    if max(change_60d, change_ytd) > 0:
+        target_score = 2.0
+    return production_coldness_fields(code=code, as_of=as_of, target_score=target_score)
 
 
 def complete_type5_bottom_metrics(**overrides):
@@ -574,6 +718,21 @@ class TestFrameworkInvariants(unittest.TestCase):
             self.assertIsNone(bs._safe_float(value))
             self.assertEqual(bs._score_0_10(value, [(0, 0), (1, 10)]), 0.0)
 
+    def test_finish_exposes_missing_score_placeholder_and_fails_closed(self):
+        scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type1"]}
+        scores["1b"] = float("nan")
+        reasons = {key: "可复算证据" for key in scores}
+
+        triggered, _total, cleaned, metadata = bs._finish("type1", scores, reasons)
+
+        self.assertFalse(triggered)
+        self.assertEqual(cleaned["1b"], 0.0)
+        self.assertEqual(metadata["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(metadata["_evidence"], "incomplete")
+        self.assertIn("1b", metadata["_missing"])
+        self.assertIn("0占位", metadata["_score_placeholder"])
+        self.assertEqual(metadata["_score_quality"], "缺失项以0占位")
+
     def test_displayed_rounding_is_used_for_trigger(self):
         scores = {key: 6.96 for key in bs.TYPE_WEIGHTS["type1"]}
         reasons = {key: "证据" for key in scores}
@@ -598,6 +757,13 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertFalse(triggered)
         self.assertTrue(all(len(text) <= bs.EVIDENCE_MAX_LENGTH for text in compact.values()))
 
+    def test_compact_reason_ends_at_a_complete_evidence_segment_with_an_ellipsis(self):
+        compact = bs._compact_reason("量价冷度;60日19.7%;YTD13.4%;换手2.1%")
+
+        self.assertEqual(compact, "量价冷度;60日19.7%…")
+        self.assertLessEqual(len(compact), bs.EVIDENCE_MAX_LENGTH)
+        self.assertNotIn("YTD13.", compact)
+
     def test_not_applicable_overrides_veto_but_confirmed_veto_overrides_other_missing_evidence(self):
         scores = {key: 1.0 for key in bs.TYPE_WEIGHTS["type4"]}
         reasons = {key: "部分证据" for key in scores}
@@ -611,19 +777,294 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertEqual(confirmed_veto[3]["_status"], bs.STATUS_VETOED)
         self.assertEqual(confirmed_veto[3]["_evidence"], "incomplete")
         self.assertIn("_veto", confirmed_veto[3])
+        self.assertIn("_missing", confirmed_veto[3])
+        self.assertIn("仅供诊断", confirmed_veto[3]["_score_quality"])
+
+    @staticmethod
+    def _decision_payload(type_key, outcome, *, ledger=None, market_context=None):
+        triggered, total, sub_scores, reasons = outcome
+        status = reasons["_status"]
+        payload = {
+            "triggered": triggered,
+            "total": total,
+            "sub_scores": sub_scores,
+            "reasons": reasons,
+            "veto": bool(reasons.get("_veto")),
+            "status": status,
+            "applicable": status != bs.STATUS_NOT_APPLICABLE,
+            "evidence_complete": reasons.get("_evidence") == "complete",
+            bs._DECISION_MARKET_CONTEXT: market_context
+            or {"tradable": True, "reference_price": False, "risk_status": "normal"},
+        }
+        if ledger is not None:
+            payload["ledger"] = ledger
+        return payload
+
+    def test_decision_contract_scope_exclusion_has_zero_bounds(self):
+        payload = self._decision_payload("type5", bs._not_applicable("type5", "不属于强周期公司"))
+
+        decision = bs.replay_buy_decision("type5", payload)
+
+        self.assertEqual(set(decision), bs._DECISION_FIELDS)
+        self.assertEqual(decision["model_id"], "buy-decision-bounds-v1")
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "scope_exclusion")
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (0.0, 0.0))
+        self.assertEqual(decision["veto_state"], "none")
+        self.assertFalse(decision["potentially_triggerable"])
+        self.assertEqual(decision["missing_dimensions"], [])
+
+    def test_decision_contract_confirmed_veto_is_final_despite_other_missing_dimensions(self):
+        scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type4"]}
+        scores["4c"] = 2.0
+        reasons = {key: "部分可复算证据" for key in scores}
+        reasons["_veto"] = "护城河已确认不足"
+        payload = self._decision_payload(
+            "type4",
+            bs._finish(
+                "type4",
+                scores,
+                reasons,
+                veto=True,
+                evidence_complete=False,
+                missing_dimensions=["4a", "4b"],
+            ),
+        )
+
+        decision = bs.replay_buy_decision("type4", payload)
+
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "confirmed_veto")
+        self.assertEqual(decision["veto_state"], "confirmed")
+        self.assertFalse(decision["potentially_triggerable"])
+        self.assertEqual(decision["missing_dimensions"], ["4a", "4b"])
+
+    def test_decision_contract_type3_missing_dimension_uses_theoretical_ten_not_adapter_cap(self):
+        scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type3"]}
+        payload = self._decision_payload(
+            "type3",
+            bs._finish(
+                "type3",
+                scores,
+                {key: "部分可复算证据" for key in scores},
+                evidence_complete=False,
+                missing_dimensions=["3b"],
+            ),
+        )
+
+        decision = bs.replay_buy_decision("type3", payload)
+
+        self.assertEqual(decision["missing_dimensions"], ["3b"])
+        self.assertEqual(decision["score_lower_bound"], 6.4)
+        self.assertEqual(decision["score_upper_bound"], 8.4)
+        self.assertFalse(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "unresolved_missing_evidence")
+        self.assertTrue(decision["potentially_triggerable"])
+
+    def test_decision_contract_conservative_upper_bound_can_finish_partial_no_buy(self):
+        scores = {key: 0.0 for key in bs.TYPE_WEIGHTS["type1"]}
+        scores["1a"] = 5.0
+        scores["1b"] = 4.0
+        payload = self._decision_payload(
+            "type1",
+            bs._finish(
+                "type1",
+                scores,
+                {key: "已知低分证据" for key in scores},
+                evidence_complete=False,
+                missing_dimensions=["1d"],
+            ),
+        )
+
+        decision = bs.replay_buy_decision("type1", payload)
+
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (2.9, 4.4))
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "conservative_upper_bound")
+        self.assertFalse(decision["potentially_triggerable"])
+
+    def test_decision_contract_type6_missing_position_is_an_explicit_action_condition(self):
+        scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type6"]}
+        scores["6e"] = 10.0
+        reasons = {key: "可复算公司证据" for key in scores}
+        reasons["_condition"] = "须确认实际仓位符合建议上限"
+        payload = self._decision_payload(
+            "type6",
+            bs._finish("type6", scores, reasons, extra_condition=False),
+        )
+
+        decision = bs.replay_buy_decision("type6", payload)
+
+        self.assertFalse(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "action_condition")
+        self.assertEqual(decision["missing_dimensions"], ["6e"])
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (6.8, 8.3))
+        self.assertEqual(decision["veto_state"], "none")
+        self.assertTrue(decision["potentially_triggerable"])
+
+    def test_decision_contract_type6_action_input_cannot_rescue_an_unreachable_total(self):
+        scores = {"6a": 5.0, "6b": 5.0, "6c": 0.0, "6d": 0.0, "6e": 10.0}
+        reasons = {key: "可复算公司证据" for key in scores}
+        reasons["_condition"] = "须确认实际仓位符合建议上限"
+        payload = self._decision_payload(
+            "type6",
+            bs._finish("type6", scores, reasons, extra_condition=False),
+        )
+
+        decision = bs.replay_buy_decision("type6", payload)
+
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (2.2, 3.8))
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "conservative_upper_bound")
+        self.assertFalse(decision["potentially_triggerable"])
+
+    def test_decision_contract_type7_uses_strict_per_ledger_upper_bounds(self):
+        scores = {"7a": 8.0, "7b": 8.0, "7c": 6.0}
+        ledger = {
+            "scores": {"template1": 80.0, "template5": 80.0, "patch5": 60.0},
+            "decisive_score_upper_bounds": {"template1": 80.0, "template5": 80.0, "patch5": 70.0},
+            "prerequisites_complete": False,
+        }
+        payload = self._decision_payload(
+            "type7",
+            bs._finish(
+                "type7",
+                scores,
+                {key: "部分质量证据" for key in scores},
+                evidence_complete=False,
+                missing_dimensions=["7c"],
+            ),
+            ledger=ledger,
+        )
+
+        decision = bs.replay_buy_decision("type7", payload)
+
+        self.assertEqual(decision["missing_dimensions"], ["7c"])
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (5.3, 7.7))
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "conservative_upper_bound")
+        self.assertFalse(decision["potentially_triggerable"])
+
+    def test_decision_contract_market_block_is_not_misreported_as_a_company_veto(self):
+        scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type1"]}
+        outcome = bs._finish("type1", scores, {key: "完整证据" for key in scores})
+        payload = self._decision_payload(
+            "type1",
+            outcome,
+            market_context={"tradable": False, "reference_price": False, "risk_status": ""},
+        )
+        payload["reasons"]["_status"] = bs.STATUS_BLOCKED
+        payload["reasons"]["_veto"] = "标的不可交易"
+        payload["reasons"][bs._DECISION_MARKET_BLOCK_REASON] = "标的不可交易"
+        payload["status"] = bs.STATUS_BLOCKED
+        payload["triggered"] = False
+        payload["veto"] = True
+
+        decision = bs.replay_buy_decision("type1", payload)
+
+        self.assertTrue(decision["decision_complete"])
+        self.assertEqual(decision["decision_basis"], "market_block")
+        self.assertEqual(decision["veto_state"], "none")
+        self.assertFalse(decision["potentially_triggerable"])
+
+    def test_decision_contract_replays_hard_vetoes_without_trusting_status_or_veto_flags(self):
+        cases = {
+            "type1": ({"1a": 1.0, "1b": 8.0, "1c": 8.0, "1d": 8.0}, None),
+            "type2": ({"2a": 8.0, "2b": 8.0, "2c": 3.0, "2d": 8.0}, None),
+            "type3": ({"3a": 8.0, "3b": 8.0, "3c": 8.0, "3d": 3.0, "3e": 8.0}, None),
+            "type4": ({"4a": 8.0, "4b": 8.0, "4c": 8.0, "4d": 8.0, "4e": 3.0, "4f": 3.0}, None),
+            "type6": ({"6a": 6.0, "6b": 4.0, "6c": 4.0, "6d": 4.0, "6e": 8.0}, None),
+            "type7": (
+                {"7a": 8.0, "7b": 8.0, "7c": 8.0},
+                {
+                    "scores": {"template1": 80.0, "template5": 80.0, "patch5": 80.0},
+                    "decisive_score_upper_bounds": {"template1": 80.0, "template5": 80.0, "patch5": 80.0},
+                    "prerequisites_complete": True,
+                    "patch5": {"safety_margin_complete": True, "safety_margin_score": 7.0},
+                },
+            ),
+        }
+
+        for type_key, (scores, ledger) in cases.items():
+            with self.subTest(type_key=type_key):
+                outcome = bs._finish(type_key, scores, {key: "完整源证据" for key in scores})
+                payload = self._decision_payload(type_key, outcome, ledger=ledger)
+                decision = bs.replay_buy_decision(type_key, payload)
+
+                self.assertEqual(decision["decision_basis"], "confirmed_veto")
+                self.assertEqual(decision["veto_state"], "confirmed")
+                self.assertFalse(decision["potentially_triggerable"])
+
+        type5_scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type5"]}
+        type5_payload = self._decision_payload(
+            "type5",
+            bs._finish("type5", type5_scores, {key: "附录完整证据" for key in type5_scores}),
+        )
+        type5_decision = bs.replay_buy_decision("type5", type5_payload)
+        self.assertEqual(type5_decision["decision_basis"], "full_evidence")
+        self.assertEqual(type5_decision["veto_state"], "none")
+        self.assertTrue(type5_decision["potentially_triggerable"])
+
+    def test_decision_contract_type3_bubble_is_a_total_cap_not_a_hard_veto(self):
+        scores = {"3a": 9.0, "3b": 9.0, "3c": 9.0, "3d": 9.0, "3e": 3.0}
+        payload = self._decision_payload(
+            "type3",
+            bs._finish("type3", scores, {key: "完整源证据" for key in scores}, total_cap=4.9),
+        )
+
+        decision = bs.replay_buy_decision("type3", payload)
+
+        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (4.9, 4.9))
+        self.assertEqual(decision["veto_state"], "none")
+        self.assertEqual(decision["decision_basis"], "full_evidence")
+        self.assertFalse(decision["potentially_triggerable"])
+
+    def test_type7_safety_veto_survives_a_separate_decisive_score_failure(self):
+        ledger = {
+            "scores": {"template1": 60.0, "template5": 80.0, "patch5": 60.0},
+            "patch5": {
+                "safety_margin_complete": True,
+                "safety_margin_score": 7.0,
+            },
+            "all_scores_strictly_above_70": False,
+            "decisively_not_triggered": True,
+            "decisive_score_upper_bounds": {"template1": 60.0, "template5": 80.0, "patch5": 60.0},
+            "prerequisites": {},
+            "prerequisites_complete": True,
+            "safety_veto": True,
+        }
+        with (
+            patch.object(bs, "assess_quality_equity", return_value=ledger),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            outcome, returned_ledger = bs.score_type7_quality_equity(
+                {"code": "000001", "industry": "SOFTWARE"},
+                bs._not_applicable("type1", "测试"),
+                valuation_evidence_complete=True,
+            )
+
+        payload = self._decision_payload("type7", outcome, ledger=returned_ledger)
+        decision = bs.replay_buy_decision("type7", payload)
+
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_VETOED)
+        self.assertIn("_veto", outcome[3])
+        self.assertEqual(decision["decision_basis"], "confirmed_veto")
+        self.assertEqual(decision["veto_state"], "confirmed")
 
     def test_evidence_reason_never_exposes_internal_model_or_evidence_ids(self):
         automatic = {
             "runway_score": 8.0,
+            "runway_score_evidence_level": "derived_proxy",
             "runway_score_evidence": {
-                "source": "Eastmoney reported data; Patch6 observable-outcome formula v1",
-                "evidence_id": "patch6-observable-outcomes-v1:runway_score:600519:20260717",
+                "source": "Eastmoney reported data; Patch6 observable-outcome formula v2",
+                "evidence_id": "patch6-observable-outcomes-v2:runway_score:600519:20260717",
                 "as_of": "2026-07-17",
-                "summary": "runway_score=8.0;model=patch6-observable-outcomes-v1",
+                "summary": "runway_score=8.0;model=patch6-observable-outcomes-v2",
             },
         }
         manual = {
             "type5_bottom_signal_score": 8.0,
+            "type5_bottom_signal_score_evidence_level": "primary",
             "type5_bottom_signal_score_evidence": {
                 "source": "行业协会",
                 "evidence_id": "bottom-2025-01",
@@ -641,6 +1082,100 @@ class TestFrameworkInvariants(unittest.TestCase):
 
 
 class TestMetricExtraction(unittest.TestCase):
+    def test_evidence_id_does_not_zero_pad_an_unrelated_numeric_token_into_the_security_code(self):
+        extracted = bs.extract_metrics(
+            {
+                "moat_score": 9.0,
+                "moat_score_evidence_level": "primary",
+                "moat_score_evidence": {
+                    "source": "研究记录",
+                    "evidence_id": "report-1",
+                    "as_of": "2026-07-17",
+                    "summary": "研究结论",
+                },
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "market": "SZ",
+                "source_trade_date": "2026-07-17",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertIsNone(extracted["moat_score"])
+        self.assertIsNone(extracted["moat_score_evidence"])
+
+    def test_metric_extraction_preserves_explicit_quantitative_evidence_level(self):
+        extracted = bs.extract_metrics(
+            {
+                "moat_score": 7.5,
+                "moat_score_evidence": {
+                    "source": "可复算代理",
+                    "evidence_id": "proxy:moat:000001:20260717",
+                    "as_of": "2026-07-17",
+                    "summary": "代理结果",
+                },
+                "moat_score_evidence_level": "derived_proxy",
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "market": "SZ",
+                "source_trade_date": "2026-07-17",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertEqual(extracted["moat_score"], 7.5)
+        self.assertEqual(extracted["moat_score_evidence_level"], "derived_proxy")
+
+    def test_metric_extraction_does_not_invent_a_primary_evidence_level(self):
+        extracted = bs.extract_metrics(
+            {
+                "moat_score": 7.5,
+                "moat_score_evidence": {
+                    "source": "未标注来源",
+                    "evidence_id": "unlabelled:moat:000001:20260717",
+                    "as_of": "2026-07-17",
+                    "summary": "未标注结果",
+                },
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "market": "SZ",
+                "source_trade_date": "2026-07-17",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertIsNone(extracted["moat_score_evidence_level"])
+
+    def test_metric_extraction_rejects_an_unlabelled_type7_direct_score(self):
+        extracted = bs.extract_metrics(
+            {
+                "business_clarity_score": 9.5,
+                "business_clarity_score_evidence": {
+                    "source": "未标注研究来源",
+                    "evidence_id": "research:business-clarity:000001:20260717",
+                    "as_of": "2026-07-17",
+                    "summary": "业务清晰度研究分",
+                },
+            },
+            {
+                "code": "000001",
+                "name": "样本",
+                "market": "SZ",
+                "source_trade_date": "2026-07-17",
+            },
+            "SOFTWARE",
+        )
+
+        self.assertIsNone(extracted["business_clarity_score"])
+        self.assertIsNone(extracted["business_clarity_score_evidence"])
+        self.assertIsNone(extracted["business_clarity_score_evidence_level"])
+
     def test_metric_extraction_preserves_exact_rows_for_strict_ttm_source_binding(self):
         source = strict_ttm_source()
         extracted = bs.extract_metrics(
@@ -650,12 +1185,19 @@ class TestMetricExtraction(unittest.TestCase):
                 "income_interim": source["_ttm_income_interim"],
                 "cashflow_interim": source["_ttm_cashflow_interim"],
             },
-            {"code": "000001", "name": "样本", "market": "SZ"},
+            {
+                "code": "000001",
+                "name": "样本",
+                "market": "SZ",
+                "listing_date": "2024-01-10",
+                "source_trade_date": "2026-07-22",
+            },
             "SOFTWARE",
         )
 
         for key, expected in source.items():
             self.assertEqual(extracted[key], expected)
+        self.assertEqual(extracted["listing_date"], "2024-01-10")
 
     def test_main_financial_indicators_feed_formula_backed_metrics_without_unit_confusion(self):
         indicators = []
@@ -976,8 +1518,10 @@ class TestMetricExtraction(unittest.TestCase):
             {
                 "technology_score": 8.0,
                 "technology_score_evidence": score_evidence("technology_score"),
+                "technology_score_evidence_level": "primary",
                 "business_model_score": 7.0,
                 "business_model_score_evidence": score_evidence("business_model_score"),
+                "business_model_score_evidence_level": "primary",
             },
             {"code": "1", "name": "样本"},
             "SOFTWARE",
@@ -986,8 +1530,10 @@ class TestMetricExtraction(unittest.TestCase):
             {
                 "technology_score": 11.0,
                 "technology_score_evidence": score_evidence("technology_score"),
+                "technology_score_evidence_level": "primary",
                 "business_model_score": -1.0,
                 "business_model_score_evidence": score_evidence("business_model_score"),
+                "business_model_score_evidence_level": "primary",
             },
             {"code": "1", "name": "样本"},
             "SOFTWARE",
@@ -1393,6 +1939,7 @@ class TestMetricExtraction(unittest.TestCase):
     def test_qualitative_evidence_uses_shanghai_market_date(self):
         container = {
             "technology_score": 9.0,
+            "technology_score_evidence_level": "primary",
             "technology_score_evidence": {
                 "source": "market-date-source",
                 "evidence_id": "market-date-1",
@@ -1415,6 +1962,7 @@ class TestMetricExtraction(unittest.TestCase):
             "code": "000001",
             "source_trade_date": "2026-07-18",
             "technology_score": 9.0,
+            "technology_score_evidence_level": "primary",
             "technology_score_evidence": {
                 "source": "上市公司公告",
                 "evidence_id": "technology:600519:20260718",
@@ -1583,6 +2131,22 @@ class TestTypeRules(unittest.TestCase):
             with self.subTest(fcf_yield=fcf_yield):
                 self.assertEqual(bs._score_type1_fcf_yield(fcf_yield), score)
 
+    def test_type1_old_fcf_history_cannot_complete_the_current_value_trap_check(self):
+        metric = complete_type1_metrics(
+            fcf_history=[20.0, 25.0, 30.0],
+            fcf_years=[2008, 2009, 2010],
+        )
+
+        triggered, _total, _scores, reasons = bs.score_type1_dcf(
+            metric,
+            complete_dcf_evidence(),
+            benchmarks(),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("价值陷阱", reasons["_missing"])
+
     def test_type1_observation_zone_never_triggers_buy_type(self):
         m = base_metrics(price=109.0, free_cash_flow=30.0, market_cap=100.0, management_alignment_score=8.0)
         triggered, total, scores, reasons = bs.score_type1_dcf(
@@ -1609,6 +2173,8 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("研究缺口", missing[3]["1b"])
         self.assertNotIn("估值折价", missing[3]["1d"])
         self.assertEqual(missing[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("价值陷阱", missing[3]["_missing"])
+        self.assertIn("回归催化", missing[3]["_missing"])
         self.assertNotIn("_veto", missing[3])
 
     def test_type1_confirmed_price_veto_survives_missing_governance(self):
@@ -1622,6 +2188,8 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_status"], bs.STATUS_VETOED)
         self.assertEqual(outcome[3]["_evidence"], "incomplete")
         self.assertEqual(outcome[3]["_veto"], "买入区深度不足")
+        self.assertIn("价值陷阱", outcome[3]["_missing"])
+        self.assertIn("回归催化", outcome[3]["_missing"])
 
     def test_financial_type1_requires_a_justified_pb_result(self):
         for payload in (
@@ -1657,6 +2225,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_status"], bs.STATUS_VETOED)
         self.assertEqual(outcome[3]["_evidence"], "incomplete")
         self.assertEqual(outcome[3]["_veto"], "买入区深度不足")
+        self.assertIn("价值陷阱", outcome[3]["_missing"])
 
     def test_type1_uses_fcf_not_ocf_and_type4_requires_terminal_value(self):
         m = base_metrics(oper_cf=100.0, free_cash_flow=-10.0)
@@ -1719,7 +2288,7 @@ class TestTypeRules(unittest.TestCase):
 
         self.assertGreaterEqual(total, 7.0)
         self.assertEqual(scores["2a"], 10.0)
-        self.assertEqual(scores["2c"], 10.0)
+        self.assertEqual(scores["2c"], 8.0)
         self.assertLessEqual(scores["2d"], 2.0)
         self.assertFalse(triggered)
         self.assertIn("_condition", reasons)
@@ -1824,6 +2393,125 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(missing_reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertNotIn("PE", missing_reasons["2c"])
 
+    def test_type2_rejects_market_coldness_from_a_different_trading_session(self):
+        metric = base_metrics(
+            source_trade_date="2026-07-15",
+            market_coldness_score=10.0,
+            market_coldness_score_evidence=score_evidence(
+                "market_coldness_score",
+                as_of="2025-07-15",
+            ),
+        )
+
+        triggered, _total, scores, reasons = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(scores["2c"], 0.0)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
+    def test_type2_rejects_same_session_derived_proxy_without_replayable_components(self):
+        metric = base_metrics(
+            source_trade_date="2026-07-15",
+            market_coldness_score=8.0,
+            market_coldness_score_evidence_level="derived_proxy",
+            market_coldness_score_evidence={
+                "source": "任意量价代理",
+                "evidence_id": "forged:000001:20260715",
+                "as_of": "2026-07-15",
+                "summary": "同日伪造分数",
+            },
+        )
+
+        triggered, _total, scores, reasons = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(scores["2c"], 0.0)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
+    def test_type2_pb_fallback_requires_a_real_peer_sample_count(self):
+        triggered, _total, scores, reasons = bs.score_type2_two_hot_one_cold(
+            base_metrics(peg=None, pb=1.0),
+            benchmarks(median_pb=2.0, median_pb_count=None),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(scores["2d"], 2.0)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("估值", reasons["_missing"])
+
+    def test_type2_missing_company_chain_is_not_a_complete_zero_or_veto(self):
+        metric = base_metrics(
+            revenue_values=[100.0, 120.0],
+            revenue_years=[2024, 2025],
+            net_profit_history=[10.0, 12.0],
+            net_profit_years=[2024, 2025],
+            margin_history=[0.10, 0.12],
+            margin_years=[2024, 2025],
+            listing_date=None,
+            source_trade_date="2026-07-22",
+            market_coldness_score=10.0,
+            peg=0.5,
+        )
+
+        triggered, _total, _scores, reasons = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(reasons["_evidence"], "incomplete")
+        self.assertIn("公司拐点", reasons["_missing"])
+        self.assertNotIn("_veto", reasons)
+
+    def test_type2_recent_listing_uses_explicit_short_history_contract(self):
+        two_year = base_metrics(
+            listing_date="2024-01-10",
+            source_trade_date="2026-07-22",
+            revenue_values=[100.0, 120.0],
+            revenue_years=[2024, 2025],
+            net_profit_history=[10.0, 12.0],
+            net_profit_years=[2024, 2025],
+            margin_history=[0.10, 0.12],
+            margin_years=[2024, 2025],
+        )
+        quarterly = base_metrics(
+            listing_date="2026-01-10",
+            source_trade_date="2026-07-22",
+            revenue_values=[],
+            revenue_years=[],
+            net_profit_history=[],
+            net_profit_years=[],
+            margin_history=[],
+            margin_years=[],
+        )
+
+        self.assertEqual(bs._type2_company_turn_evidence(two_year), (True, "上市后2年连续财务数据"))
+        self.assertEqual(bs._type2_company_turn_evidence(quarterly), (True, "上市后同口径季报同比"))
+
+    def test_type2_missing_valuation_is_diagnostic_not_a_measured_two_point_score(self):
+        outcome = bs.score_type2_two_hot_one_cold(
+            base_metrics(
+                peg=None,
+                pb=None,
+                market_coldness_score=10.0,
+            ),
+            benchmarks(median_cagr=0.50, median_cagr_count=50, median_pb=2.0),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["2d"], 2.0)
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(outcome[3]["_evidence"], "incomplete")
+        self.assertIn("估值", outcome[3]["_missing"])
+        self.assertIn("仅供诊断", outcome[3]["_score_quality"])
+
     def test_current_industry_contraction_is_not_replaced_by_long_term_story_growth(self):
         bench = benchmarks(
             median_cagr=-0.08,
@@ -1905,7 +2593,7 @@ class TestTypeRules(unittest.TestCase):
             net_profit_history=[10, 15, 25],
             ocf_np_ratio=1.2,
             market_coldness_score=10.0,
-            peg=0.8,
+            peg=0.5,
             interim_current_profit=-1.0,
             interim_prior_profit=0.0,
             interim_profit_yoy=None,
@@ -1993,7 +2681,7 @@ class TestTypeRules(unittest.TestCase):
                         net_profit_history=[10, 15, 25],
                         ocf_np_ratio=1.2,
                         market_coldness_score=10.0,
-                        peg=0.8,
+                        peg=0.5,
                         **values,
                     ),
                     bench,
@@ -2009,7 +2697,7 @@ class TestTypeRules(unittest.TestCase):
                 net_profit_history=[10, 15, 25],
                 ocf_np_ratio=1.2,
                 market_coldness_score=10.0,
-                peg=0.8,
+                peg=0.5,
                 interim_current_revenue=-1.0,
                 interim_prior_revenue=-2.0,
                 interim_revenue_yoy=0.50,
@@ -2200,6 +2888,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(reasons["_status"], bs.STATUS_VETOED)
         self.assertEqual(reasons["_evidence"], "incomplete")
         self.assertEqual(reasons["_veto"], "护城河证据不足")
+        self.assertIn("投入回报", reasons["_missing"])
 
     def test_type3_accepts_dated_mainfinance_roic_and_uses_quality_evidence(self):
         metric = base_metrics(
@@ -2223,7 +2912,10 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(scores["3a"], 5.0)
 
     def test_type3_bad_profit_trend_is_not_overwritten_by_consistency(self):
-        m = base_metrics(profit_1yr_change=-0.15, growth_consistency=0.1)
+        m = base_metrics(
+            net_profit_history=[12.0, 16.0, 20.0, 30.0, 25.5],
+            growth_consistency=0.1,
+        )
         _, _, scores, reasons = bs.score_type3_sustainable_growth(m, benchmarks())
         self.assertLessEqual(scores["3d"], 5.0)
         self.assertIn("下降", reasons["3d"])
@@ -2255,7 +2947,10 @@ class TestTypeRules(unittest.TestCase):
 
     def test_type3_below_ten_percent_trend_is_not_applicable_not_zero_score_failure(self):
         outcome = bs.score_type3_sustainable_growth(
-            base_metrics(trend_growth=0.0999),
+            base_metrics(
+                revenue_values=[100.0, 104.0, 108.0, 113.0, 118.0],
+                trend_growth=0.0999,
+            ),
             benchmarks(),
         )
 
@@ -2276,6 +2971,20 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_evidence"], "incomplete")
         self.assertNotIn("_veto", outcome[3])
 
+    def test_type3_sparse_revenue_years_cannot_prove_sustainable_growth(self):
+        outcome = bs.score_type3_sustainable_growth(
+            complete_type3_metrics(
+                revenue_values=[100.0, 180.0],
+                revenue_years=[2021, 2024],
+                trend_growth=0.20,
+            ),
+            benchmarks(),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("连续4年营收", outcome[3]["_missing"])
+
     def test_type3_confirmed_sustainability_veto_survives_other_missing_evidence(self):
         outcome = bs.score_type3_sustainable_growth(
             complete_type3_metrics(
@@ -2290,6 +2999,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_status"], bs.STATUS_VETOED)
         self.assertEqual(outcome[3]["_evidence"], "incomplete")
         self.assertEqual(outcome[3]["_veto"], "增长不可持续")
+        self.assertIn("投入回报", outcome[3]["_missing"])
 
     def test_type3_weak_qualitative_proxies_are_capped(self):
         triggered, _, scores, reasons = bs.score_type3_sustainable_growth(
@@ -2309,6 +3019,16 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreater(scores["4d"], 6.0)
         self.assertGreater(scores["4f"], 8.0)
         self.assertIn("中性终局", reasons["4d"])
+
+    def test_type4_financial_company_is_explicitly_not_applicable(self):
+        outcome = bs.score_type4_long_runway(
+            base_metrics(industry="INSURANCE"),
+            benchmarks(),
+        )
+
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertEqual(outcome[3]["_applicable"], "no")
+        self.assertEqual(outcome[3]["_evidence"], "complete")
 
     def test_type4_cannot_trigger_without_a_complete_dcf_terminal_value(self):
         triggered, total, scores, reasons = bs.score_type4_long_runway(
@@ -2371,7 +3091,7 @@ class TestTypeRules(unittest.TestCase):
             ),
         ):
             self.assertFalse(outcome[0], type_key)
-            if type_key in {"type3", "type5", "type6"}:
+            if type_key in {"type3", "type4", "type5", "type6"}:
                 self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
             else:
                 self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
@@ -2435,17 +3155,10 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("监管最低", outcome[3]["1b"])
 
     def test_bank_type2_uses_sector_cycle_company_reversion_and_independent_coldness(self):
-        evidence = {
-            "source": "量价模型",
-            "evidence_id": "bank-cold:000001:20251231",
-            "as_of": "2025-12-31",
-            "summary": "独立市场冷度",
-        }
         financial = base_metrics(
             industry="BANK",
             pb=0.70,
             market_coldness_score=8.0,
-            market_coldness_score_evidence=evidence,
             net_interest_margin_history=[0.018, 0.019],
             net_interest_margin_years=[2024, 2025],
             nonperforming_loan_ratio_history=[0.011, 0.010],
@@ -2476,6 +3189,41 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_evidence"], "complete")
         self.assertIn("银行业", outcome[3]["2a"])
         self.assertIn("金融回归", outcome[3]["2b"])
+
+    def test_bank_type2_missing_peer_valuation_is_incomplete_even_with_other_three_dimensions(self):
+        financial = base_metrics(
+            industry="BANK",
+            pb=None,
+            market_coldness_score=8.0,
+            net_interest_margin_history=[0.018, 0.019],
+            net_interest_margin_years=[2024, 2025],
+            nonperforming_loan_ratio_history=[0.011, 0.010],
+            nonperforming_loan_ratio_years=[2024, 2025],
+            capital_adequacy_ratio_history=[0.120, 0.125],
+            capital_adequacy_ratio_years=[2024, 2025],
+            profit_1yr_change=0.20,
+        )
+        sector_benchmarks = {
+            "BANK": {
+                "median_nim_change": 0.0005,
+                "median_nim_change_count": 20,
+                "median_npl_change": -0.0002,
+                "median_npl_change_count": 20,
+                "median_profit_change": 0.08,
+                "median_profit_change_count": 20,
+                "median_bank_capital_change": 0.001,
+                "median_bank_capital_change_count": 20,
+                "median_pb": 1.0,
+                "median_pb_count": 20,
+            }
+        }
+
+        outcome = bs.score_type2_two_hot_one_cold(financial, sector_benchmarks)
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["2d"], 2.0)
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("金融估值", outcome[3]["_missing"])
 
     def test_financial_institutions_are_not_forced_into_type5_strong_cycle_model(self):
         financial = base_metrics(
@@ -2653,6 +3401,17 @@ class TestTypeRules(unittest.TestCase):
                 self.assertIn("厚雪", outcome[3]["_missing"])
                 self.assertNotIn("_veto", outcome[3])
 
+    def test_type4_snow_rejects_roic_and_wacc_with_an_unbound_calculation_basis(self):
+        outcome = bs.score_type4_long_runway(
+            complete_type4_metrics(roic_wacc_basis="unrelated-basis"),
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("厚雪", outcome[3]["_missing"])
+
     def test_type4_industry_bubble_score_never_falls_back_to_company_or_peer_pe(self):
         low_pe = bs.score_type4_long_runway(base_metrics(pe=5.0), benchmarks(median_pe=50.0), complete_dcf_evidence())
         high_pe = bs.score_type4_long_runway(base_metrics(pe=500.0), benchmarks(median_pe=5.0), complete_dcf_evidence())
@@ -2783,12 +3542,74 @@ class TestTypeRules(unittest.TestCase):
 
         self.assertTrue(triggered)
         self.assertGreaterEqual(total, 7.0)
-        self.assertEqual(scores["5b"], 9.6)
+        self.assertEqual(scores["5b"], 9.4)
         self.assertEqual(reasons["_status"], bs.STATUS_TRIGGERED)
         self.assertEqual(reasons["_evidence"], "complete")
         self.assertIn("PB8%/0.95", reasons["5b"])
         self.assertNotIn("成本", reasons["5b"])
         self.assertNotIn("库存", reasons["5b"])
+        contract = bs._type5_automatic_bottom_contract(metric, history)
+        self.assertEqual(
+            set(contract),
+            {
+                "schema_version",
+                "model_id",
+                "code",
+                "as_of",
+                "quote_pb",
+                "valuation_history",
+                "market_coldness_record",
+                "financial_cycle",
+            },
+        )
+        self.assertEqual(contract["schema_version"], bs.TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION)
+        self.assertEqual(contract["model_id"], bs.TYPE5_BOTTOM_EVIDENCE_MODEL_ID)
+        self.assertEqual(contract["code"], "000001")
+        self.assertEqual(contract["as_of"], metric["source_trade_date"])
+        self.assertEqual(contract["valuation_history"], history["valuation_history"])
+        self.assertEqual(
+            contract["market_coldness_record"]["components"],
+            metric["market_coldness_components"],
+        )
+        self.assertEqual(
+            contract["financial_cycle"]["net_profit_history"],
+            metric["net_profit_history"],
+        )
+        self.assertEqual(
+            bs.replay_type5_bottom_evidence_contract(
+                contract,
+                expected_code=metric["code"],
+                expected_as_of=metric["source_trade_date"],
+            ),
+            {"score": scores["5b"], "reason": reasons["5b"]},
+        )
+
+        mutations = {
+            "identity": lambda value: value.update(code="000002"),
+            "valuation_summary": lambda value: value["valuation_history"].update(pb_percentile=0.90),
+            "valuation_distribution": lambda value: value["valuation_history"]["pb_distribution"]["counts"].pop(),
+            "market_session": lambda value: value["market_coldness_record"]["components"].update(
+                as_of_session="2026-07-16"
+            ),
+            "market_drawdown": lambda value: value["market_coldness_record"]["components"]["raw_values"].update(
+                change_60d_pct=20.0,
+                change_ytd_pct=20.0,
+            ),
+            "financial_cycle": lambda value: value["financial_cycle"]["net_profit_history"].pop(),
+        }
+        expected_replay = {"score": scores["5b"], "reason": reasons["5b"]}
+        for label, mutate in mutations.items():
+            forged = copy.deepcopy(contract)
+            mutate(forged)
+            with self.subTest(contract_mutation=label):
+                self.assertNotEqual(
+                    bs.replay_type5_bottom_evidence_contract(
+                        forged,
+                        expected_code=metric["code"],
+                        expected_as_of=metric["source_trade_date"],
+                    ),
+                    expected_replay,
+                )
 
     def test_type5_missing_coldness_keeps_bottom_evidence_incomplete(self):
         metric = complete_type5_bottom_metrics(
@@ -2842,14 +3663,31 @@ class TestTypeRules(unittest.TestCase):
                 self.assertEqual(scores["5b"], 5.0)
                 self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
 
+    def test_type5_recomputes_pb_percentile_from_the_raw_distribution(self):
+        metric = complete_type5_bottom_metrics()
+        history = type5_history_evidence()
+        history["valuation_history"]["pb_percentile"] = 0.90
+
+        outcome = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=history,
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["5b"], 5.0)
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
     def test_type5_history_preflight_requires_decision_reachability(self):
         viable = complete_type5_bottom_metrics()
         viable_outcome = bs.score_type5_counter_cyclical(viable, benchmarks())
         impossible = complete_type5_bottom_metrics(
-            type5_cycle_attribute_score=7.0,
-            type5_survival_score=0.0,
-            type5_upside_elasticity_score=0.0,
-            type5_normalized_earnings_score=0.0,
+            **trusted_type5_scores(
+                type5_cycle_attribute_score=7.0,
+                type5_survival_score=0.0,
+                type5_upside_elasticity_score=0.0,
+                type5_normalized_earnings_score=0.0,
+            ),
         )
         impossible_outcome = bs.score_type5_counter_cyclical(impossible, benchmarks())
         non_cycle = base_metrics(industry="SOFTWARE")
@@ -2876,14 +3714,36 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertIn("证据", reasons["_missing"])
 
+    def test_type5_ancient_gap_cannot_create_a_current_cycle(self):
+        outcome = bs.score_type5_counter_cyclical(
+            base_metrics(
+                industry="COAL",
+                net_profit_history=[1000.0, 100.0, 110.0, 105.0, 108.0],
+                net_profit_years=[2010, 2022, 2023, 2024, 2025],
+                gross_margin_history=[0.50, 0.20, 0.21, 0.205, 0.208],
+                gross_margin_years=[2010, 2022, 2023, 2024, 2025],
+                type5_bottom_signal_score=9.0,
+                type5_survival_score=9.0,
+                type5_upside_elasticity_score=9.0,
+                type5_normalized_earnings_score=9.0,
+            ),
+            benchmarks(),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("强周期属性", outcome[3]["_missing"])
+
     def test_type5_uses_total_after_5a_without_an_extra_5c_hard_gate(self):
         m = base_metrics(
             industry="COAL",
-            type5_cycle_attribute_score=8.0,
-            type5_bottom_signal_score=10.0,
-            type5_survival_score=1.0,
-            type5_upside_elasticity_score=10.0,
-            type5_normalized_earnings_score=10.0,
+            **trusted_type5_scores(
+                type5_cycle_attribute_score=8.0,
+                type5_bottom_signal_score=10.0,
+                type5_survival_score=1.0,
+                type5_upside_elasticity_score=10.0,
+                type5_normalized_earnings_score=10.0,
+            ),
         )
         triggered, total, scores, reasons = bs.score_type5_counter_cyclical(m, benchmarks())
         self.assertGreaterEqual(total, 7.0)
@@ -2894,17 +3754,19 @@ class TestTypeRules(unittest.TestCase):
 
     def test_type5_accepts_complete_financial_history_for_survival_elasticity_and_normalised_earnings(self):
         profits = [100.0, 50.0, 20.0, 40.0, 80.0, 120.0, 60.0, 30.0, 50.0, 90.0]
-        m = base_metrics(
-            industry="COAL",
+        m = complete_type5_bottom_metrics(
             market_cap=500.0,
             net_profit_history=profits,
             net_profit_years=list(range(2016, 2026)),
             gross_margin_history=[0.42, 0.30, 0.18, 0.25, 0.38, 0.45, 0.29, 0.16, 0.23, 0.35],
             gross_margin_years=list(range(2016, 2026)),
-            type5_bottom_signal_score=10.0,
         )
 
-        triggered, total, scores, reasons = bs.score_type5_counter_cyclical(m, benchmarks())
+        triggered, total, scores, reasons = bs.score_type5_counter_cyclical(
+            m,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
 
         self.assertTrue(triggered)
         self.assertGreaterEqual(total, 7.0)
@@ -2912,6 +3774,22 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreaterEqual(scores["5d"], 6.0)
         self.assertGreaterEqual(scores["5e"], 7.0)
         self.assertNotIn("_missing", reasons)
+
+    def test_type5_rejects_serialized_generic_scores_without_the_strict_validation_boundary(self):
+        outcome = bs.score_type5_counter_cyclical(
+            base_metrics(
+                industry="SOFTWARE",
+                type5_cycle_attribute_score=10.0,
+                type5_bottom_signal_score=10.0,
+                type5_survival_score=10.0,
+                type5_upside_elasticity_score=10.0,
+                type5_normalized_earnings_score=10.0,
+            ),
+            benchmarks(),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
 
     def test_type5_rejects_non_cyclical_industry_even_when_company_numbers_look_cyclical(self):
         outcome = bs.score_type5_counter_cyclical(
@@ -3021,6 +3899,50 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("_condition", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_CONDITIONAL)
 
+    def test_type6_unknown_profit_profile_is_insufficient_not_not_applicable(self):
+        cases = (
+            base_metrics(market_cap=10e8, net_profit=None, net_margin=None),
+            base_metrics(market_cap=10e8, net_profit=1.0, net_margin=None),
+        )
+        for metric in cases:
+            with self.subTest(net_profit=metric["net_profit"]):
+                outcome = bs.score_type6_vc(
+                    metric,
+                    benchmarks(median_cagr=0.20, median_cagr_count=20),
+                )
+                self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+                self.assertEqual(outcome[3]["_applicable"], "yes")
+                self.assertEqual(outcome[3]["_evidence"], "incomplete")
+
+    def test_type6_missing_turnaround_history_is_not_a_measured_three_point_failure(self):
+        outcome = bs.score_type6_vc(
+            base_metrics(
+                market_cap=10e8,
+                technology_score=10.0,
+                business_model_score=10.0,
+                net_profit=-1.0,
+                net_margin=-0.01,
+                net_profit_history=[],
+                net_profit_years=[],
+                margin_history=[],
+                margin_years=[],
+                profit_1yr_change=None,
+                interim_profit_yoy=None,
+                interim_current_profit=None,
+                interim_prior_profit=None,
+                interim_profit_pair_basis="missing_same_period_comparator",
+                position_size_pct=1.0,
+                type6_portfolio_pct=8.0,
+            ),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["6d"], 3.0)
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("反转历史", outcome[3]["_missing"])
+        self.assertIn("仅供诊断", outcome[3]["_score_quality"])
+
     def test_type6_requires_loss_or_microprofit_and_consecutive_recovery_years(self):
         profitable = bs.score_type6_vc(
             base_metrics(
@@ -3053,6 +3975,105 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(profitable[3]["_status"], bs.STATUS_NOT_APPLICABLE)
         self.assertIn("微利", profitable[3]["_scope"])
         self.assertEqual(gapped[2]["6d"], 3.0)
+
+    def test_type2_through_type6_cannot_use_old_consecutive_windows_as_current_evidence(self):
+        stale_years = {
+            "revenue_years": [2008, 2009, 2010, 2011, 2012],
+            "net_profit_years": [2008, 2009, 2010, 2011, 2012],
+            "margin_years": [2008, 2009, 2010, 2011, 2012],
+        }
+        type2 = bs.score_type2_two_hot_one_cold(
+            base_metrics(**stale_years, market_coldness_score=10.0),
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+        self.assertFalse(type2[0])
+        self.assertEqual(type2[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("公司拐点", type2[3]["_missing"])
+
+        type3 = bs.score_type3_sustainable_growth(
+            complete_type3_metrics(**stale_years),
+            benchmarks(),
+        )
+        self.assertFalse(type3[0])
+        self.assertEqual(type3[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("最新完整财年", type3[3]["_missing"])
+
+        type4 = bs.score_type4_long_runway(
+            complete_type4_metrics(
+                **stale_years,
+                fcf_years=[2010, 2011, 2012],
+                gross_margin_years=[2010, 2011, 2012],
+                indicator_roic_years=[2010, 2011, 2012],
+            ),
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+        self.assertFalse(type4[0])
+        self.assertEqual(type4[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("厚雪", type4[3]["_missing"])
+
+        stale_type5 = complete_type5_bottom_metrics(
+            net_profit_years=list(range(2006, 2016)),
+            gross_margin_years=list(range(2006, 2016)),
+        )
+        type5 = bs.score_type5_counter_cyclical(
+            stale_type5,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+        self.assertFalse(type5[0])
+        self.assertEqual(type5[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("强周期属性", type5[3]["_missing"])
+
+        type6 = bs.score_type6_vc(
+            base_metrics(
+                market_cap=10e8,
+                technology_score=10.0,
+                business_model_score=10.0,
+                net_profit=-1.0,
+                net_margin=-0.01,
+                net_profit_history=[-5.0, -3.0, -1.0],
+                net_profit_years=[2010, 2011, 2012],
+                margin_history=[-0.05, -0.03, -0.01],
+                margin_years=[2010, 2011, 2012],
+                interim_profit_yoy=None,
+                interim_current_profit=None,
+                interim_prior_profit=None,
+                interim_profit_pair_basis="missing_same_period_comparator",
+                position_size_pct=1.0,
+                type6_portfolio_pct=8.0,
+            ),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+        self.assertFalse(type6[0])
+        self.assertEqual(type6[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("反转历史", type6[3]["_missing"])
+
+    def test_financial_indicator_report_date_selects_the_current_complete_annual_year(self):
+        metric = base_metrics(
+            source_trade_date="2026-03-01",
+            financial_indicator_as_of="2024-12-31",
+            revenue_values=[100.0, 120.0, 140.0],
+            revenue_years=[2022, 2023, 2024],
+        )
+
+        self.assertTrue(
+            bs._aligned_current_consecutive(
+                metric,
+                metric["revenue_values"],
+                metric["revenue_years"],
+                3,
+            )
+        )
+        metric["financial_indicator_as_of"] = None
+        self.assertFalse(
+            bs._aligned_current_consecutive(
+                metric,
+                metric["revenue_values"],
+                metric["revenue_years"],
+                3,
+            )
+        )
 
     def test_traceable_normalised_fcf_prevents_latest_year_spike_from_inflating_scores(self):
         spike_source = strict_ttm_source(prior_annual_fcf=10.0, annual_fcf=10.0, ttm_fcf=1_000.0)
@@ -3348,10 +4369,12 @@ class TestTypeRules(unittest.TestCase):
                     margin_median_hist=0.10,
                     monetary_funds=50.0,
                     total_assets=300.0,
-                    type5_bottom_signal_score=8.0,
-                    type5_survival_score=8.0,
-                    type5_upside_elasticity_score=8.0,
-                    type5_normalized_earnings_score=8.0,
+                    **trusted_type5_scores(
+                        type5_bottom_signal_score=8.0,
+                        type5_survival_score=8.0,
+                        type5_upside_elasticity_score=8.0,
+                        type5_normalized_earnings_score=8.0,
+                    ),
                 ),
                 cyclical_benchmarks,
             ),
@@ -3598,7 +4621,7 @@ class TestMarketScreen(unittest.TestCase):
             "type2": bs._insufficient_evidence("type2", "证据缺失"),
             "type3": bs._finish(
                 "type3",
-                complete_scores("type3"),
+                {**complete_scores("type3"), "3a": 2.0},
                 {**complete_reasons("type3"), "_veto": "公司否决"},
                 veto=True,
             ),
@@ -3628,6 +4651,9 @@ class TestMarketScreen(unittest.TestCase):
         self.assertNotIn("_veto", row["type4"]["reasons"])
         self.assertEqual(row["type5"]["status"], bs.STATUS_BLOCKED)
         self.assertEqual(row["type6"]["status"], bs.STATUS_BLOCKED)
+        self.assertEqual(row["type2"]["decision"]["decision_basis"], "market_block")
+        self.assertTrue(row["type2"]["decision"]["decision_complete"])
+        self.assertFalse(row["type2"]["decision"]["potentially_triggerable"])
 
     def test_normalized_financial_code_collision_is_rejected(self):
         quotes = pd.DataFrame([{"code": "000001", "name": "甲", "price": 1}])
@@ -3667,16 +4693,14 @@ class TestMarketScreen(unittest.TestCase):
             captured.update(metric)
             return neutral_outcome("type2")
 
-        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0}])
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-24"}])
+        fields = production_coldness_fields(as_of="2026-07-24", target_score=8.0)
         evidence = {
             "000001": {
-                "market_coldness_score": 7.4,
-                "market_coldness_score_evidence": {
-                    "source": "Eastmoney quantity-price model",
-                    "evidence_id": "coldness:000001:20260716",
-                    "as_of": date.today().isoformat(),
-                    "summary": "60日/YTD/换手/量比",
-                },
+                "market_coldness_score": fields["market_coldness_score"],
+                "market_coldness_score_evidence_level": fields["market_coldness_score_evidence_level"],
+                "market_coldness_score_evidence": fields["market_coldness_score_evidence"],
+                "components": fields["market_coldness_components"],
             }
         }
         with (
@@ -3690,8 +4714,12 @@ class TestMarketScreen(unittest.TestCase):
         ):
             bs.screen_all_types({"1": {}}, quotes, market_coldness_evidence=evidence)
 
-        self.assertEqual(captured["market_coldness_score"], 7.4)
-        self.assertEqual(captured["market_coldness_score_evidence"]["evidence_id"], "coldness:000001:20260716")
+        self.assertEqual(captured["market_coldness_score"], 8.0)
+        self.assertEqual(
+            captured["market_coldness_score_evidence"]["evidence_id"],
+            "patch6-type2c-quantity-price-v1:000001:20260724",
+        )
+        self.assertEqual(captured["market_coldness_score_evidence_level"], "derived_proxy")
 
     def test_invalid_bulk_market_coldness_evidence_is_rejected(self):
         quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0}])
@@ -3830,6 +4858,13 @@ class TestMarketScreen(unittest.TestCase):
             ],
         )
         self.assertNotEqual(result.iloc[0]["type3"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        row = result.iloc[0]
+        self.assertEqual(row["growth_quality_score"], 8.0)
+        self.assertEqual(row["growth_quality_score_evidence"], score_evidence("growth_quality_score"))
+        self.assertEqual(row["growth_quality_score_evidence_level"], "derived_proxy")
+        self.assertEqual(row["growth_sustainability_score"], 9.0)
+        self.assertEqual(row["growth_sustainability_score_evidence"], score_evidence("growth_sustainability_score"))
+        self.assertEqual(row["growth_sustainability_score_evidence_level"], "derived_proxy")
 
     def test_type7_dcf_flag_is_independent_from_type1_overall_evidence(self):
         def neutral_outcome(type_key):
@@ -3930,6 +4965,152 @@ class TestMarketScreen(unittest.TestCase):
 
         self.assertEqual(loader_calls, [([{"code": "000001", "as_of": "2026-07-17"}], None)])
         self.assertEqual(type7_calls, [None, history])
+        self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
+
+    def test_type7_patch4_loader_replays_bound_announcement_before_history_or_reports(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        code = "000001"
+        as_of = "2026-07-17"
+        evidence_date = "2026-07-16"
+        art_code = "AN" + "1" * 18
+        content_hash = "a" * 64
+        detail_url = f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+        evidence_id = f"eastmoney-notice:{code}:{art_code}:sha256:{content_hash[:16]}"
+
+        def criterion(value):
+            return {
+                "value": value,
+                "evidence": {
+                    "source": "东方财富上市公司公告正文",
+                    "evidence_id": evidence_id,
+                    "url": detail_url,
+                    "as_of": evidence_date,
+                    "summary": f"公告正文明确陈述，正文SHA-256前16位：{content_hash[:16]}",
+                },
+            }
+
+        values = {
+            "core_rd_ownership_pct": 6.0,
+            "esop_core_talent_coverage_pct": 40.0,
+            "long_term_rd_metrics": True,
+            "frontline_rd_equity": True,
+            "short_term_price_binding": False,
+        }
+        assessment = {
+            "schema_version": 1,
+            "model_id": "patch4-technology-shareholder-culture-v1",
+            "code": code,
+            "as_of": as_of,
+            "criteria": {key: criterion(value) for key, value in values.items()},
+        }
+        record = {
+            "available": True,
+            "code": code,
+            "as_of": as_of,
+            "model_id": "patch4-public-announcement-evidence-v2",
+            "assessment": assessment,
+            "criteria": {
+                key: {
+                    "status": "known",
+                    "reason": "direct_explicit_statement",
+                    "value": value,
+                    "evidence_id": evidence_id,
+                    "documents_checked": 1,
+                }
+                for key, value in values.items()
+            },
+            "status": "complete",
+            "documents": [
+                {
+                    "art_code": art_code,
+                    "code": code,
+                    "as_of": evidence_date,
+                    "title": "测试公司2026年限制性股票激励计划公告",
+                    "url": detail_url,
+                    "plan_id": "2026:限制性股票:未分期",
+                    "plan_status": "unrevoked",
+                    "page_size": 1,
+                    "page_sha256": ["b" * 64],
+                    "content_sha256": content_hash,
+                    "content_length": 500,
+                }
+            ],
+            "cache_hit": False,
+            "cache_diagnostic": "disabled",
+            "reason": "",
+        }
+        type7_calls = []
+
+        def fake_type7(metric, _type1, _history, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
+            loaded = metric.get("type7_patch4_assessment") == assessment
+            type7_calls.append(loaded)
+            return neutral_outcome("type7"), {
+                "prerequisites": {
+                    "core_modules_80pct": {"passed": True},
+                    "technology_patch4": {
+                        "applicable": True,
+                        "passed": loaded,
+                        "validation_status": (
+                            "validated_replayable_assessment" if loaded else "missing_validated_patch4_assessment"
+                        ),
+                    },
+                    "three_year_financials": {"passed": True},
+                    "latest_quote_and_valuation": {"passed": True},
+                },
+                "decisive_score_upper_bounds": {
+                    "template1": 90.0,
+                    "template5": 90.0,
+                    "patch5": 90.0,
+                },
+                "safety_veto": False,
+                "decisively_not_triggered": False,
+                "history_request_needed": False,
+                "research_request_needed": False,
+                "loaded_marker": loaded,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        loader_calls = []
+
+        def loader(requests, *, progress_cb):
+            loader_calls.append((requests, progress_cb))
+            return {code: record}
+
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": as_of}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(
+                bs,
+                "extract_metrics",
+                return_value={
+                    "industry": "SOFTWARE",
+                    "source_trade_date": as_of,
+                    "type7_patch4_assessment": {"untrusted": True},
+                },
+            ),
+            patch.object(bs, "enrich_metrics", return_value=({}, {})),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            result = bs.screen_all_types({"1": {}}, quotes, patch4_loader=loader)
+
+        request = [{"code": code, "as_of": as_of}]
+        self.assertEqual(loader_calls, [(request, None)])
+        self.assertEqual(type7_calls, [False, True])
         self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
 
     def test_type7_loads_exact_history_before_report_metadata_and_preserves_both_records(self):
@@ -4066,10 +5247,13 @@ class TestMarketScreen(unittest.TestCase):
             "000001": complete_type5_bottom_metrics(),
             "000002": complete_type5_bottom_metrics(
                 code="000002",
-                type5_cycle_attribute_score=7.0,
-                type5_survival_score=0.0,
-                type5_upside_elasticity_score=0.0,
-                type5_normalized_earnings_score=0.0,
+                **trusted_type5_scores(
+                    code="000002",
+                    type5_cycle_attribute_score=7.0,
+                    type5_survival_score=0.0,
+                    type5_upside_elasticity_score=0.0,
+                    type5_normalized_earnings_score=0.0,
+                ),
                 **type5_coldness_fields(code="000002"),
             ),
             "000003": complete_type5_bottom_metrics(
@@ -4083,6 +5267,7 @@ class TestMarketScreen(unittest.TestCase):
             fields = type5_coldness_fields(code=code)
             return {
                 "market_coldness_score": fields["market_coldness_score"],
+                "market_coldness_score_evidence_level": fields["market_coldness_score_evidence_level"],
                 "market_coldness_score_evidence": fields["market_coldness_score_evidence"],
                 "components": fields["market_coldness_components"],
             }
@@ -4138,8 +5323,17 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(loader_calls, [([{"code": "000001", "as_of": "2026-07-17"}], None)])
         by_code = result.set_index("code")
         self.assertEqual(by_code.loc["000001", "type5"]["status"], bs.STATUS_TRIGGERED)
+        self.assertEqual(by_code.loc["000001", "source_trade_date"], "2026-07-17")
+        self.assertEqual(
+            by_code.loc["000001", "type5"]["bottom_evidence_contract"]["model_id"],
+            bs.TYPE5_BOTTOM_EVIDENCE_MODEL_ID,
+        )
+        self.assertEqual(by_code.loc["000001", "type5"]["bottom_evidence_mode"], "automatic_replay")
         self.assertEqual(by_code.loc["000002", "type5"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertNotIn("bottom_evidence_contract", by_code.loc["000002", "type5"])
+        self.assertEqual(by_code.loc["000002", "type5"]["bottom_evidence_mode"], "incomplete")
         self.assertEqual(by_code.loc["000003", "type5"]["status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertEqual(by_code.loc["000003", "type5"]["bottom_evidence_mode"], "not_applicable")
 
     def test_type7_is_not_scored_twice_when_preflight_history_does_not_change(self):
         def neutral_outcome(type_key):
@@ -4381,6 +5575,44 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(result.iloc[0]["buy_types"], ["type1", "type5", "type3"])
         self.assertTrue(all(len(items) == 3 for items in result["bear_case"]))
         self.assertEqual(bs.validate_screening_result(result), [])
+        for type_key in bs.TYPE_WEIGHTS:
+            payload = result.iloc[0][type_key]
+            self.assertEqual(set(payload["decision"]), bs._DECISION_FIELDS)
+            self.assertEqual(payload["decision"], bs.replay_buy_decision(type_key, payload))
+        tampered = copy.deepcopy(result)
+        tampered.iloc[0]["type3"]["decision"]["score_upper_bound"] = 0.0
+        self.assertTrue(any("type3决策边界" in error for error in bs.validate_screening_result(tampered)))
+
+        suppressed = copy.deepcopy(result)
+        suppressed_type5 = suppressed.iloc[0]["type5"]
+        suppressed_type5["reasons"]["_status"] = bs.STATUS_OBSERVE
+        suppressed_type5["status"] = bs.STATUS_OBSERVE
+        suppressed_type5["triggered"] = False
+        suppressed_type5["decision"] = bs.replay_buy_decision("type5", suppressed_type5)
+        suppressed.at[suppressed.index[0], "buy_types"] = ["type1", "type3"]
+        self.assertTrue(any("type5模型触发重放错误" in error for error in bs.validate_screening_result(suppressed)))
+
+        fake_veto = copy.deepcopy(result)
+        fake_veto_type2 = fake_veto.iloc[0]["type2"]
+        fake_veto_type2["reasons"]["_status"] = bs.STATUS_VETOED
+        fake_veto_type2["reasons"]["_veto"] = "伪造公司否决"
+        fake_veto_type2["status"] = bs.STATUS_VETOED
+        fake_veto_type2["veto"] = True
+        fake_veto_type2["decision"] = bs.replay_buy_decision("type2", fake_veto_type2)
+        self.assertTrue(any("type2否决缺少模型依据" in error for error in bs.validate_screening_result(fake_veto)))
+
+        fake_market_block = copy.deepcopy(result)
+        fake_market_type2 = fake_market_block.iloc[0]["type2"]
+        fake_market_type2["reasons"]["_status"] = bs.STATUS_BLOCKED
+        fake_market_type2["reasons"]["_veto"] = "伪造市场阻断"
+        fake_market_type2["reasons"][bs._DECISION_MARKET_BLOCK_REASON] = "伪造市场阻断"
+        fake_market_type2["status"] = bs.STATUS_BLOCKED
+        fake_market_type2["veto"] = True
+        fake_market_type2["decision"] = bs.replay_buy_decision("type2", fake_market_type2)
+        self.assertTrue(
+            any("type2市场阻断标记错误" in error for error in bs.validate_screening_result(fake_market_block))
+        )
+
         begin_generation.assert_called_once_with()
         duplicated = pd.concat([result, result.iloc[[0]]], ignore_index=True)
         self.assertTrue(any("code重复" in error for error in bs.validate_screening_result(duplicated)))

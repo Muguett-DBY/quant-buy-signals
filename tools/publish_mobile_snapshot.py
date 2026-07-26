@@ -19,9 +19,12 @@ import shutil
 import subprocess
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.growth_evidence import fetch_growth_evidence_batch
+from data.patch4_evidence import fetch_patch4_evidence_batch
 from data.quality_history import fetch_quality_history_batch
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import DEFAULT_SNAPSHOT_PATH, SNAPSHOT_SCHEMA_VERSION, get_market_snapshot, save_market_snapshot
@@ -30,11 +33,19 @@ from data.market_coldness import MARKET_COLDNESS_DECISION_READY_TIME, archive_ma
 from engine.audit import audit_state_hashes
 from engine.pipeline import run_market_analysis
 from tools.run_full_audit import (
+    _analysis_coverage_summary,
     _comparison_quality,
     _load_market_coldness_evidence,
     _refresh_completed,
     _require_market_coldness_release_evidence,
     _snapshot_reporting_period_contract,
+)
+
+
+_MOBILE_STRUCTURAL_EVIDENCE_GATES = (
+    "artifact_integrity_ready",
+    "candidate_visibility_ready",
+    "candidate_recall_ready",
 )
 
 
@@ -160,6 +171,28 @@ def _require_post_close_quotes(snapshot: object, market_as_of: str) -> float:
     return coverage
 
 
+def _mobile_screening_coverage(scores: object) -> dict[str, object]:
+    """Require replayable score records while publishing honest source gaps."""
+
+    if not isinstance(scores, pd.DataFrame):
+        raise RuntimeError("whole-market screening result is not a score frame")
+    coverage = _analysis_coverage_summary(scores)
+    readiness = coverage.get("goal_readiness")
+    if not isinstance(readiness, Mapping):
+        raise RuntimeError("whole-market screening evidence contract is missing")
+    failed = [gate for gate in _MOBILE_STRUCTURAL_EVIDENCE_GATES if readiness.get(gate) is not True]
+    if failed:
+        raise RuntimeError("whole-market screening evidence contract failed: " + ",".join(failed))
+    result = dict(coverage)
+    result["publication_readiness"] = {
+        "artifact_integrity_ready": True,
+        "candidate_visibility_ready": True,
+        "candidate_recall_ready": True,
+        "ideal_zero_gap_ready": readiness.get("ideal_zero_gap_ready") is True,
+    }
+    return result
+
+
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     if refresh and _shanghai_now().time() < MARKET_COLDNESS_DECISION_READY_TIME:
@@ -216,11 +249,13 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         quality_history_loader=fetch_quality_history_batch,
         type3_growth_loader=fetch_growth_evidence_batch,
         research_report_loader=fetch_research_reports_batch,
+        patch4_loader=fetch_patch4_evidence_batch,
     )
     if analysis.issues:
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")
     if not isinstance(analysis.quality, Mapping) or analysis.quality.get("ok") is not True:
         raise RuntimeError("whole-market analysis quality gate did not pass")
+    screening_coverage = _mobile_screening_coverage(analysis.scores)
 
     active_payload_sha256 = getattr(snapshot, "baseline_payload_sha256", None)
     if snapshot.source == "network":
@@ -258,6 +293,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
             "snapshot_validation": dict(snapshot.validation),
             "market_coldness": dict(coldness_status),
             "post_close_quote_coverage": post_close_quote_coverage,
+            "screening_coverage": screening_coverage,
             "source_state": starting_state,
         },
     )

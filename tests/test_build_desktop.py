@@ -21,7 +21,7 @@ from tools import build_desktop
 
 
 def test_desktop_version_matches_project_and_release_manifest():
-    assert __version__ == "11.2.0"
+    assert __version__ == "11.3.0"
     assert build_desktop._project_version() == __version__
     assert build_desktop._release_manifest() == {
         "schema_version": 1,
@@ -477,6 +477,43 @@ def test_ci_workflow_uses_the_unpublishable_smoke_mode_without_a_desktop_secret(
     assert "--output-root build/ci-smoke-output" in workflow
     assert "--work-root build/ci-smoke-work" in workflow
     assert "DS_DCF_DESKTOP_SIGNING_PRIVATE_KEY" not in workflow
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 is required")
+@pytest.mark.parametrize("collision", ["manifest", "private-key"])
+def test_desktop_manifest_signer_never_overwrites_an_input(tmp_path, collision):
+    signer = Path(__file__).resolve().parents[1] / "tools/sign_desktop_update_manifest.ps1"
+    manifest = tmp_path / "update-manifest.json"
+    private_key = tmp_path / "private-key.properties"
+    manifest.write_text("{}\n", encoding="utf-8")
+    private_key.write_text("not-a-real-private-key\n", encoding="utf-8")
+    output = manifest if collision == "manifest" else private_key
+    before = output.read_bytes()
+
+    completed = subprocess.run(
+        [
+            shutil.which("pwsh"),
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(signer),
+            "-Manifest",
+            str(manifest),
+            "-Output",
+            str(output),
+            "-PrivateKeyPath",
+            str(private_key),
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode != 0
+    assert output.read_bytes() == before
+    assert "must not overwrite" in completed.stderr
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 is required")
