@@ -103,16 +103,16 @@
     "688795",
     "688809"
   ],
-  "data_timestamp_utc": "2026-07-26T15:58:24.195756+00:00",
+  "data_timestamp_utc": "2026-07-26T19:30:19.418835+00:00",
   "dcf_valid": 34,
   "eligible_universe_size": 4987,
   "provenance": {
     "audit_schema_version": 4,
-    "generated_at_utc": "2026-07-26T16:55:40.621256+00:00",
-    "snapshot_content_sha256": "79147141117da51ee600ac7ba91c90daa4fe388fed99bd3018040d187d7f61ff",
-    "snapshot_artifact_sha256": "693A3E4A26E6A0071DEA6373397AD2C34E4115DC4C1467886B8786257E5A6EEA",
+    "generated_at_utc": "2026-07-26T19:36:49.893774+00:00",
+    "snapshot_content_sha256": "8f8524c263edebd4421f1b0dfc5f65f1eb9dae35829a9f836050df72115de4c3",
+    "snapshot_artifact_sha256": "3FAA7C1523099E651A2045B14BD59E24CFA2679B11E05B25DB3A5D7C4F72CD77",
     "eligible_universe_sha256": "10e244443b16356fa35e2bb464f0d982caeb12dac215b264fc0e9a28dc845dca",
-    "code_sha256": "046184aeb499e39668319602763e4ecbd093b1a9acf06146167856211cb1b82d",
+    "code_sha256": "e7d69d6f05b838b7bbbb29577abd417d58c3f6c1967f822e643c49ebfe7c78d4",
     "rules_sha256": "f3db36120faabde0813230a13d192703db92fc0e4e4dcc7905d78343e9eb6dca",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
     "dependency_manifest_sha256": "ce9e42dd9b32345e611e8dc6cf36b88958ca0648fbb89290af36fb73597a5802",
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "8eb4e973c452805759f213134c2b154b3eccbf20",
+      "commit": "578f1cba5ffe8e39138b4108c300f62368dc4c55",
       "dirty": false
     },
     "runtime": {
@@ -171,14 +171,15 @@
         "pillow": "12.3.0",
         "plotly": "6.9.0",
         "requests": "2.34.2",
-        "streamlit": "1.59.2"
+        "streamlit": "1.59.2",
+        "gitpython": "3.1.55"
       }
     },
     "caller_metadata": {
       "snapshot_schema_version": 8,
-      "snapshot_source": "cache",
-      "snapshot_payload_sha256": "f3fc834115e8476e1e992a7bf40660cbf8291bdc4cabe8b221eb0490d401eef7",
-      "snapshot_artifact_bytes": 13712439,
+      "snapshot_source": "network",
+      "snapshot_payload_sha256": "1e42c32f5d4b60f1e6e3b5ccfcd9e155e58ea0432c73a27eff50d67c82182dc8",
+      "snapshot_artifact_bytes": 13712362,
       "validation": {
         "quotes": 5200,
         "financials": 5200,
@@ -374,13 +375,13 @@
         "eligible_trading_quotes": 4987,
         "eligible_trading_coverage": 1.0,
         "retrieval_time_coverage": 1.0,
-        "retrieval_time_oldest": 1785080042.4759414,
-        "retrieval_time_latest": 1785080062.4494445,
-        "retrieval_time_span_seconds": 19.97350311279297,
-        "retrieval_age_seconds": 1461.7198150157928,
+        "retrieval_time_oldest": 1785093948.0669086,
+        "retrieval_time_latest": 1785093950.7547574,
+        "retrieval_time_span_seconds": 2.6878488063812256,
+        "retrieval_age_seconds": 271.3519265651703,
         "source_quote_timestamp_oldest": 1784876400.0,
         "source_quote_timestamp_latest": 1784878560.0,
-        "source_quote_age_seconds": 208121.02579951286,
+        "source_quote_age_seconds": 217819.41883516312,
         "trading_source_trade_dates": [
           "2026-07-24"
         ],
@@ -397,8 +398,8 @@
           },
           "source": "Eastmoney push2 clist",
           "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
-          "retrieved_at_oldest": 1785080174.0,
-          "retrieved_at_latest": 1785080174.0
+          "retrieved_at_oldest": 1785093942.0,
+          "retrieved_at_latest": 1785093942.0
         },
         "market_counts": {
           "BJ": 0,
@@ -88794,26 +88795,26 @@
             "capex_absolute": 477645954.43,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 477645954.43,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 477645954.43
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 477645954.43
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -88826,26 +88827,26 @@
             "capex_absolute": 152931464.13,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 152931464.13,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 152931464.13
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 152931464.13
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -88858,26 +88859,26 @@
             "capex_absolute": 165032006.87,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 165032006.87,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 165032006.87
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 165032006.87
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89164,26 +89165,26 @@
             "capex_absolute": 43229002.15,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 43229002.15,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 43229002.15
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 43229002.15
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89196,26 +89197,26 @@
             "capex_absolute": 19317088.82,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 19317088.82,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 19317088.82
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 19317088.82
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89228,26 +89229,26 @@
             "capex_absolute": 17491718.39,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 17491718.39,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 17491718.39
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 17491718.39
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89527,26 +89528,26 @@
             "capex_absolute": 190975416.28,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 190975416.28,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 190975416.28
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 190975416.28
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89559,26 +89560,26 @@
             "capex_absolute": 26715536.03,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 26715536.03,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 26715536.03
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 26715536.03
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89591,26 +89592,26 @@
             "capex_absolute": 11794066.81,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 11794066.81,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 11794066.81
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 11794066.81
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89890,26 +89891,26 @@
             "capex_absolute": 46019496.28,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 46019496.28,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 46019496.28
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 46019496.28
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89922,26 +89923,26 @@
             "capex_absolute": 2977779.46,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 2977779.46,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 2977779.46
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 2977779.46
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -89954,26 +89955,26 @@
             "capex_absolute": 6907919.09,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 6907919.09,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 6907919.09
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 6907919.09
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90253,26 +90254,26 @@
             "capex_absolute": 71743936.03,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 71743936.03,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 71743936.03
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 71743936.03
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90285,26 +90286,26 @@
             "capex_absolute": 16580883.71,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 16580883.71,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 16580883.71
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 16580883.71
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90317,26 +90318,26 @@
             "capex_absolute": 19156119.54,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 19156119.54,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 19156119.54
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 19156119.54
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90616,26 +90617,26 @@
             "capex_absolute": 343859208.69,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 343859208.69,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 343859208.69
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 343859208.69
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90648,26 +90649,26 @@
             "capex_absolute": 44579656.01,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 44579656.01,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 44579656.01
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 44579656.01
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90680,26 +90681,26 @@
             "capex_absolute": 41695629.01,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 41695629.01,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 41695629.01
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 41695629.01
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -90979,26 +90980,26 @@
             "capex_absolute": 18380221.25,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 18380221.25,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 18380221.25
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 18380221.25
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91011,26 +91012,26 @@
             "capex_absolute": 1198473.23,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 1198473.23,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 1198473.23
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 1198473.23
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91043,26 +91044,26 @@
             "capex_absolute": 5936840.06,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 5936840.06,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 5936840.06
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 5936840.06
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91349,26 +91350,26 @@
             "capex_absolute": 265076577.98,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 265076577.98,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 265076577.98
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 265076577.98
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91381,26 +91382,26 @@
             "capex_absolute": 16268767.7,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 16268767.7,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 16268767.7
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 16268767.7
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91413,26 +91414,26 @@
             "capex_absolute": 43703699.8,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 43703699.8,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 43703699.8
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 43703699.8
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91719,26 +91720,26 @@
             "capex_absolute": 354154400.13,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 354154400.13,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 354154400.13
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 354154400.13
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91751,26 +91752,26 @@
             "capex_absolute": 36772426.94,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 36772426.94,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 36772426.94
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 36772426.94
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -91783,26 +91784,26 @@
             "capex_absolute": 199763304.27,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 199763304.27,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 199763304.27
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 199763304.27
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92089,26 +92090,26 @@
             "capex_absolute": 44431094.6,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 44431094.6,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 44431094.6
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 44431094.6
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92121,26 +92122,26 @@
             "capex_absolute": 4531975.43,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 4531975.43,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 4531975.43
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 4531975.43
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92153,26 +92154,26 @@
             "capex_absolute": 10319549.23,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 10319549.23,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 10319549.23
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 10319549.23
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92452,26 +92453,26 @@
             "capex_absolute": 228203220.47,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 228203220.47,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 228203220.47
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 228203220.47
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92484,26 +92485,26 @@
             "capex_absolute": 65589748.03,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 65589748.03,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 65589748.03
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 65589748.03
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92516,26 +92517,26 @@
             "capex_absolute": 64297156.09,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 64297156.09,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 64297156.09
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 64297156.09
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92815,26 +92816,26 @@
             "capex_absolute": 40208602.94,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 40208602.94,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 40208602.94
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 40208602.94
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92847,26 +92848,26 @@
             "capex_absolute": 2422785.88,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 2422785.88,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 2422785.88
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 2422785.88
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -92879,26 +92880,26 @@
             "capex_absolute": 14395361.57,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 14395361.57,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 14395361.57
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 14395361.57
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93178,26 +93179,26 @@
             "capex_absolute": 15110175.31,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 15110175.31,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 15110175.31
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 15110175.31
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93210,26 +93211,26 @@
             "capex_absolute": 1204110.11,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 1204110.11,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 1204110.11
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 1204110.11
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93242,26 +93243,26 @@
             "capex_absolute": 5346524.73,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 5346524.73,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 5346524.73
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 5346524.73
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93541,26 +93542,26 @@
             "capex_absolute": 13818496.11,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 13818496.11,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 13818496.11
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 13818496.11
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93573,26 +93574,26 @@
             "capex_absolute": 177483.78,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 177483.78,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 177483.78
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 177483.78
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93605,26 +93606,26 @@
             "capex_absolute": 530368.59,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 530368.59,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 530368.59
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 530368.59
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93904,26 +93905,26 @@
             "capex_absolute": 2796568.78,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 2796568.78,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 2796568.78
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 2796568.78
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93936,26 +93937,26 @@
             "capex_absolute": 162545.32,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 162545.32,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 162545.32
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 162545.32
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -93968,26 +93969,26 @@
             "capex_absolute": 478024.96,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 478024.96,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 478024.96
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 478024.96
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94274,26 +94275,26 @@
             "capex_absolute": 482989259.81,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 482989259.81,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 482989259.81
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 482989259.81
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94306,26 +94307,26 @@
             "capex_absolute": 17798105.54,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 17798105.54,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 17798105.54
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 17798105.54
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94338,26 +94339,26 @@
             "capex_absolute": 369559134.72,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 369559134.72,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 369559134.72
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 369559134.72
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94637,26 +94638,26 @@
             "capex_absolute": 264099872.04,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 264099872.04,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 264099872.04
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 264099872.04
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94669,26 +94670,26 @@
             "capex_absolute": 29639061.95,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 29639061.95,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 29639061.95
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 29639061.95
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -94701,26 +94702,26 @@
             "capex_absolute": 54381853.18,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 54381853.18,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 54381853.18
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 54381853.18
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95007,26 +95008,26 @@
             "capex_absolute": 205080400.55,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 205080400.55,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 205080400.55
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 205080400.55
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95039,26 +95040,26 @@
             "capex_absolute": 31745232.67,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 31745232.67,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 31745232.67
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 31745232.67
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95071,26 +95072,26 @@
             "capex_absolute": 15430004.13,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 15430004.13,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 15430004.13
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 15430004.13
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95377,26 +95378,26 @@
             "capex_absolute": 178096173.4,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 178096173.4,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 178096173.4
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 178096173.4
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95409,26 +95410,26 @@
             "capex_absolute": 33529360.49,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 33529360.49,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 33529360.49
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 33529360.49
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95441,26 +95442,26 @@
             "capex_absolute": 68909262.74,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 68909262.74,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 68909262.74
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 68909262.74
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95740,26 +95741,26 @@
             "capex_absolute": 132309215.8,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 132309215.8,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 132309215.8
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 132309215.8
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95772,26 +95773,26 @@
             "capex_absolute": 36644720.85,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 36644720.85,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 36644720.85
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 36644720.85
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -95804,26 +95805,26 @@
             "capex_absolute": 16376688.43,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 16376688.43,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 16376688.43
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 16376688.43
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96103,26 +96104,26 @@
             "capex_absolute": 48851349.26,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 48851349.26,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 48851349.26
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 48851349.26
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96135,26 +96136,26 @@
             "capex_absolute": 9146315.65,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 9146315.65,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 9146315.65
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 9146315.65
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96167,26 +96168,26 @@
             "capex_absolute": 15255253.25,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 15255253.25,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 15255253.25
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 15255253.25
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96473,26 +96474,26 @@
             "capex_absolute": 247850795.62,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 247850795.62,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 247850795.62
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 247850795.62
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96505,26 +96506,26 @@
             "capex_absolute": 27791855.96,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 27791855.96,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 27791855.96
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 27791855.96
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96537,26 +96538,26 @@
             "capex_absolute": 58706177.79,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 58706177.79,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 58706177.79
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 58706177.79
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96843,26 +96844,26 @@
             "capex_absolute": 74783278.12,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 74783278.12,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 74783278.12
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 74783278.12
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96875,26 +96876,26 @@
             "capex_absolute": 13098025.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 13098025.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 13098025.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 13098025.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -96907,26 +96908,26 @@
             "capex_absolute": 42830.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 42830.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 42830.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 42830.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97213,26 +97214,26 @@
             "capex_absolute": 21787133000.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 21787133000.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 21787133000.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 21787133000.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97245,26 +97246,26 @@
             "capex_absolute": 4390508000.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 4390508000.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 4390508000.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 4390508000.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97277,26 +97278,26 @@
             "capex_absolute": 5750612000.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 5750612000.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 5750612000.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 5750612000.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97783,26 +97784,26 @@
             "capex_absolute": 159849409.99,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 159849409.99,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 159849409.99
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 159849409.99
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97815,26 +97816,26 @@
             "capex_absolute": 30434771.93,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 30434771.93,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 30434771.93
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 30434771.93
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -97847,26 +97848,26 @@
             "capex_absolute": 59070097.31,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 59070097.31,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 59070097.31
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 59070097.31
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98153,26 +98154,26 @@
             "capex_absolute": 6807081.66,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 6807081.66,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 6807081.66
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 6807081.66
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98185,26 +98186,26 @@
             "capex_absolute": 3387272.0,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 3387272.0,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 3387272.0
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 3387272.0
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98217,26 +98218,26 @@
             "capex_absolute": 1872433.42,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 1872433.42,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 1872433.42
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 1872433.42
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98516,26 +98517,26 @@
             "capex_absolute": 373594349.38,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 373594349.38,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 373594349.38
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 373594349.38
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98548,26 +98549,26 @@
             "capex_absolute": 56653670.78,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 56653670.78,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 56653670.78
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 56653670.78
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98580,26 +98581,26 @@
             "capex_absolute": 58535336.03,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 58535336.03,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 58535336.03
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 58535336.03
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98879,26 +98880,26 @@
             "capex_absolute": 1286968414.66,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 1286968414.66,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 1286968414.66
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 1286968414.66
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98911,26 +98912,26 @@
             "capex_absolute": 258034896.74,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 258034896.74,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 258034896.74
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 258034896.74
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -98943,26 +98944,26 @@
             "capex_absolute": 264694812.57,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 264694812.57,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 264694812.57
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 264694812.57
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99242,26 +99243,26 @@
             "capex_absolute": 182889680.49,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 182889680.49,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 182889680.49
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 182889680.49
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99274,26 +99275,26 @@
             "capex_absolute": 28014011.51,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 28014011.51,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 28014011.51
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 28014011.51
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99306,26 +99307,26 @@
             "capex_absolute": 21866114.84,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 21866114.84,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 21866114.84
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 21866114.84
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99605,26 +99606,26 @@
             "capex_absolute": 16486550.06,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 16486550.06,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 16486550.06
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 16486550.06
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99637,26 +99638,26 @@
             "capex_absolute": 3123080.65,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 3123080.65,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 3123080.65
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 3123080.65
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99669,26 +99670,26 @@
             "capex_absolute": 5571378.15,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 5571378.15,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 5571378.15
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 5571378.15
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -99975,26 +99976,26 @@
             "capex_absolute": 2269157969.98,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 2269157969.98,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 2269157969.98
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 2269157969.98
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100007,26 +100008,26 @@
             "capex_absolute": 600348012.75,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 600348012.75,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 600348012.75
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 600348012.75
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100039,26 +100040,26 @@
             "capex_absolute": 632138541.28,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 632138541.28,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 632138541.28
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 632138541.28
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100338,26 +100339,26 @@
             "capex_absolute": 51389118.43,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 51389118.43,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 51389118.43
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 51389118.43
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100370,26 +100371,26 @@
             "capex_absolute": 17374950.38,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 17374950.38,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 17374950.38
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 17374950.38
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100402,26 +100403,26 @@
             "capex_absolute": 9596251.72,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 9596251.72,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 9596251.72
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 9596251.72
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100708,26 +100709,26 @@
             "capex_absolute": 186002845.96,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 186002845.96,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-12-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 186002845.96
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-12-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-12-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 186002845.96
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-12-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100740,26 +100741,26 @@
             "capex_absolute": 8422153.63,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 8422153.63,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2026-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 8422153.63
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2026-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2026-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 8422153.63
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2026-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -100772,26 +100773,26 @@
             "capex_absolute": 57870013.73,
             "capex_source_field": "CONSTRUCT_LONG_ASSET",
             "capex_provenance": {
+              "schema_version": 1,
+              "status": "complete",
+              "evidence_label": "fact_source_reported",
+              "value": 57870013.73,
+              "source_report": "RPT_DMSK_FN_CASHFLOW",
+              "source_field": "CONSTRUCT_LONG_ASSET",
+              "report_date": "2025-03-31",
+              "formula": "source_reported",
+              "derivation_method": null,
               "components": {
                 "reported_value": 57870013.73
               },
-              "derivation_method": null,
-              "evidence_label": "fact_source_reported",
-              "formula": "source_reported",
-              "report_date": "2025-03-31",
-              "schema_version": 1,
-              "source_field": "CONSTRUCT_LONG_ASSET",
               "source_null_fields": [],
-              "source_query": {
-                "client": "PC",
-                "report_date": "2025-03-31",
-                "report_name": "RPT_DMSK_FN_CASHFLOW",
-                "source": "WEB"
-              },
-              "source_report": "RPT_DMSK_FN_CASHFLOW",
               "source_url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
-              "status": "complete",
-              "value": 57870013.73
+              "source_query": {
+                "report_name": "RPT_DMSK_FN_CASHFLOW",
+                "report_date": "2025-03-31",
+                "source": "WEB",
+                "client": "PC"
+              }
             },
             "capex_provenance_status": "complete"
           },
@@ -371929,6 +371930,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "711b7e265ebcdf21f059fbd013b949d53b8ab75f83faecabcca2546a7f821b37",
-    "markdown": "57d657c69ed116c73e5b2b78d57ab2c69e4701263ac900eeb9f68ff0aaba3c77"
+    "markdown": "3bd0a78d0303b29f299cabb1ac47a5fa96252d72ea6706464e7d9ef064211e78"
   }
 }
