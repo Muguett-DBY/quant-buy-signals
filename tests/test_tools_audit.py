@@ -3,7 +3,7 @@ import io
 import json
 from copy import deepcopy
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -11,6 +11,12 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from data.market_coldness import (
+    MarketColdnessCoverage,
+    MarketColdnessRecord,
+    MarketColdnessSnapshot,
+    MetricCoverage,
+)
 from engine.dcf import ReportingPeriodContract
 from engine import buy_screener as bs
 from engine import quantitative_evidence as qe
@@ -69,6 +75,32 @@ def _market_coldness_record(
     }
     relative = relative or {}
     available = [key for key in run_full_audit._MARKET_COLDNESS_BASE_WEIGHTS if values[key] is not None]
+    relative_context = {}
+    for key in available:
+        if key in relative:
+            section_size = 1001
+            equal_count = 1
+            greater_count = round((relative[key] - 1.0) * (section_size - 1) / 8.0)
+            lower_count = section_size - equal_count - greater_count
+            relative_context[key] = {
+                "section_size": section_size,
+                "minimum_section_records": 1,
+                "section_population": section_size,
+                "source_present": section_size,
+                "source_total": section_size,
+                "lower_count": lower_count,
+                "equal_count": equal_count,
+            }
+        else:
+            relative_context[key] = {
+                "section_size": 1,
+                "minimum_section_records": 2,
+                "section_population": 1,
+                "source_present": 1,
+                "source_total": 1,
+                "lower_count": 0,
+                "equal_count": 1,
+            }
     absolute = {
         key: run_full_audit._market_coldness_interpolate(
             values[key], run_full_audit._MARKET_COLDNESS_ABSOLUTE_BANDS[key]
@@ -114,10 +146,15 @@ def _market_coldness_record(
             "summary": summary,
         },
         "components": {
+            "schema_version": run_full_audit.MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION,
+            "model_id": run_full_audit.MARKET_COLDNESS_MODEL_ID,
+            "code": code,
+            "source": run_full_audit.EASTMONEY_SOURCE,
             "raw_values": values,
             "absolute": {key: round(value, 6) for key, value in absolute.items()},
             "relative": {key: round(value, 6) for key, value in relative.items()},
-            "relative_sample_sizes": {key: 1000 for key in relative},
+            "relative_sample_sizes": {key: relative_context[key]["section_size"] for key in relative},
+            "relative_context": relative_context,
             "metric_scores": {key: round(value, 6) for key, value in metric_scores.items()},
             "weights": {key: round(weights[key], 6) for key in available},
             "ytd_reliability": round(reliability, 6),
@@ -1366,8 +1403,20 @@ def test_market_coldness_replay_accepts_complete_source_rows_outside_the_listed_
         as_of_session="2026-07-16",
     )
 
-    assert replay["full_evidence"] == baseline["full_evidence"]
-    assert replay["eligible_evidence"] == baseline["eligible_evidence"]
+    assert set(replay["full_evidence"]) == set(baseline["full_evidence"])
+    for code, replayed_record in replay["full_evidence"].items():
+        baseline_record = baseline["full_evidence"][code]
+        replayed_without_context = deepcopy(replayed_record)
+        baseline_without_context = deepcopy(baseline_record)
+        replayed_context = replayed_without_context["components"].pop("relative_context")
+        baseline_context = baseline_without_context["components"].pop("relative_context")
+        assert replayed_without_context == baseline_without_context
+        for metric in replayed_context:
+            replayed_counts = dict(replayed_context[metric])
+            baseline_counts = dict(baseline_context[metric])
+            assert replayed_counts.pop("source_present") == baseline_counts.pop("source_present") + 1
+            assert replayed_counts.pop("source_total") == baseline_counts.pop("source_total") + 1
+            assert replayed_counts == baseline_counts
 
 
 def test_market_coldness_replay_rejects_an_extra_row_masking_a_missing_listed_company():
@@ -1566,6 +1615,168 @@ def test_release_market_coldness_gate_rejects_invalid_record_content(record, mes
             eligible_codes=("000001",),
             as_of_session="2026-07-16",
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    [
+        ("schema_version", 999),
+        ("model_id", "forged-market-coldness-model"),
+        ("code", "000002"),
+        ("source", "forged-source"),
+    ],
+)
+def test_release_market_coldness_gate_rejects_forged_component_identity(field, forged_value):
+    record = _market_coldness_record("000001")
+    record["components"][field] = forged_value
+
+    with pytest.raises(RuntimeError, match="component provenance is invalid"):
+        run_full_audit._require_market_coldness_release_evidence(
+            {"000001": record},
+            _market_coldness_status(("000001",)),
+            eligible_codes=("000001",),
+            as_of_session="2026-07-16",
+        )
+
+
+def test_release_market_coldness_gate_rejects_deleted_identity_and_relative_context():
+    for missing_field in ("schema_version", "relative_context"):
+        record = _market_coldness_record("000001")
+        record["components"].pop(missing_field)
+        with pytest.raises(RuntimeError, match="component provenance is invalid"):
+            run_full_audit._require_market_coldness_release_evidence(
+                {"000001": record},
+                _market_coldness_status(("000001",)),
+                eligible_codes=("000001",),
+                as_of_session="2026-07-16",
+            )
+
+    record = _market_coldness_record("000001")
+    record["components"]["relative_context"]["change_60d_pct"].pop("equal_count")
+    with pytest.raises(RuntimeError, match="relative context is invalid"):
+        run_full_audit._require_market_coldness_release_evidence(
+            {"000001": record},
+            _market_coldness_status(("000001",)),
+            eligible_codes=("000001",),
+            as_of_session="2026-07-16",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    [
+        ("section_size", 0),
+        ("section_population", 0),
+        ("source_present", 2),
+        ("source_total", 0),
+        ("lower_count", -1),
+        ("equal_count", 0),
+    ],
+)
+def test_release_market_coldness_gate_rejects_invalid_relative_context_counts(field, forged_value):
+    record = _market_coldness_record("000001")
+    record["components"]["relative_context"]["change_60d_pct"][field] = forged_value
+
+    with pytest.raises(RuntimeError, match="relative counts are invalid"):
+        run_full_audit._require_market_coldness_release_evidence(
+            {"000001": record},
+            _market_coldness_status(("000001",)),
+            eligible_codes=("000001",),
+            as_of_session="2026-07-16",
+        )
+
+
+def test_release_market_coldness_gate_recomputes_relative_rank_and_sample_size_from_context():
+    record = _market_coldness_record(
+        "000001",
+        relative={metric: 9.0 for metric in run_full_audit._MARKET_COLDNESS_BASE_WEIGHTS},
+    )
+    record["components"]["relative_context"]["change_60d_pct"]["lower_count"] = 1
+    with pytest.raises(RuntimeError, match="relative component replay failed"):
+        run_full_audit._require_market_coldness_release_evidence(
+            {"000001": record},
+            _market_coldness_status(("000001",)),
+            eligible_codes=("000001",),
+            as_of_session="2026-07-16",
+        )
+
+    record = _market_coldness_record(
+        "000001",
+        relative={metric: 9.0 for metric in run_full_audit._MARKET_COLDNESS_BASE_WEIGHTS},
+    )
+    record["components"]["relative_sample_sizes"]["change_60d_pct"] += 1
+    with pytest.raises(RuntimeError, match="relative component replay failed"):
+        run_full_audit._require_market_coldness_release_evidence(
+            {"000001": record},
+            _market_coldness_status(("000001",)),
+            eligible_codes=("000001",),
+            as_of_session="2026-07-16",
+        )
+
+
+def test_release_market_coldness_record_gate_accepts_real_builder_output():
+    retrieved_at = "2026-07-16T08:20:00Z"
+    source_record = MarketColdnessRecord(
+        code="600519",
+        exchange="SH",
+        eastmoney_market_id=1,
+        name="贵州茅台",
+        change_60d_pct=-12.0,
+        change_ytd_pct=-8.0,
+        turnover_rate_pct=1.0,
+        volume_ratio=0.8,
+        listing_date="2001-08-27",
+        source_updated_at="2026-07-16T07:34:00Z",
+        source=run_full_audit.EASTMONEY_SOURCE,
+        source_url=run_full_audit.EASTMONEY_CLIST_ENDPOINT,
+        retrieved_at=retrieved_at,
+        upstream_fields={},
+        missing_reasons={},
+    )
+    metrics = (
+        "change_60d_pct",
+        "change_ytd_pct",
+        "turnover_rate_pct",
+        "volume_ratio",
+        "listing_date",
+        "source_updated_at",
+    )
+    snapshot = MarketColdnessSnapshot(
+        available=True,
+        records=(source_record,),
+        source=run_full_audit.EASTMONEY_SOURCE,
+        source_url=run_full_audit.EASTMONEY_CLIST_ENDPOINT,
+        retrieved_at=retrieved_at,
+        total_expected=1,
+        fetched_count=1,
+        page_count=1,
+        response_bytes=100,
+        universe_coverage_rate=1.0,
+        coverage=MarketColdnessCoverage(
+            total_records=1,
+            complete_records=1,
+            complete_record_rate=1.0,
+            by_metric={metric: MetricCoverage(present=1, missing=0, coverage_rate=1.0) for metric in metrics},
+        ),
+        cache_hit=False,
+        cache_diagnostic="",
+        reason="",
+        failure=None,
+    )
+    record = run_full_audit.build_market_coldness_evidence(
+        snapshot,
+        as_of_session="2026-07-16",
+        now=datetime(2026, 7, 16, 8, 25, tzinfo=timezone.utc),
+        min_cross_section_records=1,
+        min_board_turnover_records=1,
+    )["600519"]
+
+    run_full_audit._require_market_coldness_record(
+        "600519",
+        record,
+        parsed_session=date(2026, 7, 16),
+        retrieved_at=retrieved_at,
+    )
 
 
 def test_release_market_coldness_gate_independently_replays_hot_market_and_missing_volume_caps():

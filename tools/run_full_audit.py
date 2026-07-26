@@ -42,6 +42,7 @@ from engine.buy_screener import TYPE_WEIGHTS
 from engine.dcf import ReportingPeriodContract
 from engine.market_coldness import (
     MARKET_COLDNESS_DIAGNOSTICS_SCHEMA_VERSION,
+    MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION,
     MARKET_COLDNESS_MODEL_ID,
     MAX_COLDNESS_SCORE,
     MAX_SCORE_WITHOUT_VOLUME_RATIO,
@@ -470,14 +471,14 @@ def _replay_market_coldness_reference_artifact(
         raise RuntimeError("market-coldness source does not cover the listed universe")
 
     source_count = len(source_records)
+    source_present_counts = {
+        metric: sum(values[metric] is not None for _listed_date, values, _updated in source_records.values())
+        for metric in _MARKET_COLDNESS_BASE_WEIGHTS
+    }
     source_coverages = {
         "listing_date": sum(listed_date is not None for listed_date, _values, _updated in source_records.values())
         / source_count,
-        **{
-            metric: sum(values[metric] is not None for _listed_date, values, _updated in source_records.values())
-            / source_count
-            for metric in _MARKET_COLDNESS_BASE_WEIGHTS
-        },
+        **{metric: source_present_counts[metric] / source_count for metric in _MARKET_COLDNESS_BASE_WEIGHTS},
     }
     for metric in (*_MARKET_COLDNESS_RAW_KEYS - {"volume_ratio"}, "listing_date"):
         if source_coverages[metric] < MIN_SOURCE_FIELD_COVERAGE:
@@ -542,6 +543,7 @@ def _replay_market_coldness_reference_artifact(
         }
         relative: dict[str, float] = {}
         relative_samples: dict[str, int] = {}
+        relative_context: dict[str, dict[str, int]] = {}
         for metric in available:
             section = global_sections[metric]
             minimum = min_cross_section_records
@@ -552,6 +554,17 @@ def _replay_market_coldness_reference_artifact(
                     section = board_turnover[board]
                     minimum = min_board_turnover_records
                     population = board_counts[board]
+            lower = bisect.bisect_left(section, values[metric])
+            upper = bisect.bisect_right(section, values[metric])
+            relative_context[metric] = {
+                "section_size": len(section),
+                "minimum_section_records": minimum,
+                "section_population": population,
+                "source_present": source_present_counts[metric],
+                "source_total": source_count,
+                "lower_count": lower,
+                "equal_count": upper - lower,
+            }
             reference_coverage = len(section) / population
             if (
                 len(section) >= minimum
@@ -598,10 +611,15 @@ def _replay_market_coldness_reference_artifact(
                 "summary": summary,
             },
             "components": {
+                "schema_version": MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION,
+                "model_id": MARKET_COLDNESS_MODEL_ID,
+                "code": code,
+                "source": EASTMONEY_SOURCE,
                 "raw_values": values,
                 "absolute": {key: round(value, 6) for key, value in absolute.items()},
                 "relative": {key: round(value, 6) for key, value in relative.items()},
                 "relative_sample_sizes": relative_samples,
+                "relative_context": relative_context,
                 "metric_scores": {key: round(value, 6) for key, value in metric_scores.items()},
                 "weights": {key: round(weights[key], 6) for key in available},
                 "ytd_reliability": round(ytd_reliability, 6),
@@ -716,6 +734,14 @@ def _require_market_coldness_record(
     score = _finite_numeric(record.get("market_coldness_score"))
     if score is None or not 1.0 <= score <= MAX_COLDNESS_SCORE:
         raise RuntimeError(f"release market-coldness score is invalid: {code}")
+    expected_record_keys = {
+        "market_coldness_score",
+        "market_coldness_score_evidence_level",
+        "market_coldness_score_evidence",
+        "components",
+    }
+    if set(record) != expected_record_keys or record.get("market_coldness_score_evidence_level") != "derived_proxy":
+        raise RuntimeError(f"release market-coldness evidence record is invalid: {code}")
     metadata = record.get("market_coldness_score_evidence")
     components = record.get("components")
     expected_id = f"{MARKET_COLDNESS_MODEL_ID}:{code}:{parsed_session.strftime('%Y%m%d')}"
@@ -731,10 +757,15 @@ def _require_market_coldness_record(
     ):
         raise RuntimeError(f"release market-coldness score provenance is invalid: {code}")
     expected_component_keys = {
+        "schema_version",
+        "model_id",
+        "code",
+        "source",
         "raw_values",
         "absolute",
         "relative",
         "relative_sample_sizes",
+        "relative_context",
         "metric_scores",
         "weights",
         "ytd_reliability",
@@ -751,6 +782,10 @@ def _require_market_coldness_record(
     if (
         not isinstance(components, Mapping)
         or set(components) != expected_component_keys
+        or components.get("schema_version") != MARKET_COLDNESS_EVIDENCE_SCHEMA_VERSION
+        or components.get("model_id") != MARKET_COLDNESS_MODEL_ID
+        or components.get("code") != code
+        or components.get("source") != EASTMONEY_SOURCE
         or components.get("as_of_session") != parsed_session.isoformat()
         or components.get("source_url") != EASTMONEY_CLIST_ENDPOINT
         or components.get("retrieved_at") != retrieved_at
@@ -798,32 +833,85 @@ def _require_market_coldness_record(
     absolute = components.get("absolute")
     relative = components.get("relative")
     relative_samples = components.get("relative_sample_sizes")
+    relative_context = components.get("relative_context")
     metric_scores = components.get("metric_scores")
     weights = components.get("weights")
     if (
         not isinstance(absolute, Mapping)
         or set(absolute) != set(available)
         or not isinstance(relative, Mapping)
-        or not set(relative).issubset(available)
         or not isinstance(relative_samples, Mapping)
-        or set(relative_samples) != set(relative)
+        or not isinstance(relative_context, Mapping)
+        or set(relative_context) != set(available)
         or not isinstance(metric_scores, Mapping)
         or set(metric_scores) != set(available)
         or not isinstance(weights, Mapping)
         or set(weights) != set(available)
     ):
         raise RuntimeError(f"release market-coldness score components are invalid: {code}")
-    for metric, value in relative.items():
-        relative_value = _finite_numeric(value)
-        sample_size = relative_samples.get(metric)
+
+    context_keys = {
+        "section_size",
+        "minimum_section_records",
+        "section_population",
+        "source_present",
+        "source_total",
+        "lower_count",
+        "equal_count",
+    }
+    expected_relative: dict[str, float] = {}
+    expected_relative_samples: dict[str, int] = {}
+    for metric in available:
+        context = relative_context.get(metric)
+        if not isinstance(context, Mapping) or set(context) != context_keys:
+            raise RuntimeError(f"release market-coldness relative context is invalid: {code}:{metric}")
+        if any(isinstance(context[field], bool) or not isinstance(context[field], int) for field in context_keys):
+            raise RuntimeError(f"release market-coldness relative counts are invalid: {code}:{metric}")
+        section_size = context["section_size"]
+        minimum = context["minimum_section_records"]
+        population = context["section_population"]
+        source_present = context["source_present"]
+        source_total = context["source_total"]
+        lower = context["lower_count"]
+        equal = context["equal_count"]
         if (
-            relative_value is None
-            or not 1.0 <= relative_value <= 9.0
-            or isinstance(sample_size, bool)
-            or not isinstance(sample_size, int)
-            or sample_size < 2
+            minimum < 1
+            or section_size < 1
+            or population < section_size
+            or source_total < source_present
+            or source_present < 1
+            or lower < 0
+            or equal < 1
+            or lower + equal > section_size
         ):
-            raise RuntimeError(f"release market-coldness relative component is invalid: {code}:{metric}")
+            raise RuntimeError(f"release market-coldness relative counts are invalid: {code}:{metric}")
+        eligible = (
+            section_size >= minimum
+            and section_size / population >= MIN_SOURCE_FIELD_COVERAGE
+            and source_present / source_total >= MIN_SOURCE_FIELD_COVERAGE
+        )
+        if eligible:
+            if section_size < 2 or equal == section_size:
+                rank_score = 5.0
+            else:
+                greater = section_size - lower - equal
+                rank_score = 1.0 + 8.0 * (greater + 0.5 * (equal - 1)) / (section_size - 1)
+                rank_score = max(1.0, min(9.0, rank_score))
+            expected_relative[metric] = rank_score
+            expected_relative_samples[metric] = section_size
+    if (
+        set(relative) != set(expected_relative)
+        or set(relative_samples) != set(expected_relative_samples)
+        or any(
+            not _close_numeric(relative.get(metric), round(value, 6), tolerance=5e-7)
+            for metric, value in expected_relative.items()
+        )
+        or any(
+            isinstance(relative_samples.get(metric), bool) or relative_samples.get(metric) != sample_size
+            for metric, sample_size in expected_relative_samples.items()
+        )
+    ):
+        raise RuntimeError(f"release market-coldness relative component replay failed: {code}")
 
     expected_absolute = {
         metric: _market_coldness_interpolate(values[metric], _MARKET_COLDNESS_ABSOLUTE_BANDS[metric])
@@ -833,8 +921,8 @@ def _require_market_coldness_record(
         raise RuntimeError(f"release market-coldness absolute component replay failed: {code}")
     expected_metric_scores = {
         metric: (
-            0.8 * expected_absolute[metric] + 0.2 * float(relative[metric])
-            if metric in relative
+            0.8 * expected_absolute[metric] + 0.2 * expected_relative[metric]
+            if metric in expected_relative
             else expected_absolute[metric]
         )
         for metric in available
