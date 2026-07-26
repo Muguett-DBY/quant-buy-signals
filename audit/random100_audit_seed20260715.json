@@ -112,8 +112,8 @@
     "snapshot_content_sha256": "8f8524c263edebd4421f1b0dfc5f65f1eb9dae35829a9f836050df72115de4c3",
     "snapshot_artifact_sha256": "3FAA7C1523099E651A2045B14BD59E24CFA2679B11E05B25DB3A5D7C4F72CD77",
     "eligible_universe_sha256": "10e244443b16356fa35e2bb464f0d982caeb12dac215b264fc0e9a28dc845dca",
-    "code_sha256": "e7d69d6f05b838b7bbbb29577abd417d58c3f6c1967f822e643c49ebfe7c78d4",
-    "rules_sha256": "f3db36120faabde0813230a13d192703db92fc0e4e4dcc7905d78343e9eb6dca",
+    "code_sha256": "2a4b4ab071f8fc294ba30fd00ac9f4158d7e1db8cc64af8865d95aacef01b798",
+    "rules_sha256": "8c4b6d496c27f4c087536511b49cbd55e051590af764d07c8de25bc5f407326d",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
     "dependency_manifest_sha256": "ce9e42dd9b32345e611e8dc6cf36b88958ca0648fbb89290af36fb73597a5802",
     "patch6_source": {
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "578f1cba5ffe8e39138b4108c300f62368dc4c55",
+      "commit": "7c0cda99ba7a12476a0668bd22d3cccc9622c017",
       "dirty": false
     },
     "runtime": {
@@ -371930,6 +371930,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "711b7e265ebcdf21f059fbd013b949d53b8ab75f83faecabcca2546a7f821b37",
-    "markdown": "3bd0a78d0303b29f299cabb1ac47a5fa96252d72ea6706464e7d9ef064211e78"
+    "markdown": "4f984028b7079122dba9128541556fd78ed5b5089b40fa81d6b8808a64c4d2bd"
   }
 }

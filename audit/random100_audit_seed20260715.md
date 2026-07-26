@@ -14,15 +14,15 @@
 - triggered_by_type: `{'type1': 1, 'type2': 2, 'type3': 0, 'type4': 0, 'type5': 1, 'type6': 0, 'type7': 0}`
 - snapshot_content_sha256: `8f8524c263edebd4421f1b0dfc5f65f1eb9dae35829a9f836050df72115de4c3`
 - snapshot_artifact_sha256: `3FAA7C1523099E651A2045B14BD59E24CFA2679B11E05B25DB3A5D7C4F72CD77`
-- code_sha256: `e7d69d6f05b838b7bbbb29577abd417d58c3f6c1967f822e643c49ebfe7c78d4`
-- rules_sha256: `f3db36120faabde0813230a13d192703db92fc0e4e4dcc7905d78343e9eb6dca`
+- code_sha256: `2a4b4ab071f8fc294ba30fd00ac9f4158d7e1db8cc64af8865d95aacef01b798`
+- rules_sha256: `8c4b6d496c27f4c087536511b49cbd55e051590af764d07c8de25bc5f407326d`
 - dependency_manifest_sha256: `ce9e42dd9b32345e611e8dc6cf36b88958ca0648fbb89290af36fb73597a5802`
 - industry_sha256: `e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631`
 - patch6_source: `{'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}`
 - type7_source_documents: `{'template1': {'path_at_model_authoring': 'E:\\模板汇总MD\\第1模板.md', 'sha256': '98d8a101a08cdb122afd23c793faa3edf5e4e426eae09e7fc20901476ea95b1d'}, 'template5': {'path_at_model_authoring': 'E:\\模板汇总MD\\第5模板.md', 'sha256': '37a9cd43633bcd0bc1f2811738d48a7d1cff659e5ef11b6fd9152f2ed0686946'}, 'patch5': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁5.md', 'sha256': '8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4'}, 'patch6': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}}`
 - risk_parameter_sources: `{'model_as_of': '2026-07-15', 'risk_free_rate_as_of': '2026-07-15', 'risk_free_rate_source': 'ChinaBond China Government Bond Yield Curve 10Y', 'risk_free_rate_source_url': 'https://yield.chinabond.com.cn/cbweb-sh-mn/sh/searchShTable?locale=zh_CN', 'equity_risk_premium_as_of': '2026-04-01', 'equity_risk_premium_basis': 'china_rating_based_total_erp', 'equity_risk_premium_source_url': 'https://pages.stern.nyu.edu/~adamodar/pc/datasets/ctrypremApr26.xlsx', 'ctrypremApr26.xlsx': '2bcfaace0ee4132ced6039ea0a2f26999af8d5366f8fbde81cf71dfb2735566e', 'industry_data_as_of': '2026-01-05', 'betaChina.xls': 'ff9187e1ca2dc5ee697e240d368f5c8f1956bc00c4ff8e8b0b0d46c698f2aee9', 'waccChina.xls': '525ff4a15a2585fd2d1c06fc758296654370837da95e7107f64a14b0f03667a6'}`
 - scoring_verification_scope: `{'same_source_replay': 'recomputes every published field from reordered production inputs', 'same_source_valuation_replay': 'recomputes valuation existence, payloads, skip reasons and sampled issues', 'independent_runtime_checks': 'recompute weights, trigger relations, ranking, bear cases, valuation formulas and source binding', 'business_rule_oracle': 'fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py'}`
-- git: `{'commit': '578f1cba5ffe8e39138b4108c300f62368dc4c55', 'dirty': False}`
+- git: `{'commit': '7c0cda99ba7a12476a0668bd22d3cccc9622c017', 'dirty': False}`
 
 ## 公司明细
 
