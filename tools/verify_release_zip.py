@@ -184,7 +184,16 @@ _EXPECTED_TYPE7_SOURCE_DOCUMENTS = {
     },
     "patch6": dict(_EXPECTED_PATCH6_SOURCE),
 }
-_EXPECTED_DIRECT_DEPENDENCIES = {"numpy", "orjson", "pandas", "plotly", "pillow", "requests", "streamlit"}
+_EXPECTED_DIRECT_DEPENDENCIES = {
+    "numpy",
+    "orjson",
+    "pandas",
+    "plotly",
+    "pillow",
+    "requests",
+    "streamlit",
+    "gitpython",
+}
 _SSH_PRIVATE_KEY_NAMES = {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
 _AUDIT_TYPE_WEIGHTS = {
     "type1": {"1a": 0.30, "1b": 0.35, "1c": 0.20, "1d": 0.15},
@@ -312,6 +321,11 @@ _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
 _AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
 _AUDIT_TYPE5_MAX_COLDNESS_SCORE = 8.0
 _AUDIT_TYPE5_MAX_COLDNESS_SCORE_WITHOUT_VOLUME = 7.5
+_AUDIT_TYPE5_COLDNESS_EVIDENCE_SCHEMA_VERSION = 1
+_AUDIT_TYPE5_COLDNESS_MODEL_ID = "patch6-type2c-quantity-price-v1"
+_AUDIT_TYPE5_COLDNESS_SOURCE = "Eastmoney push2 clist"
+_AUDIT_TYPE5_COLDNESS_SOURCE_URL = "https://push2delay.eastmoney.com/api/qt/clist/get"
+_AUDIT_TYPE5_COLDNESS_MIN_SOURCE_COVERAGE = 0.90
 _AUDIT_TYPE5_COLDNESS_WEIGHTS = {
     "change_60d_pct": 0.45,
     "change_ytd_pct": 0.25,
@@ -1220,6 +1234,55 @@ def _audit_type5_market_replay(value: Any, *, code: str, as_of: str) -> float | 
     if not isinstance(raw_values, Mapping):
         return None
     full_components = "absolute" in components
+    if full_components:
+        expected_component_fields = {
+            "schema_version",
+            "model_id",
+            "code",
+            "source",
+            "raw_values",
+            "absolute",
+            "relative",
+            "relative_sample_sizes",
+            "relative_context",
+            "metric_scores",
+            "weights",
+            "ytd_reliability",
+            "price_score",
+            "raw_score",
+            "score_cap",
+            "caps",
+            "board",
+            "retrieved_at",
+            "as_of_session",
+            "source_url",
+            "source_updated_at",
+        }
+        expected_board = (
+            "STAR"
+            if code.startswith(("688", "689"))
+            else "CHINEXT"
+            if code.startswith(("300", "301"))
+            else "SH_MAIN"
+            if code.startswith("6")
+            else "SZ_MAIN"
+            if code.startswith(("0", "3"))
+            else None
+        )
+        if (
+            set(evidence) != {"source", "evidence_id", "as_of", "summary"}
+            or set(components) != expected_component_fields
+            or components.get("schema_version") != _AUDIT_TYPE5_COLDNESS_EVIDENCE_SCHEMA_VERSION
+            or components.get("model_id") != _AUDIT_TYPE5_COLDNESS_MODEL_ID
+            or components.get("code") != code
+            or components.get("source") != _AUDIT_TYPE5_COLDNESS_SOURCE
+            or components.get("source_url") != _AUDIT_TYPE5_COLDNESS_SOURCE_URL
+            or components.get("as_of_session") != as_of
+            or components.get("board") != expected_board
+            or source != f"{_AUDIT_TYPE5_COLDNESS_SOURCE}; {_AUDIT_TYPE5_COLDNESS_SOURCE_URL}"
+            or evidence_id != f"{_AUDIT_TYPE5_COLDNESS_MODEL_ID}:{code}:{as_of.replace('-', '')}"
+        ):
+            return None
     expected_raw_keys = (
         set(_AUDIT_TYPE5_COLDNESS_WEIGHTS)
         if full_components
@@ -1246,15 +1309,16 @@ def _audit_type5_market_replay(value: Any, *, code: str, as_of: str) -> float | 
         absolute = components.get("absolute")
         relative = components.get("relative")
         relative_samples = components.get("relative_sample_sizes")
+        relative_context = components.get("relative_context")
         metric_scores = components.get("metric_scores")
         weights = components.get("weights")
         if (
             not isinstance(absolute, Mapping)
             or set(absolute) != set(available)
             or not isinstance(relative, Mapping)
-            or not set(relative).issubset(available)
             or not isinstance(relative_samples, Mapping)
-            or set(relative_samples) != set(relative)
+            or not isinstance(relative_context, Mapping)
+            or set(relative_context) != set(available)
             or not isinstance(metric_scores, Mapping)
             or set(metric_scores) != set(available)
             or not isinstance(weights, Mapping)
@@ -1265,21 +1329,73 @@ def _audit_type5_market_replay(value: Any, *, code: str, as_of: str) -> float | 
             key: _audit_type5_coldness_interpolate(float(values[key]), _AUDIT_TYPE5_COLDNESS_BANDS[key])
             for key in available
         }
-        expected_metric_scores: dict[str, float] = {}
+        expected_relative: dict[str, float] = {}
+        expected_relative_samples: dict[str, int] = {}
+        context_fields = {
+            "section_size",
+            "minimum_section_records",
+            "section_population",
+            "source_present",
+            "source_total",
+            "lower_count",
+            "equal_count",
+        }
         for key in available:
-            relative_value = _finite_number(relative.get(key)) if key in relative else None
-            sample_size = relative_samples.get(key) if key in relative else None
-            if key in relative and (
-                relative_value is None
-                or not 1 <= relative_value <= 9
-                or isinstance(sample_size, bool)
-                or not isinstance(sample_size, int)
-                or sample_size < 2
+            context = relative_context.get(key)
+            if not isinstance(context, Mapping) or set(context) != context_fields:
+                return None
+            if any(isinstance(context[field], bool) or not isinstance(context[field], int) for field in context_fields):
+                return None
+            section_size = context["section_size"]
+            minimum = context["minimum_section_records"]
+            population = context["section_population"]
+            source_present = context["source_present"]
+            source_total = context["source_total"]
+            lower = context["lower_count"]
+            equal = context["equal_count"]
+            if (
+                minimum < 1
+                or section_size < 1
+                or population < section_size
+                or source_total < source_present
+                or source_present < 1
+                or lower < 0
+                or equal < 1
+                or lower + equal > section_size
             ):
                 return None
+            relative_eligible = (
+                section_size >= minimum
+                and section_size / population >= _AUDIT_TYPE5_COLDNESS_MIN_SOURCE_COVERAGE
+                and source_present / source_total >= _AUDIT_TYPE5_COLDNESS_MIN_SOURCE_COVERAGE
+            )
+            if relative_eligible:
+                if section_size < 2 or equal == section_size:
+                    rank_score = 5.0
+                else:
+                    greater = section_size - lower - equal
+                    rank_score = 1.0 + 8.0 * (greater + 0.5 * (equal - 1)) / (section_size - 1)
+                    rank_score = max(1.0, min(9.0, rank_score))
+                expected_relative[key] = rank_score
+                expected_relative_samples[key] = section_size
+        if (
+            set(relative) != set(expected_relative)
+            or set(relative_samples) != set(expected_relative_samples)
+            or any(
+                not _audit_type5_close(relative.get(key), round(expected_relative[key], 6)) for key in expected_relative
+            )
+            or any(
+                isinstance(relative_samples.get(key), bool)
+                or relative_samples.get(key) != expected_relative_samples[key]
+                for key in expected_relative
+            )
+        ):
+            return None
+        expected_metric_scores: dict[str, float] = {}
+        for key in available:
             expected_metric_scores[key] = (
-                0.8 * expected_absolute[key] + 0.2 * float(relative_value)
-                if relative_value is not None
+                0.8 * expected_absolute[key] + 0.2 * expected_relative[key]
+                if key in expected_relative
                 else expected_absolute[key]
             )
         ytd_reliability = _finite_number(components.get("ytd_reliability"))

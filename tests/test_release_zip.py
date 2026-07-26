@@ -1155,6 +1155,7 @@ def _audit_payload(files):
                     "pillow": "12.3.0",
                     "requests": "2.34.2",
                     "streamlit": "1.59.2",
+                    "gitpython": "3.1.55",
                 },
             },
         },
@@ -1336,6 +1337,7 @@ def _write_minimal_release(
         "pillow": "12.3.0",
         "requests": "2.34.2",
         "streamlit": "1.59.2",
+        "gitpython": "3.1.55",
     }
     files = {
         "LICENSE": _LICENSE_BYTES,
@@ -1398,7 +1400,7 @@ def _write_minimal_release(
         "tools/sign_desktop_update_manifest.ps1": b"# desktop manifest signer\n",
         "tools/verify_release_zip.py": b"# verifier\n",
         "requirements-bootstrap.txt": _locked_line("pip", "26.1.2").encode(),
-        "requirements.txt": b"numpy==2.4.6\norjson==3.11.9\npandas==3.0.3\nplotly==6.9.0\npillow==12.3.0\nrequests==2.34.2\nstreamlit==1.59.2\n",
+        "requirements.txt": b"numpy==2.4.6\norjson==3.11.9\npandas==3.0.3\nplotly==6.9.0\npillow==12.3.0\nrequests==2.34.2\nstreamlit==1.59.2\ngitpython==3.1.55\n",
         "requirements-lock.txt": "".join(
             _locked_line(name, version) for name, version in runtime_versions.items()
         ).encode(),
@@ -1412,7 +1414,7 @@ def _write_minimal_release(
             b"[project]\nname='ds-dcf'\nversion='11.1.0'\nrequires-python='>=3.11,<3.15'\n"
             b"license='LicenseRef-PolyForm-Noncommercial-1.0.0'\nlicense-files=['LICENSE']\n"
             b"dependencies=['numpy==2.4.6','orjson==3.11.9','pandas==3.0.3','plotly==6.9.0','pillow==12.3.0',"
-            b"'requests==2.34.2','streamlit==1.59.2']\n"
+            b"'requests==2.34.2','streamlit==1.59.2','gitpython==3.1.55']\n"
         ),
     }
     payload = _audit_payload(files)

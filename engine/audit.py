@@ -573,7 +573,7 @@ def _git_metadata() -> dict[str, Any]:
 
 def _runtime_versions() -> dict[str, str | None]:
     versions: dict[str, str | None] = {}
-    for package in ("numpy", "orjson", "pandas", "pillow", "plotly", "requests", "streamlit"):
+    for package in ("numpy", "orjson", "pandas", "pillow", "plotly", "requests", "streamlit", "gitpython"):
         try:
             versions[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
