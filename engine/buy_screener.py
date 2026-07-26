@@ -2101,6 +2101,22 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         # Preserve only the server-created marker.  Serialized snapshots
         # cannot create this identity, and it is never part of result output.
         m["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
+    elif any(
+        _verified_score(m, key) is not None
+        for key in (
+            "type5_cycle_attribute_score",
+            "type5_bottom_signal_score",
+            "type5_survival_score",
+            "type5_upside_elasticity_score",
+            "type5_normalized_earnings_score",
+        )
+    ):
+        # The public financial adapter has already converted each score and
+        # checked its dated, code-bound evidence above.  Bind a fresh marker
+        # for that validated record so production JSON can actually reach the
+        # strict Type5 external path; a naked number still fails closed in
+        # ``_verified_score`` and never creates this marker.
+        m["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
     m["type7_research_sources"] = normalise_research_sources(
         fin_data.get("type7_research_sources"),
         today=_evidence_reference_date(m.get("source_trade_date")) or _shanghai_today(),

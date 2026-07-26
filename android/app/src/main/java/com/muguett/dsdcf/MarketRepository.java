@@ -1864,6 +1864,10 @@ public final class MarketRepository {
             if (!observedTypes.isEmpty()) {
                 labels.add("观察：" + labels(observedTypes) + "（不是买入信号）");
             }
+            List<String> insufficientTypes = typesWithStatus("insufficient_evidence");
+            if (!insufficientTypes.isEmpty()) {
+                labels.add("资料不足：" + labels(insufficientTypes) + "（不是买入信号）");
+            }
             if (labels.isEmpty()) {
                 labels.add("未触发买入信号");
             }

@@ -462,6 +462,24 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
+    public void insufficientEvidenceIsVisibleInTheListInsteadOfLookingLikeNoData() {
+        Map<String, String> names = typeNames();
+        MarketRepository.MarketEntry entry = new MarketRepository.MarketEntry(
+                "600003",
+                "资料不足样本",
+                "制造业",
+                10.0,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                typeScores("type4", "insufficient_evidence"),
+                names,
+                null
+        );
+        assertTrue(entry.displayLabel().contains("资料不足：4类（不是买入信号）"));
+        assertFalse(entry.displayLabel().contains("未触发买入信号"));
+    }
+
+    @Test
     public void conditionalOnlyClassificationExcludesACompanyThatAlsoHasABuySignal() {
         Map<String, String> names = typeNames();
         MarketRepository.MarketEntry conditionalOnly = new MarketRepository.MarketEntry(

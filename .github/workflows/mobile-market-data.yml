@@ -1025,6 +1025,11 @@ jobs:
             $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
             $assetVerified = $false
             $lastAssetFailure = 'public release asset remained unavailable'
+            # GitHub's release CDN can lag the release API for several minutes.
+            # Keep the job green when that public download path is transiently
+            # unavailable; the release API digest was already checked in the
+            # publish job, and retention cleanup is deferred rather than
+            # deleting a generation we could not re-read.
             $assetVerificationAttempts = 8
             $assetVerificationBaseDelaySeconds = 10
             for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++) {
@@ -1047,7 +1052,8 @@ jobs:
               }
             }
             if (-not $assetVerified) {
-              throw "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure"
+              Write-Warning "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure"
+              'MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED=true' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             }
           }
 
@@ -1057,6 +1063,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
+          }
+          if ($env:MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED -eq 'true') {
+            Write-Warning 'Public immutable asset verification was deferred after bounded retries; retaining all release assets for the next run.'
+            exit 0
           }
           if ($env:MOBILE_PREVIOUS_MANIFEST_STATE -ceq 'error') {
             Write-Warning 'Skipping retention cleanup because the previous stable generation could not be validated.'
