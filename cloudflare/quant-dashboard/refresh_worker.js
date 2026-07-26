@@ -97,13 +97,13 @@ async function verifyManifestSignature(manifestText, signatureBytes) {
 }
 
 function generationFromNames(catalogue, signals, signature) {
-  const c = catalogue.match(ASSET_NAMES.catalogue);
-  const s = signals.match(ASSET_NAMES.signals);
-  const g = signature.match(ASSET_NAMES.signature);
-  if (!c || !s || !g || c[0].slice(8, 24) !== s[0].slice(8, 24) || c[0].slice(8, 24) !== g[0].slice(8, 24)) {
+  const c = /^catalog-([0-9a-f]{16})\.json\.gz$/.exec(catalogue);
+  const s = /^signals-([0-9a-f]{16})\.json\.gz$/.exec(signals);
+  const g = /^manifest-([0-9a-f]{16})\.sig$/.exec(signature);
+  if (!c || !s || !g || c[1] !== s[1] || c[1] !== g[1]) {
     throw new Error("manifest assets are not one generation");
   }
-  return c[0].slice(8, 24);
+  return c[1];
 }
 
 async function refresh(env) {
