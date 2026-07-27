@@ -103,6 +103,41 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
     )
 
 
+def test_mobile_catalogue_exposes_each_verified_sub_score_and_plain_evidence(monkeypatch):
+    scores = _scores()
+    type1 = dict(scores.at[0, "type1"])
+    type1.update(
+        {
+            "status": "triggered",
+            "triggered": True,
+            "evidence_complete": True,
+            "total": 8.0,
+            "sub_scores": {"1a": 8.0, "1b": 7.0, "1c": 9.0, "1d": 6.0},
+            "reasons": {"1a": "买入区内折价", "1b": "陷阱排查通过", "1c": "现金流安全边际", "1d": "业绩拐点催化"},
+            "veto": False,
+        }
+    )
+    scores.at[0, "type1"] = type1
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    _manifest, catalogue, _signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    types = catalogue["companies"][0]["types"]
+    type1 = types["type1"]
+    assert set(type1["sub_scores"]) == {"1a", "1b", "1c", "1d"}
+    assert all(0.0 <= float(value) <= 10.0 for value in type1["sub_scores"].values())
+    assert set(type1["sub_score_reasons"]) == {"1a", "1b", "1c", "1d"}
+    assert all(type1["sub_score_reasons"].values())
+    assert types["type3"]["status"] == "not_applicable"
+    assert types["type3"].get("sub_scores", {}) == {}
+
+
+
 def test_mobile_snapshot_exports_a_chinese_industry_label_and_keeps_the_enum_separate(monkeypatch):
     scores = _scores()
     scores.at[0, "code"] = "600519"

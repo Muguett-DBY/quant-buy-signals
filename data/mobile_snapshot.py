@@ -180,12 +180,37 @@ def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
 
 
 def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
+    def public_dimensions(value: Mapping[str, Any], status: str) -> tuple[dict[str, float], dict[str, str]]:
+        # A scoreless framework must never expose the scorer's internal zero
+        # placeholders.  Complete/diagnostic frameworks retain every finite
+        # sub-score together with its short, plain-language evidence sentence.
+        if status in _SCORELESS_STATUSES:
+            return {}, {}
+        raw_scores = value.get("sub_scores")
+        raw_reasons = value.get("reasons")
+        if not isinstance(raw_scores, Mapping):
+            return {}, {}
+        scores: dict[str, float] = {}
+        reasons: dict[str, str] = {}
+        for dimension in TYPE_WEIGHTS[type_key]:
+            score = _finite(raw_scores.get(dimension))
+            if score is None:
+                continue
+            scores[dimension] = round(score, 3)
+            if isinstance(raw_reasons, Mapping) and isinstance(raw_reasons.get(dimension), str):
+                evidence = _public_reason_text(raw_reasons[dimension])
+                if evidence:
+                    reasons[dimension] = evidence
+        return scores, reasons
+
     if not isinstance(payload, Mapping):
         return {
             "status": "invalid",
             "score": None,
             "reason": "",
             "decision": None,
+            "sub_scores": {},
+            "sub_score_reasons": {},
         }
     status = str(payload.get("status") or "invalid")
     total = None if status in _SCORELESS_STATUSES else _finite(payload.get("total"))
@@ -221,12 +246,23 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
                 ),
                 "",
             )
-    return {
+    sub_scores, sub_score_reasons = public_dimensions(payload, status)
+    compact = {
         "status": status,
         "score": round(total, 3) if total is not None else None,
         "reason": public_reason,
         "decision": _public_decision(payload.get("decision"), type_key),
     }
+    # Empty maps are omitted from the all-company catalogue to keep the
+    # bounded mobile asset small enough for the Android decompression limit.
+    # The detail payload restores both maps as empty objects, so clients have
+    # one stable shape when they open a company and can render "不适用" or
+    # "资料不足" without mistaking omitted data for a zero score.
+    if sub_scores:
+        compact["sub_scores"] = sub_scores
+    if sub_score_reasons:
+        compact["sub_score_reasons"] = sub_score_reasons
+    return compact
 
 
 def _public_type_detail(payload: Any, type_key: str) -> dict[str, Any]:
@@ -245,20 +281,10 @@ def _public_type_detail(payload: Any, type_key: str) -> dict[str, Any]:
             key for key in public_keys if isinstance(reasons.get(key), str) and _public_reason_text(reasons[key])
         )
         public_reasons = {key: _public_reason_text(reasons[key]) for key in public_reasons}
-    sub_scores = payload.get("sub_scores")
-    if compact["status"] in _SCORELESS_STATUSES:
-        # Scorers retain a fixed numeric shape internally so independent audit
-        # replay can validate every framework.  Those zero-valued placeholders
-        # are not investment scores and must not cross the public/mobile
-        # boundary for an inapplicable or evidence-incomplete framework.
-        sub_scores = None
     compact.update(
         {
-            "sub_scores": {
-                str(key): round(score, 3) for key, raw in sub_scores.items() if (score := _finite(raw)) is not None
-            }
-            if isinstance(sub_scores, Mapping)
-            else {},
+            "sub_scores": compact.get("sub_scores", {}),
+            "sub_score_reasons": compact.get("sub_score_reasons", {}),
             "reasons": public_reasons,
             "veto": payload.get("veto") is True,
         }
