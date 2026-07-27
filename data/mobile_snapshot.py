@@ -4,8 +4,10 @@ The desktop analysis contains the complete financial input tree and DCF audit
 ledger.  Publishing that object to a phone would be slow, costly, and expose
 far more raw provider data than the client needs.  This module exports a
 small catalogue for the whole market plus a separate detail file for actual
-or conditional candidates.  The catalogue also preserves the bounded decision
-contract for unresolved candidates so the phone can show them without
+or conditional candidates.  Applicable and diagnostic frameworks publish every
+finite sub-score; scoreless states omit internal zero placeholders and retain
+their explicit public status.  The catalogue also preserves the bounded
+decision contract for unresolved candidates so the phone can show them without
 mistaking them for buy signals.  It never performs an analysis itself.
 """
 
