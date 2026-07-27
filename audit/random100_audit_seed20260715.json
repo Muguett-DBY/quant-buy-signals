@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "90a1cbb95605caf1e31696892f7ac16ca0f741a1",
+      "commit": "21192dcf7b42786b235a7e99b3f18b2253e1f754",
       "dirty": false
     },
     "runtime": {
@@ -371930,6 +371930,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "711b7e265ebcdf21f059fbd013b949d53b8ab75f83faecabcca2546a7f821b37",
-    "markdown": "c2fe2e64db2e2a1a692c8f17e658e1d36297222a294236673e356d7137d54dd2"
+    "markdown": "284fadf9b616808f758c6cf12aa0085def7730c773ee3eb981720bced9cdb83d"
   }
 }
