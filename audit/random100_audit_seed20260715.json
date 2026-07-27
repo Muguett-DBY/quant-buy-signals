@@ -112,7 +112,7 @@
     "snapshot_content_sha256": "8f8524c263edebd4421f1b0dfc5f65f1eb9dae35829a9f836050df72115de4c3",
     "snapshot_artifact_sha256": "3FAA7C1523099E651A2045B14BD59E24CFA2679B11E05B25DB3A5D7C4F72CD77",
     "eligible_universe_sha256": "10e244443b16356fa35e2bb464f0d982caeb12dac215b264fc0e9a28dc845dca",
-    "code_sha256": "2a4b4ab071f8fc294ba30fd00ac9f4158d7e1db8cc64af8865d95aacef01b798",
+    "code_sha256": "7128829c413938c8e1caaf0832c80c73778fbe60c9b6e4b105021e8176346496",
     "rules_sha256": "8c4b6d496c27f4c087536511b49cbd55e051590af764d07c8de25bc5f407326d",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
     "dependency_manifest_sha256": "ce9e42dd9b32345e611e8dc6cf36b88958ca0648fbb89290af36fb73597a5802",
@@ -158,7 +158,7 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "7c0cda99ba7a12476a0668bd22d3cccc9622c017",
+      "commit": "90a1cbb95605caf1e31696892f7ac16ca0f741a1",
       "dirty": false
     },
     "runtime": {
@@ -371930,6 +371930,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "711b7e265ebcdf21f059fbd013b949d53b8ab75f83faecabcca2546a7f821b37",
-    "markdown": "4f984028b7079122dba9128541556fd78ed5b5089b40fa81d6b8808a64c4d2bd"
+    "markdown": "c2fe2e64db2e2a1a692c8f17e658e1d36297222a294236673e356d7137d54dd2"
   }
 }
