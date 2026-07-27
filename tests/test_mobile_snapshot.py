@@ -137,7 +137,6 @@ def test_mobile_catalogue_exposes_each_verified_sub_score_and_plain_evidence(mon
     assert types["type3"].get("sub_scores", {}) == {}
 
 
-
 def test_mobile_snapshot_exports_a_chinese_industry_label_and_keeps_the_enum_separate(monkeypatch):
     scores = _scores()
     scores.at[0, "code"] = "600519"

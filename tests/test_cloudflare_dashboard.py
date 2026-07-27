@@ -10,7 +10,7 @@ def test_dashboard_select_filters_use_change_events_and_type_scoped_statuses():
 
     assert 'addEventListener("change"' in source
     assert 'typeState.status!=="not_applicable"' in source
-    assert 'typeState.status===s' in source
+    assert "typeState.status===s" in source
 
 
 def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
