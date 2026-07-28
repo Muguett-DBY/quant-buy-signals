@@ -3,7 +3,7 @@
 - seed: `20260715`
 - sample_size: `100`
 - eligible_universe_size: `4982`
-- data_timestamp_utc: `2026-07-28T15:57:00.277368+00:00`
+- data_timestamp_utc: `2026-07-28T16:55:53.606319+00:00`
 - dcf_valid: `38`
 - dcf_skipped_with_reason: `62`
 - pipeline_issues: `0`
@@ -12,9 +12,9 @@
 - same_source_valuation_replay_errors: `0`
 - independent_check_errors: `0`
 - triggered_by_type: `{'type1': 0, 'type2': 3, 'type3': 0, 'type4': 0, 'type5': 1, 'type6': 0, 'type7': 0}`
-- snapshot_content_sha256: `39f99a23f74cb741daf63f539bfbd221191cedeb406e7e83c444f1733952d076`
-- snapshot_artifact_sha256: `5CEEC9E2C415B2222415E1485D7EC3A065146A1624150FB0B94456A7F129C2D3`
-- code_sha256: `1a964ecb72bfcb5625591f478e810c01e8c201f5789e086c0fe709736eae7150`
+- snapshot_content_sha256: `8047b8347da3b4fc56a6ca67c41b237da0998cc951f3a4ec0b5ad808104d92f2`
+- snapshot_artifact_sha256: `E67AF9D0532827C1BE3FE9E848FC513391237CE0A927E9B6F459744407879E78`
+- code_sha256: `9bc7f603b7f55b4d59962a60c50dfb92f4dfe32b3e218ad42df54aa12f8a70f8`
 - rules_sha256: `59c055a5132d7e38e261387f0d0b7c9b7fb1cde680d78764c96232ee6c371bf4`
 - dependency_manifest_sha256: `eb984ae26b0b0fbb21ad4899c47ab703f7e449c96ef226c3cd223f342f6c2b7a`
 - industry_sha256: `e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631`
@@ -22,7 +22,7 @@
 - type7_source_documents: `{'template1': {'path_at_model_authoring': 'E:\\模板汇总MD\\第1模板.md', 'sha256': '98d8a101a08cdb122afd23c793faa3edf5e4e426eae09e7fc20901476ea95b1d'}, 'template5': {'path_at_model_authoring': 'E:\\模板汇总MD\\第5模板.md', 'sha256': '37a9cd43633bcd0bc1f2811738d48a7d1cff659e5ef11b6fd9152f2ed0686946'}, 'patch5': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁5.md', 'sha256': '8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4'}, 'patch6': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}}`
 - risk_parameter_sources: `{'model_as_of': '2026-07-15', 'risk_free_rate_as_of': '2026-07-15', 'risk_free_rate_source': 'ChinaBond China Government Bond Yield Curve 10Y', 'risk_free_rate_source_url': 'https://yield.chinabond.com.cn/cbweb-sh-mn/sh/searchShTable?locale=zh_CN', 'equity_risk_premium_as_of': '2026-04-01', 'equity_risk_premium_basis': 'china_rating_based_total_erp', 'equity_risk_premium_source_url': 'https://pages.stern.nyu.edu/~adamodar/pc/datasets/ctrypremApr26.xlsx', 'ctrypremApr26.xlsx': '2bcfaace0ee4132ced6039ea0a2f26999af8d5366f8fbde81cf71dfb2735566e', 'industry_data_as_of': '2026-01-05', 'betaChina.xls': 'ff9187e1ca2dc5ee697e240d368f5c8f1956bc00c4ff8e8b0b0d46c698f2aee9', 'waccChina.xls': '525ff4a15a2585fd2d1c06fc758296654370837da95e7107f64a14b0f03667a6'}`
 - scoring_verification_scope: `{'same_source_replay': 'recomputes every published field from reordered production inputs', 'same_source_valuation_replay': 'recomputes valuation existence, payloads, skip reasons and sampled issues', 'independent_runtime_checks': 'recompute weights, trigger relations, ranking, bear cases, valuation formulas and source binding', 'business_rule_oracle': 'fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py'}`
-- git: `{'commit': '1d04c4c6102252d6aa60069e85fe72a62211a2fc', 'dirty': True}`
+- git: `{'commit': '96137b704252c5fb15b2b64b49e9fcd1284489a5', 'dirty': False}`
 
 ## 公司明细
 

@@ -103,16 +103,16 @@
     "688800",
     "688819"
   ],
-  "data_timestamp_utc": "2026-07-28T15:57:00.277368+00:00",
+  "data_timestamp_utc": "2026-07-28T16:55:53.606319+00:00",
   "dcf_valid": 38,
   "eligible_universe_size": 4982,
   "provenance": {
     "audit_schema_version": 4,
-    "generated_at_utc": "2026-07-28T16:06:55.742860+00:00",
-    "snapshot_content_sha256": "39f99a23f74cb741daf63f539bfbd221191cedeb406e7e83c444f1733952d076",
-    "snapshot_artifact_sha256": "5CEEC9E2C415B2222415E1485D7EC3A065146A1624150FB0B94456A7F129C2D3",
+    "generated_at_utc": "2026-07-28T17:05:42.776332+00:00",
+    "snapshot_content_sha256": "8047b8347da3b4fc56a6ca67c41b237da0998cc951f3a4ec0b5ad808104d92f2",
+    "snapshot_artifact_sha256": "E67AF9D0532827C1BE3FE9E848FC513391237CE0A927E9B6F459744407879E78",
     "eligible_universe_sha256": "ca9588e3ae77cba5d711dfdd3fec29e74282729e9cd3d3fc51fa716604d03d72",
-    "code_sha256": "1a964ecb72bfcb5625591f478e810c01e8c201f5789e086c0fe709736eae7150",
+    "code_sha256": "9bc7f603b7f55b4d59962a60c50dfb92f4dfe32b3e218ad42df54aa12f8a70f8",
     "rules_sha256": "59c055a5132d7e38e261387f0d0b7c9b7fb1cde680d78764c96232ee6c371bf4",
     "industry_sha256": "e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631",
     "dependency_manifest_sha256": "eb984ae26b0b0fbb21ad4899c47ab703f7e449c96ef226c3cd223f342f6c2b7a",
@@ -158,8 +158,8 @@
       "business_rule_oracle": "fixed expected vectors and mutation/boundary tests in tests/test_buy_screener_rules.py"
     },
     "git": {
-      "commit": "1d04c4c6102252d6aa60069e85fe72a62211a2fc",
-      "dirty": true
+      "commit": "96137b704252c5fb15b2b64b49e9fcd1284489a5",
+      "dirty": false
     },
     "runtime": {
       "python": "3.12.10",
@@ -178,8 +178,8 @@
     "caller_metadata": {
       "snapshot_schema_version": 8,
       "snapshot_source": "network",
-      "snapshot_payload_sha256": "159473b4dfe3229cb91d7d47736139a16f2a81481d2049d0af73a97b05f7381b",
-      "snapshot_artifact_bytes": 13714396,
+      "snapshot_payload_sha256": "036a34b03e448c58153f97a0e9d58c9c62b031d0c8d644096c98abbc91e48d44",
+      "snapshot_artifact_bytes": 13714401,
       "validation": {
         "quotes": 5201,
         "financials": 5201,
@@ -375,13 +375,13 @@
         "eligible_trading_quotes": 4982,
         "eligible_trading_coverage": 1.0,
         "retrieval_time_coverage": 1.0,
-        "retrieval_time_oldest": 1785253674.923035,
-        "retrieval_time_latest": 1785253679.0463219,
-        "retrieval_time_span_seconds": 4.123286962509155,
-        "retrieval_age_seconds": 545.3543334007263,
+        "retrieval_time_oldest": 1785256465.3950584,
+        "retrieval_time_latest": 1785256469.5608976,
+        "retrieval_time_span_seconds": 4.165839195251465,
+        "retrieval_age_seconds": 1288.2112610340118,
         "source_quote_timestamp_oldest": 1785222000.0,
         "source_quote_timestamp_latest": 1785224160.0,
-        "source_quote_age_seconds": 32220.277368307114,
+        "source_quote_age_seconds": 35753.60631942749,
         "trading_source_trade_dates": [
           "2026-07-28"
         ],
@@ -398,8 +398,8 @@
           },
           "source": "Eastmoney push2 clist",
           "source_url": "https://push2delay.eastmoney.com/api/qt/clist/get",
-          "retrieved_at_oldest": 1785253673.0,
-          "retrieved_at_latest": 1785253673.0
+          "retrieved_at_oldest": 1785256453.0,
+          "retrieved_at_latest": 1785256453.0
         },
         "market_counts": {
           "BJ": 0,
@@ -87957,11 +87957,11 @@
       },
       "strict_evidence_required": false,
       "screening_coverage": {
-        "candidate_companies": 275,
-        "total_framework_triggers": 281,
+        "candidate_companies": 274,
+        "total_framework_triggers": 280,
         "framework_trigger_counts": {
           "type1": 59,
-          "type2": 204,
+          "type2": 203,
           "type3": 1,
           "type4": 1,
           "type5": 16,
@@ -87970,7 +87970,7 @@
         },
         "primary_trigger_counts": {
           "type1": 59,
-          "type2": 200,
+          "type2": 199,
           "type5": 16
         },
         "framework_status_counts": {
@@ -87984,11 +87984,11 @@
           },
           "type2": {
             "conditional": 10,
-            "insufficient_evidence": 1492,
+            "insufficient_evidence": 1493,
             "not_applicable": 15,
             "not_triggered": 1,
             "observe": 205,
-            "triggered": 204,
+            "triggered": 203,
             "vetoed": 3055
           },
           "type3": {
@@ -88062,19 +88062,19 @@
             "applicable": 4967,
             "not_applicable": 15,
             "invalid_applicability": 0,
-            "evidence_complete": 542,
-            "evidence_incomplete": 4440,
+            "evidence_complete": 541,
+            "evidence_incomplete": 4441,
             "invalid_evidence_complete": 0,
-            "applicable_evidence_complete": 527,
-            "applicable_evidence_incomplete": 4440,
-            "incomplete_with_reason": 4440,
+            "applicable_evidence_complete": 526,
+            "applicable_evidence_incomplete": 4441,
+            "incomplete_with_reason": 4441,
             "incomplete_without_reason": 0,
             "valid_sub_scores": 4982,
             "invalid_sub_scores": 0,
             "valid_decision": 4982,
             "invalid_decision": 0,
-            "decision_complete": 4833,
-            "decision_incomplete": 149,
+            "decision_complete": 4832,
+            "decision_incomplete": 150,
             "potentially_triggerable": 353,
             "decision_visible": 4982,
             "decision_hidden": 0,
@@ -88661,7 +88661,7 @@
       "available_count": 306,
       "eligible_evidence_count": 659,
       "eligible_evidence_coverage": 0.13227619429947812,
-      "evidence_sha256": "ef414ddbb996ffd712f9e9bb2ff14142bf5f8ef0241113ae6ddc94f9015400c9",
+      "evidence_sha256": "5bcce0c83394fde28115e86517f77fceb753c0046872194480e814f2c7ea0f26",
       "as_of_sessions": [
         "2026-07-28"
       ]
@@ -379377,6 +379377,6 @@
   ],
   "companion_artifacts_sha256": {
     "csv": "0e7395b3b219e828bc3e66580afd8ce4d5eca1974504f4f271e6ba894cec5e0e",
-    "markdown": "0d7c53e34a40b08e522a70abed4d82107a664fca810e70fa36d1cc45c263e98c"
+    "markdown": "76bb2d462d8ad54c42a1af1cc67342df15a20b9207ef5d3dcc8009819b99bc69"
   }
 }
