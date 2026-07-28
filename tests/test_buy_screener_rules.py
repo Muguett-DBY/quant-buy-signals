@@ -2358,6 +2358,34 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreater((displayed_above[2]["2a"] + displayed_above[2]["2b"]) / 2, 4.0)
         self.assertNotIn("_veto", displayed_above[3])
 
+    def test_type2_valuation_boundary_uses_the_displayed_one_decimal_score(self):
+        metric = base_metrics(
+            peg=None,
+            pb=2.467,
+            revenue_values=[100, 110, 140],
+            margin_history=[0.10, 0.12, 0.16],
+            net_profit_history=[10, 15, 25],
+            ocf_np_ratio=1.2,
+            market_coldness_score=10.0,
+        )
+
+        outcome = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50, median_pb=2.0, median_pb_count=50),
+        )
+        payload = {
+            "triggered": outcome[0],
+            "total": outcome[1],
+            "sub_scores": outcome[2],
+            "reasons": outcome[3],
+            "status": outcome[3]["_status"],
+            "veto": bool(outcome[3].get("_veto")),
+        }
+
+        self.assertEqual(outcome[2]["2d"], 5.0)
+        self.assertTrue(outcome[0])
+        self.assertTrue(bs.replay_buy_decision("type2", payload)["potentially_triggerable"])
+
     def test_type2_industry_growth_score_is_continuous_at_five_percent(self):
         low = benchmarks(median_cagr=0.05 - 1e-6, median_cagr_count=50)
         high = benchmarks(median_cagr=0.05 + 1e-6, median_cagr_count=50)

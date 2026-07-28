@@ -3817,7 +3817,7 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
     # “产业刚回暖、公司强拐点”等典型错配机会。
     hot_dimensions_ready = hot_average > 4
     hot_veto = not industry_evidence_missing and company_turn_evidence_complete and not hot_dimensions_ready
-    cold_veto = not market_coldness_missing and scores["2c"] <= 3
+    cold_veto = not market_coldness_missing and decision_scores["2c"] <= 3
     veto = hot_veto or cold_veto
     missing_dimensions: list[str] = []
     missing_dimension_keys: list[str] = []
@@ -3843,9 +3843,14 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
     # 估值必须合理（>=5）。补丁6只在“两热”和“冷”都很强时，
     # 允许4~5分的中性偏高估值；显著高估绝不能仅靠其他维度补回。
     valuation_adjustment = bool(
-        valuation_evidence_complete and hot_average >= 7 and scores["2c"] >= 7 and 4 <= scores["2d"] <= 5
+        valuation_evidence_complete
+        and hot_average >= 7
+        and decision_scores["2c"] >= 7
+        and 4 <= decision_scores["2d"] <= 5
     )
-    valuation_ready = bool(valuation_evidence_complete and (scores["2d"] >= 5 or valuation_adjustment))
+    valuation_ready = bool(
+        valuation_evidence_complete and (decision_scores["2d"] >= 5 or valuation_adjustment)
+    )
     if valuation_adjustment:
         reasons["_adjustment"] = "强两热一冷允许中性估值"
     if not valuation_ready:
