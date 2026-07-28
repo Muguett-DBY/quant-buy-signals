@@ -10,6 +10,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Spinner;
@@ -44,6 +45,8 @@ public final class MainActivity extends Activity {
 
     private TextView marketSummary;
     private TextView operationStatus;
+    private TextView resultsStatus;
+    private TextView emptyState;
     private EditText search;
     private Spinner mode;
     private Spinner typeMode;
@@ -119,7 +122,9 @@ public final class MainActivity extends Activity {
         marketSummary = new TextView(this);
         marketSummary.setText(R.string.market_summary_empty);
         marketSummary.setTextSize(14);
-        marketSummary.setPadding(0, dp(4), 0, dp(8));
+        marketSummary.setPadding(dp(8), dp(8), dp(8), dp(8));
+        marketSummary.setBackgroundResource(android.R.drawable.list_selector_background);
+        marketSummary.setOnClickListener(view -> showCoverageSummary());
         root.addView(marketSummary);
 
         search = new EditText(this);
@@ -148,12 +153,34 @@ public final class MainActivity extends Activity {
         typeMode.setOnItemSelectedListener(new SimpleItemSelectedListener(this::applyFilters));
         root.addView(typeMode);
 
+        resultsStatus = new TextView(this);
+        resultsStatus.setText(R.string.results_waiting);
+        resultsStatus.setTextSize(15);
+        resultsStatus.setPadding(0, dp(8), 0, dp(4));
+        root.addView(resultsStatus);
+
+        FrameLayout resultArea = new FrameLayout(this);
         ListView list = new ListView(this);
         listAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, android.R.id.text1, new ArrayList<>());
         listAdapter.setNotifyOnChange(false);
         list.setAdapter(listAdapter);
         list.setOnItemClickListener((parent, view, position, id) -> showEntryDetails(visibleEntries.get(position)));
-        root.addView(list, new LinearLayout.LayoutParams(
+        resultArea.addView(list, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+
+        emptyState = new TextView(this);
+        emptyState.setText(R.string.results_empty);
+        emptyState.setTextSize(16);
+        emptyState.setGravity(Gravity.CENTER);
+        emptyState.setPadding(dp(18), dp(18), dp(18), dp(18));
+        resultArea.addView(emptyState, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+        list.setEmptyView(emptyState);
+        root.addView(resultArea, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1
         ));
 
@@ -249,9 +276,19 @@ public final class MainActivity extends Activity {
                 marketData.companyCount,
                 marketData.triggeredCompanyCount,
                 marketData.conditionalCompanyCount,
-                marketData.pendingCompanyCount,
-                marketData.typeCoverageSummary()
+                marketData.pendingCompanyCount
         ));
+    }
+
+    private void showCoverageSummary() {
+        if (marketData == null) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.coverage_dialog_title)
+                .setMessage(marketData.typeCoverageSummary())
+                .setPositiveButton(R.string.close, null)
+                .show();
     }
 
     private void applyFilters() {
@@ -285,6 +322,17 @@ public final class MainActivity extends Activity {
         }
         listAdapter.addAll(labels);
         listAdapter.notifyDataSetChanged();
+        String selectedModeLabel = String.valueOf(mode.getSelectedItem());
+        String selectedTypeLabel = String.valueOf(typeMode.getSelectedItem());
+        resultsStatus.setText(getString(
+                R.string.results_count,
+                selectedModeLabel,
+                selectedTypeLabel,
+                visibleEntries.size()
+        ));
+        emptyState.setText(keyword.isEmpty()
+                ? R.string.results_empty
+                : R.string.results_empty_search);
     }
 
     private void showEntryDetails(MarketRepository.MarketEntry entry) {

@@ -44,6 +44,31 @@ def test_android_user_facing_copy_uses_plain_chinese_and_hides_parser_errors():
     assert "error.getClass().getSimpleName()" not in main_activity
 
 
+def test_android_company_results_are_visible_and_explain_empty_filters():
+    project_root = Path(__file__).resolve().parents[1]
+    strings_path = project_root / "android" / "app" / "src" / "main" / "res" / "values" / "strings.xml"
+    main_activity = (
+        project_root / "android" / "app" / "src" / "main" / "java" / "com" / "muguett" / "dsdcf" / "MainActivity.java"
+    ).read_text(encoding="utf-8")
+    strings = {node.attrib["name"]: node.text or "" for node in ET.parse(strings_path).getroot().iter("string")}
+
+    assert "当前列出 %3$d 家公司" in strings["results_count"]
+    assert "点公司名称查看详情" in strings["results_count"]
+    assert "请切换上方的名单类型" in strings["results_empty"]
+    assert "请清空搜索词" in strings["results_empty_search"]
+    assert "点这里查看七类数量明细" in strings["market_summary"]
+    assert (
+        "marketData.typeCoverageSummary()"
+        not in main_activity[
+            main_activity.index("private void renderSummary()") : main_activity.index(
+                "private void showCoverageSummary()"
+            )
+        ]
+    )
+    assert "list.setEmptyView(emptyState)" in main_activity
+    assert "visibleEntries.size()" in main_activity
+
+
 def test_android_update_check_uses_a_dedicated_stable_manifest_release():
     project_root = Path(__file__).resolve().parents[1]
     repository = (

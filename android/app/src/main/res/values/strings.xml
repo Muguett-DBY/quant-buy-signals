@@ -42,7 +42,12 @@
     <string name="status_allow_install">请允许本应用安装更新；返回后会继续打开安装确认页面。</string>
     <string name="status_update_cancelled">更新已取消：%1$s</string>
     <string name="status_update_file_missing">已验证的更新文件不存在，请重新检查应用更新。</string>
-    <string name="market_summary">当前展示交易日：%1$s；覆盖 %2$d 家沪深公司；实际买入信号 %3$d 家；待确认候选 %4$d 家；仍可能触发但待补证据 %5$d 家。\n%6$s</string>
+    <string name="market_summary">交易日：%1$s；覆盖 %2$d 家沪深公司；实际买入 %3$d 家；待确认 %4$d 家；待补证据 %5$d 家。\n点这里查看七类数量明细。</string>
+    <string name="coverage_dialog_title">七类买入情况数量明细</string>
+    <string name="results_waiting">正在准备公司名单…</string>
+    <string name="results_count">%1$s · %2$s：当前列出 %3$d 家公司（点公司名称查看详情）</string>
+    <string name="results_empty">当前筛选没有公司。请切换上方的名单类型或七类买入情况。</string>
+    <string name="results_empty_search">没有公司匹配当前搜索词。请清空搜索词或调整筛选条件。</string>
     <string name="close">关闭</string>
     <string name="status_confirm_install">请在 Android 系统页面确认安装。</string>
 </resources>
