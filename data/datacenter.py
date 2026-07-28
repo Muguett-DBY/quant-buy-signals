@@ -50,7 +50,11 @@ _MAX_DATACENTER_RESPONSE_BYTES = 16 * 1024 * 1024
 _RESPONSE_CHUNK_BYTES = 64 * 1024
 _MAX_REMOTE_SECURITY_CODES = 100
 _DATACENTER_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
-_DATACENTER_RECOVERY_RETRIES = 2
+# Recovering one failed page is much cheaper than restarting every annual and
+# interim report.  Eastmoney occasionally leaves a single page stalled for two
+# consecutive 30-second reads, so give the bounded, sequential recovery path
+# four attempts while keeping the parallel fast path at three attempts.
+_DATACENTER_RECOVERY_RETRIES = 4
 _MAX_DATACENTER_RECOVERY_PAGES = 3
 _RETRYABLE_DATACENTER_HTTP_STATUSES = frozenset({408, 425, 429})
 ANNUAL_HISTORY_YEARS = 10

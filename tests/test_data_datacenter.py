@@ -352,7 +352,7 @@ def test_fetch_all_pages_rejects_incomplete_snapshots(monkeypatch, failure):
         dc._fetch_all_pages(dc.RPT_INCOME, "SECURITY_CODE", page_size=1)
 
 
-def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_two_attempts(monkeypatch):
+def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_four_attempts(monkeypatch):
     monkeypatch.setattr(dc.time, "sleep", lambda _seconds: None)
     calls = []
 
@@ -369,6 +369,8 @@ def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_two
         dc.REQUEST_TIMEOUT,
         dc.REQUEST_TIMEOUT,
         dc.REQUEST_TIMEOUT,
+        dc._DATACENTER_RECOVERY_TIMEOUT,
+        dc._DATACENTER_RECOVERY_TIMEOUT,
         dc._DATACENTER_RECOVERY_TIMEOUT,
         dc._DATACENTER_RECOVERY_TIMEOUT,
     ]
