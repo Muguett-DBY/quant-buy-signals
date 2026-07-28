@@ -3172,6 +3172,18 @@ def test_release_zip_verifier_requires_full_sh_sz_universe_and_snapshot_identity
     assert any("identified, time-consistent market snapshot" in error for error in errors)
 
 
+def test_release_zip_verifier_accepts_a_short_audit_that_crosses_shanghai_midnight(tmp_path):
+    path = tmp_path / "cross-midnight.zip"
+
+    def mutate(payload):
+        payload["data_timestamp_utc"] = "2026-07-15T15:50:00+00:00"
+        payload["provenance"]["generated_at_utc"] = "2026-07-15T16:10:00+00:00"
+
+    _write_minimal_release(path, mutate_payload=mutate)
+
+    assert not any("identified, time-consistent market snapshot" in error for error in _verify(path))
+
+
 def test_release_zip_verifier_recomputes_fixed_seed_sample(tmp_path):
     path = tmp_path / "forged-sample.zip"
 

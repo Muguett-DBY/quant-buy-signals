@@ -5720,7 +5720,7 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                         and data_shanghai_date is not None
                         and generated_shanghai_date is not None
                         and 0 <= (data_shanghai_date - trade_date).days <= 10
-                        and generated_shanghai_date == data_shanghai_date
+                        and 0 <= (generated_shanghai_date - data_shanghai_date).days <= 1
                         and generation_delay is not None
                         and 0 <= generation_delay <= 6 * 60 * 60
                     )
