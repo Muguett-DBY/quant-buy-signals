@@ -7,7 +7,12 @@ import math
 import pytest
 
 from data.market_history import TencentWeeklyHistoryAdapter, WeeklyClose
-from data.quality_history import fetch_quality_history, fetch_quality_history_batch, replay_valuation_distribution
+from data.quality_history import (
+    fetch_quality_history,
+    fetch_quality_history_batch,
+    load_quality_history_cache_batch,
+    replay_valuation_distribution,
+)
 
 
 class _WeeklyAdapter:
@@ -247,6 +252,57 @@ def test_quality_history_batch_rejects_duplicates_before_work(monkeypatch):
         max_workers=2,
     )
     assert list(result) == ["000001", "600001"]
+
+
+def test_quality_history_reuses_recent_normalized_source_capture_without_network(tmp_path):
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+    assert first.available
+
+    class _NoNetwork:
+        def fetch_weekly_closes(self, *_args, **_kwargs):
+            raise AssertionError("recent source capture unexpectedly performed network I/O")
+
+    reused = fetch_quality_history(
+        "600519",
+        "2026-07-18",
+        weekly_adapter=_NoNetwork(),
+        cache_dir=tmp_path,
+    )
+
+    assert reused.available
+    assert reused.as_of == "2026-07-18"
+    assert reused.cache_hit
+    assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
+
+
+def test_quality_history_cache_batch_loads_recent_records_and_omits_real_misses(tmp_path):
+    saved = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+    assert saved.available
+
+    result = load_quality_history_cache_batch(
+        [
+            {"code": "000001", "as_of": "2026-07-18"},
+            {"code": "600519", "as_of": "2026-07-18"},
+        ],
+        cache_dir=tmp_path,
+        max_workers=2,
+    )
+
+    assert list(result) == ["600519"]
+    assert result["600519"]["available"] is True
+    assert result["600519"]["cache_diagnostic"] == "recent_source_capture:2026-07-17"
 
 
 @pytest.mark.parametrize("max_workers", [True, 2.0, 0, -1])

@@ -20,6 +20,8 @@ from tools.run_full_audit import (
     _replay_market_coldness_reference_artifact,
 )
 
+_prepare_quality_history_evidence = publisher._prepare_quality_history_evidence
+
 
 @pytest.fixture(autouse=True)
 def _published_source_commit(monkeypatch):
@@ -30,6 +32,21 @@ def _published_source_commit(monkeypatch):
         publisher,
         "archive_market_coldness_session_snapshot",
         lambda snapshot, _session: snapshot,
+    )
+    monkeypatch.setattr(
+        publisher,
+        "_prepare_quality_history_evidence",
+        lambda codes, _as_of: (
+            {},
+            {
+                "requested_companies": len(codes),
+                "reused_companies": 0,
+                "network_tranche_companies": 0,
+                "returned_companies": 0,
+                "available_companies": 0,
+                "remaining_companies": len(codes),
+            },
+        ),
     )
 
 
@@ -217,6 +234,42 @@ def test_mobile_source_commit_uses_head_only_after_a_clean_local_worktree(monkey
         ["git", "rev-parse", "HEAD"],
     ]
     assert all(call[1]["cwd"] == publisher.Path(publisher.__file__).resolve().parents[1] for call in calls)
+
+
+def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranche(monkeypatch):
+    codes = [f"{index:06d}" for index in range(1, 1_206)]
+    monkeypatch.setattr(
+        publisher,
+        "load_quality_history_cache_batch",
+        lambda requests: {
+            request["code"]: {"available": True, "code": request["code"]}
+            for request in requests[:5]
+        },
+    )
+    captured = []
+
+    def fetch(requests):
+        captured.extend(requests)
+        return {
+            request["code"]: {"available": True, "code": request["code"]}
+            for request in requests
+        }
+
+    monkeypatch.setattr(publisher, "fetch_quality_history_batch", fetch)
+
+    evidence, status = _prepare_quality_history_evidence(codes, "2026-07-17")
+
+    assert len(captured) == publisher._QUALITY_HISTORY_BACKFILL_LIMIT
+    assert captured[0] == {"code": "000006", "as_of": "2026-07-17"}
+    assert len(evidence) == 1_005
+    assert status == {
+        "requested_companies": 1_205,
+        "reused_companies": 5,
+        "network_tranche_companies": 1_000,
+        "returned_companies": 1_005,
+        "available_companies": 1_005,
+        "remaining_companies": 200,
+    }
 
 
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path):

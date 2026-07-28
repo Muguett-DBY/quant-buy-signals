@@ -25,7 +25,7 @@ from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.growth_evidence import fetch_growth_evidence_batch
 from data.patch4_evidence import fetch_patch4_evidence_batch
-from data.quality_history import fetch_quality_history_batch
+from data.quality_history import fetch_quality_history_batch, load_quality_history_cache_batch
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import DEFAULT_SNAPSHOT_PATH, SNAPSHOT_SCHEMA_VERSION, get_market_snapshot, save_market_snapshot
 from data.mobile_snapshot import write_mobile_snapshot
@@ -47,6 +47,7 @@ _MOBILE_STRUCTURAL_EVIDENCE_GATES = (
     "candidate_visibility_ready",
     "candidate_recall_ready",
 )
+_QUALITY_HISTORY_BACKFILL_LIMIT = 1_000
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -193,6 +194,41 @@ def _mobile_screening_coverage(scores: object) -> dict[str, object]:
     return result
 
 
+def _prepare_quality_history_evidence(
+    eligible_codes: Sequence[str],
+    market_as_of: str,
+) -> tuple[dict[str, Mapping[str, object]], dict[str, int]]:
+    """Reuse recent source captures and fill one bounded daily tranche.
+
+    A full A-share history refresh requires roughly ten thousand upstream
+    requests.  Loading every company in one burst is both unreliable and
+    unfriendly to the public sources.  The daily publication therefore
+    restores every still-fresh source capture and fetches the next stable
+    tranche of missing companies.  Coverage accumulates across runs.
+    """
+
+    requests_ = [{"code": str(code), "as_of": market_as_of} for code in sorted(set(eligible_codes))]
+    cached = load_quality_history_cache_batch(requests_)
+    missing = [request for request in requests_ if request["code"] not in cached]
+    tranche = missing[:_QUALITY_HISTORY_BACKFILL_LIMIT]
+    fetched = fetch_quality_history_batch(tranche) if tranche else {}
+    combined: dict[str, Mapping[str, object]] = {
+        str(code): dict(value) for code, value in cached.items() if isinstance(value, Mapping)
+    }
+    combined.update(
+        {str(code): dict(value) for code, value in fetched.items() if isinstance(value, Mapping)}
+    )
+    available = sum(1 for value in combined.values() if value.get("available") is True)
+    return combined, {
+        "requested_companies": len(requests_),
+        "reused_companies": len(cached),
+        "network_tranche_companies": len(tranche),
+        "returned_companies": len(combined),
+        "available_companies": available,
+        "remaining_companies": max(0, len(requests_) - available),
+    }
+
+
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     if refresh and _shanghai_now().time() < MARKET_COLDNESS_DECISION_READY_TIME:
@@ -237,6 +273,10 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     if len(coldness_archive_candidates) != 1:
         raise RuntimeError("validated market-coldness evidence has no unique archive candidate")
     archive_market_coldness_session_snapshot(coldness_archive_candidates[0], market_as_of)
+    quality_history_evidence, quality_history_backfill = _prepare_quality_history_evidence(
+        eligible_codes,
+        market_as_of,
+    )
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -246,6 +286,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         previous_quality=_comparison_quality(snapshot),
         reporting_period_contract=reporting_period_contract,
         market_coldness_evidence=coldness_evidence,
+        quality_history_evidence=quality_history_evidence,
         quality_history_loader=fetch_quality_history_batch,
         type3_growth_loader=fetch_growth_evidence_batch,
         research_report_loader=fetch_research_reports_batch,
@@ -294,6 +335,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
             "market_coldness": dict(coldness_status),
             "post_close_quote_coverage": post_close_quote_coverage,
             "screening_coverage": screening_coverage,
+            "quality_history_backfill": quality_history_backfill,
             "source_state": starting_state,
         },
     )

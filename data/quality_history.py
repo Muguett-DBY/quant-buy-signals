@@ -50,6 +50,7 @@ VALUATION_PAGE_SIZE = 2_000
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_BATCH_COMPANIES = 2_000
 CACHE_SCHEMA_VERSION = 1
+REUSABLE_CACHE_MAX_AGE_DAYS = LATEST_MAX_AGE_DAYS
 
 _A_SHARE_CODE = re.compile(r"^[036][0-9]{5}$")
 _CANONICAL_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -551,6 +552,30 @@ def _cache_path(code: str, as_of: date, cache_dir: Path) -> Path:
     return cache_dir / f"{MODEL_ID}_{code}_{as_of.strftime('%Y%m%d')}.json.gz"
 
 
+def _reusable_cache_candidates(code: str, as_of: date, cache_dir: Path) -> list[tuple[date, Path]]:
+    """Return recent, earlier cache generations newest-first.
+
+    The persisted payload contains normalized source rows, not merely a final
+    score.  Replaying a recent source capture against the requested cutoff is
+    therefore safe while the ordinary latest-observation freshness contract
+    remains satisfied.
+    """
+
+    earliest = as_of.toordinal() - REUSABLE_CACHE_MAX_AGE_DAYS
+    prefix = f"{MODEL_ID}_{code}_"
+    candidates: list[tuple[date, Path]] = []
+    for path in cache_dir.glob(f"{prefix}????????.json.gz"):
+        stamp = path.name[len(prefix) : len(prefix) + 8]
+        try:
+            cached_as_of = datetime.strptime(stamp, "%Y%m%d").date()
+        except ValueError:
+            continue
+        if earliest <= cached_as_of.toordinal() <= as_of.toordinal():
+            candidates.append((cached_as_of, path))
+    candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+    return candidates
+
+
 def _from_cache(payload: Any, code: str, as_of: date) -> QualityHistoryEvidence:
     if not isinstance(payload, Mapping) or set(payload) != {"contract", "weekly_bars", "valuation_rows"}:
         raise QualityHistoryError("market-history cache payload shape is invalid")
@@ -562,6 +587,74 @@ def _from_cache(payload: Any, code: str, as_of: date) -> QualityHistoryEvidence:
     if not result.available:
         raise QualityHistoryError(f"cached quality history is incomplete: {result.reason}")
     return result
+
+
+def _from_recent_cache(
+    payload: Any,
+    code: str,
+    *,
+    cached_as_of: date,
+    requested_as_of: date,
+) -> QualityHistoryEvidence:
+    if not isinstance(payload, Mapping) or set(payload) != {"contract", "weekly_bars", "valuation_rows"}:
+        raise QualityHistoryError("market-history cache payload shape is invalid")
+    if payload.get("contract") != _cache_contract(code, cached_as_of):
+        raise QualityHistoryError("market-history cache contract mismatch")
+    bars = _deserialize_bars(payload.get("weekly_bars"))
+    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, requested_as_of)
+    result = _calculate_evidence(
+        code,
+        requested_as_of,
+        bars,
+        rows,
+        cache_hit=True,
+        cache_diagnostic=f"recent_source_capture:{cached_as_of.isoformat()}",
+    )
+    if not result.available:
+        raise QualityHistoryError(f"recent quality history is incomplete: {result.reason}")
+    return result
+
+
+def _load_reusable_cache(
+    code: str,
+    as_of: date,
+    *,
+    cache_dir: Path,
+    cache_ttl_seconds: int,
+) -> QualityHistoryEvidence | None:
+    exact_path = _cache_path(code, as_of, cache_dir)
+    exact = SafeFileCache(
+        exact_path,
+        schema_version=CACHE_SCHEMA_VERSION,
+        ttl=int(cache_ttl_seconds),
+        max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+    ).load()
+    if exact.hit:
+        try:
+            return _from_cache(exact.value, code, as_of)
+        except QualityHistoryError:
+            pass
+    for cached_as_of, path in _reusable_cache_candidates(code, as_of, cache_dir):
+        if path == exact_path:
+            continue
+        cached = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=int(cache_ttl_seconds),
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        ).load(allow_expired=True)
+        if not cached.hit:
+            continue
+        try:
+            return _from_recent_cache(
+                cached.value,
+                code,
+                cached_as_of=cached_as_of,
+                requested_as_of=as_of,
+            )
+        except QualityHistoryError:
+            continue
+    return None
 
 
 def fetch_quality_history(
@@ -588,8 +681,17 @@ def fetch_quality_history(
     initial = None
     diagnostic = "disabled"
     if use_cache:
+        cache_root = Path(cache_dir)
+        reusable = _load_reusable_cache(
+            normalized_code,
+            cutoff,
+            cache_dir=cache_root,
+            cache_ttl_seconds=int(cache_ttl_seconds),
+        )
+        if reusable is not None:
+            return reusable
         cache = SafeFileCache(
-            _cache_path(normalized_code, cutoff, Path(cache_dir)),
+            _cache_path(normalized_code, cutoff, cache_root),
             schema_version=CACHE_SCHEMA_VERSION,
             ttl=int(cache_ttl_seconds),
             max_uncompressed_bytes=MAX_RESPONSE_BYTES,
@@ -660,6 +762,64 @@ def fetch_quality_history(
         return replace(result, cache_diagnostic=f"{diagnostic};write_failed:{_error_label(exc)}")
 
 
+def load_quality_history_cache_batch(
+    requests_: Sequence[Mapping[str, Any]],
+    *,
+    max_workers: int = 16,
+    progress_cb: Any = None,
+    cache_dir: str | Path = QUALITY_HISTORY_CACHE_DIR,
+    cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+) -> dict[str, dict[str, Any]]:
+    """Load all currently reusable histories without performing network I/O."""
+
+    if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
+        raise TypeError("market-history cache requests must be a sequence")
+    if len(requests_) > 6_000:
+        raise ValueError("market-history cache batch exceeds the company limit")
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int) or not 1 <= max_workers <= 32:
+        raise ValueError("max_workers must be between 1 and 32")
+    if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
+        raise ValueError("cache_ttl_seconds must be non-negative")
+    cache_root = Path(cache_dir)
+    prepared: list[tuple[str, date]] = []
+    seen: set[str] = set()
+    for request in requests_:
+        if not isinstance(request, Mapping) or set(request) != {"code", "as_of"}:
+            raise ValueError("market-history cache request shape is invalid")
+        code = _normalise_code(request.get("code"))
+        as_of = _parse_as_of(request.get("as_of"))
+        if code in seen:
+            raise ValueError(f"market-history cache batch contains duplicate code: {code}")
+        seen.add(code)
+        prepared.append((code, as_of))
+    prepared.sort(key=lambda item: item[0])
+    if not prepared:
+        return {}
+
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=min(int(max_workers), len(prepared))) as executor:
+        future_to_code = {
+            executor.submit(
+                _load_reusable_cache,
+                code,
+                as_of,
+                cache_dir=cache_root,
+                cache_ttl_seconds=cache_ttl_seconds,
+            ): code
+            for code, as_of in prepared
+        }
+        completed = 0
+        for future in as_completed(future_to_code):
+            code = future_to_code[future]
+            evidence = future.result()
+            if evidence is not None:
+                results[code] = evidence.to_dict()
+            completed += 1
+            if progress_cb:
+                progress_cb(completed, len(prepared))
+    return {code: results[code] for code, _ in prepared if code in results}
+
+
 def fetch_quality_history_batch(
     requests_: Sequence[Mapping[str, Any]],
     *,
@@ -724,5 +884,6 @@ __all__ = [
     "QualityHistoryEvidence",
     "fetch_quality_history",
     "fetch_quality_history_batch",
+    "load_quality_history_cache_batch",
     "replay_valuation_distribution",
 ]

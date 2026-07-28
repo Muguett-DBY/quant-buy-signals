@@ -265,7 +265,7 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert jobs["deploy_pages"]["environment"]["name"] == "github-pages"
     assert "requirements-dev-lock.txt" not in workflow
     assert "timeout-minutes: 90" in workflow
-    assert workflow.count("continue-on-error: true") == 2
+    assert workflow.count("continue-on-error: true") == 4
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
@@ -369,8 +369,8 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "should_run": "${{ steps.guard.outputs.should_run }}",
         "reason": "${{ steps.guard.outputs.reason }}",
     }
+    assert workflow.count("data/cache/market_snapshot.json.gz") == 2
     for path in (
-        "data/cache/market_snapshot.json.gz",
         "data/cache/market_coldness",
         "data/cache/market_history",
         "data/cache/quality_history",
@@ -378,7 +378,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/cache/research_reports",
         "data/cache/patch4_evidence",
     ):
-        assert workflow.count(path) == 2
+        assert workflow.count(path) == 4
     for contract in (
         "data/growth_evidence.py",
         "data/quality_history.py",
@@ -386,6 +386,8 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/patch4_evidence.py",
     ):
         assert workflow.count(contract) == 3
+    assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 3
+    assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
 
 
 def test_every_powershell_workflow_script_parses_with_the_real_parser(tmp_path):
