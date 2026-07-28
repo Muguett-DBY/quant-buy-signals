@@ -14,9 +14,9 @@
 - triggered_by_type: `{'type1': 1, 'type2': 2, 'type3': 0, 'type4': 0, 'type5': 1, 'type6': 0, 'type7': 0}`
 - snapshot_content_sha256: `8f8524c263edebd4421f1b0dfc5f65f1eb9dae35829a9f836050df72115de4c3`
 - snapshot_artifact_sha256: `3FAA7C1523099E651A2045B14BD59E24CFA2679B11E05B25DB3A5D7C4F72CD77`
-- code_sha256: `c1dacf27aca89c04330ec09ae04352a01ca4dae029dcb289a8d81f39bd18a173`
+- code_sha256: `8392d9551d0ccda0718f2e3b97f9d544d460c6d89b71f3a24461eb88be308139`
 - rules_sha256: `ef4a55784080c9975efee545d9714435ebff6c1141a41a5e5cca4de3eb280286`
-- dependency_manifest_sha256: `605dd659a0e1ae9349855d1f6df401bf54a5be37ace86faed87da949fe97d989`
+- dependency_manifest_sha256: `b92d1f0800ccd7b9efdec66654cab1826f3b1914a047cb53c7461ebe29266280`
 - industry_sha256: `e5a71f39c525a1c3c7e7bd947354dad357d5f33e863b5a6f682271dfa9a1e631`
 - patch6_source: `{'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}`
 - type7_source_documents: `{'template1': {'path_at_model_authoring': 'E:\\模板汇总MD\\第1模板.md', 'sha256': '98d8a101a08cdb122afd23c793faa3edf5e4e426eae09e7fc20901476ea95b1d'}, 'template5': {'path_at_model_authoring': 'E:\\模板汇总MD\\第5模板.md', 'sha256': '37a9cd43633bcd0bc1f2811738d48a7d1cff659e5ef11b6fd9152f2ed0686946'}, 'patch5': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁5.md', 'sha256': '8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4'}, 'patch6': {'path_at_model_authoring': 'E:\\模板汇总MD\\补丁6.md', 'sha256': 'aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6'}}`
