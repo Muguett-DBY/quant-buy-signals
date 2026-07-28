@@ -65,7 +65,9 @@ def test_android_company_results_are_visible_and_explain_empty_filters():
             )
         ]
     )
-    assert "list.setEmptyView(emptyState)" in main_activity
+    assert "companyList.addHeaderView(header, null, false)" in main_activity
+    assert "emptyState.setVisibility(visibleEntries.isEmpty() ? View.VISIBLE : View.GONE)" in main_activity
+    assert "position - companyList.getHeaderViewsCount()" in main_activity
     assert "visibleEntries.size()" in main_activity
 
 

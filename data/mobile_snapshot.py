@@ -43,7 +43,7 @@ from engine.buy_screener import (
 
 SNAPSHOT_SCHEMA_VERSION = 1
 MAX_COMPRESSED_ASSET_BYTES = 8_000_000
-MAX_UNCOMPRESSED_ASSET_BYTES = 16_000_000
+MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000
 MAX_PUBLIC_REASON_UTF16_UNITS = 200
 CATALOG_FILENAME = "catalog-{generation}.json.gz"
 SIGNALS_FILENAME = "signals-{generation}.json.gz"
@@ -183,18 +183,28 @@ def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
 
 def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
     def public_dimensions(value: Mapping[str, Any], status: str) -> tuple[dict[str, float], dict[str, str]]:
-        # A scoreless framework must never expose the scorer's internal zero
-        # placeholders.  Complete/diagnostic frameworks retain every finite
-        # sub-score together with its short, plain-language evidence sentence.
-        if status in _SCORELESS_STATUSES:
+        # Not-applicable frameworks have no meaningful dimensions.  For an
+        # evidence-incomplete framework, publish every *known* dimension while
+        # omitting exactly the missing dimensions recorded by the decision
+        # contract.  This keeps internal zero placeholders private without
+        # hiding valid evidence the phone and web clients can already explain.
+        if status == "not_applicable":
             return {}, {}
         raw_scores = value.get("sub_scores")
         raw_reasons = value.get("reasons")
         if not isinstance(raw_scores, Mapping):
             return {}, {}
+        decision = value.get("decision")
+        missing_dimensions = (
+            set(decision.get("missing_dimensions", []))
+            if status == "insufficient_evidence" and isinstance(decision, Mapping)
+            else set()
+        )
         scores: dict[str, float] = {}
         reasons: dict[str, str] = {}
         for dimension in TYPE_WEIGHTS[type_key]:
+            if dimension in missing_dimensions:
+                continue
             score = _finite(raw_scores.get(dimension))
             if score is None:
                 continue
@@ -427,6 +437,10 @@ def build_mobile_snapshot(
     shared = {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "product": "DS_DCF",
+        "capabilities": {
+            "dimension_scores": True,
+            "decision_contract": True,
+        },
         "generated_at_utc": generated_at,
         "market_as_of": market_as_of,
         "data_timestamp_utc": data_timestamp_utc,

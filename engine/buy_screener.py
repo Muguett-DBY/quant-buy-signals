@@ -3484,7 +3484,11 @@ def _type2_company_turn_evidence(m: Mapping[str, Any]) -> tuple[bool, str]:
     return False, "新股缺2年或同口径季报"
 
 
-def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
+def _score_type2_financial(
+    m: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+    history_evidence: Optional[Mapping[str, Any]] = None,
+):
     industry = str(m.get("industry") or "")
     if industry not in SUPPORTED_FINANCIAL_INDUSTRIES:
         return _not_applicable("type2", "其他金融暂无专属周期模型")
@@ -3566,26 +3570,36 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
         scores["2c"] = coldness
         reasons["2c"] = _evidence_reason(m, "market_coldness_score", "冷度证据不可追溯")
 
-    pb = _safe_float(m.get("pb"))
-    median_pb = benchmark("median_pb")
-    median_pb_count = benchmark("median_pb_count")
-    valuation_evidence_complete = bool(
-        pb is not None
-        and pb > 0
-        and median_pb is not None
-        and median_pb > 0
-        and median_pb_count is not None
-        and median_pb_count >= minimum_sample
-    )
-    if valuation_evidence_complete:
-        pb_ratio = pb / median_pb
-        scores["2d"] = _score_0_10(
-            pb_ratio,
-            [(0.50, 9), (0.75, 7.5), (1.10, 5.5), (1.50, 4), (2.00, 2), (3.00, 1)],
+    valuation_history = _type2_valuation_history_inputs(m, history_evidence)
+    valuation_evidence_complete = valuation_history is not None
+    if valuation_history is not None:
+        scores["2d"], reasons["2d"] = _type2_history_score(valuation_history)
+    elif "_type2_history_evidence" not in m and history_evidence is None:
+        # Compatibility path for isolated rule callers.  Production
+        # screen_all_types always binds the history key, including explicit
+        # absence, so publication can never trigger from this peer proxy.
+        pb = _safe_float(m.get("pb"))
+        median_pb = benchmark("median_pb")
+        median_pb_count = benchmark("median_pb_count")
+        valuation_evidence_complete = bool(
+            pb is not None
+            and pb > 0
+            and median_pb is not None
+            and median_pb > 0
+            and median_pb_count is not None
+            and median_pb_count >= minimum_sample
         )
-        reasons["2d"] = f"金融PB/同行{pb_ratio:.1f}倍"
+        if valuation_evidence_complete:
+            pb_ratio = pb / median_pb
+            scores["2d"] = _score_0_10(
+                pb_ratio,
+                [(0.50, 9), (0.75, 7.5), (1.10, 5.5), (1.50, 4), (2.00, 2), (3.00, 1)],
+            )
+            reasons["2d"] = f"测试兼容PB/同行{pb_ratio:.1f}倍"
+        else:
+            scores["2d"], reasons["2d"] = 2.0, "金融PB同行证据不足"
     else:
-        scores["2d"], reasons["2d"] = 2.0, "金融PB同行证据不足"
+        scores["2d"], reasons["2d"] = 2.0, "缺公司自身五年估值分位"
 
     decision_scores = _sanitize_scores(scores, TYPE_WEIGHTS["type2"])
     hot_average = (decision_scores["2a"] + decision_scores["2b"]) / 2.0
@@ -3629,10 +3643,17 @@ def _score_type2_financial(m: Mapping[str, Any], benchmarks: Mapping[str, Mappin
     )
 
 
-def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
+def score_type2_two_hot_one_cold(
+    m: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+    history_evidence: Optional[Mapping[str, Any]] = None,
+):
     """情况二：产业热、公司拐点、市场冷和估值合理。"""
+    if "_type2_history_evidence" in m:
+        bound = m.get("_type2_history_evidence")
+        history_evidence = bound if isinstance(bound, Mapping) else None
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
-        return _score_type2_financial(m, benchmarks)
+        return _score_type2_financial(m, benchmarks, history_evidence)
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {}
     industry = str(m.get("industry", ""))
@@ -3769,43 +3790,55 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         # 假信号。缺独立量价或人工可追溯证据时必须明确N/A。
         scores["2c"], reasons["2c"] = 0.0, "缺独立量价冷度证据"
 
-    # 2d独立使用增长调整PE，缺失时再用同行PB。
-    peg = _safe_float(m.get("peg"))
-    if not _aligned_current_consecutive(m, profits, profit_years, 3):
-        peg = None
-    pb = _safe_float(m.get("pb"))
-    median_pb = None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb"))
-    median_pb_count = (
-        None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb_count"))
-    )
-    if peg is not None and peg > 0:
+    # 补丁6要求2d使用公司自身历史PE/PB/PS分位。同行估值和PEG可以
+    # 作为研究提示，但不能替代这条时间序列证据参与触发判定。
+    bound_history = m.get("_type2_history_evidence") if "_type2_history_evidence" in m else history_evidence
+    valuation_history = _type2_valuation_history_inputs(m, bound_history)
+    if valuation_history is not None:
         valuation_evidence_complete = True
-        valuation_evidence_basis = "盈利趋势PEG"
-        scores["2d"] = _score_0_10(
-            peg,
-            [(0.50, 10), (0.80, 9), (1.20, 7.5), (1.80, 5), (2.00, 4), (2.50, 3), (4.00, 1)],
+        valuation_evidence_basis = "公司自身五年估值分位"
+        scores["2d"], reasons["2d"] = _type2_history_score(valuation_history)
+    elif "_type2_history_evidence" not in m and history_evidence is None:
+        peg = _safe_float(m.get("peg"))
+        if not _aligned_current_consecutive(m, profits, profit_years, 3):
+            peg = None
+        pb = _safe_float(m.get("pb"))
+        median_pb = None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb"))
+        median_pb_count = (
+            None if industry == "DEFAULT" else _safe_float(_get_bench(benchmarks, industry, "median_pb_count"))
         )
-        reasons["2d"] = f"归母利润趋势PEG{peg:.1f}"
-    elif (
-        pb is not None
-        and pb > 0
-        and median_pb is not None
-        and median_pb > 0
-        and median_pb_count is not None
-        and median_pb_count >= MIN_SECTOR_COMPANIES
-    ):
-        valuation_evidence_complete = True
-        valuation_evidence_basis = "同行市净率"
-        pb_ratio = pb / median_pb
-        scores["2d"] = _score_0_10(
-            pb_ratio,
-            [(0.50, 9), (0.75, 7.5), (1.10, 5.5), (1.50, 4), (2.00, 2), (3.00, 1)],
-        )
-        reasons["2d"] = f"当前PB/行业{pb_ratio:.1f}倍"
+        if peg is not None and peg > 0:
+            valuation_evidence_complete = True
+            valuation_evidence_basis = "测试兼容盈利趋势PEG"
+            scores["2d"] = _score_0_10(
+                peg,
+                [(0.50, 10), (0.80, 9), (1.20, 7.5), (1.80, 5), (2.00, 4), (2.50, 3), (4.00, 1)],
+            )
+            reasons["2d"] = f"测试兼容PEG{peg:.1f}"
+        elif (
+            pb is not None
+            and pb > 0
+            and median_pb is not None
+            and median_pb > 0
+            and median_pb_count is not None
+            and median_pb_count >= MIN_SECTOR_COMPANIES
+        ):
+            valuation_evidence_complete = True
+            valuation_evidence_basis = "测试兼容同行市净率"
+            pb_ratio = pb / median_pb
+            scores["2d"] = _score_0_10(
+                pb_ratio,
+                [(0.50, 9), (0.75, 7.5), (1.10, 5.5), (1.50, 4), (2.00, 2), (3.00, 1)],
+            )
+            reasons["2d"] = f"测试兼容PB/行业{pb_ratio:.1f}倍"
+        else:
+            valuation_evidence_complete = False
+            valuation_evidence_basis = "估值证据缺失"
+            scores["2d"], reasons["2d"] = 2.0, "估值数据不足"
     else:
         valuation_evidence_complete = False
-        valuation_evidence_basis = "估值证据缺失"
-        scores["2d"], reasons["2d"] = 2.0, "估值数据不足"
+        valuation_evidence_basis = "缺公司自身历史估值"
+        scores["2d"], reasons["2d"] = 2.0, "缺公司自身五年PE/PB分位"
 
     # 否决边界必须使用最终对外展示的一位小数分数。否则插值得到的
     # 2.00000006 会在界面显示为2.0，却与2b=6.0一起绕过“平均<=4”
@@ -4917,6 +4950,78 @@ def _type5_pb_bottom_score(pb_percentile: Any, current_pb: Any) -> Optional[floa
     return min(percentile_score, absolute_score)
 
 
+def _type2_valuation_history_inputs(
+    m: Mapping[str, Any],
+    history_evidence: Optional[Mapping[str, Any]],
+) -> Optional[dict[str, float]]:
+    """Replay company-specific five-year PE/PB percentiles for Type 2."""
+
+    if not isinstance(history_evidence, Mapping):
+        return None
+    code = _canonical_evidence_code(m.get("code"))
+    reference_date = _evidence_reference_date(m.get("source_trade_date"))
+    if (
+        not code
+        or reference_date is None
+        or history_evidence.get("model_id") != LONG_HORIZON_HISTORY_MODEL_ID
+        or _canonical_evidence_code(history_evidence.get("code")) != code
+        or history_evidence.get("as_of") != reference_date.isoformat()
+    ):
+        return None
+    valuation = history_evidence.get("valuation_history")
+    if (
+        not isinstance(valuation, Mapping)
+        or valuation.get("available") is not True
+        or valuation.get("window_years") != 5
+    ):
+        return None
+    span_days = _type5_contract_number(valuation.get("span_days"))
+    start_delay = _type5_contract_number(valuation.get("start_delay_days"))
+    end_date = _evidence_reference_date(valuation.get("end_date"))
+    if (
+        span_days is None
+        or span_days < TYPE5_HISTORY_MIN_SPAN_DAYS
+        or start_delay is None
+        or not 0 <= start_delay <= TYPE5_HISTORY_MAX_START_DELAY_DAYS
+        or end_date is None
+        or not 0 <= (reference_date - end_date).days <= TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
+    ):
+        return None
+    result: dict[str, float] = {}
+    for prefix, current_key in (("pe", "current_pe_ttm"), ("pb", "current_pb_mrq")):
+        observations = valuation.get(f"{prefix}_observations")
+        current = _type5_contract_number(valuation.get(current_key))
+        declared = _type5_contract_number(valuation.get(f"{prefix}_percentile"))
+        replay = replay_valuation_distribution(valuation.get(f"{prefix}_distribution"), current)
+        if (
+            isinstance(observations, (bool, np.bool_))
+            or not isinstance(observations, (int, np.integer))
+            or int(observations) < TYPE5_PB_MIN_OBSERVATIONS
+            or current is None
+            or current <= 0
+            or declared is None
+            or replay is None
+            or int(observations) != replay["observations"]
+            or not math.isclose(declared, float(replay["percentile"]), rel_tol=0.0, abs_tol=1e-12)
+        ):
+            continue
+        result[prefix] = float(declared)
+    return result or None
+
+
+def _type2_history_score(percentiles: Mapping[str, float]) -> tuple[float, str]:
+    values = [float(value) for value in percentiles.values() if 0.0 <= float(value) <= 1.0]
+    if not values:
+        return 2.0, "缺公司自身五年估值分位"
+    percentile = float(median(values))
+    score = _score_0_10(
+        percentile,
+        [(0.05, 10.0), (0.10, 9.5), (0.20, 8.5), (0.30, 7.5), (0.50, 6.0), (0.70, 4.0), (0.90, 2.0), (1.00, 1.0)],
+    )
+    labels = "/".join(key.upper() for key in sorted(percentiles))
+    return score, f"自身五年{labels}分位{percentile:.0%}"
+
+
 def _type5_pb_history_inputs(
     m: Mapping[str, Any],
     history_evidence: Optional[Mapping[str, Any]],
@@ -5485,6 +5590,24 @@ def _type5_history_request_needed(m: Mapping[str, Any], outcome: tuple) -> bool:
     upper_scores = dict(raw_scores)
     upper_scores["5b"] = 10.0
     return _weighted_total(upper_scores, TYPE_WEIGHTS["type5"]) >= QUALIFY_THRESHOLD
+
+
+def _type2_history_request_needed(outcome: tuple) -> bool:
+    """Fetch valuation history only when 2d is the remaining decisive gap."""
+
+    if not isinstance(outcome, tuple) or len(outcome) != 4:
+        return False
+    _triggered, _total, raw_scores, raw_reasons = outcome
+    if not isinstance(raw_scores, Mapping) or not isinstance(raw_reasons, Mapping):
+        return False
+    if raw_reasons.get("_status") != STATUS_INSUFFICIENT_EVIDENCE:
+        return False
+    missing = str(raw_reasons.get("_missing") or "")
+    if "估值" not in missing or any(label in missing for label in ("产业周期", "公司拐点", "市场冷度")):
+        return False
+    upper_scores = dict(raw_scores)
+    upper_scores["2d"] = 10.0
+    return _weighted_total(upper_scores, TYPE_WEIGHTS["type2"]) >= QUALIFY_THRESHOLD
 
 
 TYPE3_GROWTH_EVIDENCE_MODEL_ID = "type3-growth-evidence-v1"
@@ -7072,6 +7195,7 @@ def screen_all_types(
     for metric in metrics:
         code = str(metric.get("code") or "")
         metric["_quantitative_peer_context"] = peer_contexts.get(code, {})
+        metric["_type2_history_evidence"] = normalized_quality_history.get(code)
         if selected_codes is None or code in selected_codes:
             _prepare_dcf_validation_cache(metric, normalized_dcf.get(code))
 
@@ -7214,6 +7338,7 @@ def screen_all_types(
             (
                 preliminary_ledger.get("history_request_needed") is True
                 or _type5_history_request_needed(m, base_outcomes_by_code[code]["type5"])
+                or _type2_history_request_needed(base_outcomes_by_code[code]["type2"])
             )
             and code not in normalized_quality_history
             and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
@@ -7234,6 +7359,7 @@ def screen_all_types(
             if not isinstance(evidence, Mapping):
                 raise ValueError(f"长期市场历史证据必须为映射:{code}")
             normalized_quality_history[code] = evidence
+            metric_by_code[code]["_type2_history_evidence"] = evidence
             newly_loaded_history_codes.add(code)
 
     # Exact long-horizon history materially changes all three Type 7 ledgers.
@@ -7244,6 +7370,7 @@ def screen_all_types(
         metric = metric_by_code[code]
         company_benchmarks = _benchmarks_for_code(benchmarks, code)
         base_outcomes = base_outcomes_by_code[code]
+        base_outcomes["type2"] = score_type2_two_hot_one_cold(metric, company_benchmarks)
         base_outcomes["type5"] = score_type5_counter_cyclical(
             metric,
             company_benchmarks,

@@ -694,6 +694,39 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
+    public void companyDetailsShowKnownDimensionScoresAndNameOnlyTheMissingDimension() {
+        MarketRepository.DecisionSummary decision = new MarketRepository.DecisionSummary(
+                false,
+                "unresolved_missing_evidence",
+                5.0,
+                7.0,
+                "none",
+                true,
+                Collections.singletonList("1c")
+        );
+        Map<String, Double> scores = new HashMap<>();
+        scores.put("1a", 8.0);
+        scores.put("1b", 7.0);
+        scores.put("1d", 6.0);
+        Map<String, String> reasons = new HashMap<>();
+        reasons.put("1a", "买入区内折价");
+        reasons.put("1b", "陷阱排查通过");
+        reasons.put("1d", "业绩拐点催化");
+        MarketRepository.TypeScore typeScore = new MarketRepository.TypeScore(
+                "insufficient_evidence",
+                null,
+                "安全边际资料待补",
+                decision,
+                scores,
+                reasons
+        );
+
+        assertEquals("8.0分；买入区内折价", typeScore.describeDimension("1a"));
+        assertEquals("资料不足（该项尚缺可核验数据）", typeScore.describeDimension("1c"));
+        assertEquals("数据版本过旧，请获取最新数据", typeScore.describeDimension("1z"));
+    }
+
+    @Test
     public void legacyMachineReasonsAreSanitizedBeforeAnyAndroidDisplay() {
         for (String machineText : Arrays.asList(
                 "证据:patch6-observable",
@@ -802,11 +835,12 @@ public final class MarketRepositoryContractTest {
                 "parseEntry",
                 JSONObject.class,
                 Map.class,
-                String.class
+                String.class,
+                boolean.class
         );
         method.setAccessible(true);
         try {
-            return (MarketRepository.MarketEntry) method.invoke(null, company, typeNames(), null);
+            return (MarketRepository.MarketEntry) method.invoke(null, company, typeNames(), null, false);
         } catch (InvocationTargetException exception) {
             Throwable cause = exception.getCause();
             if (cause instanceof IOException) {

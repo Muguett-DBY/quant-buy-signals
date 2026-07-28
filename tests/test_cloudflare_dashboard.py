@@ -22,3 +22,16 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
     assert "sub_scores" in source
     assert "sub_score_reasons" in source
     assert "资料不足" in source
+    assert "dimensionScoresAvailable" in source
+    assert "数据版本过旧" in source
+    assert "missing_dimensions" in source
+
+
+def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    assert '<option value="triggered">实际命中</option>' in source
+    assert "typeState.status===s" in source
+    assert "当前条件没有公司；这表示真实零命中或没有适用记录" in source
+    assert "score(r,t)" in source
+    assert "r.types?.[t]?.reason" in source

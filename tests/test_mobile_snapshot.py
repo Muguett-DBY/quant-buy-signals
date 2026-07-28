@@ -97,6 +97,12 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
     assert signals["candidate_detail_count"] == 0
     assert manifest["summary"]["pending_company_count"] == 1
     assert manifest["summary"]["visible_candidate_company_count"] == 1
+    assert manifest["capabilities"] == {
+        "dimension_scores": True,
+        "decision_contract": True,
+    }
+    assert catalogue["capabilities"] == manifest["capabilities"]
+    assert signals["capabilities"] == manifest["capabilities"]
     assert sum(catalogue["coverage"]["type1"].values()) == 1
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
         [catalog_filename, signals_filename, mobile_snapshot.MANIFEST_FILENAME]
@@ -135,6 +141,50 @@ def test_mobile_catalogue_exposes_each_verified_sub_score_and_plain_evidence(mon
     assert all(type1["sub_score_reasons"].values())
     assert types["type3"]["status"] == "not_applicable"
     assert types["type3"].get("sub_scores", {}) == {}
+
+
+def test_mobile_catalogue_keeps_known_dimensions_when_only_one_dimension_is_missing(monkeypatch):
+    scores = _scores()
+    type1 = dict(scores.at[0, "type1"])
+    type1.update(
+        {
+            "status": "insufficient_evidence",
+            "triggered": False,
+            "evidence_complete": False,
+            "total": 0.0,
+            "sub_scores": {"1a": 8.0, "1b": 7.0, "1c": 0.0, "1d": 6.0},
+            "reasons": {
+                "1a": "买入区内折价",
+                "1b": "陷阱排查通过",
+                "1c": "内部缺失占位",
+                "1d": "业绩拐点催化",
+            },
+            "decision": {
+                **dict(type1["decision"]),
+                "decision_complete": False,
+                "decision_basis": "unresolved_missing_evidence",
+                "score_lower_bound": 5.45,
+                "score_upper_bound": 7.45,
+                "potentially_triggerable": True,
+                "missing_dimensions": ["1c"],
+            },
+        }
+    )
+    scores.at[0, "type1"] = type1
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    _manifest, catalogue, _signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    exported = catalogue["companies"][0]["types"]["type1"]
+    assert exported["score"] is None
+    assert set(exported["sub_scores"]) == {"1a", "1b", "1d"}
+    assert set(exported["sub_score_reasons"]) == {"1a", "1b", "1d"}
+    assert "1c" not in exported["sub_scores"]
 
 
 def test_mobile_snapshot_exports_a_chinese_industry_label_and_keeps_the_enum_separate(monkeypatch):

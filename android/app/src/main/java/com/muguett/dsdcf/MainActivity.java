@@ -10,7 +10,6 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Spinner;
@@ -51,6 +50,7 @@ public final class MainActivity extends Activity {
     private Spinner mode;
     private Spinner typeMode;
     private ArrayAdapter<String> listAdapter;
+    private ListView companyList;
     private Button refreshButton;
     private Button updateButton;
     private File pendingInstallApk;
@@ -75,31 +75,35 @@ public final class MainActivity extends Activity {
 
     private View buildScreen() {
         int padding = dp(14);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(padding, padding, padding, padding);
-        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+        companyList = new ListView(this);
+        companyList.setClipToPadding(false);
+        companyList.setPadding(0, padding, 0, padding);
+        ViewCompat.setOnApplyWindowInsetsListener(companyList, (view, insets) -> {
             androidx.core.graphics.Insets systemBars =
                     insets.getInsets(WindowInsetsCompat.Type.systemBars());
             view.setPadding(
-                    padding + systemBars.left,
+                    systemBars.left,
                     padding + systemBars.top,
-                    padding + systemBars.right,
+                    systemBars.right,
                     padding + systemBars.bottom
             );
             return insets;
         });
 
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(padding, 0, padding, 0);
+
         TextView title = new TextView(this);
         title.setText(R.string.screen_title);
         title.setTextSize(22);
-        root.addView(title);
+        header.addView(title);
 
         TextView notice = new TextView(this);
         notice.setText(R.string.screen_notice);
         notice.setTextSize(14);
         notice.setPadding(0, dp(8), 0, dp(8));
-        root.addView(notice);
+        header.addView(notice);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -111,13 +115,13 @@ public final class MainActivity extends Activity {
         updateButton.setText(R.string.check_update);
         updateButton.setOnClickListener(view -> checkForUpdate());
         actions.addView(updateButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        root.addView(actions);
+        header.addView(actions);
 
         operationStatus = new TextView(this);
         operationStatus.setText(R.string.status_loading_cache);
         operationStatus.setTextSize(14);
         operationStatus.setPadding(0, dp(8), 0, dp(4));
-        root.addView(operationStatus);
+        header.addView(operationStatus);
 
         marketSummary = new TextView(this);
         marketSummary.setText(R.string.market_summary_empty);
@@ -125,13 +129,13 @@ public final class MainActivity extends Activity {
         marketSummary.setPadding(dp(8), dp(8), dp(8), dp(8));
         marketSummary.setBackgroundResource(android.R.drawable.list_selector_background);
         marketSummary.setOnClickListener(view -> showCoverageSummary());
-        root.addView(marketSummary);
+        header.addView(marketSummary);
 
         search = new EditText(this);
         search.setHint(R.string.search_hint);
         search.setSingleLine(true);
         search.addTextChangedListener(new SimpleTextWatcher(this::applyFilters));
-        root.addView(search);
+        header.addView(search);
 
         mode = new Spinner(this);
         ArrayAdapter<String> modeAdapter = new ArrayAdapter<>(
@@ -141,7 +145,7 @@ public final class MainActivity extends Activity {
         );
         mode.setAdapter(modeAdapter);
         mode.setOnItemSelectedListener(new SimpleItemSelectedListener(this::applyFilters));
-        root.addView(mode);
+        header.addView(mode);
 
         typeMode = new Spinner(this);
         ArrayAdapter<String> typeModeAdapter = new ArrayAdapter<>(
@@ -151,46 +155,41 @@ public final class MainActivity extends Activity {
         );
         typeMode.setAdapter(typeModeAdapter);
         typeMode.setOnItemSelectedListener(new SimpleItemSelectedListener(this::applyFilters));
-        root.addView(typeMode);
+        header.addView(typeMode);
 
         resultsStatus = new TextView(this);
         resultsStatus.setText(R.string.results_waiting);
         resultsStatus.setTextSize(15);
         resultsStatus.setPadding(0, dp(8), 0, dp(4));
-        root.addView(resultsStatus);
-
-        FrameLayout resultArea = new FrameLayout(this);
-        ListView list = new ListView(this);
-        listAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, android.R.id.text1, new ArrayList<>());
-        listAdapter.setNotifyOnChange(false);
-        list.setAdapter(listAdapter);
-        list.setOnItemClickListener((parent, view, position, id) -> showEntryDetails(visibleEntries.get(position)));
-        resultArea.addView(list, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        ));
+        header.addView(resultsStatus);
 
         emptyState = new TextView(this);
         emptyState.setText(R.string.results_empty);
         emptyState.setTextSize(16);
         emptyState.setGravity(Gravity.CENTER);
-        emptyState.setPadding(dp(18), dp(18), dp(18), dp(18));
-        resultArea.addView(emptyState, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        ));
-        list.setEmptyView(emptyState);
-        root.addView(resultArea, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1
-        ));
+        emptyState.setPadding(dp(18), dp(24), dp(18), dp(24));
+        emptyState.setVisibility(View.GONE);
+        header.addView(emptyState);
+
+        companyList.addHeaderView(header, null, false);
 
         TextView footer = new TextView(this);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
         footer.setText(getString(R.string.footer_version, BuildConfig.VERSION_NAME));
         footer.setTextSize(12);
-        footer.setPadding(0, dp(6), 0, 0);
-        root.addView(footer);
-        return root;
+        footer.setPadding(padding, dp(10), padding, dp(8));
+        companyList.addFooterView(footer, null, false);
+
+        listAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, android.R.id.text1, new ArrayList<>());
+        listAdapter.setNotifyOnChange(false);
+        companyList.setAdapter(listAdapter);
+        companyList.setOnItemClickListener((parent, view, position, id) -> {
+            int entryPosition = position - companyList.getHeaderViewsCount();
+            if (entryPosition >= 0 && entryPosition < visibleEntries.size()) {
+                showEntryDetails(visibleEntries.get(entryPosition));
+            }
+        });
+        return companyList;
     }
 
     private void loadCachedData() {
@@ -322,6 +321,7 @@ public final class MainActivity extends Activity {
         }
         listAdapter.addAll(labels);
         listAdapter.notifyDataSetChanged();
+        emptyState.setVisibility(visibleEntries.isEmpty() ? View.VISIBLE : View.GONE);
         String selectedModeLabel = String.valueOf(mode.getSelectedItem());
         String selectedTypeLabel = String.valueOf(typeMode.getSelectedItem());
         resultsStatus.setText(getString(

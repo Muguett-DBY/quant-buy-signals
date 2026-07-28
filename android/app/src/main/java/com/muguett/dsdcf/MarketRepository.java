@@ -63,7 +63,7 @@ public final class MarketRepository {
     private static final int MAX_MANIFEST_BYTES = 1_000_000;
     private static final int MAX_MANIFEST_SIGNATURE_BYTES = 1_024;
     private static final int MAX_COMPRESSED_ASSET_BYTES = 8_000_000;
-    private static final int MAX_UNCOMPRESSED_ASSET_BYTES = 16_000_000;
+    private static final int MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000;
     private static final int MAX_UPDATE_MANIFEST_BYTES = 1_000_000;
     private static final int MAX_PUBLIC_REASON_LENGTH = 200;
     private static final int DECISION_SCHEMA_VERSION = 1;
@@ -118,6 +118,8 @@ public final class MarketRepository {
     )));
     private static final Set<String> VALID_DECISION_VETO_STATES =
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList("none", "possible", "confirmed")));
+    private static final Map<String, List<String>> TYPE_DIMENSIONS = createTypeDimensions();
+    private static final Map<String, String> DIMENSION_NAMES = createDimensionNames();
     private static final Set<String> DECISION_FIELDS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "schema_version",
             "model_id",
@@ -572,12 +574,18 @@ public final class MarketRepository {
         }
         List<MarketEntry> entries = new ArrayList<>(companies.length());
         Set<String> uniqueCodes = new HashSet<>();
+        boolean requireDimensionScores = publishesDimensionScores(manifest, catalogue);
         for (int index = 0; index < companies.length(); index++) {
             JSONObject company = companies.optJSONObject(index);
             if (company == null) {
                 throw new IOException("市场目录包含无效公司记录。");
             }
-            MarketEntry entry = parseEntry(company, typeNames, signalDetails.get(company.optString("code")));
+            MarketEntry entry = parseEntry(
+                    company,
+                    typeNames,
+                    signalDetails.get(company.optString("code")),
+                    requireDimensionScores
+            );
             if (!isShanghaiShenzhenCompanyCode(entry.code) || !uniqueCodes.add(entry.code)) {
                 throw new IOException("市场目录包含非沪深公司或重复证券代码。");
             }
@@ -1205,6 +1213,20 @@ public final class MarketRepository {
         return result;
     }
 
+    private static boolean publishesDimensionScores(JSONObject manifest, JSONObject catalogue)
+            throws IOException {
+        JSONObject manifestCapabilities = manifest.optJSONObject("capabilities");
+        JSONObject catalogueCapabilities = catalogue.optJSONObject("capabilities");
+        boolean manifestPublished = manifestCapabilities != null
+                && manifestCapabilities.optBoolean("dimension_scores", false);
+        boolean cataloguePublished = catalogueCapabilities != null
+                && catalogueCapabilities.optBoolean("dimension_scores", false);
+        if (manifestPublished != cataloguePublished) {
+            throw new IOException("市场清单与公司目录的子指标能力声明不一致。");
+        }
+        return manifestPublished;
+    }
+
     private static Map<String, String> parseSignalDetails(JSONObject signals) throws IOException {
         JSONArray values = signals.optJSONArray("signals");
         if (values == null) {
@@ -1228,7 +1250,8 @@ public final class MarketRepository {
     private static MarketEntry parseEntry(
             JSONObject company,
             Map<String, String> typeNames,
-            String detailText
+            String detailText,
+            boolean requireDimensionScores
     ) throws IOException {
         if (typeNames.size() != 7) {
             throw new IOException("市场目录缺少七种买入情况的中文名称。");
@@ -1272,7 +1295,35 @@ public final class MarketRepository {
             if (decision != null) {
                 decisionContractCount++;
             }
-            typeScores.put(key, new TypeScore(status, score, reason, decision));
+            Map<String, Double> subScores = parseSubScores(
+                    type.optJSONObject("sub_scores"),
+                    key
+            );
+            Map<String, String> subScoreReasons = parseSubScoreReasons(
+                    type.optJSONObject("sub_score_reasons"),
+                    key,
+                    subScores.keySet()
+            );
+            if (requireDimensionScores) {
+                Set<String> expected = new HashSet<>();
+                if (!"not_applicable".equals(status)) {
+                    expected.addAll(TYPE_DIMENSIONS.get(key));
+                    if ("insufficient_evidence".equals(status) && decision != null) {
+                        expected.removeAll(decision.missingDimensions);
+                    }
+                }
+                if (!subScores.keySet().equals(expected) || !subScoreReasons.keySet().equals(expected)) {
+                    throw new IOException("公司记录缺少 " + typeNames.get(key) + " 的已知子指标分数或说明。");
+                }
+            }
+            typeScores.put(key, new TypeScore(
+                    status,
+                    score,
+                    reason,
+                    decision,
+                    subScores,
+                    subScoreReasons
+            ));
         }
         if (decisionContractCount != 0 && decisionContractCount != 7) {
             throw new IOException("公司记录的候选边界合同不完整。");
@@ -1321,6 +1372,84 @@ public final class MarketRepository {
                 typeNames,
                 detailText
         );
+    }
+
+    private static Map<String, Double> parseSubScores(JSONObject value, String typeKey)
+            throws IOException {
+        Map<String, Double> result = new HashMap<>();
+        if (value == null) {
+            return result;
+        }
+        List<String> allowed = TYPE_DIMENSIONS.get(typeKey);
+        Iterator<String> keys = value.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            double score = value.optDouble(key, Double.NaN);
+            if (allowed == null
+                    || !allowed.contains(key)
+                    || !Double.isFinite(score)
+                    || score < 0.0
+                    || score > 10.0
+                    || result.put(key, score) != null) {
+                throw new IOException("公司记录包含无效的子指标分数。");
+            }
+        }
+        return result;
+    }
+
+    private static Map<String, String> parseSubScoreReasons(
+            JSONObject value,
+            String typeKey,
+            Set<String> scoreKeys
+    ) throws IOException {
+        Map<String, String> result = new HashMap<>();
+        if (value == null) {
+            return result;
+        }
+        List<String> allowed = TYPE_DIMENSIONS.get(typeKey);
+        Iterator<String> keys = value.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            String reason = publicReasonText(value.optString(key));
+            if (allowed == null
+                    || !allowed.contains(key)
+                    || !scoreKeys.contains(key)
+                    || reason.isEmpty()
+                    || reason.length() > MAX_PUBLIC_REASON_LENGTH
+                    || result.put(key, reason) != null) {
+                throw new IOException("公司记录包含无效的子指标说明。");
+            }
+        }
+        return result;
+    }
+
+    private static Map<String, List<String>> createTypeDimensions() {
+        Map<String, List<String>> result = new HashMap<>();
+        result.put("type1", Arrays.asList("1a", "1b", "1c", "1d"));
+        result.put("type2", Arrays.asList("2a", "2b", "2c", "2d"));
+        result.put("type3", Arrays.asList("3a", "3b", "3c", "3d", "3e"));
+        result.put("type4", Arrays.asList("4a", "4b", "4c", "4d", "4e", "4f"));
+        result.put("type5", Arrays.asList("5a", "5b", "5c", "5d", "5e"));
+        result.put("type6", Arrays.asList("6a", "6b", "6c", "6d", "6e"));
+        result.put("type7", Arrays.asList("7a", "7b", "7c"));
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static Map<String, String> createDimensionNames() {
+        Map<String, String> result = new HashMap<>();
+        String[][] values = {
+                {"1a", "价格与价值空间"}, {"1b", "保守收益率"}, {"1c", "安全边际"}, {"1d", "下行保护"},
+                {"2a", "行业热度"}, {"2b", "公司热度"}, {"2c", "价格冷却"}, {"2d", "基本面确认"},
+                {"3a", "增长速度"}, {"3b", "增长质量"}, {"3c", "增长持续性"}, {"3d", "估值容错"}, {"3e", "泡沫防范"},
+                {"4a", "坡的长度"}, {"4b", "雪的厚度"}, {"4c", "护城河耐久度"}, {"4d", "估值合理性"}, {"4e", "产业泡沫防范"}, {"4f", "股价泡沫防范"},
+                {"5a", "周期位置"}, {"5b", "资产底价"}, {"5c", "行业生存力"}, {"5d", "供需反转"}, {"5e", "股东回报"},
+                {"6a", "赔率空间"}, {"6b", "催化剂"}, {"6c", "生存能力"}, {"6d", "反转证据"}, {"6e", "风险控制"},
+                {"7a", "估值买入区"}, {"7b", "强周期底部"}, {"7c", "优质股权质量"}
+        };
+        for (String[] value : values) {
+            result.put(value[0], value[1]);
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     private static DecisionSummary parseDecisionSummary(JSONObject decision, String typeKey) throws IOException {
@@ -1983,6 +2112,16 @@ public final class MarketRepository {
                 TypeScore score = typeScores.get(key);
                 output.append("\n").append(typeNames.containsKey(key) ? typeNames.get(key) : key)
                         .append("：").append(score == null ? "暂无数据" : score.describe());
+                if (score != null) {
+                    for (String dimension : TYPE_DIMENSIONS.get(key)) {
+                        output.append("\n  ")
+                                .append(dimension)
+                                .append(" ")
+                                .append(DIMENSION_NAMES.getOrDefault(dimension, "子指标"))
+                                .append("：")
+                                .append(score.describeDimension(dimension));
+                    }
+                }
             }
             if (detailText != null && !detailText.trim().isEmpty()) {
                 output.append("\n\n服务器核验详情：\n").append(detailText);
@@ -2036,12 +2175,25 @@ public final class MarketRepository {
         public final String reason;
         public final boolean potentiallyTriggerable;
         public final DecisionSummary decision;
+        public final Map<String, Double> subScores;
+        public final Map<String, String> subScoreReasons;
 
         TypeScore(String status, Double score, String reason) {
-            this(status, score, reason, null);
+            this(status, score, reason, null, Collections.emptyMap(), Collections.emptyMap());
         }
 
         TypeScore(String status, Double score, String reason, DecisionSummary decision) {
+            this(status, score, reason, decision, Collections.emptyMap(), Collections.emptyMap());
+        }
+
+        TypeScore(
+                String status,
+                Double score,
+                String reason,
+                DecisionSummary decision,
+                Map<String, Double> subScores,
+                Map<String, String> subScoreReasons
+        ) {
             this.status = status;
             // Older signed server generations may still contain the scorer's
             // internal 0.0/0.9 placeholders.  Applicability and evidence state
@@ -2050,6 +2202,8 @@ public final class MarketRepository {
             this.reason = publicReasonText(reason);
             this.decision = decision;
             this.potentiallyTriggerable = decision != null && decision.potentiallyTriggerable;
+            this.subScores = Collections.unmodifiableMap(new HashMap<>(subScores));
+            this.subScoreReasons = Collections.unmodifiableMap(new HashMap<>(subScoreReasons));
         }
 
         String describe() {
@@ -2069,6 +2223,22 @@ public final class MarketRepository {
                     ? text
                     : String.format(Locale.CHINA, "%s，%.1f分", text, score);
             return reason == null || reason.isEmpty() ? scored : scored + "；" + reason;
+        }
+
+        String describeDimension(String dimension) {
+            if ("not_applicable".equals(status)) {
+                return "不适用";
+            }
+            Double value = subScores.get(dimension);
+            if (value == null) {
+                if (decision != null && decision.missingDimensions.contains(dimension)) {
+                    return "资料不足（该项尚缺可核验数据）";
+                }
+                return "数据版本过旧，请获取最新数据";
+            }
+            String scored = String.format(Locale.CHINA, "%.1f分", value);
+            String evidence = subScoreReasons.get(dimension);
+            return evidence == null || evidence.isEmpty() ? scored : scored + "；" + evidence;
         }
     }
 

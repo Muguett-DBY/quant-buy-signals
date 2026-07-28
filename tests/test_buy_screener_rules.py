@@ -3558,7 +3558,10 @@ class TestTypeRules(unittest.TestCase):
 
     def test_type5_automatic_bottom_can_trigger_only_with_three_bound_sources(self):
         metric = complete_type5_bottom_metrics()
-        history = type5_history_evidence()
+        history = type5_history_evidence(
+            code=metric["code"],
+            as_of=metric["source_trade_date"],
+        )
         history["available"] = False
         history["shareholder_return"] = {"available": False, "reason": "insufficient_ten_year_span"}
 
@@ -3675,6 +3678,36 @@ class TestTypeRules(unittest.TestCase):
         self.assertLess(total, 7.0)
         self.assertEqual(scores["5b"], 4.0)
         self.assertEqual(reasons["_evidence"], "complete")
+
+    def test_type2_production_path_requires_company_specific_five_year_valuation_history(self):
+        metric = base_metrics(
+            revenue_values=[100, 110, 140],
+            margin_history=[0.10, 0.12, 0.16],
+            net_profit_history=[10, 15, 25],
+            ocf_np_ratio=1.2,
+            market_coldness_score=10.0,
+            peg=0.5,
+        )
+        metric["_type2_history_evidence"] = None
+        missing = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+        self.assertEqual(missing[2]["2d"], 2.0)
+        self.assertEqual(missing[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("估值", missing[3]["_missing"])
+
+        history = type5_history_evidence(
+            code=metric["code"],
+            as_of=metric["source_trade_date"],
+        )
+        metric["_type2_history_evidence"] = history
+        complete = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+        self.assertGreaterEqual(complete[2]["2d"], 9.0)
+        self.assertIn("自身五年PB分位", complete[3]["2d"])
 
     def test_type5_rejects_history_bound_to_another_security_or_date(self):
         metric = complete_type5_bottom_metrics()
