@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ds-dcf"
-version = "11.3.3"
+version = "11.3.4"
 description = "A-share multi-model valuation and seven-framework screening tool"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE"]

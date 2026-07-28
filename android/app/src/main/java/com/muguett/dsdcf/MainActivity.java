@@ -7,11 +7,14 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -283,11 +286,10 @@ public final class MainActivity extends Activity {
         if (marketData == null) {
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.coverage_dialog_title)
-                .setMessage(marketData.typeCoverageSummary())
-                .setPositiveButton(R.string.close, null)
-                .show();
+        showScrollableTextDialog(
+                getString(R.string.coverage_dialog_title),
+                marketData.typeCoverageSummary()
+        );
     }
 
     private void applyFilters() {
@@ -336,11 +338,37 @@ public final class MainActivity extends Activity {
     }
 
     private void showEntryDetails(MarketRepository.MarketEntry entry) {
-        new AlertDialog.Builder(this)
-                .setTitle(entry.name + " " + entry.code)
-                .setMessage(entry.detailedLabel())
+        showScrollableTextDialog(entry.name + " " + entry.code, entry.detailedLabel());
+    }
+
+    private void showScrollableTextDialog(String title, String message) {
+        TextView content = new TextView(this);
+        content.setText(title + "\n\n" + message);
+        content.setTextIsSelectable(true);
+        content.setTextSize(16);
+        content.setPadding(dp(24), dp(20), dp(24), dp(20));
+
+        ScrollView scroller = new ScrollView(this);
+        scroller.setFillViewport(true);
+        scroller.addView(content, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT
+        ));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(scroller)
                 .setPositiveButton(R.string.close, null)
-                .show();
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            Window window = dialog.getWindow();
+            if (window != null) {
+                window.setLayout(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.MATCH_PARENT
+                );
+            }
+        });
+        dialog.show();
     }
 
     private void setActionsEnabled(boolean enabled) {

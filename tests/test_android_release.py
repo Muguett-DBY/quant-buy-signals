@@ -71,6 +71,22 @@ def test_android_company_results_are_visible_and_explain_empty_filters():
     assert "visibleEntries.size()" in main_activity
 
 
+def test_android_company_details_remain_scrollable_on_small_large_font_screens():
+    project_root = Path(__file__).resolve().parents[1]
+    main_activity = (
+        project_root / "android" / "app" / "src" / "main" / "java" / "com" / "muguett" / "dsdcf" / "MainActivity.java"
+    ).read_text(encoding="utf-8")
+    detail_method = main_activity[
+        main_activity.index("private void showEntryDetails(") : main_activity.index("private void setActionsEnabled(")
+    ]
+
+    assert 'showScrollableTextDialog(entry.name + " " + entry.code, entry.detailedLabel())' in detail_method
+    assert "new ScrollView(this)" in detail_method
+    assert "scroller.setFillViewport(true)" in detail_method
+    assert "WindowManager.LayoutParams.MATCH_PARENT" in detail_method
+    assert ".setMessage(entry.detailedLabel())" not in detail_method
+
+
 def test_android_update_check_uses_a_dedicated_stable_manifest_release():
     project_root = Path(__file__).resolve().parents[1]
     repository = (
