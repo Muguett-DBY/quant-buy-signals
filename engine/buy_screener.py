@@ -3848,9 +3848,7 @@ def score_type2_two_hot_one_cold(m: Mapping[str, Any], benchmarks: Mapping[str, 
         and decision_scores["2c"] >= 7
         and 4 <= decision_scores["2d"] <= 5
     )
-    valuation_ready = bool(
-        valuation_evidence_complete and (decision_scores["2d"] >= 5 or valuation_adjustment)
-    )
+    valuation_ready = bool(valuation_evidence_complete and (decision_scores["2d"] >= 5 or valuation_adjustment))
     if valuation_adjustment:
         reasons["_adjustment"] = "强两热一冷允许中性估值"
     if not valuation_ready:
