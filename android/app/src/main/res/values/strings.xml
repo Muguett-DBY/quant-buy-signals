@@ -27,7 +27,7 @@
     <string name="footer_version">版本 %1$s · 数据和安装包均须通过官方加密下载与文件完整性校验</string>
     <string name="status_cached">已读取本机已校验的市场数据。</string>
     <string name="status_refreshing">正在下载并校验最新收盘后数据…</string>
-    <string name="status_refreshed">已更新：文件签名、数据结构和分析质量校验通过；部分公司仍可能显示资料不足。</string>
+    <string name="status_refreshed">获取成功：当前最新交易日为 %1$s；文件签名、数据结构和分析质量校验均已通过，部分公司仍可能显示资料不足。</string>
     <string name="status_refresh_failed">未更新，已保留上一份数据：%1$s</string>
     <string name="status_checking_update">正在检查应用更新…</string>
     <string name="status_latest_app">当前已是最新已发布的手机应用。</string>

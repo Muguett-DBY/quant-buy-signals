@@ -182,10 +182,14 @@ public final class MainActivity extends Activity {
     private void refreshData() {
         setActionsEnabled(false);
         operationStatus.setText(R.string.status_refreshing);
-        runInBackground(() -> repository.refresh(), data -> {
+        runInBackground(() -> repository.refresh(status -> runOnUiThread(() -> {
+            if (!destroyed) {
+                operationStatus.setText(status);
+            }
+        })), data -> {
             marketData = data;
             renderSummary();
-            operationStatus.setText(R.string.status_refreshed);
+            operationStatus.setText(getString(R.string.status_refreshed, data.marketAsOf));
             applyFilters();
             setActionsEnabled(true);
         }, error -> {
@@ -302,9 +306,6 @@ public final class MainActivity extends Activity {
 
     private static String friendlyMessage(Exception error) {
         String detail = error.getMessage();
-        if (detail != null && detail.contains("HTTP")) {
-            return "下载服务器暂时不可用，请稍后重试。";
-        }
         if (error instanceof JSONException) {
             return "服务器返回的数据格式不正确，已拒绝使用。";
         }

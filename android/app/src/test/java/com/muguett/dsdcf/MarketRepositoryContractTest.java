@@ -47,7 +47,7 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
-    public void stableManifestUsesPagesWhileImmutablePayloadsRemainOnTheRelease() {
+    public void stableManifestAndImmutablePayloadsHaveTwoOfficialOrigins() {
         assertEquals(
                 "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json",
                 MarketRepository.MOBILE_MANIFEST_URL
@@ -57,9 +57,23 @@ public final class MarketRepositoryContractTest {
                 MarketRepository.MOBILE_RELEASE_ASSET_BASE
         );
         assertEquals(
+                "https://muguett-dby.github.io/quant-buy-signals/mobile-data/",
+                MarketRepository.MOBILE_PAGES_ASSET_BASE
+        );
+        assertEquals(
                 "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/android-app/android-update-manifest.sig",
                 MarketRepository.UPDATE_MANIFEST_SIGNATURE_URL
         );
+    }
+
+    @Test
+    public void downloadRetriesOnlyTransientFailures() {
+        assertTrue(MarketRepository.isRetryableDownloadFailure(new IOException("timeout")));
+        assertTrue(MarketRepository.isRetryableDownloadFailure(new IOException("下载服务器返回 HTTP 429。")));
+        assertTrue(MarketRepository.isRetryableDownloadFailure(new IOException("下载服务器返回 HTTP 503。")));
+        assertFalse(MarketRepository.isRetryableDownloadFailure(new IOException("下载服务器返回 HTTP 404。")));
+        assertFalse(MarketRepository.isRetryableDownloadFailure(new IOException("下载文件大小不在允许范围内。")));
+        assertFalse(MarketRepository.isRetryableDownloadFailure(new IOException("下载地址不是受信任的官方加密发布地址。")));
     }
 
     @Test

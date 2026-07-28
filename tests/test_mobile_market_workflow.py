@@ -161,6 +161,9 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
     release = tmp_path / "ds-dcf-mobile-market-data-release"
     release.mkdir()
     (release / "manifest.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (release / "manifest-generation.sig").write_bytes(b"signature")
+    (release / "catalog-generation.json.gz").write_bytes(b"catalogue")
+    (release / "signals-generation.json.gz").write_bytes(b"signals")
     workflow_script = tmp_path / "prepare-pages.sh"
     workflow_script.write_text(textwrap.dedent(script), encoding="utf-8")
     environment = os.environ.copy()
@@ -181,7 +184,10 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
     assert (pages / "mobile-data" / "manifest.json").read_bytes() == (release / "manifest.json").read_bytes()
     assert sorted(path.relative_to(pages).as_posix() for path in pages.rglob("*") if path.is_file()) == [
         "index.html",
+        "mobile-data/catalog-generation.json.gz",
+        "mobile-data/manifest-generation.sig",
         "mobile-data/manifest.json",
+        "mobile-data/signals-generation.json.gz",
     ]
 
 

@@ -237,7 +237,7 @@ jobs:
           apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -f "$apk"
           "$aapt" dump badging "$apk" | tee "$RUNNER_TEMP/android-badging.txt"
-          grep -F "package: name='com.muguett.dsdcf' versionCode='2' versionName='11.3.0'" "$RUNNER_TEMP/android-badging.txt"
+          grep -F "package: name='com.muguett.dsdcf' versionCode='3' versionName='11.3.1'" "$RUNNER_TEMP/android-badging.txt"
           "$apksigner" verify --verbose "$apk"
 
       - name: Prove unsigned release builds fail closed

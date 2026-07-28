@@ -903,7 +903,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/mobile-pages/mobile-data"
-          cp "${RUNNER_TEMP}/ds-dcf-mobile-market-data-release/manifest.json" "${RUNNER_TEMP}/mobile-pages/mobile-data/manifest.json"
+          cp "${RUNNER_TEMP}/ds-dcf-mobile-market-data-release/"* "${RUNNER_TEMP}/mobile-pages/mobile-data/"
           cat > "${RUNNER_TEMP}/mobile-pages/index.html" <<'HTML'
           <!doctype html>
           <html lang="zh-CN">
@@ -930,6 +930,7 @@ jobs:
           HTML
           test -s "${RUNNER_TEMP}/mobile-pages/index.html"
           test -s "${RUNNER_TEMP}/mobile-pages/mobile-data/manifest.json"
+          test "$(find "${RUNNER_TEMP}/mobile-pages/mobile-data" -maxdepth 1 -type f | wc -l)" -eq 4
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5

@@ -34,15 +34,15 @@ $env:DS_DCF_ANDROID_KEY_PASSWORD = '<private>'
 发布前给 APK 一个版本化文件名。必须在仓库根目录、已提交且包含未跟踪文件在内完全干净的 Git 工作树中生成更新清单；工具会确认当前仓库根目录和 `HEAD` 提交对象。下面把产物放入已被 Git 忽略的 `dist/`，不要先把 APK 放进未忽略的仓库路径。然后再使用与 APK 证书、每日市场数据和桌面更新都不同的 P-256 私钥签署公开清单：
 
 ```powershell
-$releaseDir = 'dist\official-v11.3.0\android'
+$releaseDir = 'dist\official-v11.3.1\android'
 New-Item -ItemType Directory -Force $releaseDir | Out-Null
 Copy-Item android\app\build\outputs\apk\release\app-release.apk `
-  "$releaseDir\DS_DCF-v11.3.0-android-release.apk"
+  "$releaseDir\DS_DCF-v11.3.1-android-release.apk"
 python -m tools.android_release `
-  --apk "$releaseDir\DS_DCF-v11.3.0-android-release.apk" `
-  --version-code 2 `
-  --version-name 11.3.0 `
-  --release-tag v11.3.0 `
+  --apk "$releaseDir\DS_DCF-v11.3.1-android-release.apk" `
+  --version-code 3 `
+  --version-name 11.3.1 `
+  --release-tag v11.3.1 `
   --output "$releaseDir\android-update-manifest.json" `
   --provenance-output "$releaseDir\android-release-provenance.json"
 $env:DS_DCF_ANDROID_UPDATE_SIGNING_PRIVATE_KEY_BASE64 = '<从仓库外安全存储载入>'

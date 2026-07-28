@@ -52,6 +52,8 @@ public final class MarketRepository {
             "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/";
     public static final String MOBILE_MANIFEST_URL =
             "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json";
+    public static final String MOBILE_PAGES_ASSET_BASE =
+            "https://muguett-dby.github.io/quant-buy-signals/mobile-data/";
     public static final String UPDATE_MANIFEST_URL =
             "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/android-app/android-update-manifest.json";
     public static final String UPDATE_MANIFEST_SIGNATURE_URL =
@@ -248,19 +250,40 @@ public final class MarketRepository {
     }
 
     public MarketData refresh() throws IOException, JSONException {
-        byte[] manifestBytes = download(MOBILE_MANIFEST_URL, MAX_MANIFEST_BYTES);
+        return refresh(null);
+    }
+
+    public MarketData refresh(RefreshProgress progress) throws IOException, JSONException {
+        reportProgress(progress, "正在连接数据服务…");
+        byte[] manifestBytes = downloadFirstAvailable(
+                new String[] {
+                        MOBILE_MANIFEST_URL,
+                        MOBILE_RELEASE_ASSET_BASE + "manifest.json"
+                },
+                MAX_MANIFEST_BYTES
+        );
         JSONObject manifest = new JSONObject(new String(manifestBytes, StandardCharsets.UTF_8));
         String signatureFilename = signatureFilename(manifest);
-        byte[] signatureBytes = download(
-                MOBILE_RELEASE_ASSET_BASE + signatureFilename,
+        reportProgress(progress, "正在核对官方数据签名…");
+        byte[] signatureBytes = downloadFirstAvailable(
+                mobileAssetUrls(signatureFilename),
                 MAX_MANIFEST_SIGNATURE_BYTES
         );
         verifyManifestSignature(manifestBytes, signatureBytes);
         AssetMeta catalogueMeta = catalogueMeta(manifest);
         AssetMeta signalsMeta = signalsMeta(manifest);
         validateGenerationFilenames(signatureFilename, catalogueMeta.filename, signalsMeta.filename);
-        byte[] catalogueBytes = download(MOBILE_RELEASE_ASSET_BASE + catalogueMeta.filename, MAX_COMPRESSED_ASSET_BYTES);
-        byte[] signalsBytes = download(MOBILE_RELEASE_ASSET_BASE + signalsMeta.filename, MAX_COMPRESSED_ASSET_BYTES);
+        reportProgress(progress, "正在下载沪深公司目录…");
+        byte[] catalogueBytes = downloadFirstAvailable(
+                mobileAssetUrls(catalogueMeta.filename),
+                MAX_COMPRESSED_ASSET_BYTES
+        );
+        reportProgress(progress, "正在下载七类买入情况结果…");
+        byte[] signalsBytes = downloadFirstAvailable(
+                mobileAssetUrls(signalsMeta.filename),
+                MAX_COMPRESSED_ASSET_BYTES
+        );
+        reportProgress(progress, "正在校验并保存最新数据…");
         verifyAsset(catalogueBytes, catalogueMeta);
         verifyAsset(signalsBytes, signalsMeta);
         MarketData data = parseMarketDataSafely(manifestBytes, catalogueBytes, signalsBytes);
@@ -290,6 +313,19 @@ public final class MarketRepository {
             }
         }
         return data;
+    }
+
+    private static String[] mobileAssetUrls(String filename) {
+        return new String[] {
+                MOBILE_RELEASE_ASSET_BASE + filename,
+                MOBILE_PAGES_ASSET_BASE + filename
+        };
+    }
+
+    private static void reportProgress(RefreshProgress progress, String status) {
+        if (progress != null) {
+            progress.onStage(status);
+        }
     }
 
     public UpdateInfo checkForUpdate() throws IOException, JSONException {
@@ -1389,7 +1425,43 @@ public final class MarketRepository {
         }
     }
 
+    private static byte[] downloadFirstAvailable(String[] addresses, long maxBytes) throws IOException {
+        IOException lastFailure = null;
+        for (String address : addresses) {
+            try {
+                return download(address, maxBytes);
+            } catch (IOException failure) {
+                lastFailure = failure;
+            }
+        }
+        if (lastFailure == null) {
+            throw new IOException("没有可用的官方下载地址。");
+        }
+        throw new IOException("所有官方下载地址均未能连接：" + safeDownloadFailure(lastFailure), lastFailure);
+    }
+
     private static byte[] download(String address, long maxBytes) throws IOException {
+        IOException lastFailure = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                return downloadOnce(address, maxBytes);
+            } catch (IOException failure) {
+                lastFailure = failure;
+                if (attempt >= 2 || !isRetryableDownloadFailure(failure)) {
+                    throw failure;
+                }
+                try {
+                    Thread.sleep(300L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("下载已被中止。", interrupted);
+                }
+            }
+        }
+        throw lastFailure == null ? new IOException("下载没有完成。") : lastFailure;
+    }
+
+    private static byte[] downloadOnce(String address, long maxBytes) throws IOException {
         URL current = new URL(address);
         for (int redirects = 0; redirects <= 5; redirects++) {
             if (!isTrustedDownloadUrl(current.toString())) {
@@ -1398,8 +1470,8 @@ public final class MarketRepository {
             HttpURLConnection connection = (HttpURLConnection) current.openConnection();
             connection.setInstanceFollowRedirects(false);
             connection.setUseCaches(false);
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(30_000);
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(25_000);
             connection.setRequestProperty("Cache-Control", "no-cache, no-store, max-age=0");
             connection.setRequestProperty("Pragma", "no-cache");
             connection.setRequestProperty("Accept", "application/json, application/gzip, application/vnd.android.package-archive");
@@ -1429,6 +1501,31 @@ public final class MarketRepository {
             }
         }
         throw new IOException("下载跳转次数过多。");
+    }
+
+    static boolean isRetryableDownloadFailure(IOException failure) {
+        String detail = failure.getMessage();
+        if (detail == null || !detail.contains("HTTP ")) {
+            return detail == null
+                    || (!detail.contains("不在允许范围")
+                    && !detail.contains("不是受信任")
+                    && !detail.contains("跳转"));
+        }
+        return detail.contains("HTTP 408")
+                || detail.contains("HTTP 425")
+                || detail.contains("HTTP 429")
+                || detail.contains("HTTP 500")
+                || detail.contains("HTTP 502")
+                || detail.contains("HTTP 503")
+                || detail.contains("HTTP 504");
+    }
+
+    private static String safeDownloadFailure(IOException failure) {
+        String detail = failure.getMessage();
+        if (detail == null || detail.trim().isEmpty()) {
+            return "请检查手机网络后重试。";
+        }
+        return detail;
     }
 
     private static void downloadVerifiedFile(
@@ -1662,6 +1759,10 @@ public final class MarketRepository {
             this.signerSha256 = signerSha256;
             this.size = size;
         }
+    }
+
+    public interface RefreshProgress {
+        void onStage(String status);
     }
 
     static final class UpdateManifestWatermark {
