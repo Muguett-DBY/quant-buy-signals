@@ -353,7 +353,8 @@ def test_fetch_all_pages_rejects_incomplete_snapshots(monkeypatch, failure):
 
 
 def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_four_attempts(monkeypatch):
-    monkeypatch.setattr(dc.time, "sleep", lambda _seconds: None)
+    sleeps = []
+    monkeypatch.setattr(dc.time, "sleep", sleeps.append)
     calls = []
 
     def fake_get(_url, *, params, timeout, **_kwargs):
@@ -373,6 +374,13 @@ def test_fetch_all_pages_persistent_transport_failure_stops_after_three_plus_fou
         dc._DATACENTER_RECOVERY_TIMEOUT,
         dc._DATACENTER_RECOVERY_TIMEOUT,
         dc._DATACENTER_RECOVERY_TIMEOUT,
+    ]
+    assert sleeps == [
+        0.5,
+        1.0,
+        dc._DATACENTER_RECOVERY_RETRY_DELAY,
+        dc._DATACENTER_RECOVERY_RETRY_DELAY * 2,
+        dc._DATACENTER_RECOVERY_RETRY_DELAY * 3,
     ]
 
 

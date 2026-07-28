@@ -39,10 +39,10 @@ _ANNUAL_BATCH_DATASETS = 4
 _DATACENTER_WORKERS = max(1, min(int(CONCURRENCY) // _ANNUAL_BATCH_DATASETS, 3))
 _DATACENTER_BATCH_WORKERS = max(1, min(_ANNUAL_BATCH_DATASETS, int(CONCURRENCY) // _DATACENTER_WORKERS))
 # Annual and interim generations are independent and may overlap, but their
-# nested pools must not recreate the observed 20-request connection-reset
-# cliff.  One process-wide gate caps active Eastmoney streams below that
-# boundary without reducing either generation's completeness checks.
-_DATACENTER_ACTIVE_REQUEST_LIMIT = max(1, min(int(CONCURRENCY), 12))
+# nested pools must not recreate the observed connection-reset and DNS
+# saturation cliffs.  Six streams still overlap pagination while leaving the
+# resolver and Eastmoney edge enough headroom for a complete generation.
+_DATACENTER_ACTIVE_REQUEST_LIMIT = max(1, min(int(CONCURRENCY), 6))
 _DATACENTER_REQUEST_SLOTS = threading.BoundedSemaphore(_DATACENTER_ACTIVE_REQUEST_LIMIT)
 _MAX_DATACENTER_PAGES = 128
 _MAX_DATACENTER_ROWS = 50_000
@@ -55,6 +55,7 @@ _DATACENTER_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
 # consecutive 30-second reads, so give the bounded, sequential recovery path
 # four attempts while keeping the parallel fast path at three attempts.
 _DATACENTER_RECOVERY_RETRIES = 4
+_DATACENTER_RECOVERY_RETRY_DELAY = 2.0
 _MAX_DATACENTER_RECOVERY_PAGES = 3
 _RETRYABLE_DATACENTER_HTTP_STATUSES = frozenset({408, 425, 429})
 ANNUAL_HISTORY_YEARS = 10
@@ -304,6 +305,7 @@ def _request_page(
     extra_filter: str = "",
     timeout: int = REQUEST_TIMEOUT,
     retries: int = 3,
+    retry_delay: float = 0.5,
 ) -> _PageResult:
     if (
         isinstance(page, bool)
@@ -323,6 +325,13 @@ def _request_page(
         raise ValueError("timeout must be positive")
     if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
         raise ValueError("retries must be a positive integer")
+    if (
+        isinstance(retry_delay, bool)
+        or not isinstance(retry_delay, (int, float))
+        or not math.isfinite(float(retry_delay))
+        or float(retry_delay) < 0
+    ):
+        raise ValueError("retry_delay must be finite and non-negative")
     params = {
         "reportName": report_name,
         "columns": columns,
@@ -411,7 +420,7 @@ def _request_page(
             if not _is_transient_datacenter_transport_error(exc):
                 transient_only = False
             if attempt + 1 < retries:
-                time.sleep(0.5 * (attempt + 1))
+                time.sleep(float(retry_delay) * (attempt + 1))
     error_type = (
         _DataTransientTransportError
         if transient_only and _is_transient_datacenter_transport_error(last_error)
@@ -523,6 +532,7 @@ def _fetch_all_pages(
                 extra_filter=extra_filter,
                 timeout=_DATACENTER_RECOVERY_TIMEOUT,
                 retries=_DATACENTER_RECOVERY_RETRIES,
+                retry_delay=_DATACENTER_RECOVERY_RETRY_DELAY,
             )
         except _DataTransientTransportError as exc:
             raise DataFetchError(f"failed to recover {report_name} metadata page 1: {exc}") from exc
@@ -614,6 +624,7 @@ def _fetch_all_pages(
                 extra_filter,
                 timeout=_DATACENTER_RECOVERY_TIMEOUT,
                 retries=_DATACENTER_RECOVERY_RETRIES,
+                retry_delay=_DATACENTER_RECOVERY_RETRY_DELAY,
             )
         except _DataTransientTransportError as exc:
             raise DataFetchError(f"failed to recover {report_name} page {page}: {exc}") from exc
