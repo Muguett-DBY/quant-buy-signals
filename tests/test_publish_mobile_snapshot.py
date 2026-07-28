@@ -241,19 +241,13 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
     monkeypatch.setattr(
         publisher,
         "load_quality_history_cache_batch",
-        lambda requests: {
-            request["code"]: {"available": True, "code": request["code"]}
-            for request in requests[:5]
-        },
+        lambda requests: {request["code"]: {"available": True, "code": request["code"]} for request in requests[:5]},
     )
     captured = []
 
     def fetch(requests):
         captured.extend(requests)
-        return {
-            request["code"]: {"available": True, "code": request["code"]}
-            for request in requests
-        }
+        return {request["code"]: {"available": True, "code": request["code"]} for request in requests}
 
     monkeypatch.setattr(publisher, "fetch_quality_history_batch", fetch)
 

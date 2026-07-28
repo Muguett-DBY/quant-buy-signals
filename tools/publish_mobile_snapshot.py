@@ -215,9 +215,7 @@ def _prepare_quality_history_evidence(
     combined: dict[str, Mapping[str, object]] = {
         str(code): dict(value) for code, value in cached.items() if isinstance(value, Mapping)
     }
-    combined.update(
-        {str(code): dict(value) for code, value in fetched.items() if isinstance(value, Mapping)}
-    )
+    combined.update({str(code): dict(value) for code, value in fetched.items() if isinstance(value, Mapping)})
     available = sum(1 for value in combined.values() if value.get("available") is True)
     return combined, {
         "requested_companies": len(requests_),
