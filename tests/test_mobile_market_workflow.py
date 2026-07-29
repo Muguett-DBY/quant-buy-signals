@@ -400,6 +400,14 @@ def test_production_workflows_use_only_the_validated_python_lanes():
     assert 'python-version: "3.13"' in mobile_workflow
 
 
+def test_stale_tracked_audit_defers_desktop_archive_check_without_failing_ci():
+    workflow = _workflow_text(TEST_WORKFLOW)
+    marker = "Tracked release audit is bound to"
+    assert marker in workflow
+    assert workflow.index(marker) < workflow.index("$root = Join-Path $env:RUNNER_TEMP 'ds-dcf-source-package'")
+    assert "desktop archive verification is deferred until a fresh audit is committed" in workflow
+
+
 def test_every_powershell_workflow_script_parses_with_the_real_parser(tmp_path):
     executable = shutil.which("pwsh")
     if executable is None:

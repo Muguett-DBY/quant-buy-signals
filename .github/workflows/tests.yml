@@ -164,6 +164,13 @@ jobs:
             Write-Host 'No tracked release audit yet; desktop archive verification is deferred.'
             exit 0
           }
+          $currentCommit = (git rev-parse HEAD).Trim()
+          $auditPayload = Get-Content -LiteralPath $audit -Raw -Encoding utf8 | ConvertFrom-Json
+          $auditCommit = ([string]$auditPayload.provenance.git.commit).Trim()
+          if ([string]::IsNullOrWhiteSpace($auditCommit) -or $auditCommit -cne $currentCommit) {
+            Write-Warning "Tracked release audit is bound to $auditCommit, not $currentCommit; desktop archive verification is deferred until a fresh audit is committed."
+            exit 0
+          }
           $root = Join-Path $env:RUNNER_TEMP 'ds-dcf-source-package'
           $version = (python -c "from desktop.version import __version__; print(__version__)").Trim()
           if (-not $version) {
