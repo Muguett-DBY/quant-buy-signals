@@ -253,16 +253,16 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
 
     evidence, status = _prepare_quality_history_evidence(codes, "2026-07-17")
 
-    assert len(captured) == publisher._QUALITY_HISTORY_BACKFILL_LIMIT
+    assert len(captured) == min(len(codes) - 5, publisher._QUALITY_HISTORY_BACKFILL_LIMIT)
     assert captured[0] == {"code": "000006", "as_of": "2026-07-17"}
-    assert len(evidence) == 1_005
+    assert len(evidence) == 1_205
     assert status == {
         "requested_companies": 1_205,
         "reused_companies": 5,
-        "network_tranche_companies": 1_000,
-        "returned_companies": 1_005,
-        "available_companies": 1_005,
-        "remaining_companies": 200,
+        "network_tranche_companies": 1_200,
+        "returned_companies": 1_205,
+        "available_companies": 1_205,
+        "remaining_companies": 0,
     }
 
 
@@ -287,7 +287,7 @@ def test_quality_history_backfill_prioritises_large_companies_before_code_order(
         {"code": "001205", "as_of": "2026-07-29"},
         {"code": "000001", "as_of": "2026-07-29"},
     ]
-    assert len(captured) == publisher._QUALITY_HISTORY_BACKFILL_LIMIT
+    assert len(captured) == min(len(codes), publisher._QUALITY_HISTORY_BACKFILL_LIMIT)
 
 
 def test_quality_history_priority_codes_rank_positive_market_caps_stably():

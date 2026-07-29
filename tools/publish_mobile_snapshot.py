@@ -47,7 +47,7 @@ _MOBILE_STRUCTURAL_EVIDENCE_GATES = (
     "candidate_visibility_ready",
     "candidate_recall_ready",
 )
-_QUALITY_HISTORY_BACKFILL_LIMIT = 1_000
+_QUALITY_HISTORY_BACKFILL_LIMIT = 2_000
 
 
 def _parser() -> argparse.ArgumentParser:

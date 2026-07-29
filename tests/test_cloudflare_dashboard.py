@@ -22,6 +22,11 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
         assert label in source
     assert "sub_scores" in source
     assert "sub_score_reasons" in source
+    assert "estimated_sub_scores" in source
+    assert "estimated_sub_score_reasons" in source
+    assert "未确认估算" in source
+    assert "待仓位确认" in source
+    assert "position_guidance" in source
     assert "资料不足" in source
     assert "dimensionScoresAvailable" in source
     assert "数据版本过旧" in source

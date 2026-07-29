@@ -3540,6 +3540,25 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(years_used, 5)
         self.assertEqual(normalised_pe, 10.0)
 
+    def test_type5_complete_nonpositive_cycle_average_is_adverse_not_missing(self):
+        metric = base_metrics(
+            market_cap=100.0,
+            net_profit_history=[-100.0, -50.0, -20.0, -10.0, -5.0],
+            net_profit_years=[2021, 2022, 2023, 2024, 2025],
+            **trusted_type5_scores(
+                type5_cycle_attribute_score=8.0,
+                type5_bottom_signal_score=8.0,
+                type5_survival_score=8.0,
+                type5_upside_elasticity_score=8.0,
+            ),
+        )
+
+        outcome = bs.score_type5_counter_cyclical(metric, benchmarks())
+
+        self.assertEqual(outcome[2]["5e"], 1.0)
+        self.assertEqual(outcome[3]["5e"], "5年周期平均利润非正")
+        self.assertNotIn("5e", outcome[3]["_decision_missing_dimensions"])
+
     def test_type5_pb_signal_has_exact_percentile_and_absolute_boundaries(self):
         cases = (
             ((0.10, 1.0), 10.0),
@@ -3820,6 +3839,22 @@ class TestTypeRules(unittest.TestCase):
         self.assertFalse(outcome[0])
         self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertIn("强周期属性", outcome[3]["_missing"])
+
+    def test_type5_complete_but_low_volatility_history_is_not_called_missing_history(self):
+        outcome = bs.score_type5_counter_cyclical(
+            base_metrics(
+                industry="COAL",
+                net_profit_history=[100.0, 102.0, 104.0, 106.0, 108.0],
+                net_profit_years=[2021, 2022, 2023, 2024, 2025],
+                gross_margin_history=[0.20, 0.21, 0.22, 0.21, 0.20],
+                gross_margin_years=[2021, 2022, 2023, 2024, 2025],
+            ),
+            benchmarks(),
+        )
+
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("财务波动不足", outcome[3]["_missing"])
+        self.assertNotIn("历史不完整", outcome[3]["_missing"])
 
     def test_type5_uses_total_after_5a_without_an_extra_5c_hard_gate(self):
         m = base_metrics(
@@ -4952,6 +4987,20 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(row["growth_sustainability_score"], 9.0)
         self.assertEqual(row["growth_sustainability_score_evidence"], score_evidence("growth_sustainability_score"))
         self.assertEqual(row["growth_sustainability_score_evidence_level"], "derived_proxy")
+
+    def test_type3_growth_request_keeps_segment_load_when_goodwill_history_is_missing(self):
+        metric = complete_type3_metrics(
+            code="000001",
+            source_trade_date="2026-07-17",
+            goodwill_history=[],
+            goodwill_years=[],
+        )
+
+        request = bs._type3_growth_request(metric)
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request["goodwill_records"], [])
+        self.assertEqual(len(request["revenue_records"]), 5)
 
     def test_type7_dcf_flag_is_independent_from_type1_overall_evidence(self):
         def neutral_outcome(type_key):

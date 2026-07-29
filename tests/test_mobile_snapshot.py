@@ -99,6 +99,7 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
     assert manifest["summary"]["visible_candidate_company_count"] == 1
     assert manifest["capabilities"] == {
         "dimension_scores": True,
+        "dimension_score_estimates": True,
         "decision_contract": True,
     }
     assert catalogue["capabilities"] == manifest["capabilities"]
@@ -195,6 +196,8 @@ def test_mobile_catalogue_keeps_known_dimensions_when_only_one_dimension_is_miss
     assert set(exported["sub_scores"]) == {"1a", "1b", "1d"}
     assert set(exported["sub_score_reasons"]) == {"1a", "1b", "1d"}
     assert "1c" not in exported["sub_scores"]
+    assert exported["estimated_sub_scores"] == {"1c": 0.0}
+    assert exported["estimated_sub_score_reasons"]["1c"].startswith("未确认估算，不用于触发")
 
 
 @pytest.mark.parametrize(
@@ -261,6 +264,8 @@ def test_mobile_catalogue_never_publishes_missing_placeholders_as_exact_scores(
     assert exported["score"] is None
     assert set(exported["sub_scores"]) == {"1a", "1b", "1c"}
     assert "1d" not in exported["sub_score_reasons"]
+    assert exported["estimated_sub_scores"] == {"1d": 2.0}
+    assert "未确认估算，不用于触发" in exported["estimated_sub_score_reasons"]["1d"]
     assert exported["reason"] == expected_reason
     assert exported["evidence_gap"] == "缺催化剂证据"
     assert exported["decision"]["score_lower_bound"] == 3.7
@@ -395,6 +400,13 @@ def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeyp
     assert catalogue["companies"][0]["buy_types"] == []
     assert catalogue["companies"][0]["conditional_types"] == ["type6"]
     assert catalogue["companies"][0]["types"]["type6"]["reason"] == "须确认实际仓位符合建议上限"
+    assert catalogue["companies"][0]["types"]["type6"]["action_required"] == "position_confirmation"
+    assert catalogue["companies"][0]["types"]["type6"]["position_guidance"] == {
+        "recommendation": "下单前确认仓位",
+        "hard_caps": "硬上限：单票不超过5%，此类组合不超过15%",
+        "worst_case_loss": "请按最坏归零情景核对组合损失",
+    }
+    assert "6e" not in catalogue["companies"][0]["types"]["type6"].get("estimated_sub_scores", {})
     assert signals["triggered_company_count"] == 0
     assert signals["conditional_company_count"] == 1
     assert signals["conditional_only_company_count"] == 1

@@ -6,12 +6,13 @@ far more raw provider data than the client needs.  This module exports a
 small catalogue for the whole market plus a separate detail file for actual
 or conditional candidates.  Applicable frameworks publish every verified
 sub-score.  Any dimension named as missing by the bounded decision contract is
-omitted regardless of the final status, so a hard veto or decisive upper bound
-cannot turn an internal diagnostic placeholder into a public fact.  Incomplete
-totals are likewise omitted while their score interval remains available in
-``decision``.  The catalogue can therefore show unresolved and decisively
-rejected candidates without mistaking either for complete scores or buy
-signals.  It never performs an analysis itself.
+excluded from exact scores.  Its model estimate is published separately and
+explicitly labelled as unconfirmed, so the website can show the quantified
+diagnostic without turning an internal evidence placeholder into a verified
+fact.  Incomplete totals are likewise omitted while their score interval
+remains available in ``decision``.  The catalogue can therefore show unresolved
+and decisively rejected candidates without mistaking either for complete scores
+or buy signals.  It never performs an analysis itself.
 """
 
 from __future__ import annotations
@@ -185,36 +186,48 @@ def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
 
 
 def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
-    def public_dimensions(value: Mapping[str, Any], status: str) -> tuple[dict[str, float], dict[str, str]]:
+    def public_dimensions(
+        value: Mapping[str, Any],
+        status: str,
+    ) -> tuple[dict[str, float], dict[str, str], dict[str, float], dict[str, str]]:
         # Not-applicable frameworks have no meaningful dimensions.  For an
-        # evidence-incomplete framework, publish every *known* dimension while
-        # omitting exactly the missing dimensions recorded by the decision
-        # contract.  A framework can be decisively vetoed or rejected by a
-        # conservative upper bound while still containing missing dimensions;
-        # those placeholders are no more public in those statuses than they
-        # are in ``insufficient_evidence``.
+        # evidence-incomplete framework, publish verified dimensions as exact
+        # and contract-declared missing dimensions in a separate estimate map.
         if status == "not_applicable":
-            return {}, {}
+            return {}, {}, {}, {}
         raw_scores = value.get("sub_scores")
         raw_reasons = value.get("reasons")
         if not isinstance(raw_scores, Mapping):
-            return {}, {}
+            return {}, {}, {}, {}
         decision = value.get("decision")
         missing_dimensions = set(decision.get("missing_dimensions", [])) if isinstance(decision, Mapping) else set()
         scores: dict[str, float] = {}
         reasons: dict[str, str] = {}
+        estimates: dict[str, float] = {}
+        estimate_reasons: dict[str, str] = {}
         for dimension in TYPE_WEIGHTS[type_key]:
-            if dimension in missing_dimensions:
-                continue
             score = _finite(raw_scores.get(dimension))
             if score is None:
                 continue
+            evidence = (
+                _public_reason_text(raw_reasons[dimension])
+                if isinstance(raw_reasons, Mapping) and isinstance(raw_reasons.get(dimension), str)
+                else ""
+            )
+            if dimension in missing_dimensions:
+                # 6e is an investor action, not an uncertain company fact.  It
+                # receives dedicated position guidance below instead of a
+                # misleading company-data estimate.
+                if type_key != "type6" or dimension != "6e":
+                    estimates[dimension] = round(score, 3)
+                    estimate_reasons[dimension] = (
+                        f"未确认估算，不用于触发；{evidence}" if evidence else "未确认估算，不用于触发"
+                    )
+                continue
             scores[dimension] = round(score, 3)
-            if isinstance(raw_reasons, Mapping) and isinstance(raw_reasons.get(dimension), str):
-                evidence = _public_reason_text(raw_reasons[dimension])
-                if evidence:
-                    reasons[dimension] = evidence
-        return scores, reasons
+            if evidence:
+                reasons[dimension] = evidence
+        return scores, reasons, estimates, estimate_reasons
 
     if not isinstance(payload, Mapping):
         return {
@@ -265,7 +278,10 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
                 ),
                 "",
             )
-    sub_scores, sub_score_reasons = public_dimensions(payload, status)
+    sub_scores, sub_score_reasons, estimated_sub_scores, estimated_sub_score_reasons = public_dimensions(
+        payload,
+        status,
+    )
     compact = {
         "status": status,
         "score": round(total, 3) if total is not None else None,
@@ -285,6 +301,19 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         compact["sub_scores"] = sub_scores
     if sub_score_reasons:
         compact["sub_score_reasons"] = sub_score_reasons
+    if estimated_sub_scores:
+        compact["estimated_sub_scores"] = estimated_sub_scores
+    if estimated_sub_score_reasons:
+        compact["estimated_sub_score_reasons"] = estimated_sub_score_reasons
+    if type_key == "type6" and "6e" in decision["missing_dimensions"] and isinstance(reasons, Mapping):
+        recommendation = _public_reason_text(reasons.get("6e"))
+        worst_case = _public_reason_text(reasons.get("_risk"))
+        compact["action_required"] = "position_confirmation"
+        compact["position_guidance"] = {
+            "recommendation": recommendation or "请确认计划仓位",
+            "hard_caps": "硬上限：单票不超过5%，此类组合不超过15%",
+            "worst_case_loss": worst_case or "请按最坏归零情景核对组合损失",
+        }
     return compact
 
 
@@ -462,6 +491,7 @@ def build_mobile_snapshot(
         "product": "DS_DCF",
         "capabilities": {
             "dimension_scores": True,
+            "dimension_score_estimates": True,
             "decision_contract": True,
         },
         "generated_at_utc": generated_at,

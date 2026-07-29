@@ -5527,6 +5527,8 @@ def score_type5_counter_cyclical(
         and _aligned_current_consecutive(m, margins, margin_years, 4)
         and max(margins) - min(margins) > 0.15
     )
+    profit_history_ready = bool(len(profits) >= 4 and _aligned_current_consecutive(m, profits, profit_years, 4))
+    margin_history_ready = bool(len(margins) >= 4 and _aligned_current_consecutive(m, margins, margin_years, 4))
     direct_commodity_industry = industry in TYPE5_DIRECT_CYCLICAL_INDUSTRIES
 
     cycle_score, cycle_reason = _type5_external_score(m, "type5_cycle_attribute_score")
@@ -5546,7 +5548,12 @@ def score_type5_counter_cyclical(
         scores["5a"] = 7.0
         reasons["5a"] = "大宗行业/毛利/利润周期"
     elif direct_commodity_industry:
-        return _insufficient_evidence("type5", "强周期属性缺毛利或盈利历史")
+        if not profit_history_ready or not margin_history_ready:
+            return _insufficient_evidence("type5", "强周期属性所需的连续毛利率或利润历史不完整")
+        return _insufficient_evidence(
+            "type5",
+            "现有财务波动不足以确认强周期属性，尚缺商品价格或产能周期证据",
+        )
     else:
         return _not_applicable("type5", "非强周期标的，适用其他框架")
 
@@ -5621,7 +5628,12 @@ def score_type5_counter_cyclical(
     if earnings_score is None:
         normalised_pe, years_used = _type5_normalised_pe(m)
         if normalised_pe is None:
-            scores["5e"], reasons["5e"] = 2.0, "缺5年完整周期均利"
+            if years_used >= 5:
+                # A complete cycle whose average profit is non-positive is
+                # adverse evidence, not missing evidence.
+                scores["5e"], reasons["5e"] = 1.0, f"{years_used}年周期平均利润非正"
+            else:
+                scores["5e"], reasons["5e"] = 2.0, "缺5年完整周期均利"
         elif normalised_pe <= 8.0:
             scores["5e"], reasons["5e"] = 9.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
         elif normalised_pe <= 12.0:
@@ -5632,7 +5644,7 @@ def score_type5_counter_cyclical(
             scores["5e"], reasons["5e"] = 3.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
         else:
             scores["5e"], reasons["5e"] = 1.0, f"{years_used}年均利PE{normalised_pe:.1f}倍"
-        earnings_complete = normalised_pe is not None and years_used >= 5
+        earnings_complete = years_used >= 5
     else:
         scores["5e"], reasons["5e"] = earnings_score, earnings_reason or "正常化盈利外部证据"
         earnings_complete = True
@@ -5831,12 +5843,16 @@ def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
         return [{"year": year, "value": by_year[year]} for year in ordered]
 
     revenue_records = records("revenue_values", "revenue_years", minimum=5)
-    goodwill_records = records("goodwill_history", "goodwill_years", minimum=5)
+    # Segment growth (3d) is independent from acquisition/goodwill quality
+    # (3b).  A company that does not disclose a five-year goodwill series must
+    # still be allowed to load its product/region segment history.  The growth
+    # adapter accepts an empty goodwill sequence and will correctly leave only
+    # the external-acquisition component incomplete.
+    goodwill_records = records("goodwill_history", "goodwill_years", minimum=5) or []
     code = str(m.get("code") or "")
     as_of = str(m.get("source_trade_date") or "")
     if (
         revenue_records is None
-        or goodwill_records is None
         or not re.fullmatch(r"[036][0-9]{5}", code)
         or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
     ):
