@@ -4,11 +4,14 @@ The desktop analysis contains the complete financial input tree and DCF audit
 ledger.  Publishing that object to a phone would be slow, costly, and expose
 far more raw provider data than the client needs.  This module exports a
 small catalogue for the whole market plus a separate detail file for actual
-or conditional candidates.  Applicable and diagnostic frameworks publish every
-finite sub-score; scoreless states omit internal zero placeholders and retain
-their explicit public status.  The catalogue also preserves the bounded
-decision contract for unresolved candidates so the phone can show them without
-mistaking them for buy signals.  It never performs an analysis itself.
+or conditional candidates.  Applicable frameworks publish every verified
+sub-score.  Any dimension named as missing by the bounded decision contract is
+omitted regardless of the final status, so a hard veto or decisive upper bound
+cannot turn an internal diagnostic placeholder into a public fact.  Incomplete
+totals are likewise omitted while their score interval remains available in
+``decision``.  The catalogue can therefore show unresolved and decisively
+rejected candidates without mistaking either for complete scores or buy
+signals.  It never performs an analysis itself.
 """
 
 from __future__ import annotations
@@ -186,8 +189,10 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         # Not-applicable frameworks have no meaningful dimensions.  For an
         # evidence-incomplete framework, publish every *known* dimension while
         # omitting exactly the missing dimensions recorded by the decision
-        # contract.  This keeps internal zero placeholders private without
-        # hiding valid evidence the phone and web clients can already explain.
+        # contract.  A framework can be decisively vetoed or rejected by a
+        # conservative upper bound while still containing missing dimensions;
+        # those placeholders are no more public in those statuses than they
+        # are in ``insufficient_evidence``.
         if status == "not_applicable":
             return {}, {}
         raw_scores = value.get("sub_scores")
@@ -195,11 +200,7 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         if not isinstance(raw_scores, Mapping):
             return {}, {}
         decision = value.get("decision")
-        missing_dimensions = (
-            set(decision.get("missing_dimensions", []))
-            if status == "insufficient_evidence" and isinstance(decision, Mapping)
-            else set()
-        )
+        missing_dimensions = set(decision.get("missing_dimensions", [])) if isinstance(decision, Mapping) else set()
         scores: dict[str, float] = {}
         reasons: dict[str, str] = {}
         for dimension in TYPE_WEIGHTS[type_key]:
@@ -225,14 +226,20 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
             "sub_score_reasons": {},
         }
     status = str(payload.get("status") or "invalid")
-    total = None if status in _SCORELESS_STATUSES else _finite(payload.get("total"))
+    decision = _public_decision(payload.get("decision"), type_key)
+    total = None if status in _SCORELESS_STATUSES or decision["missing_dimensions"] else _finite(payload.get("total"))
     reasons = payload.get("reasons")
     public_reason = ""
     if isinstance(reasons, Mapping):
+        reason_keys = (
+            ("_scope", "_condition", "_veto", "_missing", "_downgrade", "_risk")
+            if status == "not_triggered"
+            else _PUBLIC_META_REASON_KEYS
+        )
         public_reason = next(
             (
                 _public_reason_text(reasons[key])
-                for key in _PUBLIC_META_REASON_KEYS
+                for key in reason_keys
                 if isinstance(reasons.get(key), str) and _public_reason_text(reasons[key])
             ),
             "",
@@ -263,8 +270,12 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         "status": status,
         "score": round(total, 3) if total is not None else None,
         "reason": public_reason,
-        "decision": _public_decision(payload.get("decision"), type_key),
+        "decision": decision,
     }
+    if isinstance(reasons, Mapping) and isinstance(reasons.get("_missing"), str):
+        evidence_gap = _public_reason_text(reasons["_missing"])
+        if evidence_gap and evidence_gap != public_reason:
+            compact["evidence_gap"] = evidence_gap
     # Empty maps are omitted from the all-company catalogue to keep the
     # bounded mobile asset small enough for the Android decompression limit.
     # The detail payload restores both maps as empty objects, so clients have
@@ -318,9 +329,21 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
         and payload["decision"].get("potentially_triggerable") is True
         and payload["status"] not in {"triggered", "conditional"}
     ]
-    diagnostic_score = _finite(row.get("diagnostic_score"))
-    if diagnostic_score is None:
-        diagnostic_score = _finite(row.get("max_score"))
+    # The engine's diagnostic maximum may legitimately use an incomplete
+    # framework as an internal triage hint.  Public clients cannot attach a
+    # precise company-level score to that placeholder total.  Recompute the
+    # public diagnostic maximum exclusively from compact types whose complete
+    # evidence contract permits an exact score.
+    diagnostic_candidates = [
+        (float(payload["score"]), -order, type_key)
+        for order, type_key in enumerate(_TYPE_KEYS)
+        if (payload := type_payloads[type_key]).get("score") is not None
+    ]
+    if diagnostic_candidates:
+        diagnostic_score, _tie_breaker, diagnostic_type = max(diagnostic_candidates)
+        diagnostic_label = TYPE_NAMES[diagnostic_type]
+    else:
+        diagnostic_score, diagnostic_type, diagnostic_label = None, "", ""
     raw_industry = str(row.get("industry_code") or row.get("industry") or "").strip()
     return {
         "code": _normalise_code(row.get("code")),
@@ -339,8 +362,8 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
         "pending_types": pending_types,
         "primary_type": str(row.get("primary_type") or ""),
         "primary_label": str(row.get("primary_label") or ""),
-        "diagnostic_type": str(row.get("diagnostic_type") or ""),
-        "diagnostic_label": str(row.get("diagnostic_label") or ""),
+        "diagnostic_type": diagnostic_type,
+        "diagnostic_label": diagnostic_label,
         "diagnostic_score": diagnostic_score,
         "types": type_payloads,
     }

@@ -127,19 +127,30 @@ async function refresh(env) {
   const now = new Date().toISOString();
   const manifestBytes = new TextEncoder().encode(manifestText);
   const manifestHash = await sha256(manifestBytes);
-  const previous = await env.DB.prepare("SELECT generation_id FROM current_generation WHERE singleton = 1").first();
-  if (previous?.generation_id === generationId) {
-    await env.DB.prepare("UPDATE generations SET last_checked_at = ? WHERE generation_id = ?").bind(now, generationId).run();
-    return { status: "unchanged", generation_id: generationId, market_as_of: manifest.market_as_of };
-  }
-
   const prefix = `generations/${generationId}`;
   const objects = [
-    ["manifest.json", manifestText, "application/json; charset=utf-8"],
-    [catalogueName, catalogueBytes, "application/json", "gzip"],
-    [signalsName, signalsBytes, "application/json", "gzip"],
-    [signatureName, signatureBytes, "application/octet-stream"],
+    ["manifest.json", manifestText, "application/json; charset=utf-8", null, manifestBytes.byteLength],
+    [catalogueName, catalogueBytes, "application/json", "gzip", catalogueBytes.byteLength],
+    [signalsName, signalsBytes, "application/json", "gzip", signalsBytes.byteLength],
+    [signatureName, signatureBytes, "application/octet-stream", null, signatureBytes.byteLength],
   ];
+  const previous = await env.DB.prepare("SELECT generation_id FROM current_generation WHERE singleton = 1").first();
+  if (previous?.generation_id === generationId) {
+    let repaired = false;
+    for (const [name, body, contentType, contentEncoding, expectedSize] of objects) {
+      const key = `${prefix}/${name}`;
+      const existing = await env.DATA_BUCKET.head(key);
+      if (!existing || existing.size !== expectedSize) {
+        await env.DATA_BUCKET.put(key, body, {
+          httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
+        });
+        repaired = true;
+      }
+    }
+    await env.DB.prepare("UPDATE generations SET last_checked_at = ? WHERE generation_id = ?").bind(now, generationId).run();
+    return { status: repaired ? "repaired" : "unchanged", generation_id: generationId, market_as_of: manifest.market_as_of };
+  }
+
   for (const [name, body, contentType, contentEncoding] of objects) {
     await env.DATA_BUCKET.put(`${prefix}/${name}`, body, { httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) } });
   }

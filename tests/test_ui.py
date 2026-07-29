@@ -576,6 +576,32 @@ def test_dimension_table_does_not_show_numeric_placeholder_for_declared_missing_
     assert by_dimension.loc["估值合理性", "依据"] == "缺公司自身五年估值分位"
 
 
+def test_dimension_table_honours_serialized_missing_dimensions_without_nested_decision(monkeypatch):
+    tables = []
+    monkeypatch.setattr(buy_types_page.st, "plotly_chart", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "dataframe", lambda value, **kwargs: tables.append(value))
+
+    _render_dimension_table(
+        "type1",
+        {
+            "type1": {
+                "status": "vetoed",
+                "total": 4.0,
+                "sub_scores": {"1a": 1.5, "1b": 8.0, "1c": 3.8, "1d": 2.0},
+                "reasons": {
+                    "1d": "缺催化剂证据",
+                    "_decision_missing_dimensions": ["1d"],
+                },
+            }
+        },
+    )
+
+    by_dimension = tables[0].set_index("维度")
+    assert by_dimension.loc["催化剂/回归动力", "评分"] == "资料不足"
+    assert by_dimension.loc["催化剂/回归动力", "依据"] == "缺催化剂证据"
+
+
 def test_snapshot_age_formatter_is_bounded_and_readable():
     assert _format_snapshot_age(None, now=1_000) == "未知"
     assert _format_snapshot_age(1_100, now=1_000) == "0秒"
@@ -638,13 +664,19 @@ def test_not_applicable_and_insufficient_statuses_are_rendered_without_english_m
 def test_display_reason_hides_legacy_machine_evidence_ids():
     assert _display_reason("证据:patch6-observable") == "可核验的财务与行业数据"
     assert _display_reason("证据:patch6-type2c-qua") == "量价与换手数据"
-    assert _display_reason("PB分位与库存去化") == "PB分位与库存去化"
+    assert _display_reason("PB分位与库存去化") == "市净率分位与库存去化"
 
 
 def test_display_reason_preserves_chinese_conclusion_while_removing_internal_note():
     assert _display_reason("坡的长度是短板(证据:patch6-observable)") == "坡的长度是短板"
     assert _display_reason("missing_quote") == "未取得有效行情"
     assert _display_reason("valuation_exception:RuntimeError") == "估值计算发生内部异常，相关结果未被采用"
+
+
+def test_display_reason_expands_finance_abbreviations():
+    assert _display_reason("FCF4.7%;ROIC10;PE/PB分位2%;DCF合理;YTD-2%") == (
+        "自由现金流4.7%;投入资本回报率10;市盈率/市净率分位2%;现金流折现估值合理;年初至今-2%"
+    )
 
 
 @pytest.mark.parametrize(

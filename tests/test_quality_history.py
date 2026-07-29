@@ -281,6 +281,37 @@ def test_quality_history_reuses_recent_normalized_source_capture_without_network
     assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
 
 
+def test_quality_history_reuse_slides_valuation_window_without_rejecting_older_rows(tmp_path):
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+    assert first.available
+
+    class _NoNetwork:
+        def fetch_weekly_closes(self, *_args, **_kwargs):
+            raise AssertionError("recent source capture unexpectedly performed network I/O")
+
+    reused = fetch_quality_history(
+        "600519",
+        "2026-07-28",
+        weekly_adapter=_NoNetwork(),
+        cache_dir=tmp_path,
+    )
+
+    assert reused.available
+    assert reused.as_of == "2026-07-28"
+    assert reused.cache_hit
+    assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
+    assert reused.valuation_history["available"] is True
+    assert reused.valuation_history["start_date"] >= "2021-07-28"
+    assert reused.valuation_history["pe_observations"] >= 500
+    assert reused.valuation_history["pb_observations"] >= 500
+
+
 def test_quality_history_cache_batch_loads_recent_records_and_omits_real_misses(tmp_path):
     saved = fetch_quality_history(
         "600519",

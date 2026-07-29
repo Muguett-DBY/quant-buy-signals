@@ -758,11 +758,13 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertTrue(all(len(text) <= bs.EVIDENCE_MAX_LENGTH for text in compact.values()))
 
     def test_compact_reason_ends_at_a_complete_evidence_segment_with_an_ellipsis(self):
-        compact = bs._compact_reason("量价冷度;60日19.7%;YTD13.4%;换手2.1%")
+        compact = bs._compact_reason(
+            "量价冷度;60日19.7%;年内13.4%;换手2.1%;量比0.8;同行样本完整;估值历史完整;数据来源完整"
+        )
 
-        self.assertEqual(compact, "量价冷度;60日19.7%…")
+        self.assertTrue(compact.endswith("…"))
         self.assertLessEqual(len(compact), bs.EVIDENCE_MAX_LENGTH)
-        self.assertNotIn("YTD13.", compact)
+        self.assertNotIn("估值历…", compact)
 
     def test_not_applicable_overrides_veto_but_confirmed_veto_overrides_other_missing_evidence(self):
         scores = {key: 1.0 for key in bs.TYPE_WEIGHTS["type4"]}
@@ -3046,7 +3048,7 @@ class TestTypeRules(unittest.TestCase):
         _, _, scores, reasons = bs.score_type4_long_runway(complete_type4_metrics(price=60.0), benchmarks(), dcf)
         self.assertGreater(scores["4d"], 6.0)
         self.assertGreater(scores["4f"], 8.0)
-        self.assertIn("中性终局", reasons["4d"])
+        self.assertIn("10年中性估值", reasons["4d"])
 
     def test_type4_financial_company_is_explicitly_not_applicable(self):
         outcome = bs.score_type4_long_runway(
@@ -3709,6 +3711,30 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreaterEqual(complete[2]["2d"], 9.0)
         self.assertIn("自身五年PB分位", complete[3]["2d"])
 
+    def test_reused_valuation_distribution_is_rebased_to_the_current_quote(self):
+        metric = base_metrics(
+            source_trade_date="2026-07-28",
+            pb=1.20,
+        )
+        history = type5_history_evidence(
+            code=metric["code"],
+            as_of="2026-07-28",
+            pb_percentile=0.08,
+            current_pb=0.95,
+        )
+        history["valuation_history"]["end_date"] = "2026-07-17"
+
+        rebased = bs._rebase_quality_history_to_current_quote(metric, history)
+
+        self.assertIsNot(rebased, history)
+        valuation = rebased["valuation_history"]
+        self.assertEqual(valuation["current_pb_mrq"], 1.20)
+        self.assertEqual(valuation["pb_percentile"], 1.0)
+        self.assertEqual(valuation["current_valuation_date"], "2026-07-28")
+        self.assertEqual(valuation["current_valuation_source"], "validated_closing_quote")
+        self.assertEqual(history["valuation_history"]["current_pb_mrq"], 0.95)
+        self.assertEqual(history["valuation_history"]["pb_percentile"], 0.08)
+
     def test_type5_rejects_history_bound_to_another_security_or_date(self):
         metric = complete_type5_bottom_metrics()
         for field, value in (("code", "000002"), ("as_of", "2026-07-16")):
@@ -4180,7 +4206,7 @@ class TestTypeRules(unittest.TestCase):
         )
 
         self.assertEqual(type1[2]["1c"], 5.0)
-        self.assertIn("末1000.00元", type1[3]["1c"])
+        self.assertIn("最新1000.00元", type1[3]["1c"])
         self.assertNotIn("e+", type1[3]["1c"].lower())
         self.assertEqual(cyclical[2]["5e"], 0.0)
         self.assertEqual(cyclical[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)

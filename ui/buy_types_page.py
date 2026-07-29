@@ -1886,11 +1886,12 @@ def _render_dimension_table(type_key, row):
     total = info.get("total", 0)
     status_code = _type_status(info)
     decision = info.get("decision")
-    decision_missing = (
-        set(decision.get("missing_dimensions", []))
-        if isinstance(decision, Mapping) and isinstance(decision.get("missing_dimensions"), (list, tuple, set))
-        else set()
+    raw_declared_missing = (
+        decision.get("missing_dimensions")
+        if isinstance(decision, Mapping)
+        else reasons.get("_decision_missing_dimensions")
     )
+    decision_missing = set(raw_declared_missing) if isinstance(raw_declared_missing, (list, tuple, set)) else set()
 
     # 雷达图
     _render_radar_chart(type_key, row)

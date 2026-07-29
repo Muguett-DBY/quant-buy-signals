@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:MaximumManifestBytes = 1000000
 $script:MaximumPayloadBytes = 8000000
-$script:MaximumUncompressedPayloadBytes = 16000000
+$script:MaximumUncompressedPayloadBytes = 24000000
 if ($MaximumCompanyCount -lt $MinimumCompanyCount) {
   throw 'MaximumCompanyCount cannot be lower than MinimumCompanyCount.'
 }

@@ -613,6 +613,7 @@ def test_segment_cache_is_validated_and_avoids_second_network_call(tmp_path):
 
 
 def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch):
+    assert ge.MAX_BATCH_COMPANIES >= 5_200
     calls = []
 
     def fake_cashflow(years, *, codes):

@@ -2691,25 +2691,25 @@ def test_release_zip_verifier_accepts_confirmed_veto_with_other_evidence_incompl
     assert _verify(path) == ()
 
 
-def test_release_zip_verifier_accepts_20_character_evidence_and_rejects_21(tmp_path):
-    accepted = tmp_path / "evidence-20.zip"
+def test_release_zip_verifier_accepts_48_character_evidence_and_rejects_49(tmp_path):
+    accepted = tmp_path / "evidence-48.zip"
 
-    def set_20(payload):
-        evidence = "证" * 20
+    def set_48(payload):
+        evidence = "证" * 48
         payload["companies"][0]["type1"]["reasons"]["1c"] = evidence
         payload["companies"][0]["bear_case"][1]["reason"] = evidence
 
-    _write_minimal_release(accepted, mutate_payload=set_20, rerender_companions=True)
+    _write_minimal_release(accepted, mutate_payload=set_48, rerender_companions=True)
     assert _verify(accepted) == ()
 
-    rejected = tmp_path / "evidence-21.zip"
+    rejected = tmp_path / "evidence-49.zip"
 
-    def set_21(payload):
-        evidence = "证" * 21
+    def set_49(payload):
+        evidence = "证" * 49
         payload["companies"][0]["type1"]["reasons"]["1c"] = evidence
         payload["companies"][0]["bear_case"][1]["reason"] = evidence
 
-    _write_minimal_release(rejected, mutate_payload=set_21, rerender_companions=True)
+    _write_minimal_release(rejected, mutate_payload=set_49, rerender_companions=True)
     assert any("100 complete company rows" in error for error in _verify(rejected))
 
 

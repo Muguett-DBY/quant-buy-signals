@@ -112,7 +112,7 @@ _AUDIT_NAMES = {
     "type7": "7️⃣ 优质股权型",
 }
 _AUDIT_QUALIFY_THRESHOLD = 7.0
-_AUDIT_REASON_MAX_LENGTH = 20
+_AUDIT_REASON_MAX_LENGTH = 48
 _AUDIT_TYPE_STATUSES = {
     "triggered",
     "observe",

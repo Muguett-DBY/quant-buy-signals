@@ -3,6 +3,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js"
+REFRESH_WORKER = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
 
 
 def test_dashboard_select_filters_use_change_events_and_type_scoped_statuses():
@@ -26,6 +27,11 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
     assert "数据版本过旧" in source
     assert "missing_dimensions" in source
     assert "missingScore=missing.has(dimension)||!hasScore" in source
+    assert "function scoreLabel" in source
+    assert "估算范围 " in source
+    assert "综合诊断分" in source
+    assert "仅供排序" in source
+    assert "if(typeResult.score!=null&&missing.length===0)" in source
 
 
 def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
@@ -34,5 +40,31 @@ def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
     assert '<option value="triggered">实际命中</option>' in source
     assert "typeState.status===s" in source
     assert "当前条件没有公司；这表示真实零命中或没有适用记录" in source
-    assert "score(r,t)" in source
+    assert "displayedScore" in source
     assert "r.types?.[t]?.reason" in source
+
+
+def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_all_assets():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    for field in (
+        "data_generated_at",
+        "generation_published_at",
+        "last_mirror_check_at",
+        "data_age_hours",
+        "stale",
+        "signals_bytes",
+        "signature_bytes",
+    ):
+        assert field in source
+    assert "catalogueOk&&signalsOk&&signatureOk" in source
+    assert "updated_at:generation?.data_timestamp_utc" in source
+    assert 'requestedGeneration?"public, max-age=300, immutable":"no-store"' in source
+
+
+def test_refresh_worker_repairs_missing_objects_even_when_generation_is_unchanged():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+
+    assert 'status: repaired ? "repaired" : "unchanged"' in source
+    assert "existing.size !== expectedSize" in source
+    assert "await env.DATA_BUCKET.put(key, body" in source

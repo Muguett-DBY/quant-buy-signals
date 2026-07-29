@@ -290,7 +290,7 @@ def _strict_json_loads(raw: bytes) -> Any:
 
 
 _AUDIT_QUALIFY_THRESHOLD = 7.0
-_AUDIT_REASON_MAX_LENGTH = 20
+_AUDIT_REASON_MAX_LENGTH = 48
 _AUDIT_TYPE_STATUSES = {
     "triggered",
     "observe",

@@ -121,6 +121,16 @@ def test_mobile_catalogue_exposes_each_verified_sub_score_and_plain_evidence(mon
             "sub_scores": {"1a": 8.0, "1b": 7.0, "1c": 9.0, "1d": 6.0},
             "reasons": {"1a": "买入区内折价", "1b": "陷阱排查通过", "1c": "现金流安全边际", "1d": "业绩拐点催化"},
             "veto": False,
+            "decision": {
+                **dict(type1["decision"]),
+                "decision_complete": True,
+                "decision_basis": "full_evidence",
+                "score_lower_bound": 8.0,
+                "score_upper_bound": 8.0,
+                "veto_state": "none",
+                "potentially_triggerable": True,
+                "missing_dimensions": [],
+            },
         }
     )
     scores.at[0, "type1"] = type1
@@ -185,6 +195,133 @@ def test_mobile_catalogue_keeps_known_dimensions_when_only_one_dimension_is_miss
     assert set(exported["sub_scores"]) == {"1a", "1b", "1d"}
     assert set(exported["sub_score_reasons"]) == {"1a", "1b", "1d"}
     assert "1c" not in exported["sub_scores"]
+
+
+@pytest.mark.parametrize(
+    ("status", "decision_basis", "veto_state", "expected_reason"),
+    [
+        ("vetoed", "confirmed_veto", "confirmed", "买入区深度不足"),
+        (
+            "not_triggered",
+            "conservative_upper_bound",
+            "none",
+            "补全全部缺失证据后仍不达标",
+        ),
+    ],
+)
+def test_mobile_catalogue_never_publishes_missing_placeholders_as_exact_scores(
+    monkeypatch,
+    status,
+    decision_basis,
+    veto_state,
+    expected_reason,
+):
+    scores = _scores()
+    type1 = dict(scores.at[0, "type1"])
+    type1.update(
+        {
+            "status": status,
+            "triggered": False,
+            "evidence_complete": False,
+            "total": 4.0,
+            "sub_scores": {"1a": 1.5, "1b": 8.0, "1c": 3.8, "1d": 2.0},
+            "reasons": {
+                "1a": "远离买入区",
+                "1b": "陷阱排查通过",
+                "1c": "现金流安全边际",
+                "1d": "内部缺失占位",
+                "_missing": "缺催化剂证据",
+                "_condition": "补全全部缺失证据后仍不达标",
+                "_veto": "买入区深度不足",
+            },
+            "decision": {
+                **dict(type1["decision"]),
+                "decision_complete": True,
+                "decision_basis": decision_basis,
+                "score_lower_bound": 3.7,
+                "score_upper_bound": 5.2,
+                "veto_state": veto_state,
+                "potentially_triggerable": False,
+                "missing_dimensions": ["1d"],
+            },
+        }
+    )
+    scores.at[0, "type1"] = type1
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    _manifest, catalogue, _signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    exported = catalogue["companies"][0]["types"]["type1"]
+    assert exported["status"] == status
+    assert exported["score"] is None
+    assert set(exported["sub_scores"]) == {"1a", "1b", "1c"}
+    assert "1d" not in exported["sub_score_reasons"]
+    assert exported["reason"] == expected_reason
+    assert exported["evidence_gap"] == "缺催化剂证据"
+    assert exported["decision"]["score_lower_bound"] == 3.7
+    assert exported["decision"]["score_upper_bound"] == 5.2
+
+
+def test_mobile_catalogue_diagnostic_maximum_uses_only_complete_public_scores(monkeypatch):
+    scores = _scores()
+    type1 = dict(scores.at[0, "type1"])
+    type1.update(
+        {
+            "status": "not_triggered",
+            "total": 9.0,
+            "sub_scores": {"1a": 9.0, "1b": 9.0, "1c": 9.0, "1d": 9.0},
+            "decision": {
+                **dict(type1["decision"]),
+                "decision_complete": True,
+                "decision_basis": "conservative_upper_bound",
+                "score_lower_bound": 7.0,
+                "score_upper_bound": 9.5,
+                "potentially_triggerable": False,
+                "missing_dimensions": ["1d"],
+            },
+        }
+    )
+    type2 = dict(scores.at[0, "type2"])
+    type2.update(
+        {
+            "status": "observe",
+            "total": 5.5,
+            "sub_scores": {"2a": 5.5, "2b": 5.5, "2c": 5.5, "2d": 5.5},
+            "decision": {
+                **dict(type2["decision"]),
+                "decision_complete": True,
+                "decision_basis": "full_evidence",
+                "score_lower_bound": 5.5,
+                "score_upper_bound": 5.5,
+                "potentially_triggerable": False,
+                "missing_dimensions": [],
+            },
+        }
+    )
+    scores.at[0, "type1"] = type1
+    scores.at[0, "type2"] = type2
+    scores.at[0, "diagnostic_type"] = "type1"
+    scores.at[0, "diagnostic_label"] = "1️⃣ 估值买入区"
+    scores.at[0, "max_score"] = 9.0
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    _manifest, catalogue, _signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    company = catalogue["companies"][0]
+    assert company["types"]["type1"]["score"] is None
+    assert company["diagnostic_type"] == "type2"
+    assert company["diagnostic_label"] == "2️⃣ 两热一冷"
+    assert company["diagnostic_score"] == 5.5
 
 
 def test_mobile_snapshot_exports_a_chinese_industry_label_and_keeps_the_enum_separate(monkeypatch):

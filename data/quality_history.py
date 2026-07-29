@@ -601,7 +601,15 @@ def _from_recent_cache(
     if payload.get("contract") != _cache_contract(code, cached_as_of):
         raise QualityHistoryError("market-history cache contract mismatch")
     bars = _deserialize_bars(payload.get("weekly_bars"))
-    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, requested_as_of)
+    # Validate the persisted rows against the date contract that created them
+    # before sliding the five-year window forward.  Re-validating the complete
+    # older capture directly against ``requested_as_of`` rejects every trading
+    # day that has legitimately fallen out of the newer window, which makes
+    # the documented 21-day reusable-cache path unusable after a long weekend
+    # or any request shift greater than the first observed trading-day delay.
+    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, cached_as_of)
+    requested_start = _years_before(requested_as_of, 5)
+    rows = [row for row in rows if requested_start <= date.fromisoformat(str(row["date"])) <= requested_as_of]
     result = _calculate_evidence(
         code,
         requested_as_of,

@@ -2,17 +2,77 @@ const INDEX_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>量化买入情况看板</title>
 <link rel="icon" href="data:,"><style>
 :root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--bg:#f5f7fb}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}header{background:linear-gradient(135deg,#102a63,#1d4ed8);color:#fff;padding:28px max(20px,calc((100vw - 1240px)/2)) 24px}header h1{margin:0 0 6px;font-size:clamp(24px,4vw,36px)}header p{margin:0;color:#dbeafe}.wrap{max-width:1240px;margin:auto;padding:18px 20px 48px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-bottom:16px}.card,.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 5px 18px #102a630c}.card small{color:var(--muted);display:block}.card strong{font-size:24px;display:block;margin-top:3px}.panel{margin-bottom:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,minmax(120px,1fr));gap:10px}.filters label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}.filters input,.filters select{border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:9px;color:var(--ink);min-width:0}button{border:0;border-radius:9px;background:#e2e8f0;color:var(--ink);padding:9px 12px;cursor:pointer}button:hover{background:#cbd5e1}.meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:13px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px}.table{border-collapse:collapse;width:100%;min-width:960px;background:#fff}.table th,.table td{padding:10px 9px;border-bottom:1px solid #edf1f7;text-align:left;white-space:nowrap}.table th{background:#f8fafc;color:#475569;font-size:12px;position:sticky;top:0}.table tbody tr{cursor:pointer}.table tbody tr:hover{background:#eff6ff}.status{border-radius:999px;padding:3px 7px;font-size:12px}.s-triggered{background:#dcfce7;color:#166534}.s-conditional,.s-observe{background:#fef3c7;color:#92400e}.s-vetoed{background:#fee2e2;color:#991b1b}.s-insufficient_evidence,.s-not_applicable,.s-not_triggered{background:#e2e8f0;color:#475569}.pager{display:flex;justify-content:space-between;align-items:center;margin-top:12px}.drawer{position:fixed;inset:0;background:#0f172a66;display:none;align-items:flex-end;justify-content:center;padding:12px}.drawer.open{display:flex}.drawer-card{background:#fff;border-radius:16px 16px 0 0;max-width:820px;width:100%;max-height:82vh;overflow:auto;padding:20px}.drawer-head{display:flex;justify-content:space-between;gap:12px;align-items:start}.type-row{display:grid;grid-template-columns:1fr auto;gap:5px 14px;border-top:1px solid var(--line);padding:10px 0}.type-row p{margin:2px 0;color:var(--muted);font-size:13px;grid-column:1/-1;white-space:pre-wrap}.dimensions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:6px}.dimension{padding:6px 8px;border:1px solid #edf1f7;border-radius:8px;background:#f8fafc}.dimension small{display:block;color:var(--muted);font-size:12px}.dimension span{display:block;font-weight:600}.dimension em{display:block;color:var(--muted);font-size:12px;font-style:normal;font-weight:400;white-space:normal}.notice{color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-top:12px}@media(max-width:850px){.filters{grid-template-columns:1fr 1fr}.filters label:first-child{grid-column:1/-1}.dimensions{grid-template-columns:1fr}}
-</style></head><body><header><h1>量化买入情况看板</h1><p>沪深股票收盘后数据的只读展示。每家公司会明确区分：已触发、观察、资料不足、不适用和不符合硬条件。</p></header><main class="wrap"><section class="cards" id="cards"></section><section class="panel"><div class="meta" id="meta">正在读取数据…</div><div class="notice" id="notice">页面只展示程序已经完成校验的数据，不在浏览器重新计算估值；“资料不足”不等于公司差，“不适用”也不等于否决。</div></section><section class="panel"><div class="filters"><label>代码/名称<input id="q" autocomplete="off" placeholder="例如 600519 或 贵州茅台"></label><label>市场<select id="market"><option value="">全部市场</option><option value="SH">沪市</option><option value="SZ">深市</option></select></label><label>买入类型<select id="type"><option value="">全部七类</option></select></label><label>当前类型状态<select id="status"><option value="triggered">实际命中</option><option value="">全部适用状态</option></select></label><label>行业<select id="industry"><option value="">全部行业</option></select></label><label>排序<select id="sort"><option value="score">当前类型/综合分高到低</option><option value="name">名称</option><option value="code">代码</option></select></label></div></section><section class="panel"><div class="meta" id="resultMeta" aria-live="polite"></div><div class="table-wrap"><table class="table"><thead><tr><th>代码</th><th>名称</th><th>市场</th><th>行业</th><th id="scoreHeading">综合分</th><th id="typeHeading">主要买入情况</th><th id="statusHeading">七类状态</th></tr></thead><tbody id="rows"></tbody></table></div><div class="pager"><span id="pageInfo"></span><span><button id="prev">上一页</button> <button id="next">下一页</button></span></div></section></main><div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="detailTitle"><article class="drawer-card"><div class="drawer-head"><div><h2 id="detailTitle"></h2><div class="meta" id="detailMeta"></div></div><button id="close">关闭</button></div><div id="detailRows"></div></article></div><script>
+</style></head><body><header><h1>量化买入情况看板</h1><p>沪深股票收盘后数据的只读展示。每家公司会明确区分：已触发、观察、资料不足、不适用和不符合硬条件。</p></header><main class="wrap"><section class="cards" id="cards"></section><section class="panel"><div class="meta" id="meta">正在读取数据…</div><div class="notice" id="notice">页面只展示程序已经完成校验的数据，不在浏览器重新计算估值；“资料不足”不等于公司差，“不适用”也不等于否决。综合诊断分只用于排序，不等于买入信号。</div></section><section class="panel"><div class="filters"><label>代码/名称<input id="q" autocomplete="off" placeholder="例如 600519 或 贵州茅台"></label><label>市场<select id="market"><option value="">全部市场</option><option value="SH">沪市</option><option value="SZ">深市</option></select></label><label>买入类型<select id="type"><option value="">全部七类</option></select></label><label>当前类型状态<select id="status"><option value="triggered">实际命中</option><option value="">全部适用状态</option></select></label><label>行业<select id="industry"><option value="">全部行业</option></select></label><label>排序<select id="sort"><option value="score">当前类型/诊断分高到低</option><option value="name">名称</option><option value="code">代码</option></select></label></div></section><section class="panel"><div class="meta" id="resultMeta" aria-live="polite"></div><div class="table-wrap"><table class="table"><thead><tr><th>代码</th><th>名称</th><th>市场</th><th>行业</th><th id="scoreHeading">综合诊断分</th><th id="typeHeading">主要买入情况</th><th id="statusHeading">七类状态</th></tr></thead><tbody id="rows"></tbody></table></div><div class="pager"><span id="pageInfo"></span><span><button id="prev">上一页</button> <button id="next">下一页</button></span></div></section></main><div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="detailTitle"><article class="drawer-card"><div class="drawer-head"><div><h2 id="detailTitle"></h2><div class="meta" id="detailMeta"></div></div><button id="close">关闭</button></div><div id="detailRows"></div></article></div><script>
 const TYPE_NAMES={type1:"1️⃣ 估值买入区",type2:"2️⃣ 两热一冷",type3:"3️⃣ 可持续高增长",type4:"4️⃣ 长坡厚雪",type5:"5️⃣ 强周期底部",type6:"6️⃣ 高风险早期/困境型",type7:"7️⃣ 优质股权型"};
 const STATUS_NAMES={triggered:"已触发",conditional:"待确认",observe:"观察",insufficient_evidence:"资料不足",vetoed:"不符合硬条件",not_triggered:"未触发",not_applicable:"不适用",blocked:"市场状态阻断"};
 const TYPE_DIMENSIONS={type1:[["1a","买入区深度"],["1b","价值陷阱排查"],["1c","安全边际厚度"],["1d","催化剂/回归动力"]],type2:[["2a","产业周期热度"],["2b","公司周期拐点"],["2c","市场周期冷度"],["2d","估值合理性"]],type3:[["3a","护城河支撑度"],["3b","增长质量"],["3c","资本回报率"],["3d","增长可持续性"],["3e","产业/股价泡沫"]],type4:[["4a","坡的长度"],["4b","雪的厚度"],["4c","护城河耐久度"],["4d","估值合理性"],["4e","产业泡沫防范"],["4f","股价泡沫防范"]],type5:[["5a","强周期属性"],["5b","底部信号"],["5c","抗周期能力"],["5d","上行弹性"],["5e","正常化盈利估值"]],type6:[["6a","产业爆发"],["6b","技术壁垒"],["6c","模式创新"],["6d","困境反转"],["6e","仓位风控"]],type7:[["7a","长期质量与回报"],["7b","产业质量与估值"],["7c","商业质量与安全边际"]]};
-let data=[],page=0,dimensionScoresAvailable=false;const pageSize=100;const $=id=>document.getElementById(id);function market(code){return String(code).startsWith("6")?"沪市":"深市"}function score(row,type=""){const value=type?row.types?.[type]?.score:row.diagnostic_score;return value==null?-1:Number(value)}
+let data=[],page=0,dimensionScoresAvailable=false;const pageSize=100;const $=id=>document.getElementById(id);function market(code){return String(code).startsWith("6")?"沪市":"深市"}function score(row,type=""){const result=type?row.types?.[type]:null;const value=type?result?.score:row.diagnostic_score;if(value!=null)return Number(value);const upper=Number(result?.decision?.score_upper_bound);return type&&Number.isFinite(upper)?upper:-1}function scoreLabel(typeResult){if(!typeResult||typeResult.status==="not_applicable")return"";const missing=typeResult.decision?.missing_dimensions||[];if(typeResult.score!=null&&missing.length===0)return Number(typeResult.score).toFixed(1)+"分";const lower=Number(typeResult.decision?.score_lower_bound),upper=Number(typeResult.decision?.score_upper_bound);if(Number.isFinite(lower)&&Number.isFinite(upper)&&lower<=upper)return Math.abs(upper-lower)<.05?upper.toFixed(1)+"分":"估算范围 "+lower.toFixed(1)+"–"+upper.toFixed(1)+"分";return"资料未齐，暂不显示精确分"}
 function fillOptions(){for(const [k,v] of Object.entries(TYPE_NAMES)){const o=document.createElement("option");o.value=k;o.textContent=v;$("type").append(o)}for(const [k,v] of Object.entries(STATUS_NAMES)){if([...$("status").options].some(o=>o.value===k))continue;const o=document.createElement("option");o.value=k;o.textContent=v;$("status").append(o)}for(const v of [...new Set(data.map(r=>r.industry).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"zh-CN"))){const o=document.createElement("option");o.value=v;o.textContent=v;$("industry").append(o)}}
 function rowMatches(r,{q,m,t,s,i}){const typeState=t?(r.types?.[t]||null):null;const typeMatches=!t||(typeState&&((s&&typeState.status===s)||(!s&&typeState.status!=="not_applicable")));const statusMatches=!s||t||Object.values(r.types||{}).some(v=>v.status===s);return(!q||(r.code+" "+r.name).toLowerCase().includes(q))&&(!m||market(r.code)===({SH:"沪市",SZ:"深市"}[m]))&&(!i||r.industry===i)&&typeMatches&&statusMatches}
 function filtered(){const q=$("q").value.trim().toLowerCase(),m=$("market").value,t=$("type").value,s=$("status").value,i=$("industry").value;let out=data.filter(r=>rowMatches(r,{q,m,t,s,i}));out.sort((a,b)=>$("sort").value==="name"?String(a.name).localeCompare(String(b.name),"zh-CN"):$("sort").value==="code"?String(a.code).localeCompare(String(b.code)):score(b,t)-score(a,t));return out}
 function badge(status){const span=document.createElement("span");span.className="status s-"+status;span.textContent=STATUS_NAMES[status]||"资料异常";return span}
-function render(){const t=$("type").value,out=filtered(),pages=Math.max(1,Math.ceil(out.length/pageSize));page=Math.min(page,pages-1);const slice=out.slice(page*pageSize,(page+1)*pageSize);$("scoreHeading").textContent=t?TYPE_NAMES[t]+"分数":"综合分";$("typeHeading").textContent=t?"当前类型状态":"主要买入情况";$("statusHeading").textContent=t?"当前类型依据":"七类状态";$("rows").replaceChildren(...slice.map(r=>{const tr=document.createElement("tr");tr.tabIndex=0;tr.addEventListener("click",()=>detail(r));tr.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();detail(r)}});for(const value of [r.code,r.name,market(r.code),r.industry,score(r,t)>=0?score(r,t).toFixed(1):"—"]){const td=document.createElement("td");td.textContent=value;tr.append(td)}const td=document.createElement("td");if(t){td.append(badge(r.types?.[t]?.status||"invalid"))}else{td.textContent=r.primary_label||"—"}tr.append(td);const statuses=document.createElement("td");if(t){statuses.textContent=r.types?.[t]?.reason||"暂无补充说明"}else{for(const k of Object.keys(TYPE_NAMES)){const v=r.types?.[k];if(v){const b=badge(v.status);b.title=TYPE_NAMES[k];statuses.append(b," ")}}}tr.append(statuses);return tr}));$("resultMeta").textContent=(out.length?"筛选后 "+out.length.toLocaleString()+" 家，当前显示 "+slice.length+" 家；点击一行查看七类明细。":"当前条件没有公司；这表示真实零命中或没有适用记录，不会用其他类型的公司填充。");$("pageInfo").textContent="第 "+(page+1)+" / "+pages+" 页";$("prev").disabled=page===0;$("next").disabled=page>=pages-1}
-function detail(r){$("detailTitle").textContent=r.name+"（"+r.code+"）";$("detailMeta").textContent=market(r.code)+" · "+(r.industry||"行业未知")+" · 综合分 "+(score(r)>=0?score(r).toFixed(1):"—");const box=$("detailRows");box.replaceChildren();for(const [k,n] of Object.entries(TYPE_NAMES)){const v=r.types?.[k]||{};const article=document.createElement("section");article.className="type-row";const title=document.createElement("strong");title.textContent=n;const right=document.createElement("span");right.append(badge(v.status||"invalid"));if(v.score!=null)right.append(document.createTextNode(" "+Number(v.score).toFixed(1)+"分"));const p=document.createElement("p");p.textContent=v.reason||"暂无补充说明";const dimensions=document.createElement("div");dimensions.className="dimensions";const subScores=v.sub_scores||{};const subReasons=v.sub_score_reasons||{};const missing=new Set(v.decision?.missing_dimensions||[]);for(const [dimension,label] of (TYPE_DIMENSIONS[k]||[])){const item=document.createElement("div");item.className="dimension";const name=document.createElement("small");name.textContent=dimension+" · "+label;const value=document.createElement("span");const hasScore=Object.prototype.hasOwnProperty.call(subScores,dimension)&&Number.isFinite(Number(subScores[dimension]));const missingScore=missing.has(dimension)||!hasScore;value.textContent=v.status==="not_applicable"?"不适用":missingScore?(dimensionScoresAvailable?"资料不足":"数据版本过旧"):Number(subScores[dimension]).toFixed(1)+"分";const evidence=document.createElement("em");evidence.textContent=subReasons[dimension]||(v.status==="not_applicable"?"该类型不适用于此公司":missingScore?"尚未取得可核验的该项资料":dimensionScoresAvailable?"服务器未提供有效说明":"请等待最新数据发布");item.append(name,value,evidence);dimensions.append(item)}article.append(title,right,p,dimensions);box.append(article)}$("drawer").classList.add("open");$("close").focus()}
+function render(){
+  const t=$("type").value,out=filtered(),pages=Math.max(1,Math.ceil(out.length/pageSize));
+  page=Math.min(page,pages-1);
+  const slice=out.slice(page*pageSize,(page+1)*pageSize);
+  $("scoreHeading").textContent=t?TYPE_NAMES[t]+"分数或估算范围":"综合诊断分";
+  $("typeHeading").textContent=t?"当前类型状态":"主要买入情况";
+  $("statusHeading").textContent=t?"当前类型依据":"七类状态";
+  $("rows").replaceChildren(...slice.map(r=>{
+    const tr=document.createElement("tr");
+    tr.tabIndex=0;
+    tr.addEventListener("click",()=>detail(r));
+    tr.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();detail(r)}});
+    const displayedScore=t?(scoreLabel(r.types?.[t])||"—"):(score(r)>=0?score(r).toFixed(1):"—");
+    for(const value of [r.code,r.name,market(r.code),r.industry,displayedScore]){
+      const td=document.createElement("td");td.textContent=value;tr.append(td);
+    }
+    const td=document.createElement("td");
+    if(t){td.append(badge(r.types?.[t]?.status||"invalid"))}else{td.textContent=r.primary_label||"—"}
+    tr.append(td);
+    const statuses=document.createElement("td");
+    if(t){statuses.textContent=r.types?.[t]?.reason||"暂无补充说明"}else{
+      for(const k of Object.keys(TYPE_NAMES)){
+        const v=r.types?.[k];
+        if(v){const b=badge(v.status);b.title=TYPE_NAMES[k];statuses.append(b," ")}
+      }
+    }
+    tr.append(statuses);
+    return tr;
+  }));
+  $("resultMeta").textContent=out.length?"筛选后 "+out.length.toLocaleString()+" 家，当前显示 "+slice.length+" 家；点击一行查看七类明细。":"当前条件没有公司；这表示真实零命中或没有适用记录，不会用其他类型的公司填充。";
+  $("pageInfo").textContent="第 "+(page+1)+" / "+pages+" 页";
+  $("prev").disabled=page===0;$("next").disabled=page>=pages-1;
+}
+function detail(r){
+  $("detailTitle").textContent=r.name+"（"+r.code+"）";
+  $("detailMeta").textContent=market(r.code)+" · "+(r.industry||"行业未知")+" · 综合诊断分 "+(score(r)>=0?score(r).toFixed(1):"—")+"（仅供排序）";
+  const box=$("detailRows");box.replaceChildren();
+  for(const [k,n] of Object.entries(TYPE_NAMES)){
+    const v=r.types?.[k]||{};
+    const article=document.createElement("section");article.className="type-row";
+    const title=document.createElement("strong");title.textContent=n;
+    const right=document.createElement("span");right.append(badge(v.status||"invalid"));
+    const typeScoreLabel=scoreLabel(v);
+    if(typeScoreLabel)right.append(document.createTextNode(" "+typeScoreLabel));
+    const p=document.createElement("p");p.textContent=(v.reason||"暂无补充说明")+(v.evidence_gap?"；资料缺口："+v.evidence_gap:"");
+    const dimensions=document.createElement("div");dimensions.className="dimensions";
+    const subScores=v.sub_scores||{},subReasons=v.sub_score_reasons||{},missing=new Set(v.decision?.missing_dimensions||[]);
+    for(const [dimension,label] of (TYPE_DIMENSIONS[k]||[])){
+      const item=document.createElement("div");item.className="dimension";
+      const name=document.createElement("small");name.textContent=dimension+" · "+label;
+      const value=document.createElement("span");
+      const hasScore=Object.prototype.hasOwnProperty.call(subScores,dimension)&&Number.isFinite(Number(subScores[dimension]));
+      const missingScore=missing.has(dimension)||!hasScore;
+      value.textContent=v.status==="not_applicable"?"不适用":missingScore?(dimensionScoresAvailable?"资料不足":"数据版本过旧"):Number(subScores[dimension]).toFixed(1)+"分";
+      const evidence=document.createElement("em");
+      evidence.textContent=subReasons[dimension]||(v.status==="not_applicable"?"该类型不适用于此公司":missingScore?"尚未取得可核验的该项资料":dimensionScoresAvailable?"服务器未提供有效说明":"请等待最新数据发布");
+      item.append(name,value,evidence);dimensions.append(item);
+    }
+    article.append(title,right,p,dimensions);box.append(article);
+  }
+  $("drawer").classList.add("open");$("close").focus();
+}
 async function load(){try{const manifestResponse=await fetch("/api/manifest",{cache:"no-store"});if(!manifestResponse.ok)throw new Error("清单读取 HTTP "+manifestResponse.status);const m=await manifestResponse.json();const generationId=encodeURIComponent(String(m.generation_id||m.provenance?.generation_id||""));const catalogueResponse=await fetch("/api/catalogue?generation_id="+generationId,{cache:"no-store"});if(!catalogueResponse.ok)throw new Error("目录读取 HTTP "+catalogueResponse.status);const c=await catalogueResponse.json();dimensionScoresAvailable=m.capabilities?.dimension_scores===true&&c.capabilities?.dimension_scores===true;data=Array.isArray(c.companies)?c.companies:[];fillOptions();const s=m.summary||{};const insufficientCompanyCount=data.filter(r=>Object.values(r.types||{}).some(v=>v.status==="insufficient_evidence")).length;$("cards").replaceChildren(...[["全市场公司",s.company_count||data.length],["已触发公司",s.triggered_company_count||0],["待确认公司",s.conditional_company_count||0],["含资料不足公司",insufficientCompanyCount],["七类合计触发",Object.values(s.type_coverage||{}).reduce((n,v)=>n+Number(v.triggered||0),0)]].map(([a,b])=>{const d=document.createElement("div");d.className="card";const sm=document.createElement("small");sm.textContent=a;const st=document.createElement("strong");st.textContent=Number(b).toLocaleString();d.append(sm,st);return d}));$("meta").textContent="数据日期："+(m.market_as_of||"—")+" · 更新时间："+(m.data_timestamp_utc||"—")+" · 来源版本："+(String(m.provenance?.source_commit||"").slice(0,12)||"—");if(!dimensionScoresAvailable)$("notice").textContent="当前服务器仍是旧数据版本，尚未包含子指标分数；页面不会把版本缺失伪装成公司资料不足。请等待最新数据发布。";render()}catch(e){$("meta").textContent="数据读取失败："+(e.message||e)}}
 $("q").addEventListener("input",()=>{page=0;render()});for(const id of ["market","type","status","industry","sort"])$(id).addEventListener("change",()=>{page=0;render()});$("prev").onclick=()=>{page--;render()};$("next").onclick=()=>{page++;render()};$("close").onclick=()=>$("drawer").classList.remove("open");$("drawer").onclick=e=>{if(e.target===$("drawer"))$("drawer").classList.remove("open")};document.addEventListener("keydown",e=>{if(e.key==="Escape")$("drawer").classList.remove("open")});load();
 </script></body></html>`;
@@ -21,4 +81,67 @@ const JSON_HEADERS={"content-type":"application/json; charset=utf-8","cache-cont
 function json(value,status=200){return new Response(JSON.stringify(value),{status,headers:JSON_HEADERS})}
 async function currentGeneration(env,generationId=""){if(generationId)return await env.DB.prepare("SELECT * FROM generations WHERE generation_id=?").bind(generationId).first();return await env.DB.prepare("SELECT g.* FROM current_generation c JOIN generations g ON g.generation_id=c.generation_id WHERE c.singleton=1").first()}
 async function generationManifest(env,generation){if(!generation)return null;const object=await env.DATA_BUCKET.get("generations/"+generation.generation_id+"/manifest.json");return object?await object.json():null}
-export default{async fetch(request,env){if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405);const url=new URL(request.url);const path=url.pathname;try{if(path==="/"||path==="/index.html")return new Response(INDEX_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});const requestedGeneration=url.searchParams.get("generation_id")||"";const generation=await currentGeneration(env,requestedGeneration);if(path==="/api/health"){const manifest=await generationManifest(env,generation);const catalogueName=String(manifest?.catalogue?.filename||"");const object=generation&&catalogueName?await env.DATA_BUCKET.head("generations/"+generation.generation_id+"/"+catalogueName):null;return json({ok:Boolean(generation&&manifest&&object),generation_id:generation?.generation_id||null,market_as_of:generation?.market_as_of||null,updated_at:generation?.last_checked_at||null,catalogue_bytes:object?.size||0})}if(path==="/api/meta")return json(generation||{ok:false,error:"尚未完成首次数据同步"});if(!generation)return json({error:"尚未完成首次数据同步"},503);const prefix="generations/"+generation.generation_id+"/";if(path==="/api/manifest"){const object=await env.DATA_BUCKET.get(prefix+"manifest.json");if(!object)return json({error:"数据对象缺失"},503);const manifest=await object.json();return json({...manifest,generation_id:generation.generation_id})}if(path==="/api/catalogue"){const manifest=await generationManifest(env,generation);const object=await env.DATA_BUCKET.get(prefix+String(manifest?.catalogue?.filename||""));if(!object)return json({error:"目录对象缺失"},503);const body=object.body?.pipeThrough(new DecompressionStream("gzip"));if(!body)return json({error:"目录流不可用"},503);return new Response(body,{headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store",etag:object.etag||""}})}return new Response("Not Found",{status:404})}catch(error){return json({error:String(error?.message||error)},500)}}};
+function declaredAsset(manifest,key){const value=manifest?.[key];const filename=String(value?.filename||"");const size=Number(value?.size);return{filename,size:Number.isSafeInteger(size)&&size>0?size:null}}
+function boundedDataAgeHours(timestamp){const parsed=Date.parse(String(timestamp||""));if(!Number.isFinite(parsed))return null;const hours=(Date.now()-parsed)/3600000;return Number.isFinite(hours)?Math.max(0,Math.round(hours*10)/10):null}
+export default{
+  async fetch(request,env){
+    if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405);
+    const url=new URL(request.url),path=url.pathname;
+    try{
+      if(path==="/"||path==="/index.html")return new Response(INDEX_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+      const requestedGeneration=url.searchParams.get("generation_id")||"";
+      const generation=await currentGeneration(env,requestedGeneration);
+      if(path==="/api/health"){
+        const manifest=await generationManifest(env,generation);
+        const catalogue=declaredAsset(manifest,"catalogue"),signals=declaredAsset(manifest,"signals");
+        const signatureName=String(manifest?.signature?.filename||"");
+        const prefix=generation?"generations/"+generation.generation_id+"/":"";
+        const [catalogueObject,signalsObject,signatureObject]=generation&&manifest?await Promise.all([
+          catalogue.filename?env.DATA_BUCKET.head(prefix+catalogue.filename):null,
+          signals.filename?env.DATA_BUCKET.head(prefix+signals.filename):null,
+          signatureName?env.DATA_BUCKET.head(prefix+signatureName):null,
+        ]):[null,null,null];
+        const catalogueOk=Boolean(catalogueObject&&catalogue.size===catalogueObject.size);
+        const signalsOk=Boolean(signalsObject&&signals.size===signalsObject.size);
+        const signatureOk=Boolean(signatureObject&&signatureObject.size>=64&&signatureObject.size<=128);
+        const dataAgeHours=boundedDataAgeHours(generation?.data_timestamp_utc);
+        const stale=dataAgeHours===null||dataAgeHours>36;
+        return json({
+          ok:Boolean(generation&&manifest&&catalogueOk&&signalsOk&&signatureOk),
+          stale,
+          freshness_basis:"数据生成时间距今不超过36小时；休市日请结合市场日期判断",
+          data_age_hours:dataAgeHours,
+          generation_id:generation?.generation_id||null,
+          market_as_of:generation?.market_as_of||null,
+          updated_at:generation?.data_timestamp_utc||null,
+          data_generated_at:generation?.data_timestamp_utc||null,
+          generation_published_at:generation?.created_at||null,
+          last_mirror_check_at:generation?.last_checked_at||null,
+          catalogue_bytes:catalogueObject?.size||0,
+          signals_bytes:signalsObject?.size||0,
+          signature_bytes:signatureObject?.size||0,
+        });
+      }
+      if(path==="/api/meta")return json(generation||{ok:false,error:"尚未完成首次数据同步"});
+      if(!generation)return json({error:"尚未完成首次数据同步"},503);
+      const prefix="generations/"+generation.generation_id+"/";
+      if(path==="/api/manifest"){
+        const object=await env.DATA_BUCKET.get(prefix+"manifest.json");
+        if(!object)return json({error:"数据对象缺失"},503);
+        const manifest=await object.json();
+        return json({...manifest,generation_id:generation.generation_id});
+      }
+      if(path==="/api/catalogue"){
+        const manifest=await generationManifest(env,generation);
+        const object=await env.DATA_BUCKET.get(prefix+String(manifest?.catalogue?.filename||""));
+        if(!object)return json({error:"目录对象缺失"},503);
+        const body=object.body?.pipeThrough(new DecompressionStream("gzip"));
+        if(!body)return json({error:"目录流不可用"},503);
+        return new Response(body,{headers:{"content-type":"application/json; charset=utf-8","cache-control":requestedGeneration?"public, max-age=300, immutable":"no-store",etag:object.etag||""}});
+      }
+      return new Response("Not Found",{status:404});
+    }catch(error){
+      return json({error:String(error?.message||error)},500);
+    }
+  },
+};

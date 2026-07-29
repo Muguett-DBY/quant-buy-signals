@@ -39,6 +39,31 @@ _LEGACY_PUBLIC_TEXT_REPLACEMENTS = (
     ("小盘高风险模板", "小盘高风险型"),
     ("增长模板", "增长型"),
 )
+_FINANCE_TERM_REPLACEMENTS = (
+    ("EV/EBITDA", "企业价值/息税折旧摊销前利润"),
+    ("EV/Sales", "企业价值/营业收入"),
+    ("FCFF", "企业自由现金流"),
+    ("FCF", "自由现金流"),
+    ("CAPEX", "资本开支"),
+    ("Capex", "资本开支"),
+    ("CFO", "经营现金流"),
+    ("ROIC", "投入资本回报率"),
+    ("WACC", "加权平均资本成本"),
+    ("DCF", "现金流折现估值"),
+    ("TTM", "最近十二个月"),
+    ("CAGR", "年复合增速"),
+    ("YTD", "年初至今"),
+    ("PEG", "市盈率相对盈利增长比"),
+    ("MRQ", "最近一季"),
+    ("PE/PB/PS", "市盈率/市净率/市销率"),
+    ("PE/PB", "市盈率/市净率"),
+    ("P/E", "市盈率"),
+    ("P/B", "市净率"),
+    ("P/S", "市销率"),
+    ("PE", "市盈率"),
+    ("PB", "市净率"),
+    ("PS", "市销率"),
+)
 _EVIDENCE_NOTE = re.compile(
     r"\s*[（(]\s*(?:证据|evidence)\s*[:：][^）)]*[）)]",
     flags=re.IGNORECASE,
@@ -70,6 +95,8 @@ def public_reason_text(value: Any) -> str:
         return "估值计算发生内部异常，相关结果未被采用"
     for legacy, readable in _LEGACY_PUBLIC_TEXT_REPLACEMENTS:
         text = text.replace(legacy, readable)
+    for finance_term, readable in _FINANCE_TERM_REPLACEMENTS:
+        text = text.replace(finance_term, readable)
     lowered = text.casefold()
 
     def remove_internal_note(match: re.Match[str]) -> str:

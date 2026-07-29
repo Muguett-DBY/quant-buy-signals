@@ -43,11 +43,13 @@ SEGMENT_CACHE_DIR = CACHE_DIRECTORY / "growth_evidence"
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SEGMENT_ROWS = 1_000
-# The whole-market pipeline may have more than one thousand applicable
-# companies.  Keep the public batch contract large enough to request all
-# eligible rows in one deterministic scoring pass; the annual cash-flow
-# source is still queried in source-safe chunks below.
-MAX_BATCH_COMPANIES = 2_000
+# The whole-market pipeline can have roughly five thousand eligible rows.
+# Keep the public batch contract above the complete A-share universe so the
+# scorer cannot fail merely because a refreshed evidence tranche is larger
+# than the old 2,000-company ceiling.  The annual cash-flow source remains
+# explicitly chunked below, and the segment adapter still uses only two
+# workers plus its global rate limiter.
+MAX_BATCH_COMPANIES = 6_000
 _CASHFLOW_BATCH_COMPANIES = 100
 MAX_WORKERS = 2
 MAX_SEGMENT_HISTORY_YEARS = 10

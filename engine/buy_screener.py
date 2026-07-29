@@ -90,7 +90,7 @@ VETO_SCORE = 3.0
 # must end at a semantic separator where possible and always show an ellipsis;
 # silently slicing through a percentage or unit makes the explanation false.
 # Full values and formulas live in the structured valuation ledger.
-EVIDENCE_MAX_LENGTH = 20
+EVIDENCE_MAX_LENGTH = 48
 
 STATUS_TRIGGERED = "triggered"
 STATUS_OBSERVE = "observe"
@@ -3317,7 +3317,7 @@ def score_type1_dcf(
     elif fcf is not None and fcf > 0 and market_cap is not None and market_cap > 0:
         fcf_yield = fcf / market_cap
         scores["1c"] = _score_type1_fcf_yield(fcf_yield)
-        reasons["1c"] = f"FCF{fcf_yield:.1%};末{_format_rmb(latest_fcf)}"
+        reasons["1c"] = f"FCF收益率{fcf_yield:.1%};最新{_format_rmb(latest_fcf)}"
     elif fcf is not None:
         scores["1c"], reasons["1c"] = 0.0, "自由现金流非正"
     else:
@@ -3688,7 +3688,11 @@ def score_type2_two_hot_one_cold(
             growth,
             [(-0.10, 0.5), (-0.08, 1.0), (0.0, 2.0), (0.05, 5.0), (0.12, 7.0), (0.25, 8.5), (0.50, 10.0)],
         )
-        reasons["2a"] = f"产业聚合增速{growth:.1%}" if aggregate_ready else f"产业横截面增速{growth:.1%}"
+        reasons["2a"] = (
+            f"本司外{int(aggregate_sample)}家总营收加权增速{growth:.1%}"
+            if aggregate_ready
+            else f"同行营收增速中位数{growth:.1%}"
+        )
 
     revenue = m.get("revenue_values", [])
     revenue_years = m.get("revenue_years", [])
@@ -4339,7 +4343,10 @@ def score_type4_long_runway(
     scores["4b"] = round((margin_score + gross_score + cash_score + roic_score) / 4.0, 1)
     if (margin is not None and margin <= 0) or (cash_history_complete and total_fcf <= 0):
         scores["4b"] = min(scores["4b"], 2.0)
-    reasons["4b"] = f"净{margin_score:.0f}/毛{gross_score:.0f}/现{cash_score:.0f}/ROIC{roic_score:.0f}"
+    reasons["4b"] = (
+        f"分项得分:净利率{margin_score:.1f}/毛利率{gross_score:.1f}/"
+        f"现金回收{cash_score:.1f}/投入资本回报率{roic_score:.1f}"
+    )
     profit_change = _current_annual_change(m, "net_profit_history", "net_profit_years")
     if profit_change is not None and profit_change <= -0.50:
         scores["4b"], reasons["4b"] = min(scores["4b"], 2.0), "年度利润崩塌"
@@ -4393,7 +4400,7 @@ def score_type4_long_runway(
             terminal_ratio,
             [(0.50, 10), (0.75, 8), (1.00, 6), (1.25, 4), (1.75, 2), (2.50, 0)],
         )
-        reasons["4d"] = f"价格/10年中性终局{terminal_ratio:.1f}倍"
+        reasons["4d"] = f"当前价是10年中性估值的{terminal_ratio:.1f}倍"
     else:
         scores["4d"], reasons["4d"] = 2.0, "缺终局折现价值证据"
 
@@ -4410,7 +4417,9 @@ def score_type4_long_runway(
     implied_years = _implied_price_growth_years(dcf_result, price) if valuation_evidence_valid else None
     if implied_years is not None:
         scores["4f"] = _score_implied_growth_years(implied_years)
-        reasons["4f"] = "乐观上沿透支30年+" if implied_years > 30 else f"乐观上沿透支{implied_years}年"
+        reasons["4f"] = (
+            "当前价已提前反映30年以上乐观增长" if implied_years > 30 else f"当前价已提前反映约{implied_years}年乐观增长"
+        )
         reasons["_4f_formula"] = "opt_upper_v1"
     else:
         scores["4f"], reasons["4f"] = 2.0, "缺隐含增长年数证据"
@@ -4925,6 +4934,93 @@ def _type5_contract_number(value: Any) -> Optional[float]:
     if isinstance(value, (bool, np.bool_)):
         return None
     return _safe_float(value)
+
+
+def _rebase_quality_history_to_current_quote(
+    m: Mapping[str, Any],
+    history_evidence: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Combine a reusable historical distribution with the current quote.
+
+    The long-horizon loader may reuse a source capture for up to 21 days.  Its
+    distributions remain a valid five-year history during that interval, but
+    the last row's PE/PB is not the current session's valuation.  Replaying the
+    old current value would label a new quote with a stale percentile.  Keep
+    the immutable distribution and its end date, independently validate its
+    original summary, then rebase only the current value and percentile to the
+    security-bound closing quote already validated by the market snapshot.
+    """
+
+    if not isinstance(history_evidence, Mapping):
+        return history_evidence
+    reference_date = _evidence_reference_date(m.get("source_trade_date"))
+    valuation = history_evidence.get("valuation_history")
+    end_date = _evidence_reference_date(valuation.get("end_date")) if isinstance(valuation, Mapping) else None
+    if (
+        reference_date is None
+        or not isinstance(valuation, Mapping)
+        or valuation.get("available") is not True
+        or end_date is None
+        or end_date == reference_date
+        or not 0 <= (reference_date - end_date).days <= TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
+        or history_evidence.get("as_of") != reference_date.isoformat()
+    ):
+        return history_evidence
+
+    rebased_valuation = dict(valuation)
+    updated = False
+    for prefix, history_current_key, quote_key in (
+        ("pe", "current_pe_ttm", "pe"),
+        ("pb", "current_pb_mrq", "pb"),
+    ):
+        observations = valuation.get(f"{prefix}_observations")
+        stored_current = _type5_contract_number(valuation.get(history_current_key))
+        declared_median = _type5_contract_number(
+            valuation.get(f"median_{prefix}_ttm" if prefix == "pe" else "median_pb_mrq")
+        )
+        declared_percentile = _type5_contract_number(valuation.get(f"{prefix}_percentile"))
+        stored_replay = replay_valuation_distribution(valuation.get(f"{prefix}_distribution"), stored_current)
+        quote_current = _type5_contract_number(m.get(quote_key))
+        if (
+            isinstance(observations, (bool, np.bool_))
+            or not isinstance(observations, (int, np.integer))
+            or stored_current is None
+            or stored_current <= 0
+            or declared_median is None
+            or declared_percentile is None
+            or stored_replay is None
+            or int(observations) != stored_replay["observations"]
+            or not math.isclose(declared_median, float(stored_replay["median"]), rel_tol=0.0, abs_tol=1e-9)
+            or not math.isclose(
+                declared_percentile,
+                float(stored_replay["percentile"]),
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
+            or quote_current is None
+            or quote_current <= 0
+        ):
+            continue
+        current_replay = replay_valuation_distribution(
+            valuation.get(f"{prefix}_distribution"),
+            quote_current,
+        )
+        if current_replay is None or int(observations) != current_replay["observations"]:
+            continue
+        rebased_valuation[history_current_key] = quote_current
+        rebased_valuation[f"median_{prefix}_ttm" if prefix == "pe" else "median_pb_mrq"] = float(
+            current_replay["median"]
+        )
+        rebased_valuation[f"{prefix}_percentile"] = float(current_replay["percentile"])
+        updated = True
+
+    if not updated:
+        return history_evidence
+    rebased_valuation["current_valuation_date"] = reference_date.isoformat()
+    rebased_valuation["current_valuation_source"] = "validated_closing_quote"
+    rebased = dict(history_evidence)
+    rebased["valuation_history"] = rebased_valuation
+    return rebased
 
 
 def _type5_pb_bottom_score(pb_percentile: Any, current_pb: Any) -> Optional[float]:
@@ -6218,6 +6314,53 @@ def _type7_missing_dimensions(ledger: Mapping[str, Any]) -> list[str]:
     return missing
 
 
+def _type7_incomplete_evidence_labels(ledger: Mapping[str, Any]) -> list[str]:
+    """Return ordinary-language labels for incomplete Type 7 source items."""
+
+    prerequisites = ledger.get("prerequisites")
+    core = prerequisites.get("core_modules_80pct") if isinstance(prerequisites, Mapping) else None
+    identifiers = core.get("incomplete_required_items") if isinstance(core, Mapping) else None
+    if not isinstance(identifiers, list):
+        return []
+
+    template1 = ledger.get("template1")
+    template5 = ledger.get("template5")
+    patch5 = ledger.get("patch5")
+    template1_labels = {
+        str(item.get("key")): str(item.get("label"))
+        for item in template1.get("items", [])
+        if isinstance(template1, Mapping) and isinstance(item, Mapping) and item.get("key") and item.get("label")
+    }
+    template5_labels = {
+        str(item.get("key")): str(item.get("label"))
+        for item in template5.get("items", [])
+        if isinstance(template5, Mapping) and isinstance(item, Mapping) and item.get("key") and item.get("label")
+    }
+    patch5_labels: dict[tuple[str, str], str] = {}
+    if isinstance(patch5, Mapping):
+        for section in patch5.get("dimensions", []):
+            if not isinstance(section, Mapping):
+                continue
+            section_key = str(section.get("key") or "")
+            for component in section.get("components", []):
+                if isinstance(component, Mapping) and component.get("key") and component.get("label"):
+                    patch5_labels[(section_key, str(component["key"]))] = str(component["label"])
+
+    labels: list[str] = []
+    for raw_identifier in identifiers:
+        parts = str(raw_identifier).split(".")
+        label = None
+        if len(parts) == 2 and parts[0] == "template1":
+            label = template1_labels.get(parts[1])
+        elif len(parts) == 2 and parts[0] == "template5":
+            label = template5_labels.get(parts[1])
+        elif len(parts) == 3 and parts[0] == "patch5":
+            label = patch5_labels.get((parts[1], parts[2]))
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
 def score_type7_quality_equity(
     m: Mapping[str, Any],
     type1_outcome: tuple[bool, float, Mapping[str, Any], Mapping[str, Any]],
@@ -6276,7 +6419,7 @@ def score_type7_quality_equity(
             else "缺核心研发持股与长期激励资料"
         )
         labels = {
-            "core_modules_80pct": "核心必需子项不完整或覆盖不足80%",
+            "core_modules_80pct": "核心分析证据不完整",
             "technology_patch4": technology_missing,
             "three_year_financials": "不足3年财报",
             "latest_quote_and_valuation": "缺最新估值",
@@ -6284,7 +6427,19 @@ def score_type7_quality_equity(
             "external_report_content_verification": "研报正文尚未读取并交叉核验",
             "ten_year_return_and_five_year_valuation": "缺十年回报或估值史",
         }
-        reasons["_missing"] = labels.get(failed_prerequisites[0], "优质股权前置证据不足")
+        missing_reason = labels.get(failed_prerequisites[0], "优质股权前置证据不足")
+        incomplete_labels = _type7_incomplete_evidence_labels(ledger)
+        if "core_modules_80pct" in failed_prerequisites and incomplete_labels:
+            missing_reason = (
+                "缺" + "、".join(incomplete_labels[:4]) + ("等证据" if len(incomplete_labels) > 4 else "证据")
+            )
+        report_gaps = {
+            "three_external_reports",
+            "external_report_content_verification",
+        }.intersection(failed_prerequisites)
+        if report_gaps and "研报" not in missing_reason:
+            missing_reason += "；另缺3份研报正文核验"
+        reasons["_missing"] = missing_reason
     if ledger["safety_veto"]:
         reasons["_veto"] = "安全边际低于8/20"
     return (
@@ -7213,7 +7368,13 @@ def screen_all_types(
     for metric in metrics:
         code = str(metric.get("code") or "")
         metric["_quantitative_peer_context"] = peer_contexts.get(code, {})
-        metric["_type2_history_evidence"] = normalized_quality_history.get(code)
+        history_evidence = _rebase_quality_history_to_current_quote(
+            metric,
+            normalized_quality_history.get(code),
+        )
+        if history_evidence is not None:
+            normalized_quality_history[code] = history_evidence
+        metric["_type2_history_evidence"] = history_evidence
         if selected_codes is None or code in selected_codes:
             _prepare_dcf_validation_cache(metric, normalized_dcf.get(code))
 
@@ -7376,8 +7537,12 @@ def screen_all_types(
         for code, evidence in normalized_loaded.items():
             if not isinstance(evidence, Mapping):
                 raise ValueError(f"长期市场历史证据必须为映射:{code}")
-            normalized_quality_history[code] = evidence
-            metric_by_code[code]["_type2_history_evidence"] = evidence
+            metric = metric_by_code[code]
+            scoring_evidence = _rebase_quality_history_to_current_quote(metric, evidence)
+            if not isinstance(scoring_evidence, Mapping):
+                raise ValueError(f"长期市场历史证据无法绑定当前行情:{code}")
+            normalized_quality_history[code] = scoring_evidence
+            metric["_type2_history_evidence"] = scoring_evidence
             newly_loaded_history_codes.add(code)
 
     # Exact long-horizon history materially changes all three Type 7 ledgers.
