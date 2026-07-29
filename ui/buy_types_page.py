@@ -1885,6 +1885,12 @@ def _render_dimension_table(type_key, row):
     reasons = info.get("reasons", {})
     total = info.get("total", 0)
     status_code = _type_status(info)
+    decision = info.get("decision")
+    decision_missing = (
+        set(decision.get("missing_dimensions", []))
+        if isinstance(decision, Mapping) and isinstance(decision.get("missing_dimensions"), (list, tuple, set))
+        else set()
+    )
 
     # 雷达图
     _render_radar_chart(type_key, row)
@@ -1913,6 +1919,7 @@ def _render_dimension_table(type_key, row):
         score = sub_scores.get(dim_key)
         score_f = _fmt_score(score)
         reason = _display_reason(reasons.get(dim_key, ""))
+        missing = dim_key in decision_missing or score_f is None
         rows_data.append(
             {
                 "维度": dim_name,
@@ -1924,7 +1931,7 @@ def _render_dimension_table(type_key, row):
                     "不适用"
                     if status_code == "not_applicable"
                     else "资料不足"
-                    if score_f is None
+                    if missing
                     else f"{score_f:.3f}"
                     if type_key == "type7"
                     else f"{score_f:.1f}"
@@ -1933,7 +1940,7 @@ def _render_dimension_table(type_key, row):
                 "依据": reason
                 if reason
                 else "该子项尚缺可核验资料"
-                if score_f is None and status_code == "insufficient_evidence"
+                if missing
                 else "该框架不适用"
                 if status_code == "not_applicable"
                 else "—",

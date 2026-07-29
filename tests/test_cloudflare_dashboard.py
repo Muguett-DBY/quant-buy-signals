@@ -25,6 +25,7 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
     assert "dimensionScoresAvailable" in source
     assert "数据版本过旧" in source
     assert "missing_dimensions" in source
+    assert "missingScore=missing.has(dimension)||!hasScore" in source
 
 
 def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():

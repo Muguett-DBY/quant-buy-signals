@@ -552,6 +552,30 @@ def test_dimension_table_keeps_known_scores_visible_when_other_dimensions_are_mi
     assert by_dimension.loc["公司周期拐点", "依据"] == "该子项尚缺可核验资料"
 
 
+def test_dimension_table_does_not_show_numeric_placeholder_for_declared_missing_score(monkeypatch):
+    tables = []
+    monkeypatch.setattr(buy_types_page.st, "plotly_chart", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "dataframe", lambda value, **kwargs: tables.append(value))
+
+    _render_dimension_table(
+        "type2",
+        {
+            "type2": {
+                "status": "vetoed",
+                "total": 3.1,
+                "sub_scores": {"2a": 0.5, "2b": 3.5, "2c": 6.0, "2d": 2.0},
+                "reasons": {"2d": "缺公司自身五年估值分位"},
+                "decision": {"missing_dimensions": ["2d"]},
+            }
+        },
+    )
+
+    by_dimension = tables[0].set_index("维度")
+    assert by_dimension.loc["估值合理性", "评分"] == "资料不足"
+    assert by_dimension.loc["估值合理性", "依据"] == "缺公司自身五年估值分位"
+
+
 def test_snapshot_age_formatter_is_bounded_and_readable():
     assert _format_snapshot_age(None, now=1_000) == "未知"
     assert _format_snapshot_age(1_100, now=1_000) == "0秒"
