@@ -359,10 +359,20 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     triggers = parsed.get("on", parsed.get(True))
 
     assert triggers["schedule"] == [{"cron": "17 8 * * 1-5"}]
+    assert triggers["workflow_dispatch"]["inputs"]["rebuild_latest_closed"] == {
+        "description": (
+            "Re-score the latest already closed and published market session with the current source revision"
+        ),
+        "required": False,
+        "default": False,
+        "type": "boolean",
+    }
     preflight = parsed["jobs"]["preflight"]
     guard = next(step for step in preflight["steps"] if step.get("id") == "guard")
     assert "mobile_market_workflow_guard.ps1" in guard["run"]
     assert "${{ github.event_name }}" in guard["run"]
+    assert "'${{ inputs.rebuild_latest_closed }}' -eq 'true'" in guard["run"]
+    assert "reason=manual_rebuild_latest_closed" in guard["run"]
     guard_invocation = guard["run"].index("mobile_market_workflow_guard.ps1")
     assert "$LASTEXITCODE" not in guard["run"][guard_invocation:]
     assert preflight["outputs"] == {
@@ -388,6 +398,25 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         assert workflow.count(contract) == 3
     assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 3
     assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
+
+
+def test_manual_model_rebuild_reuses_only_the_latest_validated_closed_session():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    build_steps = parsed["jobs"]["build"]["steps"]
+    build = next(step for step in build_steps if step.get("name") == "Build validated market data")["run"]
+    verify = next(
+        step for step in build_steps if step.get("name") == "Verify the post-close, content-addressed manifest"
+    )["run"]
+
+    assert "$attemptLimit = if ($rebuildLatestClosed) { 1 } else { 2 }" in build
+    assert "$publisherArguments += '--refresh'" in build
+    assert "if (-not $rebuildLatestClosed)" in build
+    assert "& python @publisherArguments" in build
+    assert "--refresh --output-dir" not in build
+    assert "model_rebuild=$env:GITHUB_RUN_ID" in verify
+    assert "$publishedManifest.market_as_of" in verify
+    assert "is not the latest published closed session" in verify
+    assert "older than 14 days" in verify
 
 
 def test_production_workflows_use_only_the_validated_python_lanes():

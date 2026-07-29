@@ -7,6 +7,12 @@ on:
     # several independent failed runs and notification emails.
     - cron: "17 8 * * 1-5"
   workflow_dispatch:
+    inputs:
+      rebuild_latest_closed:
+        description: Re-score the latest already closed and published market session with the current source revision
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -71,6 +77,12 @@ jobs:
             Write-Host 'This workflow run belongs to an older main revision; publication is a successful no-op.'
             'should_run=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             'reason=stale_main_workflow_run' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
+          if ('${{ inputs.rebuild_latest_closed }}' -eq 'true') {
+            Write-Host 'Manual model-only rebuild will reuse the latest validated closed-market snapshot.'
+            'should_run=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            'reason=manual_rebuild_latest_closed' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             return
           }
           & .\tools\mobile_market_workflow_guard.ps1 -EventName '${{ github.event_name }}'
@@ -138,20 +150,27 @@ jobs:
           python -m pip install --require-hashes -r requirements-lock.txt
           python -m pip check
 
-      - name: Build fresh post-close market data
+      - name: Build validated market data
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $attemptLimit = if ($rebuildLatestClosed) { 1 } else { 2 }
+          $modeLabel = if ($rebuildLatestClosed) { 'latest closed-session model rebuild' } else { 'fresh post-close refresh' }
           $releaseOutput = Join-Path $env:RUNNER_TEMP 'ds-dcf-mobile-market-data-release'
           $successfulOutput = $null
-          for ($attempt = 1; $attempt -le 2; $attempt++) {
+          for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
             $output = Join-Path $env:RUNNER_TEMP "ds-dcf-mobile-market-data-attempt-$attempt"
             New-Item -ItemType Directory -Force -Path $output | Out-Null
-            Write-Host "Starting fresh mobile market refresh attempt $attempt of 2."
-            & python -m tools.publish_mobile_snapshot --refresh --output-dir $output
+            Write-Host "Starting $modeLabel attempt $attempt of $attemptLimit."
+            $publisherArguments = @('-m', 'tools.publish_mobile_snapshot', '--output-dir', $output)
+            if (-not $rebuildLatestClosed) {
+              $publisherArguments += '--refresh'
+            }
+            & python @publisherArguments
             $refreshExitCode = $LASTEXITCODE
             if ($refreshExitCode -eq 0) {
               $manifestPath = Join-Path $output 'manifest.json'
@@ -181,13 +200,13 @@ jobs:
               $successfulOutput = $output
               break
             }
-            if ($attempt -lt 2) {
+            if ($attempt -lt $attemptLimit) {
               Write-Warning "Refresh attempt $attempt failed with exit code $refreshExitCode; retrying once without accepting stale data."
               Start-Sleep -Seconds 20
             }
           }
           if ($null -eq $successfulOutput) {
-            throw 'Mobile market snapshot did not pass its freshness and quality gates after two attempts.'
+            throw "Mobile market snapshot did not pass its $modeLabel quality gates."
           }
           Move-Item -LiteralPath $successfulOutput -Destination $releaseOutput
           "MOBILE_DATA_DIR=$releaseOutput" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -223,12 +242,13 @@ jobs:
           }
           $shanghaiZone = [TimeZoneInfo]::FindSystemTimeZoneById('China Standard Time')
           $nowShanghai = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $shanghaiZone)
+          $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
           $marketDate = [DateTime]::ParseExact(
             [string]$manifest.market_as_of,
             'yyyy-MM-dd',
             [Globalization.CultureInfo]::InvariantCulture
           )
-          if ($marketDate.Date -ne $nowShanghai.Date) {
+          if (-not $rebuildLatestClosed -and $marketDate.Date -ne $nowShanghai.Date) {
             throw "The mobile manifest market date $($manifest.market_as_of) is not today's Shanghai session."
           }
           $dataTimestamp = [DateTimeOffset]::Parse(
@@ -236,6 +256,22 @@ jobs:
             [Globalization.CultureInfo]::InvariantCulture
           )
           $dataTimestampShanghai = [TimeZoneInfo]::ConvertTime($dataTimestamp, $shanghaiZone)
+          if ($rebuildLatestClosed) {
+            if ($marketDate.Date -gt $nowShanghai.Date -or ($nowShanghai - $dataTimestampShanghai) -gt [TimeSpan]::FromDays(14)) {
+              throw 'The model-only rebuild snapshot is future-dated or older than 14 days.'
+            }
+            $publishedManifestUrl = (
+              "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json" +
+              "?model_rebuild=$env:GITHUB_RUN_ID"
+            )
+            $publishedManifest = Invoke-RestMethod -Uri $publishedManifestUrl -Method Get -TimeoutSec 30
+            if ([string]$publishedManifest.market_as_of -cne [string]$manifest.market_as_of) {
+              throw (
+                "The restored snapshot session $($manifest.market_as_of) is not the latest published closed session " +
+                "$($publishedManifest.market_as_of)."
+              )
+            }
+          }
           if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
             throw 'The mobile manifest was not generated after 16:15 on its Shanghai market date.'
           }
