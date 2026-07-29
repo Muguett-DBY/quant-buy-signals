@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 import shutil
 import subprocess
@@ -7,6 +8,7 @@ import subprocess
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js"
 REFRESH_WORKER = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
+WRANGLER_CONFIG = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "wrangler.jsonc"
 
 
 def test_dashboard_embedded_browser_script_has_valid_javascript_syntax():
@@ -65,6 +67,7 @@ def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
 
     assert '<option value="triggered">实际命中</option>' in source
     assert "typeState.status===s" in source
+    assert 's=q?"":$("status").value' in source
     assert "当前确实为 0 家命中" in source
     assert "没有找到匹配该代码或名称的公司" in source
     assert "displayedScore" in source
@@ -128,3 +131,17 @@ def test_refresh_worker_repairs_missing_objects_even_when_generation_is_unchange
     assert 'status: repaired ? "repaired" : "unchanged"' in source
     assert "existing.size !== expectedSize" in source
     assert "await env.DATA_BUCKET.put(key, body" in source
+
+
+def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
+    config = json.loads(WRANGLER_CONFIG.read_text(encoding="utf-8"))
+
+    assert config["d1_databases"] == [
+        {
+            "binding": "DB",
+            "database_name": "quant-market-data",
+            "database_id": "1ea1f08e-640f-4e75-a25e-c47d0a41ae66",
+        }
+    ]
+    assert config["r2_buckets"] == [{"binding": "DATA_BUCKET", "bucket_name": "quant-market-data"}]
+    assert "vars" not in config
