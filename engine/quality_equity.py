@@ -20,8 +20,8 @@ from urllib.parse import urlsplit
 from data.quality_history import replay_valuation_distribution
 
 
-MODEL_ID = "patch6-type7-quality-equity-v6"
-SCHEMA_VERSION = 6
+MODEL_ID = "patch6-type7-quality-equity-v7"
+SCHEMA_VERSION = 7
 STRICT_THRESHOLD = 70.0
 PATCH5_SAFETY_VETO = 8.0
 MIN_CORE_COVERAGE = 0.80
@@ -82,8 +82,8 @@ _TEMPLATE1_ITEM_CONTRACTS = {
     "t1_01": ("未来生命周期", "mean(runway,industry_durability)", ({"runway", "industry"},)),
     "t1_02": (
         "成长潜力",
-        "mean(growth_sustainability,runway,revenue_growth)",
-        ({"growth_sustainability", "runway", "revenue_growth"},),
+        "mean(runway,revenue_CAGR_score,profit_FCF_CAGR_score,growth_stability)",
+        ({"runway", "revenue_growth", "profit_fcf_growth", "growth_stability"},),
     ),
     "t1_03": ("主营收入增长", "piecewise_linear(revenue_CAGR)", ({"rate"},)),
     "t1_04": ("扣非利润与FCF增长", "mean(profit_CAGR_score,FCF_CAGR_score)", ({"profit_cagr", "fcf_cagr"},)),
@@ -99,8 +99,8 @@ _TEMPLATE1_ITEM_CONTRACTS = {
     "t1_14": ("垄断性与竞争地位", "mean(moat,industry_structure)", ({"moat", "industry"},)),
     "t1_15": (
         "长期财富积累",
-        "mean(moat_durability,growth_sustainability,ROIC_spread)",
-        ({"moat_durability", "growth_sustainability", "roic"},),
+        "mean(moat_durability,profit_FCF_CAGR_score,ROIC_spread,accounting)",
+        ({"moat_durability", "profit_fcf_growth", "roic", "accounting"},),
     ),
     "t1_16": ("奢侈品属性", "luxury", ({"gross_margin", "proxy_cap"},)),
     "t1_17": ("顶级科技与创新", "technology", ({"score"},)),
@@ -1074,7 +1074,11 @@ def _growth_rate(
     years = _recent_consecutive_years(set(history), expected_latest_year)
     if len(years) < minimum:
         return None
-    years = years[-max(minimum, min(5, len(years))) :]
+    # Type 7 is explicitly a long-horizon quality framework.  Use every
+    # consecutive annual observation available up to the configured ten-year
+    # financial window instead of silently truncating mature companies to five
+    # observations.
+    years = years[-max(minimum, min(10, len(years))) :]
     if history[years[0]] <= 0 or history[years[-1]] <= 0:
         return None
     return (history[years[-1]] / history[years[0]]) ** (1.0 / (years[-1] - years[0])) - 1.0
@@ -1493,21 +1497,9 @@ def _template_inputs(
     accounting = verified("accounting_integrity_score")
     management = verified("management_alignment_score")
     technology = verified("technology_score")
-    catalyst = verified("catalyst_score")
-    growth_sustainability = verified("growth_sustainability_score")
-
-    revenue_rate = (
-        _finite(metric.get("trend_growth"))
-        if _recent_history_ready(
-            metric,
-            "revenue_values",
-            "revenue_years",
-            minimum=3,
-        )
-        else None
-    )
-    profit_rate = _growth_rate(metric, "net_profit_history", "net_profit_years")
-    fcf_rate = _growth_rate(metric, "fcf_history", "fcf_years")
+    revenue_rate = _growth_rate(metric, "revenue_values", "revenue_years", minimum=5)
+    profit_rate = _growth_rate(metric, "net_profit_history", "net_profit_years", minimum=5)
+    fcf_rate = _growth_rate(metric, "fcf_history", "fcf_years", minimum=5)
     revenue_growth = _growth_score(revenue_rate)
     profit_fcf_growth = _avg(_growth_score(profit_rate), _growth_score(fcf_rate))
     balance, balance_complete = _balance_score(metric)
@@ -1525,10 +1517,36 @@ def _template_inputs(
 
     volatility = _finite(metric.get("profit_volatility"))
     consistency = _finite(metric.get("growth_consistency"))
-    cyclicality = _avg(
+    growth_stability = _avg(
         _linear(volatility, [(0.0, 10), (0.20, 9), (0.50, 7), (1.0, 4), (2.0, 1)]),
         _linear(consistency, [(0.0, 10), (0.30, 8), (0.70, 6), (1.20, 3), (2.0, 1)]),
     )
+    recent_trend_rate = (
+        _finite(metric.get("trend_growth"))
+        if _recent_history_ready(metric, "revenue_values", "revenue_years", minimum=3)
+        else None
+    )
+    catalyst = _direct_or_proxy(
+        metric,
+        "catalyst_score",
+        (
+            _avg(
+                _growth_score(recent_trend_rate),
+                revenue_growth,
+                profit_fcf_growth,
+                growth_stability,
+            ),
+            recent_trend_rate is not None
+            and revenue_rate is not None
+            and profit_rate is not None
+            and fcf_rate is not None
+            and volatility is not None
+            and consistency is not None,
+            "derived_proxy",
+        ),
+        proxy_cap=7.0,
+    )
+    cyclicality = growth_stability
     if str(metric.get("industry") or "") in {
         "STEEL",
         "NONFERROUS",
@@ -1599,7 +1617,7 @@ def _template_inputs(
         missing=0,
     )
     forecast_growth = _forecast_growth_rate(revenue_rate, profit_rate, fcf_rate)
-    total_equity_growth = _growth_rate(metric, "equity_history", "equity_years")
+    total_equity_growth = _growth_rate(metric, "equity_history", "equity_years", minimum=5)
     share_dilution = _finite(metric.get("share_dilution_1yr"))
     per_share_book_growth = (
         (1.0 + total_equity_growth) / (1.0 + share_dilution) - 1.0
@@ -1660,7 +1678,6 @@ def _template_inputs(
         "management": (*management, {"score": management[0]}),
         "technology": (*technology, {"score": technology[0]}),
         "catalyst": (*catalyst, {"score": catalyst[0]}),
-        "growth_sustainability": (*growth_sustainability, {"score": growth_sustainability[0]}),
         "revenue_growth": (revenue_growth, revenue_rate is not None, "reported_formula", {"rate": revenue_rate}),
         "profit_fcf_growth": (
             profit_fcf_growth,
@@ -1675,6 +1692,12 @@ def _template_inputs(
         "culture": (*culture, {"management_proxy": management[0]}),
         "cyclicality": (
             cyclicality,
+            volatility is not None and consistency is not None,
+            "reported_formula",
+            {"profit_volatility": volatility, "growth_consistency": consistency},
+        ),
+        "growth_stability": (
+            growth_stability,
             volatility is not None and consistency is not None,
             "reported_formula",
             {"profit_volatility": volatility, "growth_consistency": consistency},
@@ -1745,12 +1768,22 @@ def _make_template1(values: Mapping[str, tuple[float, bool, str, Mapping[str, An
         )
 
     lifecycle = _avg(values["runway"][0], values["industry"][0])
-    growth_potential = _avg(values["growth_sustainability"][0], values["runway"][0], values["revenue_growth"][0])
+    growth_potential = _avg(
+        values["runway"][0],
+        values["revenue_growth"][0],
+        values["profit_fcf_growth"][0],
+        values["growth_stability"][0],
+    )
     health = _avg(values["accounting"][0], values["balance"][0], values["roic"][0])
     advantage = _avg(values["moat"][0], values["moat_durability"][0])
     cost_control = _avg(values["margin"][0], values["accounting"][0])
     market_position = _avg(values["moat"][0], values["industry"][0])
-    wealth = _avg(values["moat_durability"][0], values["growth_sustainability"][0], values["roic"][0])
+    wealth = _avg(
+        values["moat_durability"][0],
+        values["profit_fcf_growth"][0],
+        values["roic"][0],
+        values["accounting"][0],
+    )
 
     items = [
         _item(
@@ -1767,9 +1800,13 @@ def _make_template1(values: Mapping[str, tuple[float, bool, str, Mapping[str, An
             "成长潜力",
             5,
             growth_potential,
-            complete=all(values[key][1] for key in ("growth_sustainability", "runway", "revenue_growth")),
-            formula="mean(growth_sustainability,runway,revenue_growth)",
-            inputs={key: values[key][0] for key in ("growth_sustainability", "runway", "revenue_growth")},
+            complete=all(
+                values[key][1] for key in ("runway", "revenue_growth", "profit_fcf_growth", "growth_stability")
+            ),
+            formula="mean(runway,revenue_CAGR_score,profit_FCF_CAGR_score,growth_stability)",
+            inputs={
+                key: values[key][0] for key in ("runway", "revenue_growth", "profit_fcf_growth", "growth_stability")
+            },
         ),
         record("t1_03", "主营收入增长", "revenue_growth", "piecewise_linear(revenue_CAGR)"),
         record("t1_04", "扣非利润与FCF增长", "profit_fcf_growth", "mean(profit_CAGR_score,FCF_CAGR_score)"),
@@ -1820,9 +1857,9 @@ def _make_template1(values: Mapping[str, tuple[float, bool, str, Mapping[str, An
             "长期财富积累",
             5,
             wealth,
-            complete=all(values[key][1] for key in ("moat_durability", "growth_sustainability", "roic")),
-            formula="mean(moat_durability,growth_sustainability,ROIC_spread)",
-            inputs={key: values[key][0] for key in ("moat_durability", "growth_sustainability", "roic")},
+            complete=all(values[key][1] for key in ("moat_durability", "profit_fcf_growth", "roic", "accounting")),
+            formula="mean(moat_durability,profit_FCF_CAGR_score,ROIC_spread,accounting)",
+            inputs={key: values[key][0] for key in ("moat_durability", "profit_fcf_growth", "roic", "accounting")},
         ),
         record("t1_16", "奢侈品属性", "luxury"),
         record("t1_17", "顶级科技与创新", "technology"),
@@ -1934,8 +1971,27 @@ def _make_patch5(
         metric,
         "innovation_adaptability_score",
         (
-            _avg(values["technology"][0], values["growth_sustainability"][0]),
-            values["technology"][1] and values["growth_sustainability"][1],
+            _avg(
+                values["technology"][0],
+                values["business"][0],
+                values["catalyst"][0],
+                values["runway"][0],
+                values["revenue_growth"][0],
+                values["profit_fcf_growth"][0],
+                values["growth_stability"][0],
+            ),
+            all(
+                values[key][1]
+                for key in (
+                    "technology",
+                    "business",
+                    "catalyst",
+                    "runway",
+                    "revenue_growth",
+                    "profit_fcf_growth",
+                    "growth_stability",
+                )
+            ),
             "derived_proxy",
         ),
         proxy_cap=8.0,
@@ -2270,7 +2326,11 @@ def assess_quality_equity(
     required_items_complete = not incomplete_required_items
     prerequisites = {
         "core_modules_80pct": {
-            "passed": core_coverage >= MIN_CORE_COVERAGE and required_items_complete,
+            # Patch 5 requires at least 80% of the core analysis, not 100% of
+            # every Template 1, Template 5 and Patch 5 item.  Missing items
+            # remain visible and receive conservative scores as required by
+            # the source template.
+            "passed": core_coverage >= MIN_CORE_COVERAGE,
             "actual": core_coverage,
             "required": MIN_CORE_COVERAGE,
             "required_items_complete": required_items_complete,
@@ -2352,20 +2412,7 @@ def assess_quality_equity(
         "patch5": round(patch5_upper, 2),
     }
     pre_history_prerequisites_complete = all(
-        (
-            core_coverage >= MIN_CORE_COVERAGE
-            and set(incomplete_required_items).issubset(
-                {
-                    "template1.t1_18",
-                    "template1.t1_19",
-                    "template5.t5_v1",
-                    "template5.t5_v3",
-                    "patch5.p5_safety.p5_s1",
-                }
-            )
-            if key == "core_modules_80pct"
-            else bool(record["passed"])
-        )
+        (core_coverage >= MIN_CORE_COVERAGE if key == "core_modules_80pct" else bool(record["passed"]))
         for key, record in prerequisites.items()
         if key
         not in {
@@ -2386,7 +2433,7 @@ def assess_quality_equity(
         )
         and pre_research_prerequisites_complete
         and not safety_veto
-        and not decisively_not_triggered
+        and (not decisively_not_triggered or (len(scores) == 3 and min(scores.values()) >= 60.0))
     )
     history_request_needed = bool(
         not history_complete
@@ -2436,12 +2483,12 @@ def _template_item_contract(
         return False, None
     mean_inputs = {
         "t1_01": ("runway", "industry"),
-        "t1_02": ("growth_sustainability", "runway", "revenue_growth"),
+        "t1_02": ("runway", "revenue_growth", "profit_fcf_growth", "growth_stability"),
         "t1_06": ("accounting", "balance", "roic"),
         "t1_09": ("moat", "durability"),
         "t1_11": ("margin", "accounting"),
         "t1_14": ("moat", "industry"),
-        "t1_15": ("moat_durability", "growth_sustainability", "roic"),
+        "t1_15": ("moat_durability", "profit_fcf_growth", "roic", "accounting"),
     }
     if key in mean_inputs:
         values = [_finite(inputs.get(field)) for field in mean_inputs[key]]
@@ -2969,9 +3016,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
             patch5 if isinstance(patch5, Mapping) else {},
         )
         expected_required_items_complete = not expected_incomplete_required_items
-        expected_core_passed = bool(
-            core_actual is not None and core_actual >= MIN_CORE_COVERAGE and expected_required_items_complete
-        )
+        expected_core_passed = bool(core_actual is not None and core_actual >= MIN_CORE_COVERAGE)
         if (
             not isinstance(core, Mapping)
             or set(core)
@@ -3286,7 +3331,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
                     "template1": round(
                         min(
                             100.0,
-                            score_values["template1"]
+                            round(score_values["template1"], 2)
                             - float(template1_items["t1_18"]["points"])
                             - float(template1_items["t1_19"]["points"])
                             + 10.0,
@@ -3296,7 +3341,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
                     "template5": round(
                         min(
                             100.0,
-                            score_values["template5"]
+                            round(score_values["template5"], 2)
                             - float(template5_items["t5_v1"]["points"])
                             - float(template5_items["t5_v3"]["points"])
                             + 18.0,
@@ -3306,7 +3351,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
                     "patch5": round(
                         min(
                             100.0,
-                            score_values["patch5"]
+                            round(score_values["patch5"], 2)
                             - float(valuation_component["points"])
                             + 8.0 * _avg(dcf_score, 10.0) / 10.0,
                         ),
@@ -3321,24 +3366,9 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
     ):
         errors.append("history upper bounds mismatch")
     history_passed = prerequisite_passes.get("ten_year_return_and_five_year_valuation", False)
-    history_request_incomplete_items = _incomplete_required_item_ids(
-        template1 if isinstance(template1, Mapping) else {},
-        template5 if isinstance(template5, Mapping) else {},
-        patch5 if isinstance(patch5, Mapping) else {},
-    )
     history_request_core_coverage = _finite(template1.get("coverage")) if isinstance(template1, Mapping) else None
     history_request_core_ready = bool(
-        history_request_core_coverage is not None
-        and history_request_core_coverage >= MIN_CORE_COVERAGE
-        and set(history_request_incomplete_items).issubset(
-            {
-                "template1.t1_18",
-                "template1.t1_19",
-                "template5.t5_v1",
-                "template5.t5_v3",
-                "patch5.p5_safety.p5_s1",
-            }
-        )
+        history_request_core_coverage is not None and history_request_core_coverage >= MIN_CORE_COVERAGE
     )
     pre_history_passed = (
         len(prerequisite_passes) == len(_PREREQUISITE_KEYS)
@@ -3379,7 +3409,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
         )
         and pre_research_passed
         and not expected_safety_veto
-        and not expected_decisive_failure
+        and (not expected_decisive_failure or (len(score_values) == 3 and min(score_values.values()) >= 60.0))
     )
     if not isinstance(ledger.get("research_request_needed"), bool) or (
         ledger.get("research_request_needed") is not expected_research_request

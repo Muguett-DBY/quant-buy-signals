@@ -730,7 +730,7 @@ public final class MarketRepositoryContractTest {
     public void legacyMachineReasonsAreSanitizedBeforeAnyAndroidDisplay() {
         for (String machineText : Arrays.asList(
                 "证据:patch6-observable",
-                "model_id=patch6-type7-quality-equity-v6",
+                "model_id=patch6-type7-quality-equity-v7",
                 "schema_version=6",
                 "formula=internal_formula",
                 "reported_formula=(normalised_roe-g)/(cost_of_equity-g)",
@@ -770,7 +770,7 @@ public final class MarketRepositoryContractTest {
                 Collections.emptyList(),
                 typeScores(),
                 names,
-                "普通说明\nmodel_id=patch6-type7-quality-equity-v6\nschema_version=6"
+                "普通说明\nmodel_id=patch6-type7-quality-equity-v7\nschema_version=7"
         );
 
         String detail = entry.detailedLabel();

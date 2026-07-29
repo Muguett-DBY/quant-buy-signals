@@ -376,14 +376,12 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
         ("business_model_score", "template1.t1_05"),
         ("moat_score", "template1.t1_09"),
         ("runway_score", "template1.t1_01"),
-        ("growth_sustainability_score", "template1.t1_02"),
-        ("trend_growth", "template1.t1_03"),
         ("fcf_history", "template1.t1_04"),
         ("roic", "template1.t1_06"),
         ("wacc", "template1.t1_06"),
     ),
 )
-def test_type7_never_triggers_when_any_required_source_item_is_incomplete(
+def test_type7_80pct_core_gate_allows_conservatively_scored_incomplete_items(
     missing_field,
     expected_incomplete_item,
 ):
@@ -394,22 +392,64 @@ def test_type7_never_triggers_when_any_required_source_item_is_incomplete(
     outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
     core = ledger["prerequisites"]["core_modules_80pct"]
 
-    # These fixtures deliberately retain enough weighted score and at least 80%
-    # Template 1 coverage.  The decision must nevertheless fail closed because
-    # a required source item has no complete evidence.
+    # Patch 5 explicitly permits incomplete subdimensions to receive a
+    # conservative mid-low score once at least 80% of the core analysis is
+    # complete.  The missing-item list remains auditable but is not a hidden
+    # 100% completeness gate.
     assert ledger["all_scores_strictly_above_70"]
     assert core["actual"] >= 0.80
     assert not core["required_items_complete"]
     assert expected_incomplete_item in core["incomplete_required_items"]
-    assert not core["passed"]
-    assert not ledger["prerequisites_complete"]
-    assert not ledger["triggered"]
-    assert not outcome[0]
-    assert outcome[3]["_status"] == STATUS_INSUFFICIENT_EVIDENCE
-    assert outcome[3]["_evidence"] == "incomplete"
+    assert core["passed"]
+    assert ledger["prerequisites_complete"]
+    assert ledger["triggered"]
+    assert outcome[0]
+    assert outcome[3]["_status"] == "triggered"
     assert validate_quality_equity_ledger(ledger) == []
-    assert _audit_type7_ledger("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE) == []
-    assert _audit_type7_ledger_valid("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE)
+    assert _audit_type7_ledger("600519", ledger, "triggered") == []
+    assert _audit_type7_ledger_valid("600519", ledger, "triggered")
+
+
+def test_type7_growth_is_independent_from_type3_growth_score_and_short_term_trend():
+    baseline = assess_quality_equity(_metric(), _type1(), _history())
+    metric = _metric()
+    metric.pop("growth_sustainability_score")
+    metric.pop("growth_sustainability_score_evidence")
+    metric.pop("growth_sustainability_score_evidence_level")
+    metric.pop("trend_growth")
+    independent = assess_quality_equity(metric, _type1(), _history())
+
+    assert independent["scores"] == baseline["scores"]
+    assert independent["prerequisites"]["core_modules_80pct"]["actual"] == 1.0
+    assert independent["prerequisites"]["core_modules_80pct"]["required_items_complete"]
+    assert validate_quality_equity_ledger(independent) == []
+
+
+def test_type7_core_gate_fails_below_80pct_without_hiding_missing_items():
+    metric = _metric()
+    for key in ("business_model_score", "moat_score", "runway_score"):
+        metric.pop(key)
+    ledger = assess_quality_equity(metric, _type1(), _history())
+    core = ledger["prerequisites"]["core_modules_80pct"]
+
+    assert core["actual"] == 0.75
+    assert not core["passed"]
+    assert not core["required_items_complete"]
+    assert core["incomplete_required_items"]
+    assert validate_quality_equity_ledger(ledger) == []
+
+
+def test_type7_long_term_growth_uses_all_ten_consecutive_financial_years():
+    metric = _metric()
+    metric["revenue_years"] = list(range(2016, 2026))
+    metric["revenue_values"] = [50, 55, 62, 70, 82, 100, 120, 145, 175, 210]
+    ledger = assess_quality_equity(metric, _type1(), _history())
+    revenue_item = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_03")
+
+    expected = (210 / 50) ** (1 / 9) - 1
+    assert revenue_item["inputs"]["rate"] == pytest.approx(expected)
+    assert revenue_item["inputs"]["rate"] != pytest.approx(metric["trend_growth"])
+    assert validate_quality_equity_ledger(ledger) == []
 
 
 def test_type7_three_validators_reject_a_forged_required_item_completeness_gate():
@@ -462,7 +502,8 @@ def test_type7_valid_valuation_is_independent_from_partial_type1_catalyst_eviden
     assert valid_t1_items["t1_20"]["complete"] is True
     assert valid_t1_items["t1_20"]["evidence_level"] == "validated_nonfinancial_dcf"
     assert valid["prerequisites"]["latest_quote_and_valuation"]["passed"] is True
-    assert valid_t5_items["t5_i2"]["complete"] is False
+    assert valid_t5_items["t5_i2"]["complete"] is True
+    assert valid_t5_items["t5_i2"]["score"] <= 7.0
     assert missing_t1_items["t1_20"]["complete"] is False
     assert missing_t1_items["t1_20"]["score"] == 0.0
     assert missing["prerequisites"]["latest_quote_and_valuation"]["passed"] is False
@@ -507,8 +548,8 @@ def test_type7_is_explicitly_not_applicable_to_financial_industries(industry):
 
     assert outcome[3]["_status"] == "not_applicable"
     assert ledger == {
-        "schema_version": 6,
-        "model_id": "patch6-type7-quality-equity-v6",
+        "schema_version": 7,
+        "model_id": "patch6-type7-quality-equity-v7",
         "code": "600519",
         "applicable": False,
         "reason": "金融需专属优质股权模型",
@@ -561,6 +602,22 @@ def test_type7_decisive_upper_bound_turns_known_failure_into_not_triggered():
     assert not _audit_type7_ledger_valid("600519", ledger, STATUS_INSUFFICIENT_EVIDENCE)
 
 
+def test_type7_near_threshold_decisive_company_still_requests_report_crosscheck():
+    candidate = _metric()
+    candidate.update(_evidence("business_model_score", score=0.0))
+    candidate.update(_evidence("moat_durability_score", score=0.0))
+
+    ledger = assess_quality_equity(candidate, _type1(), _history())
+
+    assert ledger["decisively_not_triggered"]
+    assert min(ledger["scores"].values()) >= 60.0
+    assert not ledger["prerequisites"]["external_report_content_verification"]["passed"]
+    assert ledger["research_request_needed"]
+    assert validate_quality_equity_ledger(ledger) == []
+    assert _audit_type7_ledger("600519", ledger, STATUS_NOT_TRIGGERED) == []
+    assert _audit_type7_ledger_valid("600519", ledger, STATUS_NOT_TRIGGERED)
+
+
 def test_type7_preflight_upper_bound_includes_both_history_based_expected_return_items():
     candidate = _metric()
     candidate.update(_evidence("catalyst_score", score=0.0))
@@ -571,7 +628,7 @@ def test_type7_preflight_upper_bound_includes_both_history_based_expected_return
     # Without restoring t1_18 and t5_v3 to their theoretical maxima, the
     # Template 5 upper bound is only 63.77 and this viable candidate is never
     # allowed to fetch its five-year valuation history.
-    assert ledger["upper_bounds_without_history"]["template5"] == 70.97
+    assert ledger["upper_bounds_without_history"]["template5"] == 71.47
     assert all(value > 70 for value in ledger["upper_bounds_without_history"].values())
     assert ledger["history_request_needed"]
     assert validate_quality_equity_ledger(ledger) == []
@@ -861,7 +918,7 @@ def test_market_history_prerequisite_is_independent_of_terminal_profit_projectio
     item19 = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_19")
 
     assert not item19["complete"]
-    assert ledger["template1"]["score"] == 87.30
+    assert ledger["template1"]["score"] == 87.81
     assert ledger["prerequisites"]["ten_year_return_and_five_year_valuation"]["passed"]
     assert validate_quality_equity_ledger(ledger) == []
 
@@ -1326,5 +1383,5 @@ def test_type7_decisive_upper_bound_is_order_stable_at_half_cent_values():
     for dimension in ledger["patch5"]["dimensions"]:
         dimension["components"].reverse()
 
-    assert expected["template1"] == 89.28
+    assert expected["template1"] == 89.80
     assert decisive_score_upper_bounds(ledger["template1"], ledger["template5"], ledger["patch5"]) == expected

@@ -303,8 +303,8 @@ _AUDIT_TYPE_STATUSES = {
 }
 _AUDIT_NON_DIAGNOSTIC_STATUSES = {"not_applicable", "insufficient_evidence"}
 _AUDIT_TYPE7_FINANCIAL_INDUSTRIES = {"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"}
-_AUDIT_TYPE7_SCHEMA_VERSION = 6
-_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v6"
+_AUDIT_TYPE7_SCHEMA_VERSION = 7
+_AUDIT_TYPE7_MODEL_ID = "patch6-type7-quality-equity-v7"
 _AUDIT_TYPE7_SHAREHOLDER_RETURN_FORMULA = "total=end_hfq/start_hfq-1;cagr=(end_hfq/start_hfq)^(365.2425/days)-1"
 _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA = "percentile=(count(x<current)+0.5*count(x=current))/historical_count"
 _AUDIT_TYPE7_TEN_YEAR_TARGET_DAYS = 3_652
@@ -466,8 +466,8 @@ _AUDIT_TYPE7_TEMPLATE1_CONTRACTS = {
     "t1_01": ("未来生命周期", "mean(runway,industry_durability)", ({"runway", "industry"},)),
     "t1_02": (
         "成长潜力",
-        "mean(growth_sustainability,runway,revenue_growth)",
-        ({"growth_sustainability", "runway", "revenue_growth"},),
+        "mean(runway,revenue_CAGR_score,profit_FCF_CAGR_score,growth_stability)",
+        ({"runway", "revenue_growth", "profit_fcf_growth", "growth_stability"},),
     ),
     "t1_03": ("主营收入增长", "piecewise_linear(revenue_CAGR)", ({"rate"},)),
     "t1_04": ("扣非利润与FCF增长", "mean(profit_CAGR_score,FCF_CAGR_score)", ({"profit_cagr", "fcf_cagr"},)),
@@ -483,8 +483,8 @@ _AUDIT_TYPE7_TEMPLATE1_CONTRACTS = {
     "t1_14": ("垄断性与竞争地位", "mean(moat,industry_structure)", ({"moat", "industry"},)),
     "t1_15": (
         "长期财富积累",
-        "mean(moat_durability,growth_sustainability,ROIC_spread)",
-        ({"moat_durability", "growth_sustainability", "roic"},),
+        "mean(moat_durability,profit_FCF_CAGR_score,ROIC_spread,accounting)",
+        ({"moat_durability", "profit_fcf_growth", "roic", "accounting"},),
     ),
     "t1_16": ("奢侈品属性", "luxury", ({"gross_margin", "proxy_cap"},)),
     "t1_17": ("顶级科技与创新", "technology", ({"score"},)),
@@ -1671,12 +1671,12 @@ def _type7_template_input_score(
         return False, None
     mean_inputs = {
         "t1_01": ("runway", "industry"),
-        "t1_02": ("growth_sustainability", "runway", "revenue_growth"),
+        "t1_02": ("runway", "revenue_growth", "profit_fcf_growth", "growth_stability"),
         "t1_06": ("accounting", "balance", "roic"),
         "t1_09": ("moat", "durability"),
         "t1_11": ("margin", "accounting"),
         "t1_14": ("moat", "industry"),
-        "t1_15": ("moat_durability", "growth_sustainability", "roic"),
+        "t1_15": ("moat_durability", "profit_fcf_growth", "roic", "accounting"),
     }
     if key in mean_inputs:
         values = [_finite_number(inputs.get(field)) for field in mean_inputs[key]]
@@ -2443,7 +2443,7 @@ def _audit_type7_ledger_valid_impl(
             if components.get(component_key, {}).get("complete") is not True
         )
     required_items_complete = not incomplete_required_items
-    expected_core_passed = bool(core_actual is not None and core_actual >= 0.80 and required_items_complete)
+    expected_core_passed = bool(core_actual is not None and core_actual >= 0.80)
     if (
         not isinstance(core_prerequisite, Mapping)
         or set(core_prerequisite)
@@ -2847,7 +2847,7 @@ def _audit_type7_ledger_valid_impl(
         "template1": round(
             min(
                 100.0,
-                score_values["template1"]
+                round(score_values["template1"], 2)
                 - float(t1_items["t1_18"]["points"])
                 - float(t1_items["t1_19"]["points"])
                 + 10.0,
@@ -2857,7 +2857,7 @@ def _audit_type7_ledger_valid_impl(
         "template5": round(
             min(
                 100.0,
-                score_values["template5"]
+                round(score_values["template5"], 2)
                 - float(t5_items["t5_v1"]["points"])
                 - float(t5_items["t5_v3"]["points"])
                 + 18.0,
@@ -2867,7 +2867,7 @@ def _audit_type7_ledger_valid_impl(
         "patch5": round(
             min(
                 100.0,
-                score_values["patch5"]
+                round(score_values["patch5"], 2)
                 - float(valuation_component["points"])
                 + 8.0 * round((dcf_score + 10.0) / 2.0, 2) / 10.0,
             ),
@@ -2881,19 +2881,7 @@ def _audit_type7_ledger_valid_impl(
         or any(not close(published_upper.get(key), value) for key, value in expected_upper.items())
     ):
         return False
-    history_request_core_ready = bool(
-        template1_coverage is not None
-        and template1_coverage >= 0.80
-        and set(incomplete_required_items).issubset(
-            {
-                "template1.t1_18",
-                "template1.t1_19",
-                "template5.t5_v1",
-                "template5.t5_v3",
-                "patch5.p5_safety.p5_s1",
-            }
-        )
-    )
+    history_request_core_ready = bool(template1_coverage is not None and template1_coverage >= 0.80)
     expected_request = bool(
         not pass_flags["ten_year_return_and_five_year_valuation"]
         and history_request_core_ready
@@ -2920,7 +2908,7 @@ def _audit_type7_ledger_valid_impl(
             if key not in {"three_external_reports", "external_report_content_verification"}
         )
         and not safety_veto
-        and not expected_decisive_failure
+        and (not expected_decisive_failure or (len(score_values) == 3 and min(score_values.values()) >= 60.0))
     )
     return (
         ledger.get("history_request_needed") is expected_request

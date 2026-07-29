@@ -6421,7 +6421,24 @@ def score_type7_quality_equity(
     strict_pass = bool(ledger["all_scores_strictly_above_70"])
     decisive_failure = bool(ledger["decisively_not_triggered"])
     if decisive_failure:
-        reasons["_condition"] = "补全全部缺失证据后仍至少一套不超过70"
+        ledger_labels = {
+            "template1": "长期质量与回报",
+            "template5": "产业质量与估值",
+            "patch5": "商业质量与安全边际",
+        }
+        decisive_details = []
+        for ledger_key, upper_bound in ledger["decisive_score_upper_bounds"].items():
+            if float(upper_bound) > 70.0:
+                continue
+            section = ledger.get(ledger_key)
+            exact = isinstance(section, Mapping) and float(section.get("coverage") or 0.0) >= 1.0
+            label = ledger_labels.get(ledger_key, ledger_key)
+            decisive_details.append(f"{label}{'已核验' if exact else '最高可能'}{float(upper_bound):.2f}分")
+        reasons["_condition"] = (
+            "；".join(decisive_details) + "，未严格超过70分"
+            if decisive_details
+            else "至少一套评分的最高可能分未严格超过70分"
+        )
     elif not strict_pass:
         reasons["_condition"] = "三套分数均须严格大于70"
     failed_prerequisites = [key for key, record in ledger["prerequisites"].items() if not bool(record.get("passed"))]
@@ -6491,6 +6508,28 @@ def _canonicalize_mapping(mapping: Mapping[Any, Any], label: str) -> dict[str, A
             raise ValueError(f"{label}代码归一化冲突:{code}")
         canonical[code] = value
     return canonical
+
+
+def _load_research_report_batches(
+    loader,
+    requests: Sequence[Mapping[str, str]],
+    *,
+    progress_cb=None,
+) -> dict[str, Any]:
+    """Respect the upstream 2,000-company batch contract without dropping codes."""
+
+    loaded_batches: dict[str, Any] = {}
+    for start in range(0, len(requests), 2_000):
+        batch = list(requests[start : start + 2_000])
+        loaded = loader(batch, progress_cb=progress_cb)
+        if not isinstance(loaded, Mapping):
+            raise TypeError("优质股权研报元数据加载器必须返回代码映射")
+        normalized_batch = _canonicalize_mapping(loaded, "优质股权研报元数据加载结果")
+        duplicate = sorted(set(loaded_batches).intersection(normalized_batch))
+        if duplicate:
+            raise ValueError(f"优质股权研报元数据加载结果重复代码:{duplicate[:5]}")
+        loaded_batches.update(normalized_batch)
+    return loaded_batches
 
 
 def _market_trigger_block_reason(m: Mapping[str, Any]) -> Optional[str]:
@@ -7488,6 +7527,13 @@ def screen_all_types(
                 metric,
                 company_benchmarks,
             )
+            base_outcomes = base_outcomes_by_code[code]
+            preliminary_type7_by_code[code] = score_type7_quality_equity(
+                metric,
+                base_outcomes["type1"],
+                normalized_quality_history.get(code),
+                valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+            )
 
     patch4_requests = [patch4_request_by_code[code] for code in sorted(patch4_request_by_code)]
     if patch4_loader is not None and patch4_requests:
@@ -7594,10 +7640,11 @@ def screen_all_types(
 
     research_requests = [research_request_by_code[code] for code in sorted(research_request_by_code)]
     if research_report_loader is not None and research_requests:
-        loaded = research_report_loader(research_requests, progress_cb=research_report_progress_cb)
-        if not isinstance(loaded, Mapping):
-            raise TypeError("优质股权研报元数据加载器必须返回代码映射")
-        normalized_loaded = _canonicalize_mapping(loaded, "优质股权研报元数据加载结果")
+        normalized_loaded = _load_research_report_batches(
+            research_report_loader,
+            research_requests,
+            progress_cb=research_report_progress_cb,
+        )
         requested_codes = {request["code"] for request in research_requests}
         unexpected = sorted(set(normalized_loaded) - requested_codes)
         if unexpected:

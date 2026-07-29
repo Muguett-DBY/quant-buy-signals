@@ -682,8 +682,8 @@ def test_display_reason_expands_finance_abbreviations():
 @pytest.mark.parametrize(
     "machine_text",
     [
-        "model_id=patch6-type7-quality-equity-v6",
-        "schema_version=6",
+        "model_id=patch6-type7-quality-equity-v7",
+        "schema_version=7",
         "derived_proxy",
         "reported_formula",
         "financial_fade_horizon_not_tam_or_penetration_proof",
@@ -782,8 +782,8 @@ def test_dcf_parameters_are_presented_as_a_chinese_summary_without_raw_audit_fie
 def test_type7_ledger_is_presented_as_chinese_scores_and_prerequisites_only():
     summary = _type7_ledger_summary(
         {
-            "model_id": "patch6-type7-quality-equity-v6",
-            "schema_version": 6,
+            "model_id": "patch6-type7-quality-equity-v7",
+            "schema_version": 7,
             "scores": {"template1": 69.5, "template5": 72.0, "patch5": 71.0},
             "strict_checks": {"template1": False, "template5": True, "patch5": True},
             "prerequisites": {
@@ -865,8 +865,8 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
                 "code": "600519",
                 "type7": {
                     "ledger": {
-                        "model_id": "patch6-type7-quality-equity-v6",
-                        "schema_version": 6,
+                        "model_id": "patch6-type7-quality-equity-v7",
+                        "schema_version": 7,
                         "derived_proxy": True,
                     }
                 },
@@ -876,7 +876,7 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
     context = {"buy_types_dcf_results": {"600519": {"params": {"neutral": {"formula": "internal_formula"}}}}}
 
     exported = json.loads(_analysis_export_json(frame, context=context))
-    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v6"
+    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v7"
     assert exported["dcf_results"]["600519"]["params"]["neutral"]["formula"] == "internal_formula"
     render_source = inspect.getsource(buy_types_page._render_analysis_evidence)
     assert "供技术审计" in render_source

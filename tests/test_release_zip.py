@@ -941,8 +941,8 @@ def _audit_payload(files):
                 "risk_status": "",
             },
             "ledger": {
-                "schema_version": 6,
-                "model_id": "patch6-type7-quality-equity-v6",
+                "schema_version": 7,
+                "model_id": "patch6-type7-quality-equity-v7",
                 "code": code,
                 "applicable": False,
                 "reason": type7_reason,

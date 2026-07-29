@@ -660,8 +660,8 @@ def test_mobile_snapshot_hides_legacy_model_identifiers_from_all_public_text(mon
     type4["sub_scores"] = {"4a": 6.0, "4b": 6.0, "4c": 6.0, "4d": 6.0, "4e": 6.0, "4f": 6.0}
     type4["reasons"] = {
         "_condition": "证据:patch6-observable",
-        "4a": "model_id=patch6-type7-quality-equity-v6",
-        "4b": "schema_version=6",
+        "4a": "model_id=patch6-type7-quality-equity-v7",
+        "4b": "schema_version=7",
         "4c": "derived_proxy",
         "4d": "reported_formula",
         "4e": "financial_fade_horizon_not_tam_or_penetration_proof",

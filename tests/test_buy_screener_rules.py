@@ -5371,6 +5371,21 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(report_calls, [])
         self.assertEqual(type7_calls, [None, history])
 
+    def test_type7_research_loader_batches_more_than_two_thousand_companies_without_loss(self):
+        requests = [{"code": f"{index:06d}", "as_of": "2026-07-17"} for index in range(1, 2_002)]
+        batch_sizes = []
+
+        def loader(batch, *, progress_cb):
+            self.assertIs(progress_cb, self)
+            batch_sizes.append(len(batch))
+            return {request["code"]: {"code": request["code"]} for request in batch}
+
+        loaded = bs._load_research_report_batches(loader, requests, progress_cb=self)
+
+        self.assertEqual(batch_sizes, [2_000, 1])
+        self.assertEqual(len(loaded), 2_001)
+        self.assertEqual(set(loaded), {request["code"] for request in requests})
+
     def test_type5_shared_history_loader_is_reachable_and_skips_impossible_or_non_cycle_names(self):
         def neutral_outcome(type_key):
             return bs._finish(
