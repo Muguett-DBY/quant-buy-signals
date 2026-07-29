@@ -27,7 +27,6 @@ if (-not [IO.Path]::IsPathRooted($relativeToRepository) -and $relativeToReposito
 }
 
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$currentName = $currentIdentity.Name
 $currentSid = $currentIdentity.User.Value
 $systemSid = 'S-1-5-18'
 $parentAcl = Get-Acl -LiteralPath $parent
@@ -59,9 +58,37 @@ try {
     $content = $EnvironmentVariableName + '=' + $privateKeyBase64 + [Environment]::NewLine
     [IO.File]::WriteAllText($temporary, $content, [Text.UTF8Encoding]::new($false))
     [IO.File]::Move($temporary, $outputPath, $false)
-    & icacls.exe $outputPath /inheritance:r /grant:r "${currentName}:(F)" 'SYSTEM:(F)' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        [IO.File]::Delete($outputPath)
+    # Use the .NET ACL API instead of spawning icacls.exe.  Besides avoiding
+    # locale-dependent account-name parsing, this keeps the child-process
+    # handles out of callers that capture stdout/stderr (notably Python 3.14
+    # on hosted Windows runners), where icacls can leave a pipe open long
+    # enough to make an otherwise successful generation look hung.
+    $fileAcl = [Security.AccessControl.FileSecurity]::new()
+    $fileAcl.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::None
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.SecurityIdentifier]::new($currentSid),
+        $fullControl,
+        $inheritance,
+        $propagation,
+        $allow
+    ))
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.SecurityIdentifier]::new($systemSid),
+        $fullControl,
+        $inheritance,
+        $propagation,
+        $allow
+    ))
+    try {
+        Set-Acl -LiteralPath $outputPath -AclObject $fileAcl
+    } catch {
+        if ([IO.File]::Exists($outputPath)) {
+            [IO.File]::Delete($outputPath)
+        }
         throw 'Could not protect the generated signing key with a private ACL.'
     }
     Write-Output $publicKeyBase64
