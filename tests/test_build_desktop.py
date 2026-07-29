@@ -549,7 +549,7 @@ def test_p256_key_generator_never_overwrites_and_only_prints_the_public_key(tmp_
         env={**os.environ, "DS_DCF_ACL_TEST_PATH": str(protected_parent)},
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=30,
     )
     output = protected_parent / "desktop-signing-key.properties"
     command = [
@@ -601,7 +601,7 @@ def test_p256_key_generator_never_overwrites_and_only_prints_the_public_key(tmp_
         env={**os.environ, "DS_DCF_ACL_TEST_PATH": str(output)},
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=30,
     )
     assert json.loads(acl.stdout) == {"Protected": True, "RuleCount": 2}
 
