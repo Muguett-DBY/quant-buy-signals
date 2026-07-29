@@ -197,6 +197,8 @@ def _mobile_screening_coverage(scores: object) -> dict[str, object]:
 def _prepare_quality_history_evidence(
     eligible_codes: Sequence[str],
     market_as_of: str,
+    *,
+    priority_codes: Sequence[str] = (),
 ) -> tuple[dict[str, Mapping[str, object]], dict[str, int]]:
     """Reuse recent source captures and fill one bounded daily tranche.
 
@@ -207,7 +209,16 @@ def _prepare_quality_history_evidence(
     tranche of missing companies.  Coverage accumulates across runs.
     """
 
-    requests_ = [{"code": str(code), "as_of": market_as_of} for code in sorted(set(eligible_codes))]
+    eligible = {str(code) for code in eligible_codes}
+    ordered_codes: list[str] = []
+    seen: set[str] = set()
+    for code in priority_codes:
+        normalized = str(code)
+        if normalized in eligible and normalized not in seen:
+            ordered_codes.append(normalized)
+            seen.add(normalized)
+    ordered_codes.extend(sorted(eligible - seen))
+    requests_ = [{"code": code, "as_of": market_as_of} for code in ordered_codes]
     cached = load_quality_history_cache_batch(requests_)
     missing = [request for request in requests_ if request["code"] not in cached]
     tranche = missing[:_QUALITY_HISTORY_BACKFILL_LIMIT]
@@ -225,6 +236,28 @@ def _prepare_quality_history_evidence(
         "available_companies": available,
         "remaining_companies": max(0, len(requests_) - available),
     }
+
+
+def _quality_history_priority_codes(
+    quotes: object,
+    eligible_codes: Sequence[str],
+) -> tuple[str, ...]:
+    """Prioritise the most economically material companies for bounded backfill."""
+
+    if not isinstance(quotes, pd.DataFrame) or not {"code", "market_cap"}.issubset(quotes.columns):
+        return tuple()
+    eligible = {str(code) for code in eligible_codes}
+    ranked = quotes.loc[:, ["code", "market_cap"]].copy()
+    ranked["code"] = ranked["code"].astype(str)
+    ranked = ranked.loc[ranked["code"].isin(eligible)]
+    ranked["market_cap"] = pd.to_numeric(ranked["market_cap"], errors="coerce")
+    ranked = ranked.loc[ranked["market_cap"].gt(0)]
+    ranked = ranked.sort_values(
+        ["market_cap", "code"],
+        ascending=[False, True],
+        kind="mergesort",
+    )
+    return tuple(dict.fromkeys(ranked["code"].tolist()))
 
 
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
@@ -274,6 +307,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     quality_history_evidence, quality_history_backfill = _prepare_quality_history_evidence(
         eligible_codes,
         market_as_of,
+        priority_codes=_quality_history_priority_codes(snapshot.analysis_quotes, eligible_codes),
     )
     analysis = run_market_analysis(
         snapshot.analysis_quotes,

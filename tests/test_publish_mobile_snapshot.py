@@ -36,7 +36,7 @@ def _published_source_commit(monkeypatch):
     monkeypatch.setattr(
         publisher,
         "_prepare_quality_history_evidence",
-        lambda codes, _as_of: (
+        lambda codes, _as_of, **_kwargs: (
             {},
             {
                 "requested_companies": len(codes),
@@ -264,6 +264,47 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
         "available_companies": 1_005,
         "remaining_companies": 200,
     }
+
+
+def test_quality_history_backfill_prioritises_large_companies_before_code_order(monkeypatch):
+    codes = [f"{index:06d}" for index in range(1, 1_206)]
+    monkeypatch.setattr(publisher, "load_quality_history_cache_batch", lambda _requests: {})
+    captured = []
+
+    def fetch(requests):
+        captured.extend(requests)
+        return {}
+
+    monkeypatch.setattr(publisher, "fetch_quality_history_batch", fetch)
+
+    _prepare_quality_history_evidence(
+        codes,
+        "2026-07-29",
+        priority_codes=["600519", "001205", "000001", "001205"],
+    )
+
+    assert captured[:2] == [
+        {"code": "001205", "as_of": "2026-07-29"},
+        {"code": "000001", "as_of": "2026-07-29"},
+    ]
+    assert len(captured) == publisher._QUALITY_HISTORY_BACKFILL_LIMIT
+
+
+def test_quality_history_priority_codes_rank_positive_market_caps_stably():
+    quotes = pd.DataFrame(
+        [
+            {"code": "000001", "market_cap": 200.0},
+            {"code": "600519", "market_cap": 1_000.0},
+            {"code": "000002", "market_cap": 200.0},
+            {"code": "900001", "market_cap": 5_000.0},
+            {"code": "000003", "market_cap": None},
+        ]
+    )
+
+    assert publisher._quality_history_priority_codes(
+        quotes,
+        ["000001", "000002", "000003", "600519"],
+    ) == ("600519", "000001", "000002")
 
 
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path):
