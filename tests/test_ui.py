@@ -20,6 +20,7 @@ from ui.buy_types_page import (
     _dcf_audit_rows,
     _eligible_analysis_inputs,
     _filter_type_selection,
+    _selected_trigger_count,
     _filter_stock_search,
     _filter_numeric_range,
     _format_snapshot_age,
@@ -35,6 +36,7 @@ from ui.buy_types_page import (
     _public_pipeline_issue_rows,
     _reset_buy_type_filters,
     _render_radar_chart,
+    _render_dimension_table,
     _run_full_analysis,
     _snapshot_reporting_period_contract,
     _spreadsheet_safe_csv,
@@ -119,6 +121,20 @@ def test_type_filter_does_not_hide_conditional_candidates_among_no_signal_rows()
     result = _filter_type_selection(frame, ["type1"], include_no_signal=True)
 
     assert result["code"].tolist() == ["2"]
+
+
+def test_minimum_hit_count_uses_only_selected_types():
+    frame = pd.DataFrame(
+        [
+            {"code": "1", "buy_types": ["type1", "type2"]},
+            {"code": "2", "buy_types": ["type2", "type3"]},
+            {"code": "3", "buy_types": ["type1"]},
+        ]
+    )
+
+    counts = _selected_trigger_count(frame, ["type1"])
+
+    assert counts.tolist() == [1, 0, 1]
 
 
 def test_stale_analysis_generation_is_removed_fail_closed(monkeypatch):
@@ -508,6 +524,32 @@ def test_radar_threshold_has_same_length_as_axes(monkeypatch, type_key):
     assert len(figure.data[1].r) == len(dims) + 1
     expected = "每项须严格高于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）"
     assert figure.data[1].name == expected
+
+
+def test_dimension_table_keeps_known_scores_visible_when_other_dimensions_are_missing(monkeypatch):
+    tables = []
+    monkeypatch.setattr(buy_types_page.st, "plotly_chart", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "caption", lambda *args, **kwargs: None)
+    monkeypatch.setattr(buy_types_page.st, "dataframe", lambda value, **kwargs: tables.append(value))
+
+    _render_dimension_table(
+        "type2",
+        {
+            "type2": {
+                "status": "insufficient_evidence",
+                "total": 5.1,
+                "sub_scores": {"2a": 7.0, "2c": 4.0},
+                "reasons": {"2a": "产业增长", "2c": "市场冷度"},
+            }
+        },
+    )
+
+    table = tables[0]
+    by_dimension = table.set_index("维度")
+    assert by_dimension.loc["产业周期热度", "评分"] == "7.0"
+    assert by_dimension.loc["市场周期冷度", "评分"] == "4.0"
+    assert by_dimension.loc["公司周期拐点", "评分"] == "资料不足"
+    assert by_dimension.loc["公司周期拐点", "依据"] == "该子项尚缺可核验资料"
 
 
 def test_snapshot_age_formatter_is_bounded_and_readable():

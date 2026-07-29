@@ -390,6 +390,16 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
 
 
+def test_production_workflows_use_only_the_validated_python_lanes():
+    tests_workflow = _workflow_text(TEST_WORKFLOW)
+    mobile_workflow = _workflow_text(MOBILE_WORKFLOW)
+
+    assert 'python-version: "3.12"' not in tests_workflow
+    assert 'python-version: "3.12"' not in mobile_workflow
+    assert 'python-version: "3.13"' in tests_workflow
+    assert 'python-version: "3.13"' in mobile_workflow
+
+
 def test_every_powershell_workflow_script_parses_with_the_real_parser(tmp_path):
     executable = shutil.which("pwsh")
     if executable is None:

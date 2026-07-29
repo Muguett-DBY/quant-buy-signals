@@ -11,7 +11,7 @@ import os
 import re
 import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
@@ -565,6 +565,25 @@ def _filter_type_selection(
     if "buy_types" not in frame:
         return frame.copy() if include_no_signal else frame.iloc[0:0].copy()
     return frame[frame.apply(keep, axis=1)].copy()
+
+
+def _selected_trigger_count(frame: pd.DataFrame, active_types: Sequence[str]) -> pd.Series:
+    """Count only the buy types currently selected in the sidebar.
+
+    ``num_types`` is the all-framework count and is useful as a diagnostic
+    column, but it must not drive the "minimum hit types" filter after the
+    user has narrowed the active frameworks.  Otherwise a row can pass the
+    filter because of a trigger in a type the user explicitly unchecked.
+    """
+
+    active = set(active_types)
+
+    def count(value: object) -> int:
+        if not isinstance(value, (list, tuple, set)):
+            return 0
+        return sum(1 for type_key in value if str(type_key) in active)
+
+    return frame.get("buy_types", pd.Series(index=frame.index, dtype=object)).map(count)
 
 
 def _current_analysis_generation_identity() -> dict[str, object]:
@@ -1885,7 +1904,7 @@ def _render_dimension_table(type_key, row):
         st.caption(f"总分: **{total_text}/10** | 状态: {status} | 基础分数门槛: ≥7.0")
 
     dims = TYPE_DIMENSIONS.get(type_key, [])
-    if not dims or not sub_scores:
+    if not dims:
         st.caption("无子维度数据")
         return
 
@@ -1897,19 +1916,27 @@ def _render_dimension_table(type_key, row):
         rows_data.append(
             {
                 "维度": dim_name,
+                # An incomplete framework may still have valid scores for
+                # some dimensions.  Only the missing dimension is labelled
+                # as unavailable; do not hide known evidence behind a
+                # framework-wide "证据不足" label.
                 "评分": (
                     "不适用"
                     if status_code == "not_applicable"
-                    else "证据不足"
-                    if status_code == "insufficient_evidence"
-                    else "暂无数据"
+                    else "资料不足"
                     if score_f is None
                     else f"{score_f:.3f}"
                     if type_key == "type7"
                     else f"{score_f:.1f}"
                 ),
                 "权重": f"{weight * 100:.0f}%",
-                "依据": reason if reason else "—",
+                "依据": reason
+                if reason
+                else "该子项尚缺可核验资料"
+                if score_f is None and status_code == "insufficient_evidence"
+                else "该框架不适用"
+                if status_code == "not_applicable"
+                else "—",
             }
         )
 
@@ -2567,6 +2594,9 @@ def show():
         include_no_signal=include_no_signal,
         include_conditional=include_conditional,
     )
+    # Keep the count used by the minimum-hit filter bound to the same active
+    # type selection.  ``num_types`` remains the all-seven diagnostic count.
+    display["selected_num_types"] = _selected_trigger_count(display, active_types)
 
     if selected_industries:
         display = display[display["industry"].isin(selected_industries)]
@@ -2590,7 +2620,7 @@ def show():
             scale=scale,
         )
 
-    display = display[display["num_types"] >= min_types]
+    display = display[display["selected_num_types"] >= min_types]
 
     # Search is part of the displayed result identity, so apply it before all
     # counts and summary metrics. Previously the table could show one row while
@@ -2601,7 +2631,10 @@ def show():
 
     # ── 统计 ──
     st.subheader("📊 筛选结果")
-    total_with_signal = len(df[df["num_types"] > 0])
+    # This metric describes the rows currently visible after every filter,
+    # including the literal search box.  The previous implementation used the
+    # unfiltered frame, making a successful filter look ineffective.
+    total_with_signal = len(display[display["selected_num_types"] > 0])
     total_filtered = len(display)
 
     mc1, mc2, mc3, mc4 = st.columns(4)
@@ -2629,7 +2662,7 @@ def show():
         "industry_cn": "行业",
         "diagnostic_label": "诊断框架",
         "diagnostic_score": "诊断最高分",
-        "num_types": "命中数",
+        "num_types": "命中数（全部类型）",
         "price": "股价",
         "pe": "PE",
         "pb": "PB",

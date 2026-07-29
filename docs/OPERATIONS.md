@@ -7,7 +7,7 @@
 依赖升级必须作为显式维护动作完成：
 
 1. 在干净的 Python 3.12 环境安装 `requirements-dev.txt` 中固定版本的 `pip-tools`，执行 `python -m piptools compile --generate-hashes --no-emit-index-url --no-emit-trusted-host --resolver=backtracking --output-file=requirements-lock.txt requirements.txt`，再执行 `python -m piptools compile --generate-hashes --allow-unsafe --no-emit-index-url --no-emit-trusted-host --resolver=backtracking --output-file=requirements-dev-lock.txt requirements-dev.txt`；解析时可以通过环境变量选择 HTTPS 镜像，但锁文件不得内嵌 `--index-url` 或 `--trusted-host`，否则会覆盖运行者的 `PIP_INDEX_URL`。不要从包含无关工具的全局环境直接复制整个 `pip freeze`。
-2. 执行 Python 3.11、3.12、3.13、3.14 测试矩阵、覆盖率、Ruff、Bandit、`pip-audit` 和 `pip check`。
+2. 执行 Python 3.11、3.13、3.14 测试矩阵，并在 Python 3.13 上执行覆盖率、Ruff、Bandit、`pip-audit` 和 `pip check`。
 3. 在四个 Python 版本上分别以 `pip install --require-hashes -r ...-lock.txt` 验证单一锁文件。若任一版本不能解析，必须为每个 Python 版本生成独立哈希锁并在 CI 中显式选择，不能降级为无哈希约束。
 4. 记录直接依赖和传递依赖变化；只有全部验证通过才提交 lock 文件。
 
@@ -54,7 +54,7 @@ JSON 产物包含完整七类型子分/依据、Type7 三个百分制账本及�
 
 ## 本地发布验证
 
-发布验证必须在由 `requirements-dev-lock.txt` 新建的干净 Python 3.12 虚拟环境中执行，不能以全局环境“恰好能运行”代替锁文件验证：
+发布验证必须在由 `requirements-dev-lock.txt` 新建的干净 Python 3.13 虚拟环境中执行，不能以全局环境“恰好能运行”代替锁文件验证：
 
 ```powershell
 if (-not $env:PIP_INDEX_URL) { $env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -76,7 +76,7 @@ python -m tools.build_desktop --signing-private-key $desktopSigningKey
 
 构建后还必须把唯一 wheel 安装到仓库外的空目录，并从该目录导入 `data.industry` 与 `tools.run_full_audit`，确认行业 JSON 和审计入口确实打入制品。wheel 是库/导入完整性制品，不是桌面运行包；根目录 `.streamlit/config.toml` 仅由受控的源码桌面包携带。随后检查 `git status --short`、`git ls-files --eol` 和下述禁入清单；固定种子沪深 eligible universe 审计必须在代码树干净且提交已确定时生成。最终源码压缩包必须从干净提交的 tracked files 构造，并执行 `python -m tools.verify_release_zip <zip路径>`；该检查会验证禁入文件、行尾、schema、沪深随机 100 身份及审计哈希与包内代码/规则/行业/依赖完全一致，禁止直接压缩含缓存的工作目录。
 
-Windows 运行制品由 `python -m tools.build_desktop --signing-private-key <仓库外桌面私钥>` 使用固定版本 PyInstaller 构建。桌面私钥必须独立于 Android 市场数据私钥；可用 `pwsh -NoProfile -File tools/generate_p256_signing_key.ps1 -Output <仓库外路径> -EnvironmentVariableName DS_DCF_DESKTOP_SIGNING_PRIVATE_KEY_BASE64` 一次性生成，生成器拒绝覆盖已有文件且只向标准输出写公钥。构建器依次运行 EXE 的 `--version`、资源 `--health-check`，并让冻结 EXE 真正拉起 Streamlit 子进程、等待本机健康端点返回 `ok`；三项全部通过后才生成包含内部发布清单的便携 ZIP。随后构建一份单文件安装器，安装器内嵌同一 ZIP 与更新清单，并实际执行 `--version` 和只读 `--verify-bundle`。公开 CI 的 Windows/Python 3.12 门禁使用 `python -m tools.build_desktop --ci-smoke --output-root build/ci-smoke-output --work-root build/ci-smoke-work` 复用上述可执行文件与安装器冒烟链，但该模式只允许 `GITHUB_ACTIONS=true`，拒绝桌面交付、发布 URL 和任何签名输入，并且不会生成可发布更新清单或签名；正式默认路径仍在缺少私钥时失败。`--desktop` 仅把已经验证的目录、ZIP、安装器、更新清单和稳定快捷方式复制到当前用户桌面。桌面启动器只监听 `127.0.0.1`，缓存保存在 `%LOCALAPPDATA%\DS_DCF\cache`。上次成功分析结果仅在快照制品 SHA256、规则状态哈希、schema 和公司身份全部一致时恢复；任何不一致都会拒绝复用。更新必须来自配置的 HTTPS 清单，先以应用内固定桌面公钥验证独立签名，再按包大小和 SHA256 校验 ZIP 路径、大小、压缩率、内部版本和 EXE 身份，并安装到桌面 `6BUYING_POINT/<版本>/app/`，同时保留经校验的便携 ZIP。环境变量、`6BUYING_POINT/update_config.json`、随包配置按此顺序选择更新源；已有目标版本还会逐文件复核，任何额外、缺失或被篡改文件都会拒绝当成已安装版本。不得用 HTTP、无签名、无哈希下载或原地覆盖旧版本替代该流程。
+Windows 运行制品由 `python -m tools.build_desktop --signing-private-key <仓库外桌面私钥>` 使用固定版本 PyInstaller 构建。桌面私钥必须独立于 Android 市场数据私钥；可用 `pwsh -NoProfile -File tools/generate_p256_signing_key.ps1 -Output <仓库外路径> -EnvironmentVariableName DS_DCF_DESKTOP_SIGNING_PRIVATE_KEY_BASE64` 一次性生成，生成器拒绝覆盖已有文件且只向标准输出写公钥。构建器依次运行 EXE 的 `--version`、资源 `--health-check`，并让冻结 EXE 真正拉起 Streamlit 子进程、等待本机健康端点返回 `ok`；三项全部通过后才生成包含内部发布清单的便携 ZIP。随后构建一份单文件安装器，安装器内嵌同一 ZIP 与更新清单，并实际执行 `--version` 和只读 `--verify-bundle`。公开 CI 的 Windows/Python 3.13 门禁使用 `python -m tools.build_desktop --ci-smoke --output-root build/ci-smoke-output --work-root build/ci-smoke-work` 复用上述可执行文件与安装器冒烟链，但该模式只允许 `GITHUB_ACTIONS=true`，拒绝桌面交付、发布 URL 和任何签名输入，并且不会生成可发布更新清单或签名；正式默认路径仍在缺少私钥时失败。`--desktop` 仅把已经验证的目录、ZIP、安装器、更新清单和稳定快捷方式复制到当前用户桌面。桌面启动器只监听 `127.0.0.1`，缓存保存在 `%LOCALAPPDATA%\DS_DCF\cache`。上次成功分析结果仅在快照制品 SHA256、规则状态哈希、schema 和公司身份全部一致时恢复；任何不一致都会拒绝复用。更新必须来自配置的 HTTPS 清单，先以应用内固定桌面公钥验证独立签名，再按包大小和 SHA256 校验 ZIP 路径、大小、压缩率、内部版本和 EXE 身份，并安装到桌面 `6BUYING_POINT/<版本>/app/`，同时保留经校验的便携 ZIP。环境变量、`6BUYING_POINT/update_config.json`、随包配置按此顺序选择更新源；已有目标版本还会逐文件复核，任何额外、缺失或被篡改文件都会拒绝当成已安装版本。不得用 HTTP、无签名、无哈希下载或原地覆盖旧版本替代该流程。
 
 证监会行业源只能由 `tools/build_official_industry_source.py` 从官方代码排序 PDF 确定性生成。生成器会核验 PDF SHA256、最少记录数、代码唯一性和门类代码映射；期后新股的补录 JSON 必须保存交易所文件 URL、SHA256、页码和行业代码。任何手工改写但无法回溯到这些来源的数据都不能进入发布包。
 

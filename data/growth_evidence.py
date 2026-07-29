@@ -43,7 +43,12 @@ SEGMENT_CACHE_DIR = CACHE_DIRECTORY / "growth_evidence"
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SEGMENT_ROWS = 1_000
-MAX_BATCH_COMPANIES = 100
+# The whole-market pipeline may have more than one thousand applicable
+# companies.  Keep the public batch contract large enough to request all
+# eligible rows in one deterministic scoring pass; the annual cash-flow
+# source is still queried in source-safe chunks below.
+MAX_BATCH_COMPANIES = 2_000
+_CASHFLOW_BATCH_COMPANIES = 100
 MAX_WORKERS = 2
 MAX_SEGMENT_HISTORY_YEARS = 10
 MIN_SEGMENT_HISTORY_YEARS = 3
@@ -1869,16 +1874,22 @@ def fetch_growth_evidence_batch(
         years = tuple(range(latest, latest - EXTERNAL_HISTORY_YEARS, -1))
         grouped.setdefault(years, []).append(code)
     for years, codes in grouped.items():
-        try:
-            frame = fetch_detailed_annual_cashflow_history(list(years), codes=codes)
-            if not frame.empty:
-                for code in codes:
-                    acquisition_by_code[code] = frame.loc[
-                        frame["SECURITY_CODE"].astype(str).str.strip().eq(code)
-                    ].to_dict(orient="records")
-        except Exception as exc:
-            for code in codes:
-                acquisition_errors[code] = exc
+        # Eastmoney's code predicate is intentionally bounded to 100 symbols.
+        # Passing a larger list would silently remove the predicate and fetch
+        # the entire market for every annual period, which is both slow and
+        # capable of triggering the source's rate limits.  Chunk explicitly so
+        # the expanded whole-market evidence pass remains bounded and auditable.
+        for offset in range(0, len(codes), _CASHFLOW_BATCH_COMPANIES):
+            code_chunk = codes[offset : offset + _CASHFLOW_BATCH_COMPANIES]
+            try:
+                frame = fetch_detailed_annual_cashflow_history(list(years), codes=code_chunk)
+                if not frame.empty:
+                    frame_codes = frame["SECURITY_CODE"].astype(str).str.strip()
+                    for code in code_chunk:
+                        acquisition_by_code[code] = frame.loc[frame_codes.eq(code)].to_dict(orient="records")
+            except Exception as exc:
+                for code in code_chunk:
+                    acquisition_errors[code] = exc
 
     results: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(prepared))) as executor:

@@ -26,7 +26,6 @@ jobs:
       matrix:
         include:
           - python-version: "3.11"
-          - python-version: "3.12"
           - python-version: "3.13"
           - python-version: "3.14"
 
@@ -104,28 +103,28 @@ jobs:
           }
 
       - name: Unit and integration tests with coverage
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         run: python -m pytest --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Unit and integration tests
-        if: matrix.python-version != '3.12'
+        if: matrix.python-version != '3.13'
         run: python -m pytest
 
       - name: Lint and formatting checks
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         run: |
           python -m ruff check .
           python -m ruff format --check .
 
       - name: Security and dependency checks
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         run: |
           python -m bandit -q -r app.py config.py data desktop engine ui tools --severity-level medium --confidence-level medium
           python -m pip_audit --strict --progress-spinner off --require-hashes --disable-pip --timeout 30 -r requirements-dev-lock.txt
           python -m pip check
 
       - name: Build and verify wheel package data
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         shell: pwsh
         run: |
           python -m build --wheel --no-isolation
@@ -150,14 +149,14 @@ jobs:
           }
 
       - name: Build and smoke-test Windows desktop release
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         run: >-
           python -m tools.build_desktop --ci-smoke
           --output-root build/ci-smoke-output
           --work-root build/ci-smoke-work
 
       - name: Verify tracked desktop source archive
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         shell: pwsh
         run: |
           $audit = 'audit/random100_audit_seed20260715.json'

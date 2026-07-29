@@ -66,7 +66,7 @@ python -m pip check
 python -m build --wheel --no-isolation
 ```
 
-覆盖率配置要求总覆盖率不低于 75%。CI 在 Python 3.11、3.12、3.13、3.14 上运行测试，并在 Python 3.12 上集中执行覆盖率、格式、静态安全、依赖漏洞、wheel 安装验证和发布包卫生检查。GitHub Actions 固定到提交 SHA，不使用可移动标签；依赖安装强制校验 lock 中的 SHA256，行尾策略由 `.gitattributes` 与 CI 共同检查。
+覆盖率配置要求总覆盖率不低于 75%。CI 在 Python 3.11、3.13、3.14 上运行测试，并在经过验证的 Python 3.13 上集中执行覆盖率、格式、静态安全、依赖漏洞、wheel 安装验证和发布包卫生检查。GitHub Actions 固定到提交 SHA，不使用可移动标签；依赖安装强制校验 lock 中的 SHA256，行尾策略由 `.gitattributes` 与 CI 共同检查。
 
 测试覆盖数据分页与部分失败、schema 8 快照/CAS 完整性、上市日期来源与历史窗口、Type3 补充字段、严格 TTM 报告期与资本开支来源绑定、非金融 DCF 与金融 justified P/B 公式及边界、七类型权重与否决规则、Type7 十年回报/五年估值史与三账本重放、UI 持久结果身份校验、桌面更新包安全边界及固定种子随机样本审计。
 

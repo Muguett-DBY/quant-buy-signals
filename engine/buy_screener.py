@@ -5646,7 +5646,16 @@ def _type3_growth_request_needed(
     m: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
 ) -> bool:
-    """Fetch deep growth evidence only when it can still create a signal."""
+    """Fetch deep growth evidence for every eligible incomplete Type 3 row.
+
+    The previous trigger-potential shortcut only loaded evidence for rows that
+    already scored at least seven points using weak proxies.  That made the
+    result dependent on the proxy score and left many applicable companies
+    permanently at ``证据不足`` even though their five-year local histories
+    were available.  Deep evidence is now requested whenever the preliminary
+    result is incomplete specifically on the two evidence-backed growth
+    dimensions; hard N/A/veto/blocked outcomes remain excluded.
+    """
 
     quality_score = _type3_uncapped_partial_score(m, "growth_quality_score")
     sustainability_score = _type3_uncapped_partial_score(m, "growth_sustainability_score")
@@ -5675,13 +5684,22 @@ def _type3_growth_request_needed(
     outcome = score_type3_sustainable_growth(candidate, benchmarks)
     if not isinstance(outcome, tuple) or len(outcome) != 4:
         return False
-    _triggered, total, _scores, reasons = outcome
-    return (
-        _safe_float(total) is not None
-        and float(total) >= QUALIFY_THRESHOLD
-        and isinstance(reasons, Mapping)
-        and reasons.get("_status") not in {STATUS_NOT_APPLICABLE, STATUS_VETOED, STATUS_BLOCKED}
-    )
+    _triggered, _total, _scores, reasons = outcome
+    if not isinstance(reasons, Mapping):
+        return False
+    status = reasons.get("_status")
+    # The candidate deliberately attaches derived proxy evidence so the
+    # preliminary score can be calculated even when the real source is absent;
+    # therefore its status may be triggered/observe rather than
+    # ``insufficient_evidence``.  The two partial-evidence guards above are the
+    # authoritative indication that a deep load is still required.  Exclude
+    # only frameworks that are out of scope or already have a confirmed hard
+    # veto/block.
+    return status in TYPE_STATUSES and status not in {
+        STATUS_NOT_APPLICABLE,
+        STATUS_VETOED,
+        STATUS_BLOCKED,
+    }
 
 
 def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
