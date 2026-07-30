@@ -459,7 +459,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "should_run": "${{ steps.guard.outputs.should_run }}",
         "reason": "${{ steps.guard.outputs.reason }}",
     }
-    assert workflow.count("data/cache/market_snapshot.json.gz") == 2
+    assert workflow.count("data/cache/market_snapshot.json.gz") == 3
     for path in (
         "data/cache/market_coldness",
         "data/cache/market_history",
@@ -476,7 +476,8 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/patch4_evidence.py",
     ):
         assert workflow.count(contract) == 3
-    assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 3
+    assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 4
+    assert "mobile-market-v1-${{ runner.os }}-\n" in workflow
     assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
 
 
@@ -489,6 +490,8 @@ def test_manual_model_rebuild_reuses_only_the_latest_validated_closed_session():
     )["run"]
 
     assert "$attemptLimit = if ($rebuildLatestClosed) { 1 } else { 2 }" in build
+    assert "data/cache/market_snapshot.json.gz" in build
+    assert "refusing a live-data fallback" in build
     assert "$publisherArguments += '--refresh'" in build
     assert "if (-not $rebuildLatestClosed)" in build
     assert "& python @publisherArguments" in build

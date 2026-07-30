@@ -127,6 +127,7 @@ jobs:
           key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
           restore-keys: |
             mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
+            mobile-market-v1-${{ runner.os }}-
 
       - name: Restore accumulated contract-validated deep evidence
         continue-on-error: true
@@ -157,6 +158,12 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $false
           }
           $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          if (
+            $rebuildLatestClosed -and
+            -not (Test-Path -LiteralPath 'data/cache/market_snapshot.json.gz' -PathType Leaf)
+          ) {
+            throw 'The latest closed-session model rebuild has no validated cached market snapshot; refusing a live-data fallback.'
+          }
           $attemptLimit = if ($rebuildLatestClosed) { 1 } else { 2 }
           $modeLabel = if ($rebuildLatestClosed) { 'latest closed-session model rebuild' } else { 'fresh post-close refresh' }
           $releaseOutput = Join-Path $env:RUNNER_TEMP 'ds-dcf-mobile-market-data-release'
