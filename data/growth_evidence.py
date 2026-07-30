@@ -36,6 +36,7 @@ from data.datacenter import DataFetchError, fetch_detailed_annual_cashflow_histo
 MODEL_ID = "type3-growth-evidence-v1"
 SEGMENT_MODEL_ID = "type3-segment-growth-v1"
 EXTERNAL_MODEL_ID = "type3-external-growth-aggregate-v1"
+EXTERNAL_CACHE_MODEL_ID = "type3-external-growth-cache-v1"
 
 EASTMONEY_BUSINESS_ENDPOINT = "https://emweb.securities.eastmoney.com/PC_HSF10/BusinessAnalysis/PageAjax"
 EASTMONEY_BUSINESS_PAGE = "https://emweb.securities.eastmoney.com/PC_HSF10/BusinessAnalysis/Index"
@@ -58,6 +59,11 @@ EXTERNAL_HISTORY_YEARS = 5
 MIN_EXTERNAL_HISTORY_YEARS = 5
 CACHE_SCHEMA_VERSION = 1
 SEGMENT_CACHE_REUSE_DAYS = 21
+# The annual cash-flow capture and the segment capture both remain safe to
+# reuse only inside the same post-reporting window.  This is deliberately not
+# a rolling TTL: crossing a completed annual-report cutoff always requires a
+# fresh source capture.
+EXTERNAL_CACHE_REUSE_DAYS = SEGMENT_CACHE_REUSE_DAYS
 TYPE3_GROWTH_TRANSIENT_RETRY_DAYS = 1
 TYPE3_GROWTH_STRUCTURAL_RETRY_DAYS = 7
 TYPE3_GROWTH_RETRY_MODEL_ID = "type3-growth-retry-v1"
@@ -192,6 +198,11 @@ _EXTERNAL_RECORD_FIELDS = {
 }
 _SEGMENT_CACHE_STATE_FIELDS = {
     "segment_growth_sources",
+    "source_as_of",
+    "cache_diagnostic",
+}
+_EXTERNAL_CACHE_STATE_FIELDS = {
+    "external_growth_evidence",
     "source_as_of",
     "cache_diagnostic",
 }
@@ -918,6 +929,302 @@ def load_growth_evidence_cache_batch_state(
     return result
 
 
+def _external_financial_input_hash(
+    revenue_records: Sequence[Mapping[str, Any]],
+    goodwill_records: Sequence[Mapping[str, Any]],
+    *,
+    as_of: date,
+) -> str | None:
+    """Bind reusable cash-flow evidence to the exact local annual inputs.
+
+    The external proxy combines a remotely fetched cash-flow row with local
+    revenue and goodwill histories.  Reusing only the remote row would make a
+    later correction to either local annual series invisible.  Cache only a
+    complete five-year input window and hash its normalized values instead.
+    """
+
+    revenues = _prepare_financial_records(
+        revenue_records,
+        label="revenue_records",
+        nonnegative=True,
+        as_of=as_of,
+    )
+    goodwill = _prepare_financial_records(
+        goodwill_records,
+        label="goodwill_records",
+        nonnegative=True,
+        as_of=as_of,
+    )
+    latest_year = _latest_completed_annual_year(as_of)
+    years = list(range(latest_year - EXTERNAL_HISTORY_YEARS + 1, latest_year + 1))
+    if any(year not in revenues or year not in goodwill for year in years):
+        return None
+    return _canonical_hash(
+        {
+            "model_id": EXTERNAL_MODEL_ID,
+            "latest_completed_annual_year": latest_year,
+            "financial_inputs": [
+                {
+                    "year": year,
+                    "revenue": revenues[year],
+                    "goodwill": goodwill[year],
+                }
+                for year in years
+            ],
+        }
+    )
+
+
+def _external_cache_contract(
+    code: str,
+    source_as_of: date,
+    *,
+    financial_inputs_sha256: str,
+) -> dict[str, Any]:
+    if re.fullmatch(r"[0-9a-f]{64}", financial_inputs_sha256) is None:
+        raise GrowthEvidenceError("external cache financial-input hash is invalid")
+    return {
+        "model_id": EXTERNAL_CACHE_MODEL_ID,
+        "external_model_id": EXTERNAL_MODEL_ID,
+        "code": code,
+        "source_as_of": source_as_of.isoformat(),
+        "latest_completed_annual_year": _latest_completed_annual_year(source_as_of),
+        "financial_inputs_sha256": financial_inputs_sha256,
+        "source_url": EASTMONEY_DATACENTER_URL,
+    }
+
+
+def _external_cache_path(code: str, as_of: date, cache_dir: Path) -> Path:
+    return cache_dir / f"{EXTERNAL_CACHE_MODEL_ID}_{code}_{as_of.strftime('%Y%m%d')}.json.gz"
+
+
+def _external_cache_index(cache_dir: Path) -> dict[str, list[tuple[date, Path]]]:
+    """Index canonical external-evidence captures in one directory pass."""
+
+    pattern = re.compile(
+        rf"^{re.escape(EXTERNAL_CACHE_MODEL_ID)}_(?P<code>[036][0-9]{{5}})_(?P<as_of>[0-9]{{8}})\.json\.gz$"
+    )
+    indexed: dict[str, list[tuple[date, Path]]] = {}
+    try:
+        paths = list(cache_dir.iterdir())
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return indexed
+    for path in paths:
+        match = pattern.fullmatch(path.name)
+        if match is None:
+            continue
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        try:
+            source_as_of = datetime.strptime(match.group("as_of"), "%Y%m%d").date()
+        except ValueError:
+            continue
+        indexed.setdefault(match.group("code"), []).append((source_as_of, path))
+    for values in indexed.values():
+        values.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+    return indexed
+
+
+def _rebase_external_growth_evidence(
+    evidence: Any,
+    *,
+    code: str,
+    source_as_of: date,
+    as_of: date,
+) -> dict[str, Any]:
+    """Reissue a validated source capture under the current evidence cutoff."""
+
+    source = _validate_external_evidence(evidence, code=code, as_of=source_as_of)
+    if source["status"] != "complete":
+        raise GrowthEvidenceError("external cache cannot reuse incomplete evidence")
+    if source_as_of == as_of:
+        return source
+    rebased = dict(source)
+    rebased["as_of"] = as_of.isoformat()
+    identity_payload = {
+        "model_id": EXTERNAL_MODEL_ID,
+        "code": code,
+        "as_of": as_of.isoformat(),
+        "coverage_years": source["coverage_years"],
+        "records": source["records"],
+    }
+    rebased["evidence_id"] = f"eastmoney-external-growth:{code}:{_canonical_hash(identity_payload)}"
+    return _validate_external_evidence(rebased, code=code, as_of=as_of)
+
+
+def _load_reusable_external_cache(
+    code: str,
+    as_of: date,
+    *,
+    revenue_records: Sequence[Mapping[str, Any]],
+    goodwill_records: Sequence[Mapping[str, Any]],
+    cache_dir: Path,
+    cache_index: Mapping[str, Sequence[tuple[date, Path]]] | None = None,
+) -> dict[str, Any] | None:
+    """Load a recent, input-bound complete external-growth source capture."""
+
+    financial_inputs_sha256 = _external_financial_input_hash(
+        revenue_records,
+        goodwill_records,
+        as_of=as_of,
+    )
+    if financial_inputs_sha256 is None:
+        return None
+    indexed = _external_cache_index(cache_dir) if cache_index is None else cache_index
+    for source_as_of, path in indexed.get(code, ()):
+        age_days = (as_of - source_as_of).days
+        if (
+            age_days < 0
+            or age_days > EXTERNAL_CACHE_REUSE_DAYS
+            or _latest_completed_annual_year(source_as_of) != _latest_completed_annual_year(as_of)
+        ):
+            continue
+        cache = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        )
+        loaded = cache.load(allow_expired=True)
+        if not loaded.hit:
+            continue
+        try:
+            payload = loaded.value
+            if not isinstance(payload, Mapping) or set(payload) != {"contract", "external_growth_evidence"}:
+                raise GrowthEvidenceError("external cache payload shape is invalid")
+            expected_contract = _external_cache_contract(
+                code,
+                source_as_of,
+                financial_inputs_sha256=financial_inputs_sha256,
+            )
+            if payload.get("contract") != expected_contract:
+                raise GrowthEvidenceError("external cache contract mismatch")
+            evidence = _rebase_external_growth_evidence(
+                payload.get("external_growth_evidence"),
+                code=code,
+                source_as_of=source_as_of,
+                as_of=as_of,
+            )
+        except (GrowthEvidenceError, TypeError, ValueError):
+            continue
+        return {
+            "external_growth_evidence": evidence,
+            "source_as_of": source_as_of.isoformat(),
+            "cache_diagnostic": (
+                "hit" if source_as_of == as_of else f"reused_source_as_of:{source_as_of.isoformat()}"
+            ),
+        }
+    return None
+
+
+def load_external_growth_evidence_cache_batch_state(
+    requests_: Sequence[Mapping[str, Any]],
+    *,
+    cache_dir: str | Path = SEGMENT_CACHE_DIR,
+) -> dict[str, dict[str, Any]]:
+    """Return reusable complete external evidence for exact batch inputs.
+
+    Missing goodwill is intentionally not inferred as zero here.  Such rows
+    remain eligible for a later official-source refresh but cannot reuse a
+    complete proxy that was bound to different financial inputs.
+    """
+
+    if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
+        raise TypeError("external growth-evidence cache requests must be a sequence")
+    if len(requests_) > MAX_BATCH_COMPANIES:
+        raise ValueError("external growth-evidence cache batch exceeds the company limit")
+    prepared: list[tuple[str, date, Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]]] = []
+    seen: set[str] = set()
+    for request in requests_:
+        if not isinstance(request, Mapping) or set(request) != {
+            "code",
+            "as_of",
+            "revenue_records",
+            "goodwill_records",
+        }:
+            raise ValueError("external growth-evidence cache request shape is invalid")
+        code = _normalise_code(request.get("code"))
+        cutoff = _parse_as_of(request.get("as_of"))
+        if code in seen:
+            raise ValueError(f"external growth-evidence cache batch contains duplicate code: {code}")
+        revenue_records = request.get("revenue_records")
+        goodwill_records = request.get("goodwill_records")
+        _prepare_financial_records(
+            revenue_records,
+            label="revenue_records",
+            nonnegative=True,
+            as_of=cutoff,
+        )
+        _prepare_financial_records(
+            goodwill_records,
+            label="goodwill_records",
+            nonnegative=True,
+            as_of=cutoff,
+        )
+        seen.add(code)
+        prepared.append((code, cutoff, revenue_records, goodwill_records))
+    indexed = _external_cache_index(Path(cache_dir))
+    result: dict[str, dict[str, Any]] = {}
+    for code, cutoff, revenue_records, goodwill_records in sorted(prepared):
+        state = _load_reusable_external_cache(
+            code,
+            cutoff,
+            revenue_records=revenue_records,
+            goodwill_records=goodwill_records,
+            cache_dir=Path(cache_dir),
+            cache_index=indexed,
+        )
+        if state is not None:
+            result[code] = state
+    return result
+
+
+def _save_external_growth_evidence_cache(
+    code: str,
+    as_of: date,
+    *,
+    revenue_records: Sequence[Mapping[str, Any]],
+    goodwill_records: Sequence[Mapping[str, Any]],
+    evidence: Any,
+    cache_dir: Path,
+    cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+) -> bool:
+    """Best-effort persistence of a complete, validated external capture."""
+
+    try:
+        financial_inputs_sha256 = _external_financial_input_hash(
+            revenue_records,
+            goodwill_records,
+            as_of=as_of,
+        )
+        if financial_inputs_sha256 is None:
+            return False
+        normalized = _validate_external_evidence(evidence, code=code, as_of=as_of)
+        if normalized["status"] != "complete":
+            return False
+        payload = {
+            "contract": _external_cache_contract(
+                code,
+                as_of,
+                financial_inputs_sha256=financial_inputs_sha256,
+            ),
+            "external_growth_evidence": normalized,
+        }
+        cache = SafeFileCache(
+            _external_cache_path(code, as_of, cache_dir),
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=cache_ttl_seconds,
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        )
+        cache.save(payload)
+    except (GrowthEvidenceError, OSError, SafeCacheError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _prepare_growth_evidence_retry_requests(
     requests_: Sequence[Mapping[str, Any]],
 ) -> list[tuple[str, date]]:
@@ -1570,6 +1877,16 @@ def build_external_growth_evidence(
                 "source_url": acquisition["source_url"],
             }
         )
+    # The source response is decoded through Python floats.  Rebuild every
+    # record through the same Decimal-backed normalizer used by the public
+    # validator before deriving the evidence id and summary.  Otherwise a
+    # perfectly valid non-integer cash-flow ratio can differ by one binary
+    # floating-point ulp between construction and validation, producing a
+    # different content hash and falsely downgrading the whole Type 3 record.
+    records = [
+        _normalise_external_record(record, latest_year=latest_year)
+        for record in records
+    ]
     status = "complete" if len(coverage_years) >= MIN_EXTERNAL_HISTORY_YEARS else "partial"
     acquisition_values = [float(record["acquisition_cash"]) for record in records]
     acquisition_ratios = [float(record["acquisition_cash_to_revenue"]) for record in records]
@@ -1642,8 +1959,22 @@ def _assemble_growth_evidence(
     cache_hit: bool,
     cache_diagnostic: str,
     acquisition_error: BaseException | None = None,
+    preloaded_external_growth_evidence: Mapping[str, Any] | None = None,
 ) -> GrowthEvidence:
-    if acquisition_error is None:
+    if preloaded_external_growth_evidence is not None:
+        try:
+            external = _validate_external_evidence(
+                preloaded_external_growth_evidence,
+                code=code,
+                as_of=as_of,
+            )
+        except Exception as exc:
+            external = _unavailable_external_evidence(
+                code,
+                as_of,
+                f"evidence_invalid:{_error_label(exc)}",
+            )
+    elif acquisition_error is None:
         try:
             external = build_external_growth_evidence(
                 code,
@@ -2251,6 +2582,8 @@ def fetch_growth_evidence_batch(
     *,
     max_workers: int = MAX_WORKERS,
     progress_cb: Any = None,
+    cache_dir: str | Path = SEGMENT_CACHE_DIR,
+    cache_ttl_seconds: int = CACHE_TTL_SECONDS,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for exact Type 3 preflight candidates."""
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
@@ -2259,6 +2592,8 @@ def fetch_growth_evidence_batch(
         raise ValueError("growth-evidence batch exceeds the company limit")
     if isinstance(max_workers, bool) or not isinstance(max_workers, int) or not 1 <= max_workers <= MAX_WORKERS:
         raise ValueError(f"max_workers must be between 1 and {MAX_WORKERS}")
+    if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
+        raise ValueError("cache_ttl_seconds must be non-negative")
     prepared: list[tuple[str, date, Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]]] = []
     seen: set[str] = set()
     for request in requests_:
@@ -2292,12 +2627,16 @@ def fetch_growth_evidence_batch(
     prepared.sort(key=lambda item: item[0])
     if not prepared:
         return {}
-    cache_state = load_growth_evidence_cache_batch_state(requests_)
+    directory = Path(cache_dir)
+    cache_state = load_growth_evidence_cache_batch_state(requests_, cache_dir=directory)
+    external_cache_state = load_external_growth_evidence_cache_batch_state(requests_, cache_dir=directory)
 
     acquisition_by_code: dict[str, list[dict[str, Any]]] = {code: [] for code, *_ in prepared}
     acquisition_errors: dict[str, BaseException] = {}
     grouped: dict[tuple[int, ...], list[str]] = {}
     for code, cutoff, *_ in prepared:
+        if code in external_cache_state:
+            continue
         latest = _latest_completed_annual_year(cutoff)
         years = tuple(range(latest, latest - EXTERNAL_HISTORY_YEARS, -1))
         grouped.setdefault(years, []).append(code)
@@ -2327,6 +2666,8 @@ def fetch_growth_evidence_batch(
                 code,
                 cutoff,
                 recent_cache_state=cache_state,
+                cache_dir=directory,
+                cache_ttl_seconds=cache_ttl_seconds,
             ): (code, cutoff, revenue_records, goodwill_records)
             for code, cutoff, revenue_records, goodwill_records in prepared
         }
@@ -2335,6 +2676,18 @@ def fetch_growth_evidence_batch(
             code, cutoff, revenue_records, goodwill_records = futures[future]
             try:
                 segment, cache_hit, cache_diagnostic = future.result()
+                external_state = external_cache_state.get(code)
+                preloaded_external: Mapping[str, Any] | None = None
+                if external_state is not None:
+                    if not isinstance(external_state, Mapping) or set(external_state) != _EXTERNAL_CACHE_STATE_FIELDS:
+                        raise GrowthEvidenceError("preloaded external cache state is invalid")
+                    candidate = external_state.get("external_growth_evidence")
+                    external_diagnostic = external_state.get("cache_diagnostic")
+                    if not isinstance(candidate, Mapping) or not isinstance(external_diagnostic, str):
+                        raise GrowthEvidenceError("preloaded external cache contents are invalid")
+                    preloaded_external = candidate
+                    cache_hit = True
+                    cache_diagnostic = f"{cache_diagnostic};external:{external_diagnostic}"
                 result = _assemble_growth_evidence(
                     code,
                     cutoff,
@@ -2345,7 +2698,18 @@ def fetch_growth_evidence_batch(
                     cache_hit=cache_hit,
                     cache_diagnostic=cache_diagnostic,
                     acquisition_error=acquisition_errors.get(code),
+                    preloaded_external_growth_evidence=preloaded_external,
                 )
+                if preloaded_external is None:
+                    _save_external_growth_evidence_cache(
+                        code,
+                        cutoff,
+                        revenue_records=revenue_records,
+                        goodwill_records=goodwill_records,
+                        evidence=result.external_growth_evidence,
+                        cache_dir=directory,
+                        cache_ttl_seconds=cache_ttl_seconds,
+                    )
             except Exception as exc:
                 segment = {
                     "status": "unavailable",
@@ -2389,6 +2753,8 @@ def fetch_growth_evidence_batch(
 
 __all__ = [
     "EASTMONEY_BUSINESS_ENDPOINT",
+    "EXTERNAL_CACHE_MODEL_ID",
+    "EXTERNAL_CACHE_REUSE_DAYS",
     "EXTERNAL_MODEL_ID",
     "GrowthEvidence",
     "GrowthEvidenceError",
@@ -2401,6 +2767,7 @@ __all__ = [
     "build_external_growth_evidence",
     "fetch_growth_evidence",
     "fetch_growth_evidence_batch",
+    "load_external_growth_evidence_cache_batch_state",
     "load_growth_evidence_cache_batch_state",
     "load_growth_evidence_retry_state_batch",
     "record_growth_evidence_retry_states",

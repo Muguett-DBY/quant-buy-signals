@@ -425,6 +425,37 @@ def test_reported_and_uniquely_derived_acquisition_values_keep_provenance():
     assert derivation["rounding_tolerance_cny"] == 0.1
 
 
+def test_decimal_cashflow_evidence_uses_the_same_canonical_hash_as_its_validator():
+    """A decimal source amount must not be downgraded by a float-hash drift."""
+
+    revenues = _financial_records([(year, 3.3 * (year - 2019)) for year in range(2021, 2026)])
+    goodwill = _financial_records([(year, 0.33 * (year - 2020)) for year in range(2021, 2026)])
+    acquisitions = []
+    for year in range(2021, 2026):
+        row = _acquisition_row(
+            year,
+            total=3.3 * (year - 2019) + 0.17,
+            capex=3.3 * (year - 2019),
+            acquisition=0.17,
+        )
+        acquisitions.append(row)
+
+    result = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-17",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload())]),
+        use_cache=False,
+        rate_limiter=_NoWait(),
+    )
+
+    assert result.available
+    validated = ge.validate_growth_evidence_record(result.to_dict(), "600519", "2026-07-17")
+    assert validated["external_growth_evidence"]["evidence_id"] == result.external_growth_evidence["evidence_id"]
+
+
 def test_external_proxy_requires_five_years_and_allows_falling_goodwill():
     revenues, _goodwill, acquisitions = _complete_inputs()
     falling_goodwill = _financial_records([(2021, 10.0), (2022, 8.0), (2023, 6.0), (2024, 4.0), (2025, 2.0)])
@@ -898,7 +929,7 @@ def test_type3_retry_state_rejects_tampered_backoff_and_cache_write_failure(
     )
 
 
-def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch):
+def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch, tmp_path):
     assert ge.MAX_BATCH_COMPANIES >= 5_200
     calls = []
 
@@ -933,9 +964,10 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
                 "goodwill_records": goodwill,
             },
         ],
-        max_workers=2,
-        progress_cb=lambda done, total: progress.append((done, total)),
-    )
+            max_workers=2,
+            progress_cb=lambda done, total: progress.append((done, total)),
+            cache_dir=tmp_path,
+        )
 
     assert list(result) == ["000001", "600519"]
     assert all(item["available"] for item in result.values())
@@ -970,6 +1002,104 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
                 },
             ]
         )
+
+
+def test_external_cache_reuses_complete_batch_evidence_and_skips_cashflow_fetch(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_cashflow(years, *, codes):
+        calls.append((tuple(years), tuple(codes)))
+        return pd.DataFrame([_acquisition_row(year, code=code) for code in codes for year in years])
+
+    def fake_segment(code, cutoff, **_kwargs):
+        payload = ge._validate_business_payload(
+            _segment_payload(code=code),
+            code=code,
+            as_of=cutoff,
+        )
+        return ge._build_segment_growth_sources(code, cutoff, payload), False, "disabled"
+
+    monkeypatch.setattr(ge, "fetch_detailed_annual_cashflow_history", fake_cashflow)
+    monkeypatch.setattr(ge, "_fetch_segment_growth_sources", fake_segment)
+    revenues, goodwill, _ = _complete_inputs()
+    request = {
+        "code": "600519",
+        "as_of": "2026-07-17",
+        "revenue_records": revenues,
+        "goodwill_records": goodwill,
+    }
+
+    first = ge.fetch_growth_evidence_batch([request], max_workers=1, cache_dir=tmp_path)
+    assert calls == [((2025, 2024, 2023, 2022, 2021), ("600519",))]
+    assert first["600519"]["external_growth_evidence"]["status"] == "complete"
+
+    calls.clear()
+    second = ge.fetch_growth_evidence_batch([request], max_workers=1, cache_dir=tmp_path)
+
+    assert calls == []
+    assert second["600519"]["cache_hit"]
+    assert second["600519"]["cache_diagnostic"] == "disabled;external:hit"
+    assert second["600519"]["external_growth_evidence"] == first["600519"]["external_growth_evidence"]
+
+
+def test_external_cache_rebases_only_identical_financial_inputs(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_cashflow(years, *, codes):
+        calls.append((tuple(years), tuple(codes)))
+        return pd.DataFrame([_acquisition_row(year, code=code) for code in codes for year in years])
+
+    def fake_segment(code, cutoff, **_kwargs):
+        payload = ge._validate_business_payload(
+            _segment_payload(code=code),
+            code=code,
+            as_of=cutoff,
+        )
+        return ge._build_segment_growth_sources(code, cutoff, payload), False, "disabled"
+
+    monkeypatch.setattr(ge, "fetch_detailed_annual_cashflow_history", fake_cashflow)
+    monkeypatch.setattr(ge, "_fetch_segment_growth_sources", fake_segment)
+    revenues, goodwill, _ = _complete_inputs()
+    initial = {
+        "code": "600519",
+        "as_of": "2026-07-08",
+        "revenue_records": revenues,
+        "goodwill_records": goodwill,
+    }
+    captured = ge.fetch_growth_evidence_batch([initial], max_workers=1, cache_dir=tmp_path)
+    assert len(calls) == 1
+
+    calls.clear()
+    rebased = ge.fetch_growth_evidence_batch(
+        [{**initial, "as_of": "2026-07-29"}],
+        max_workers=1,
+        cache_dir=tmp_path,
+    )
+    assert calls == []
+    assert rebased["600519"]["cache_diagnostic"] == "disabled;external:reused_source_as_of:2026-07-08"
+    assert rebased["600519"]["external_growth_evidence"]["as_of"] == "2026-07-29"
+    assert (
+        rebased["600519"]["external_growth_evidence"]["evidence_id"]
+        != captured["600519"]["external_growth_evidence"]["evidence_id"]
+    )
+
+    changed_goodwill = copy.deepcopy(goodwill)
+    changed_goodwill[-1]["value"] = 4.5
+    calls.clear()
+    refreshed = ge.fetch_growth_evidence_batch(
+        [
+            {
+                "code": "600519",
+                "as_of": "2026-07-29",
+                "revenue_records": revenues,
+                "goodwill_records": changed_goodwill,
+            }
+        ],
+        max_workers=1,
+        cache_dir=tmp_path,
+    )
+    assert calls == [((2025, 2024, 2023, 2022, 2021), ("600519",))]
+    assert refreshed["600519"]["external_growth_evidence"]["records"][-1]["goodwill"] == 4.5
 
 
 def _detailed_annual_row(report_date: str, *, code: str = "000001"):

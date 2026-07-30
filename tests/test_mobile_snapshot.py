@@ -579,6 +579,8 @@ def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeyp
     assert catalogue["companies"][0]["buy_types"] == []
     assert catalogue["companies"][0]["conditional_types"] == ["type6"]
     assert catalogue["companies"][0]["types"]["type6"]["reason"] == "须确认实际仓位符合建议上限"
+    assert catalogue["companies"][0]["types"]["type6"]["diagnostic_score"] == 7.1
+    assert catalogue["companies"][0]["types"]["type6"]["diagnostic_score_note"] == "模型诊断分；未确认实际仓位，不构成买入信号"
     assert catalogue["companies"][0]["types"]["type6"]["action_required"] == "position_confirmation"
     assert catalogue["companies"][0]["types"]["type6"]["position_guidance"] == {
         "recommendation": "下单前确认仓位",

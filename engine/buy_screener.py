@@ -5907,7 +5907,12 @@ def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
             return None
         return [{"year": year, "value": by_year[year]} for year in ordered]
 
-    revenue_records = records("revenue_values", "revenue_years", minimum=5)
+    # Type 3 becomes applicable with four consecutive annual revenue points.
+    # Segment-source evidence (3d) can therefore be fetched and quantified
+    # with that same entry coverage.  The independent 3b cash-flow/goodwill
+    # proxy still enforces its own five-year requirement downstream, rather
+    # than needlessly withholding an otherwise valid 3d investigation.
+    revenue_records = records("revenue_values", "revenue_years", minimum=4)
     # Segment growth (3d) is independent from acquisition/goodwill quality
     # (3b).  A company that does not disclose a five-year goodwill series must
     # still be allowed to load its product/region segment history.  The growth

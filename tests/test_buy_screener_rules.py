@@ -5202,6 +5202,30 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(request["goodwill_records"], [])
         self.assertEqual(len(request["revenue_records"]), 5)
 
+    def test_type3_growth_request_keeps_four_year_entry_coverage_for_segment_evidence(self):
+        metric = complete_type3_metrics(
+            code="000001",
+            source_trade_date="2026-07-17",
+            revenue_values=[100.0, 115.0, 135.0, 160.0],
+            revenue_years=[2022, 2023, 2024, 2025],
+            goodwill_history=[],
+            goodwill_years=[],
+        )
+
+        request = bs._type3_growth_request(metric)
+
+        self.assertIsNotNone(request)
+        self.assertEqual(
+            request["revenue_records"],
+            [
+                {"year": 2022, "value": 100.0},
+                {"year": 2023, "value": 115.0},
+                {"year": 2024, "value": 135.0},
+                {"year": 2025, "value": 160.0},
+            ],
+        )
+        self.assertEqual(request["goodwill_records"], [])
+
     def test_type3_growth_preflight_requests_either_single_deep_evidence_gap(self):
         def partial(key, missing_input):
             return {

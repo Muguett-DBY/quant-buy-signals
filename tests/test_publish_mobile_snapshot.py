@@ -395,11 +395,19 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
             if request["code"] == "000002"
         }
 
+    def external_cache_state(requests):
+        return {
+            request["code"]: {"external_growth_evidence": {}, "source_as_of": request["as_of"]}
+            for request in requests
+            if request["code"] == "000002"
+        }
+
     def fetch(requests, *, progress_cb=None):
         calls.append((list(requests), progress_cb))
         return {request["code"]: {"available": True} for request in requests}
 
     monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", cache_state)
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", external_cache_state)
     monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
     monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
     monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
@@ -410,6 +418,35 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     assert set(loader(first, progress_cb=progress)) == {"000001", "000002", "000003"}
     assert loader(second, progress_cb=progress) == {}
     assert calls == [(first[:3], progress)]
+
+
+def test_type3_growth_loader_does_not_treat_segment_only_cache_as_free(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        publisher,
+        "load_growth_evidence_cache_batch_state",
+        lambda requests: {
+            "000002": {"segment_growth_sources": {}, "source_as_of": requests[0]["as_of"]}
+        },
+    )
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
+
+    def fetch(requests, *, progress_cb=None):
+        del progress_cb
+        calls.append([request["code"] for request in requests])
+        return {request["code"]: {"available": True} for request in requests}
+
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    requests = [
+        {"code": "000002", "as_of": "2026-07-29"},
+        {"code": "000001", "as_of": "2026-07-29"},
+    ]
+
+    assert set(publisher._bounded_type3_growth_loader(limit=1)(requests)) == {"000002"}
+    assert calls == [["000002"]]
 
 
 def test_type3_growth_loader_retries_due_candidate_while_continuing_new_coverage(monkeypatch):
@@ -431,6 +468,7 @@ def test_type3_growth_loader_retries_due_candidate_while_continuing_new_coverage
         return dict(retry_state)
 
     monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
     monkeypatch.setattr(
         publisher,
         "load_growth_evidence_retry_state_batch",
@@ -476,6 +514,7 @@ def test_type3_growth_loader_reserves_due_retry_capacity_during_continuous_new_a
         return {request["code"]: {"available": False} for request in selected}
 
     monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
     monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: retry_state)
     monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
     monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)

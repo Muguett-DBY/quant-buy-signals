@@ -213,6 +213,19 @@ def _is_live_type6_position_confirmation(
     )
 
 
+def _is_type6_investor_action_only(decision: Mapping[str, Any]) -> bool:
+    """Return whether Type 6 is missing only the investor's position input.
+
+    The five company-side dimensions are still mathematically reproducible in
+    this state.  The final action cannot be certified until the investor
+    confirms the real position, so callers must publish it as a diagnostic
+    rather than a buy score.
+    """
+
+    missing_dimensions = decision.get("missing_dimensions")
+    return isinstance(missing_dimensions, list) and set(missing_dimensions) == {"6e"}
+
+
 def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
     def public_dimensions(
         value: Mapping[str, Any],
@@ -322,6 +335,16 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         "applicable": payload.get("applicable") is True,
         "evidence_complete": payload.get("evidence_complete") is True,
     }
+    # Type 6's 6e is deliberately not inferred from public company data: it
+    # depends on the investor's actual single-name and portfolio exposure.
+    # Do not turn the calculated total into a signal, but do expose it as a
+    # plainly labelled diagnostic so the quantified company-side work is not
+    # hidden merely because the final position confirmation is absent.
+    if type_key == "type6" and _is_type6_investor_action_only(decision):
+        diagnostic_total = _finite(payload.get("total"))
+        if diagnostic_total is not None:
+            compact["diagnostic_score"] = round(diagnostic_total, 3)
+            compact["diagnostic_score_note"] = "模型诊断分；未确认实际仓位，不构成买入信号"
     # Type 6's 6e is a portfolio action supplied by the investor, not an
     # unknown company fact.  Keep that distinction even before the company
     # reaches the conditional state: consumers must not inflate a missing

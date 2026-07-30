@@ -27,6 +27,7 @@ from data.fetcher import DataFetcher
 from data.growth_evidence import (
     TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO,
     fetch_growth_evidence_batch,
+    load_external_growth_evidence_cache_batch_state,
     load_growth_evidence_cache_batch_state,
     load_growth_evidence_retry_state_batch,
     record_growth_evidence_retry_states,
@@ -362,16 +363,19 @@ def _bounded_quality_history_loader(limit: int = _QUALITY_HISTORY_DECISION_BACKF
 
 
 def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT):
-    """Reuse recent annual evidence and cap new company fetches cumulatively.
+    """Reuse complete recent evidence and cap source work cumulatively.
 
     ``screen_all_types`` supplies requests in conclusion-relevance order.
-    Recent, independently validated segment captures do not consume the
-    network budget.  Failed attempts retain scheduling-only retry metadata:
-    unseen candidates keep their supplied priority while every bounded run
-    reserves a deterministic slice for due retries ordered by oldest attempt.
-    Returning a subset is intentional:
-    companies outside the tranche retain their explicit evidence-insufficient
-    Type 3 result and are eligible for a later daily run.
+    A cached segment alone still needs an annual cash-flow fetch, and a cached
+    cash-flow proxy alone still needs a segment fetch.  Only the intersection
+    of both independently validated caches is free; otherwise an apparently
+    "cached" row could silently send an unbounded number of cash-flow queries
+    every day.  Failed attempts retain scheduling-only retry metadata: unseen
+    candidates keep their supplied priority while every bounded run reserves a
+    deterministic slice for due retries ordered by oldest attempt.  Returning
+    a subset is intentional: companies outside the tranche retain their
+    explicit evidence-insufficient Type 3 result and are eligible for a later
+    daily run.
     """
 
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
@@ -381,13 +385,15 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
     def load(requests: Sequence[Mapping[str, object]], *, progress_cb=None):
         nonlocal remaining
         prepared = list(requests)
-        cached = load_growth_evidence_cache_batch_state(prepared)
+        cached_segments = load_growth_evidence_cache_batch_state(prepared)
+        cached_external = load_external_growth_evidence_cache_batch_state(prepared)
+        fully_cached_codes = set(cached_segments).intersection(cached_external)
         retry_state = load_growth_evidence_retry_state_batch(prepared) if remaining else {}
         unseen: list[Mapping[str, object]] = []
         due_retries: list[tuple[str, int, str, Mapping[str, object]]] = []
         for position, request in enumerate(prepared):
             code = str(request.get("code") or "")
-            if code in cached:
+            if code in fully_cached_codes:
                 continue
             state = retry_state.get(code)
             if state is None:
@@ -427,7 +433,7 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         else:
             selected_network = unseen[:remaining]
         remaining -= len(selected_network)
-        selected_codes = set(cached)
+        selected_codes = set(fully_cached_codes)
         selected_codes.update(str(request.get("code") or "") for request in selected_network)
         selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
         if not selected:
