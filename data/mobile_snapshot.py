@@ -197,6 +197,22 @@ def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
     }
 
 
+def _is_live_type6_position_confirmation(
+    status: str,
+    decision: Mapping[str, Any],
+) -> bool:
+    """Return whether Type 6 is awaiting a real investor position check."""
+
+    missing_dimensions = decision.get("missing_dimensions")
+    return (
+        status == "conditional"
+        and decision.get("decision_complete") is False
+        and decision.get("potentially_triggerable") is True
+        and isinstance(missing_dimensions, list)
+        and "6e" in missing_dimensions
+    )
+
+
 def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
     def public_dimensions(
         value: Mapping[str, Any],
@@ -306,6 +322,14 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         "applicable": payload.get("applicable") is True,
         "evidence_complete": payload.get("evidence_complete") is True,
     }
+    # Type 6's 6e is a portfolio action supplied by the investor, not an
+    # unknown company fact.  Keep that distinction even before the company
+    # reaches the conditional state: consumers must not inflate a missing
+    # position confirmation into a source-data gap.  ``action_required``
+    # below remains deliberately narrower and means that the action is live
+    # right now.
+    if type_key == "type6" and "6e" in decision["missing_dimensions"]:
+        compact["investor_action_dimensions"] = ["6e"]
     if isinstance(reasons, Mapping) and isinstance(reasons.get("_missing"), str):
         evidence_gap = _public_reason_text(reasons["_missing"])
         if evidence_gap and evidence_gap != public_reason:
@@ -323,7 +347,7 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         compact["estimated_sub_scores"] = estimated_sub_scores
     if estimated_sub_score_reasons:
         compact["estimated_sub_score_reasons"] = estimated_sub_score_reasons
-    if type_key == "type6" and "6e" in decision["missing_dimensions"] and isinstance(reasons, Mapping):
+    if type_key == "type6" and _is_live_type6_position_confirmation(status, decision) and isinstance(reasons, Mapping):
         recommendation = _public_reason_text(reasons.get("6e"))
         worst_case = _public_reason_text(reasons.get("_risk"))
         compact["action_required"] = "position_confirmation"
@@ -459,6 +483,21 @@ def _company_detail_v2(row: Mapping[str, Any]) -> dict[str, Any]:
     if source_trade_date and source_trade_date.casefold() not in {"nan", "nat", "none"}:
         detail["source_trade_date"] = source_trade_date
     return detail
+
+
+def _requires_position_confirmation(company: Mapping[str, Any]) -> bool:
+    """Return true only for a live Type 6 position-confirmation action gate."""
+
+    types = company.get("types")
+    type6 = types.get("type6") if isinstance(types, Mapping) else None
+    if not isinstance(type6, Mapping):
+        return False
+    decision = type6.get("decision")
+    return (
+        type6.get("action_required") == "position_confirmation"
+        and isinstance(decision, Mapping)
+        and _is_live_type6_position_confirmation(str(type6.get("status") or ""), decision)
+    )
 
 
 def _build_company_detail_shards(
@@ -611,6 +650,7 @@ def _build_mobile_snapshot_bundle(
     }
     triggered_company_count = sum(1 for company in companies if company["buy_types"])
     conditional_company_count = sum(1 for company in companies if company["conditional_types"])
+    action_confirmation_company_count = sum(1 for company in companies if _requires_position_confirmation(company))
     conditional_only_company_count = sum(
         1 for company in companies if company["conditional_types"] and not company["buy_types"]
     )
@@ -626,6 +666,7 @@ def _build_mobile_snapshot_bundle(
         # never presents a missing portfolio confirmation as a buy signal.
         "triggered_company_count": triggered_company_count,
         "conditional_company_count": conditional_company_count,
+        "action_confirmation_company_count": action_confirmation_company_count,
         "conditional_only_company_count": conditional_only_company_count,
         # Pending evidence candidates live in the all-company catalogue so
         # older 11.2 clients can keep accepting the historical ``signals``
@@ -671,6 +712,7 @@ def _build_mobile_snapshot_bundle(
             "company_count": len(companies),
             "triggered_company_count": triggered_company_count,
             "conditional_company_count": conditional_company_count,
+            "action_confirmation_company_count": action_confirmation_company_count,
             "conditional_only_company_count": conditional_only_company_count,
             "pending_company_count": pending_company_count,
             "visible_candidate_company_count": visible_candidate_company_count,

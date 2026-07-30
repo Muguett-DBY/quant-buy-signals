@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, time, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -24,8 +25,11 @@ import pandas as pd
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.growth_evidence import (
+    TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO,
     fetch_growth_evidence_batch,
     load_growth_evidence_cache_batch_state,
+    load_growth_evidence_retry_state_batch,
+    record_growth_evidence_retry_states,
 )
 from data.patch4_evidence import fetch_patch4_evidence_batch
 from data.quality_history import (
@@ -362,9 +366,12 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
 
     ``screen_all_types`` supplies requests in conclusion-relevance order.
     Recent, independently validated segment captures do not consume the
-    network budget; the first still-uncached tranche does.  Returning a subset
-    is intentional: companies outside the tranche retain their explicit
-    evidence-insufficient Type 3 result and are eligible for a later daily run.
+    network budget.  Failed attempts retain scheduling-only retry metadata:
+    unseen candidates keep their supplied priority while every bounded run
+    reserves a deterministic slice for due retries ordered by oldest attempt.
+    Returning a subset is intentional:
+    companies outside the tranche retain their explicit evidence-insufficient
+    Type 3 result and are eligible for a later daily run.
     """
 
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
@@ -375,15 +382,60 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         nonlocal remaining
         prepared = list(requests)
         cached = load_growth_evidence_cache_batch_state(prepared)
-        network_candidates = [request for request in prepared if str(request.get("code") or "") not in cached]
-        selected_network = network_candidates[:remaining]
+        retry_state = load_growth_evidence_retry_state_batch(prepared) if remaining else {}
+        unseen: list[Mapping[str, object]] = []
+        due_retries: list[tuple[str, int, str, Mapping[str, object]]] = []
+        for position, request in enumerate(prepared):
+            code = str(request.get("code") or "")
+            if code in cached:
+                continue
+            state = retry_state.get(code)
+            if state is None:
+                unseen.append(request)
+                continue
+            retry_after = state.get("retry_after")
+            last_attempt = state.get("last_attempt_as_of")
+            as_of = request.get("as_of")
+            valid_retry_state = (
+                isinstance(retry_after, str)
+                and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", retry_after)
+                and isinstance(last_attempt, str)
+                and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", last_attempt)
+                and isinstance(as_of, str)
+                and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
+            )
+            if valid_retry_state and as_of >= retry_after:
+                due_retries.append((last_attempt, position, code, request))
+                continue
+            if not valid_retry_state:
+                unseen.append(request)
+        due_retries.sort(key=lambda item: (item[0], item[1], item[2]))
+        due_requests = [item[3] for item in due_retries]
+        if due_requests and remaining:
+            retry_slots = min(
+                len(due_requests),
+                max(1, math.ceil(remaining * TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO)),
+            )
+            unseen_slots = max(0, remaining - retry_slots)
+            selected_network = [*unseen[:unseen_slots], *due_requests[:retry_slots]]
+            if len(selected_network) < remaining:
+                shortfall = remaining - len(selected_network)
+                selected_network.extend(unseen[unseen_slots : unseen_slots + shortfall])
+                shortfall = remaining - len(selected_network)
+                if shortfall:
+                    selected_network.extend(due_requests[retry_slots : retry_slots + shortfall])
+        else:
+            selected_network = unseen[:remaining]
         remaining -= len(selected_network)
         selected_codes = set(cached)
         selected_codes.update(str(request.get("code") or "") for request in selected_network)
         selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
         if not selected:
             return {}
-        return fetch_growth_evidence_batch(selected, progress_cb=progress_cb)
+        fetched = fetch_growth_evidence_batch(selected, progress_cb=progress_cb)
+        if selected_network:
+            record_growth_evidence_retry_states(selected_network, fetched)
+        return fetched
 
     return load
 

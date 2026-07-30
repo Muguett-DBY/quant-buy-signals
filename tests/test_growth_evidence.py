@@ -779,6 +779,125 @@ def test_historical_segment_reuse_excludes_failed_and_incomplete_captures(tmp_pa
     )
 
 
+def test_type3_retry_state_persists_deterministic_transient_and_structural_backoff(tmp_path):
+    initial_requests = [
+        {"code": "600519", "as_of": "2025-07-29"},
+        {"code": "000001", "as_of": "2025-07-29"},
+    ]
+    recorded = ge.record_growth_evidence_retry_states(
+        initial_requests,
+        {
+            "600519": {
+                "code": "600519",
+                "as_of": "2025-07-29",
+                "model_id": ge.MODEL_ID,
+                "available": False,
+                "reason": "segment:source_unavailable:Timeout",
+            },
+            "000001": {
+                "code": "000001",
+                "as_of": "2025-07-29",
+                "model_id": ge.MODEL_ID,
+                "available": False,
+                "reason": "external:fewer_than_five_consecutive_completed_years",
+            },
+        },
+        cache_dir=tmp_path,
+    )
+
+    assert recorded["600519"]["retry_class"] == "transient"
+    assert recorded["600519"]["retry_after"] == "2025-07-30"
+    assert recorded["000001"]["retry_class"] == "structural"
+    assert recorded["000001"]["retry_after"] == "2025-08-05"
+    resumed = ge.load_growth_evidence_retry_state_batch(
+        [
+            {"code": "600519", "as_of": "2025-07-30"},
+            {"code": "000001", "as_of": "2025-07-30"},
+        ],
+        cache_dir=tmp_path,
+    )
+    assert resumed == recorded
+
+    assert (
+        ge.record_growth_evidence_retry_states(
+            [{"code": "000002", "as_of": "2025-07-29"}],
+            {
+                "000002": {
+                    "code": "000002",
+                    "as_of": "2025-07-29",
+                    "model_id": ge.MODEL_ID,
+                    "available": True,
+                    "reason": "",
+                }
+            },
+            cache_dir=tmp_path,
+        )
+        == {}
+    )
+    assert (
+        ge.load_growth_evidence_retry_state_batch(
+            [{"code": "000002", "as_of": "2025-07-30"}],
+            cache_dir=tmp_path,
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize("exception_type", [ge.SafeCacheError, OSError, TypeError])
+def test_type3_retry_state_rejects_tampered_backoff_and_cache_write_failure(
+    monkeypatch,
+    tmp_path,
+    exception_type,
+):
+    ge.SafeFileCache(
+        ge._type3_growth_retry_state_path("000003", tmp_path),
+        schema_version=ge.CACHE_SCHEMA_VERSION,
+        ttl=ge.CACHE_TTL_SECONDS,
+        max_uncompressed_bytes=16 * 1024,
+    ).save(
+        {
+            "model_id": ge.TYPE3_GROWTH_RETRY_MODEL_ID,
+            "code": "000003",
+            "last_attempt_as_of": "2025-07-29",
+            "retry_class": "structural",
+            "retry_after": "2025-07-30",
+            "reason": "fewer_than_five_consecutive_completed_years",
+        }
+    )
+    assert (
+        ge.load_growth_evidence_retry_state_batch(
+            [{"code": "000003", "as_of": "2025-07-30"}],
+            cache_dir=tmp_path,
+        )
+        == {}
+    )
+
+    class _FailingCache:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def save(self, _value):
+            raise exception_type("simulated cache write failure")
+
+    monkeypatch.setattr(ge, "SafeFileCache", _FailingCache)
+    assert (
+        ge.record_growth_evidence_retry_states(
+            [{"code": "000004", "as_of": "2025-07-29"}],
+            {
+                "000004": {
+                    "code": "000004",
+                    "as_of": "2025-07-29",
+                    "model_id": ge.MODEL_ID,
+                    "available": False,
+                    "reason": "segment:source_unavailable:Timeout",
+                }
+            },
+            cache_dir=tmp_path,
+        )
+        == {}
+    )
+
+
 def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch):
     assert ge.MAX_BATCH_COMPANIES >= 5_200
     calls = []

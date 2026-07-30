@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
@@ -58,6 +58,12 @@ EXTERNAL_HISTORY_YEARS = 5
 MIN_EXTERNAL_HISTORY_YEARS = 5
 CACHE_SCHEMA_VERSION = 1
 SEGMENT_CACHE_REUSE_DAYS = 21
+TYPE3_GROWTH_TRANSIENT_RETRY_DAYS = 1
+TYPE3_GROWTH_STRUCTURAL_RETRY_DAYS = 7
+TYPE3_GROWTH_RETRY_MODEL_ID = "type3-growth-retry-v1"
+# Preserve market-wide coverage progress while guaranteeing that a continuous
+# flow of never-seen companies cannot indefinitely starve due retries.
+TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO = 0.20
 REQUEST_TIMEOUT = (15, 30)
 REQUEST_ATTEMPTS = 2
 REQUEST_INTERVAL_SECONDS = 0.25
@@ -189,6 +195,16 @@ _SEGMENT_CACHE_STATE_FIELDS = {
     "source_as_of",
     "cache_diagnostic",
 }
+_TYPE3_GROWTH_RETRY_STATE_FIELDS = {
+    "model_id",
+    "code",
+    "last_attempt_as_of",
+    "retry_class",
+    "retry_after",
+    "reason",
+}
+_TYPE3_GROWTH_RETRY_CLASSES = {"structural", "transient"}
+_TYPE3_GROWTH_TRANSIENT_REASON_MARKERS = ("source_unavailable:", "worker_failure:")
 
 
 class GrowthEvidenceError(RuntimeError):
@@ -900,6 +916,250 @@ def load_growth_evidence_cache_batch_state(
         if state is not None:
             result[code] = state
     return result
+
+
+def _prepare_growth_evidence_retry_requests(
+    requests_: Sequence[Mapping[str, Any]],
+) -> list[tuple[str, date]]:
+    if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
+        raise TypeError("growth-evidence retry requests must be a sequence")
+    if len(requests_) > MAX_BATCH_COMPANIES:
+        raise ValueError("growth-evidence retry batch exceeds the company limit")
+    prepared: list[tuple[str, date]] = []
+    seen: set[str] = set()
+    for request in requests_:
+        if not isinstance(request, Mapping) or "code" not in request or "as_of" not in request:
+            raise ValueError("growth-evidence retry request shape is invalid")
+        code = _normalise_code(request.get("code"))
+        cutoff = _parse_as_of(request.get("as_of"))
+        if code in seen:
+            raise ValueError(f"growth-evidence retry batch contains duplicate code: {code}")
+        seen.add(code)
+        prepared.append((code, cutoff))
+    return prepared
+
+
+def _type3_growth_retry_state_path(code: str, cache_dir: Path) -> Path:
+    return cache_dir / f"{TYPE3_GROWTH_RETRY_MODEL_ID}_{code}.json.gz"
+
+
+def _type3_growth_retry_state_index(cache_dir: Path) -> dict[str, Path]:
+    """Index canonical retry-state files without traversing outside the cache."""
+
+    pattern = re.compile(rf"^{re.escape(TYPE3_GROWTH_RETRY_MODEL_ID)}_(?P<code>[036][0-9]{{5}})\.json\.gz$")
+    indexed: dict[str, Path] = {}
+    try:
+        paths = list(cache_dir.iterdir())
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return indexed
+    for path in paths:
+        match = pattern.fullmatch(path.name)
+        if match is None:
+            continue
+        try:
+            if path.is_file():
+                indexed[match.group("code")] = path
+        except OSError:
+            continue
+    return indexed
+
+
+def _parse_retry_calendar_date(value: Any, *, field: str) -> date:
+    """Parse an audit date that may legitimately be in the future."""
+
+    if not isinstance(value, str) or not _CANONICAL_DATE.fullmatch(value):
+        raise GrowthEvidenceError(f"growth-evidence retry {field} must use YYYY-MM-DD")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise GrowthEvidenceError(f"growth-evidence retry {field} is invalid") from exc
+
+
+def _type3_growth_retry_days(retry_class: str) -> int:
+    if retry_class == "transient":
+        return TYPE3_GROWTH_TRANSIENT_RETRY_DAYS
+    if retry_class == "structural":
+        return TYPE3_GROWTH_STRUCTURAL_RETRY_DAYS
+    raise GrowthEvidenceError("growth-evidence retry class is invalid")
+
+
+def _normalise_type3_growth_retry_reason(value: Any) -> str:
+    if not isinstance(value, str):
+        return "invalid_or_missing_growth_evidence_result"
+    printable = "".join(" " if ord(character) < 32 or ord(character) == 127 else character for character in value)
+    compact = " ".join(printable.split())
+    if not compact:
+        return "incomplete_growth_evidence_result"
+    return compact[:500]
+
+
+def _build_type3_growth_retry_state(
+    code: str,
+    attempt_as_of: date,
+    *,
+    retry_class: str,
+    reason: Any,
+) -> dict[str, Any]:
+    delay_days = _type3_growth_retry_days(retry_class)
+    return {
+        "model_id": TYPE3_GROWTH_RETRY_MODEL_ID,
+        "code": code,
+        "last_attempt_as_of": attempt_as_of.isoformat(),
+        "retry_class": retry_class,
+        "retry_after": (attempt_as_of + timedelta(days=delay_days)).isoformat(),
+        "reason": _normalise_type3_growth_retry_reason(reason),
+    }
+
+
+def _validate_type3_growth_retry_state(value: Any, *, code: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _TYPE3_GROWTH_RETRY_STATE_FIELDS:
+        raise GrowthEvidenceError("growth-evidence retry state shape is invalid")
+    if value.get("model_id") != TYPE3_GROWTH_RETRY_MODEL_ID or value.get("code") != code:
+        raise GrowthEvidenceError("growth-evidence retry state identity is invalid")
+    retry_class = value.get("retry_class")
+    if retry_class not in _TYPE3_GROWTH_RETRY_CLASSES:
+        raise GrowthEvidenceError("growth-evidence retry class is invalid")
+    attempt_as_of = _parse_retry_calendar_date(value.get("last_attempt_as_of"), field="last_attempt_as_of")
+    retry_after = _parse_retry_calendar_date(value.get("retry_after"), field="retry_after")
+    if retry_after != attempt_as_of + timedelta(days=_type3_growth_retry_days(retry_class)):
+        raise GrowthEvidenceError("growth-evidence retry backoff is invalid")
+    reason = value.get("reason")
+    if (
+        not isinstance(reason, str)
+        or not reason
+        or len(reason) > 500
+        or any(ord(character) < 32 or ord(character) == 127 for character in reason)
+    ):
+        raise GrowthEvidenceError("growth-evidence retry reason is invalid")
+    return {
+        "model_id": TYPE3_GROWTH_RETRY_MODEL_ID,
+        "code": code,
+        "last_attempt_as_of": attempt_as_of.isoformat(),
+        "retry_class": retry_class,
+        "retry_after": retry_after.isoformat(),
+        "reason": reason,
+    }
+
+
+def _type3_growth_retry_state_for_result(
+    code: str,
+    attempt_as_of: date,
+    result: Any,
+) -> dict[str, Any] | None:
+    """Convert a completed network attempt into scheduling-only retry metadata."""
+
+    if not isinstance(result, Mapping):
+        return _build_type3_growth_retry_state(
+            code,
+            attempt_as_of,
+            retry_class="transient",
+            reason="invalid_or_missing_growth_evidence_result",
+        )
+    if (
+        result.get("code") != code
+        or result.get("as_of") != attempt_as_of.isoformat()
+        or result.get("model_id") != MODEL_ID
+        or not isinstance(result.get("available"), bool)
+    ):
+        return _build_type3_growth_retry_state(
+            code,
+            attempt_as_of,
+            retry_class="transient",
+            reason="invalid_or_missing_growth_evidence_result",
+        )
+    if result["available"]:
+        return None
+    reason = _normalise_type3_growth_retry_reason(result.get("reason"))
+    retry_class = (
+        "transient" if any(marker in reason for marker in _TYPE3_GROWTH_TRANSIENT_REASON_MARKERS) else "structural"
+    )
+    return _build_type3_growth_retry_state(
+        code,
+        attempt_as_of,
+        retry_class=retry_class,
+        reason=reason,
+    )
+
+
+def load_growth_evidence_retry_state_batch(
+    requests_: Sequence[Mapping[str, Any]],
+    *,
+    cache_dir: str | Path = SEGMENT_CACHE_DIR,
+) -> dict[str, dict[str, Any]]:
+    """Load validated Type 3 retry metadata without treating it as evidence.
+
+    Retry files affect only bounded fetch scheduling.  They never supply a
+    score, replace a source capture, or make an incomplete company appear
+    complete.
+    """
+
+    prepared = _prepare_growth_evidence_retry_requests(requests_)
+    directory = Path(cache_dir)
+    indexed = _type3_growth_retry_state_index(directory)
+    result: dict[str, dict[str, Any]] = {}
+    for code, cutoff in sorted(prepared):
+        path = indexed.get(code)
+        if path is None:
+            continue
+        cache = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=16 * 1024,
+        )
+        loaded = cache.load(allow_expired=True)
+        if not loaded.hit:
+            continue
+        try:
+            state = _validate_type3_growth_retry_state(loaded.value, code=code)
+            if date.fromisoformat(state["last_attempt_as_of"]) > cutoff:
+                continue
+        except (GrowthEvidenceError, TypeError, ValueError):
+            continue
+        result[code] = state
+    return result
+
+
+def record_growth_evidence_retry_states(
+    requests_: Sequence[Mapping[str, Any]],
+    results: Mapping[str, Any],
+    *,
+    cache_dir: str | Path = SEGMENT_CACHE_DIR,
+) -> dict[str, dict[str, Any]]:
+    """Persist bounded-fetch retry metadata for selected network candidates.
+
+    A valid complete result intentionally writes no retry record.  Failed
+    transport/source attempts retry after one calendar day; evidence that is
+    valid but incomplete retries after seven days.  Cache-write failures are
+    best-effort because scheduling metadata must not invalidate the scored
+    evidence returned by the pipeline.
+    """
+
+    if not isinstance(results, Mapping):
+        raise TypeError("growth-evidence retry results must be a mapping")
+    prepared = _prepare_growth_evidence_retry_requests(requests_)
+    directory = Path(cache_dir)
+    recorded: dict[str, dict[str, Any]] = {}
+    for code, cutoff in prepared:
+        state = _type3_growth_retry_state_for_result(code, cutoff, results.get(code))
+        if state is None:
+            continue
+        cache = SafeFileCache(
+            _type3_growth_retry_state_path(code, directory),
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=16 * 1024,
+        )
+        try:
+            cache.save(state)
+        # Retry metadata is intentionally optional: directory creation and
+        # serialization occur before SafeFileCache can wrap every failure, so
+        # ordinary filesystem/value errors must not invalidate a score that
+        # was already computed from independently validated evidence.
+        except (OSError, SafeCacheError, TypeError, ValueError):
+            continue
+        recorded[code] = state
+    return recorded
 
 
 def _fetch_segment_growth_sources(
@@ -2135,9 +2395,14 @@ __all__ = [
     "MODEL_ID",
     "SEGMENT_CACHE_REUSE_DAYS",
     "SEGMENT_MODEL_ID",
+    "TYPE3_GROWTH_RETRY_MODEL_ID",
+    "TYPE3_GROWTH_STRUCTURAL_RETRY_DAYS",
+    "TYPE3_GROWTH_TRANSIENT_RETRY_DAYS",
     "build_external_growth_evidence",
     "fetch_growth_evidence",
     "fetch_growth_evidence_batch",
     "load_growth_evidence_cache_batch_state",
+    "load_growth_evidence_retry_state_batch",
+    "record_growth_evidence_retry_states",
     "validate_growth_evidence_record",
 ]

@@ -516,6 +516,8 @@ function Assert-DecisionContract([object]$Type, [string]$Code, [string]$TypeKey)
   return [pscustomobject]@{
     present = $true
     potentially_triggerable = [bool]$potential
+    decision_complete = [bool]$complete
+    missing_dimensions = @($missing)
   }
 }
 
@@ -596,6 +598,7 @@ function Assert-MobilePayloadContract(
   $triggeredCount = 0L
   $conditionalCount = 0L
   $conditionalOnlyCount = 0L
+  $actionConfirmationCount = 0L
   foreach ($company in $companies) {
     $code = [string](Get-RequiredProperty $company 'code' 'Published company')
     if ($code -cnotmatch '^[036][0-9]{5}$' -or -not $companyCodes.Add($code)) {
@@ -653,6 +656,41 @@ function Assert-MobilePayloadContract(
       $decisionSummary = Assert-DecisionContract $type $code $typeKey
       if ($decisionSummary.present) {
         $companyDecisionCount++
+        if ($typeKey -ceq 'type6') {
+          $hasInvestorActionDimension = '6e' -cin @($decisionSummary.missing_dimensions)
+          $investorActionProperty = $type.PSObject.Properties['investor_action_dimensions']
+          if ($hasInvestorActionDimension) {
+            if ($null -eq $investorActionProperty -or $investorActionProperty.Value -isnot [Array]) {
+              throw "Company $code Type 6 must declare 6e as an investor action dimension."
+            }
+            $investorActionDimensions = @($investorActionProperty.Value)
+            if ($investorActionDimensions.Count -ne 1 -or $investorActionDimensions[0] -cne '6e') {
+              throw "Company $code Type 6 investor action dimensions are invalid."
+            }
+          } elseif ($null -ne $investorActionProperty) {
+            throw "Company $code Type 6 declares an investor action without missing 6e."
+          }
+          $actionRequiredProperty = $type.PSObject.Properties['action_required']
+          $positionGuidanceProperty = $type.PSObject.Properties['position_guidance']
+          $livePositionConfirmation = (
+            $status -ceq 'conditional' -and
+            $hasInvestorActionDimension -and
+            $decisionSummary.potentially_triggerable -and
+            -not $decisionSummary.decision_complete
+          )
+          if ($livePositionConfirmation) {
+            $actionRequired = [string](Get-RequiredProperty $type 'action_required' "Company $code $typeKey")
+            if (
+              $actionRequired -cne 'position_confirmation' -or
+              $null -eq $positionGuidanceProperty
+            ) {
+              throw "Company $code Type 6 conditional state is not a live position-confirmation action gate."
+            }
+            $actionConfirmationCount++
+          } elseif ($null -ne $actionRequiredProperty -or $null -ne $positionGuidanceProperty) {
+            throw "Company $code Type 6 state cannot declare an inactive position-confirmation action."
+          }
+        }
         if (
           $decisionSummary.potentially_triggerable -and
           $status -cnotin @('triggered', 'conditional')
@@ -718,7 +756,8 @@ function Assert-MobilePayloadContract(
   }
   foreach ($entry in @(
     @($Signals, 'pending_company_count', $pendingCodes.Count),
-    @($Signals, 'visible_candidate_company_count', $visibleCandidateCodes.Count)
+    @($Signals, 'visible_candidate_company_count', $visibleCandidateCodes.Count),
+    @($Signals, 'action_confirmation_company_count', $actionConfirmationCount)
   )) {
     $property = $entry[0].PSObject.Properties[$entry[1]]
     if ($hasDecisionContract -or $null -ne $property) {
@@ -744,7 +783,8 @@ function Assert-MobilePayloadContract(
   }
   foreach ($entry in @(
     @('pending_company_count', $pendingCodes.Count),
-    @('visible_candidate_company_count', $visibleCandidateCodes.Count)
+    @('visible_candidate_company_count', $visibleCandidateCodes.Count),
+    @('action_confirmation_company_count', $actionConfirmationCount)
   )) {
     $property = $summary.PSObject.Properties[$entry[0]]
     if ($hasDecisionContract -or $null -ne $property) {

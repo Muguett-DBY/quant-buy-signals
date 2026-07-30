@@ -25,8 +25,201 @@ if (response.status !== 200) throw new Error("root response was not successful")
 const html = await response.text();
 const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
 if (!match) throw new Error("generated dashboard script was not found");
-if (html.includes("__QUANT_METHODOLOGY_")) throw new Error("template token leaked");
+if (html.includes("__QUANT_METHODOLOGY_") || html.includes("__CATALOGUE_INDEX_CONTRACT_VERSION__")) throw new Error("template token leaked");
 new Function(match[1]);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_catalogue_index_enforces_contract_and_aggregates_action_and_evidence_gaps():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to validate the dashboard worker route"
+    validator = r"""
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const cached = new Map();
+globalThis.caches = {
+  default: {
+    match: async request => cached.get(request.url)?.clone(),
+    put: async (request, response) => { cached.set(request.url, response.clone()); },
+  },
+};
+const unresolvedDecision = {
+  decision_complete: false,
+  decision_basis: "unresolved_missing_evidence",
+  potentially_triggerable: true,
+  score_lower_bound: 0,
+  score_upper_bound: 8,
+  missing_dimensions: ["3b"],
+};
+const confirmedVetoDecision = {
+  decision_complete: true,
+  decision_basis: "confirmed_veto",
+  potentially_triggerable: false,
+  score_lower_bound: 0,
+  score_upper_bound: 4,
+  missing_dimensions: ["3b"],
+};
+const actionDecision = {
+  decision_complete: false,
+  decision_basis: "action_condition",
+  potentially_triggerable: true,
+  score_lower_bound: 7,
+  score_upper_bound: 8,
+  missing_dimensions: ["6e"],
+};
+const inactiveActionDecision = {
+  decision_complete: true,
+  decision_basis: "conservative_upper_bound",
+  potentially_triggerable: false,
+  score_lower_bound: 0,
+  score_upper_bound: 4,
+  missing_dimensions: ["6e"],
+};
+const knownPositionDecision = {
+  decision_complete: true,
+  decision_basis: "full_evidence",
+  potentially_triggerable: false,
+  score_lower_bound: 5,
+  score_upper_bound: 6,
+  missing_dimensions: [],
+};
+const catalogue = {
+  capabilities: { dimension_scores: true },
+  companies: [
+    {
+      code: "300001", name: "待补资料候选", industry: "测试行业", diagnostic_score: null, primary_label: "",
+      types: { type3: { status: "insufficient_evidence", score: null, applicable: true, evidence_complete: false, decision: unresolvedDecision } },
+    },
+    {
+      code: "300002", name: "已有否决", industry: "测试行业", diagnostic_score: 4, primary_label: "",
+      types: { type3: { status: "vetoed", score: 4, applicable: true, evidence_complete: false, decision: confirmedVetoDecision } },
+    },
+    {
+      code: "300003", name: "仓位待确认", industry: "测试行业", diagnostic_score: 7, primary_label: "",
+      types: { type6: { status: "conditional", score: 7, applicable: true, evidence_complete: false, action_required: "position_confirmation", decision: actionDecision } },
+    },
+    {
+      code: "300004", name: "当前无需确认", industry: "测试行业", diagnostic_score: 4, primary_label: "",
+      types: { type6: { status: "not_triggered", score: 4, applicable: true, evidence_complete: true, investor_action_dimensions: ["6e"], decision: inactiveActionDecision } },
+    },
+    {
+      code: "300005", name: "已知仓位不合规", industry: "测试行业", diagnostic_score: 6, primary_label: "",
+      types: { type6: { status: "conditional", score: 6, applicable: true, evidence_complete: true, decision: knownPositionDecision } },
+    },
+  ],
+};
+const catalogueRaw = Buffer.from(JSON.stringify(catalogue));
+const catalogueBytes = gzipSync(catalogueRaw);
+const manifest = {
+  catalogue: {
+    filename: "catalog.json.gz",
+    size: catalogueBytes.byteLength,
+    sha256: createHash("sha256").update(catalogueBytes).digest("hex"),
+    uncompressed_size: catalogueRaw.byteLength,
+  },
+};
+const manifestBytes = Buffer.from(JSON.stringify(manifest));
+const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
+function objectFor(bytes, hash = "") {
+  return {
+    size: bytes.byteLength,
+    customMetadata: hash ? { sha256: hash } : {},
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    get body() { return new Response(bytes).body; },
+  };
+}
+const generation = { generation_id: "0123456789abcdef", manifest_sha256: manifestHash };
+const objects = new Map([
+  ["generations/0123456789abcdef/manifest.json", objectFor(manifestBytes, manifestHash)],
+  ["generations/0123456789abcdef/catalog.json.gz", objectFor(catalogueBytes)],
+]);
+const env = {
+  DB: { prepare: () => ({ bind() { return this; }, first: async () => generation }) },
+  DATA_BUCKET: { get: async (key) => objects.get(key) || null },
+};
+const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
+const canonicalUrl = legacyUrl + "&index_contract=2";
+cached.set(legacyUrl, new Response(JSON.stringify({ index_contract: 1, generation_id: "0123456789abcdef", summary: { company_count: 1 }, companies: [] })));
+const response = await worker.fetch(
+  new Request(canonicalUrl),
+  env,
+);
+assert.equal(response.status, 200);
+const payload = await response.json();
+assert.equal(payload.index_contract, 2);
+assert.equal(payload.summary.company_count, 5);
+assert.ok(cached.has(canonicalUrl));
+assert.deepEqual(payload.summary.type_coverage.type3, {
+  evidence_missing: 2,
+  decision_unresolved: 1,
+  potentially_triggerable: 1,
+  action_confirmation: 0,
+});
+assert.deepEqual(payload.summary.type_coverage.type6, {
+  evidence_missing: 0,
+  decision_unresolved: 0,
+  potentially_triggerable: 0,
+  action_confirmation: 1,
+});
+assert.deepEqual(payload.companies[0].types.type3, {
+  status: "insufficient_evidence",
+  score: null,
+  score_lower_bound: 0,
+  score_upper_bound: 8,
+  has_missing_dimensions: true,
+  has_evidence_gap: true,
+});
+assert.equal(payload.companies[1].types.type3.has_evidence_gap, true);
+assert.equal(payload.companies[2].types.type6.has_evidence_gap, false);
+assert.equal(payload.companies[3].types.type6.has_evidence_gap, false);
+assert.equal(payload.companies[4].types.type6.has_evidence_gap, false);
+assert.equal("investor_action_dimensions" in payload.companies[2].types.type6, false);
+const reordered = await worker.fetch(
+  new Request("https://dashboard.test/api/catalogue-index?index_contract=2&generation_id=0123456789abcdef"),
+  env,
+);
+assert.equal(reordered.status, 200);
+assert.equal((await reordered.json()).index_contract, 2);
+for (const invalidUrl of [
+  legacyUrl,
+  legacyUrl + "&index_contract=1",
+  canonicalUrl + "&debug=1",
+  canonicalUrl + "&generation_id=0123456789abcdef",
+]) {
+  const invalid = await worker.fetch(new Request(invalidUrl), env);
+  assert.equal(invalid.status, 400, invalidUrl);
+}
+const tamperedCatalogue = Buffer.from(catalogueBytes);
+tamperedCatalogue[0] ^= 1;
+for (const invalidUrl of [
+  "https://dashboard.test/api/company/300001?generation_id=0123456789abcdef&debug=1",
+  "https://dashboard.test/api/catalogue?generation_id=coverage-test",
+]) {
+  const invalid = await worker.fetch(new Request(invalidUrl), env);
+  assert.equal(invalid.status, 400, invalidUrl);
+}
+objects.set("generations/0123456789abcdef/catalog.json.gz", objectFor(tamperedCatalogue));
+const tampered = await worker.fetch(
+  new Request("https://dashboard.test/api/catalogue?generation_id=0123456789abcdef"),
+  env,
+);
+assert.equal(tampered.status, 500);
+assert.match((await tampered.json()).error, /目录正文完整性校验失败/);
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],
@@ -42,7 +235,9 @@ def test_dashboard_select_filters_use_change_events_and_type_scoped_statuses():
 
     assert 'addEventListener("change"' in source
     assert 'typeState.status!=="not_applicable"' in source
-    assert "typeState.status===s" in source
+    assert "function typeStatusMatches" in source
+    assert "typeState?.status===status" in source
+    assert 'status==="evidence_gap"?typeState?.has_evidence_gap===true' in source
 
 
 def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
@@ -79,12 +274,38 @@ def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert '<option value="triggered">实际命中</option>' in source
-    assert "typeState.status===s" in source
+    assert "typeState?.status===status" in source
     assert 's=q?"":$("status").value' in source
     assert "当前确实为 0 家命中" in source
     assert "没有找到匹配该代码或名称的公司" in source
     assert "displayedScore" in source
     assert "点击查看完整依据" in source
+
+
+def test_dashboard_coverage_cards_separate_signals_conditions_and_unresolved_evidence():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    assert "function coverageEvidenceStats" in source
+    assert "Object.entries(TYPE_NAMES).map" in source
+    assert 'value?.status!=="triggered"&&value?.status!=="conditional"' in source
+    assert 'decision.decision_basis==="unresolved_missing_evidence"' in source
+    assert "decision.potentially_triggerable===true" in source
+    assert (
+        'preferredStatus=triggered>0?"triggered":conditional>0?"conditional":evidence.evidenceMissing>0?"evidence_gap":""'
+        in source
+    )
+    assert "function conditionalCoverageLabel" in source
+    assert "action_confirmation" in source
+    for text in (
+        "七类命中、待确认与资料缺口分布",
+        "已触发”才是实际信号",
+        "资料缺口 ",
+        "其中结论待定 ",
+        "其中补齐后仍可能触发 ",
+        "待满足其它条件 ",
+        "coverage-breakdown",
+    ):
+        assert text in source
 
 
 def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_all_assets():
@@ -122,7 +343,11 @@ def test_dashboard_loads_a_lightweight_index_and_company_details_on_demand():
     assert "const pageSize=50" in source
     assert '$("rows").addEventListener("click"' in source
     assert 'tr.addEventListener("click"' not in source
-    assert 'cacheKey=new Request(request.url,{method:"GET"})' in source
+    assert '"&index_contract="+CATALOGUE_INDEX_CONTRACT_VERSION' in source
+    assert "Number(c.index_contract)!==CATALOGUE_INDEX_CONTRACT_VERSION" in source
+    assert "function canonicalCatalogueIndexRequest" in source
+    assert "function catalogueIndexCacheRequest" in source
+    assert 'cacheKey=new Request(cacheRequest.url,{method:"GET"})' in source
     assert "headSafeResponse(request" in source
 
 
@@ -167,12 +392,28 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
         "股价透支计算",
     ):
         assert text in source
-    assert 'dataMissing=missing.filter(dimension=>!(dimension==="6e"&&actionRequired))' in source
+    assert "function investorActionDimensions(typeKey,value)" in source
+    assert "investor_action_dimensions" in source
+    assert 'legacy=value?.action_required==="position_confirmation"&&missing.includes("6e")' in source
+    assert "positionInstruction=investorActions.has(dimension)&&missing.has(dimension)" in source
+    assert "dataMissingScore=missingScore&&!positionInstruction" in source
+    assert "function typeDataGap(typeKey,value)" in source
+    assert "dataMissing=missing.filter(dimension=>!actionDimensions.has(dimension))" in source
+    assert 'actionRequired=actionDimensions.has("6e")&&missing.includes("6e")&&value?.status==="conditional"' in source
     assert "declaredIncomplete=value?.applicable===true&&value?.evidence_complete===false" in source
-    assert 'state.key==="type6"&&company.types?.type6?.status==="conditional"' in source
-    assert 'conditionalLabel=key==="type6"?"等待确认仓位":"待满足附加条件"' in source
+    assert "hasAction=states.some(state=>state.action_required)" in source
+    assert 'state.key==="type6"&&company.types?.type6?.status==="conditional"' not in source
+    assert "function conditionalCoverageLabel" in source
+    assert "待满足其它条件" in source
     assert "EVIDENCE_META_NAMES" in source
     assert "v.reasons?.[dimension]||subReasons[dimension]" in source
+    assert (
+        "actionConfirmationCount=Number(summary.action_confirmation_company_count??s.action_confirmation_company_count??0)"
+        in source
+    )
+    assert '["其中待确认仓位",actionConfirmationCount]' in source
+    assert 'positionAction=positionInstruction&&v.status==="conditional"' in source
+    assert 'inactivePositionAction?"当前无需确认"' in source
 
 
 def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail_facts():

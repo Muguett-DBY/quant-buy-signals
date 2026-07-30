@@ -14,7 +14,13 @@ pass size, hash, schema, partition, and coverage validation.
   `/api/health`, `/api/meta`, `/api/manifest`, `/api/catalogue-index`,
   `/api/company/{code}`, and the backward-compatible `/api/catalogue` used by
   existing mobile clients.  The website loads the compact index first and
-  fetches one full company record only when its detail drawer is opened.
+  fetches one full company record only when its detail drawer is opened.  The
+  compact-index route requires a generation ID and its published
+  `index_contract` version, so a dashboard upgrade cannot reuse an old
+  one-year immutable projection.  Before parsing or serving a catalogue or a
+  company-detail shard, the worker checks the downloaded R2 body against the
+  manifest SHA-256 (and the declared decompressed size); R2 object metadata
+  alone is not treated as proof of content integrity.
 
 The public page intentionally distinguishes “已触发”, “待确认”, “观察”,
 “资料不足”, “不适用” and “不符合硬条件”; missing evidence is never shown as

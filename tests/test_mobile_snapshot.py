@@ -569,7 +569,7 @@ def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeyp
     scores.at[0, "primary_type"] = None
     monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
 
-    _manifest, catalogue, signals = mobile_snapshot.build_mobile_snapshot(
+    manifest, catalogue, signals = mobile_snapshot.build_mobile_snapshot(
         scores,
         market_as_of="2026-07-17",
         data_timestamp_utc="2026-07-17T08:20:00+00:00",
@@ -586,9 +586,12 @@ def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeyp
         "worst_case_loss": "请按最坏归零情景核对组合损失",
     }
     assert "6e" not in catalogue["companies"][0]["types"]["type6"].get("estimated_sub_scores", {})
+    assert catalogue["companies"][0]["types"]["type6"]["investor_action_dimensions"] == ["6e"]
     assert signals["triggered_company_count"] == 0
     assert signals["conditional_company_count"] == 1
+    assert signals["action_confirmation_company_count"] == 1
     assert signals["conditional_only_company_count"] == 1
+    assert manifest["summary"]["action_confirmation_company_count"] == 1
     assert signals["pending_company_count"] == 1
     assert signals["visible_candidate_company_count"] == 1
     assert signals["candidate_detail_count"] == 1
@@ -604,6 +607,106 @@ def test_mobile_snapshot_keeps_conditional_candidates_out_of_buy_signals(monkeyp
     }
     assert "高风险早期/困境型" in signals["signals"][0]["detail_text"]
     assert "须确认实际仓位符合建议上限" in signals["signals"][0]["detail_text"]
+
+
+@pytest.mark.parametrize(
+    ("status", "potentially_triggerable", "decision_complete"),
+    [
+        ("not_triggered", True, False),
+        ("observe", True, False),
+        ("vetoed", True, False),
+        ("conditional", False, False),
+        ("conditional", True, True),
+    ],
+)
+def test_mobile_snapshot_only_marks_a_live_type6_position_confirmation(
+    status,
+    potentially_triggerable,
+    decision_complete,
+):
+    payload = {
+        "status": status,
+        "total": 7.1,
+        "sub_scores": {"6a": 8.0, "6b": 8.0, "6c": 6.0, "6d": 7.0, "6e": 9.0},
+        "reasons": {"6e": "下单前确认仓位", "_risk": "最坏归零情景"},
+        "applicable": True,
+        "evidence_complete": True,
+        "decision": {
+            "schema_version": 1,
+            "model_id": "buy-decision-bounds-v1",
+            "decision_complete": decision_complete,
+            "decision_basis": "action_condition",
+            "score_lower_bound": 6.2,
+            "score_upper_bound": 7.7,
+            "veto_state": "none",
+            "potentially_triggerable": potentially_triggerable,
+            "missing_dimensions": ["6e"],
+        },
+    }
+
+    compact = mobile_snapshot._compact_type(payload, "type6")
+
+    assert "action_required" not in compact
+    assert "position_guidance" not in compact
+    assert compact["investor_action_dimensions"] == ["6e"]
+    assert not mobile_snapshot._requires_position_confirmation({"types": {"type6": compact}})
+    stale_action = {**compact, "action_required": "position_confirmation"}
+    assert not mobile_snapshot._requires_position_confirmation({"types": {"type6": stale_action}})
+
+
+def test_mobile_snapshot_does_not_publish_a_known_type7_strict_failure_as_conditional(monkeypatch):
+    scores = _scores()
+    payload = dict(scores.at[0, "type7"])
+    payload.update(
+        {
+            "status": "not_triggered",
+            "triggered": False,
+            "total": 7.0,
+            "sub_scores": {"7a": 6.781, "7b": 7.224, "7c": 6.848},
+            "reasons": {
+                "7a": "长期质量回报67.81",
+                "7b": "产业质量估值72.24",
+                "7c": "商业安全68.48；边际13.7",
+                "_condition": "长期质量与回报当前已核验资料得分67.81分；商业质量与安全边际当前已核验资料得分68.48分，未严格超过70分",
+                "_status": "not_triggered",
+                "_applicable": "yes",
+                "_evidence": "complete",
+            },
+            "veto": False,
+            "applicable": True,
+            "evidence_complete": True,
+            "decision": {
+                "schema_version": 1,
+                "model_id": "buy-decision-bounds-v1",
+                "decision_complete": True,
+                "decision_basis": "full_evidence",
+                "score_lower_bound": 7.0,
+                "score_upper_bound": 7.0,
+                "veto_state": "none",
+                "potentially_triggerable": False,
+                "missing_dimensions": [],
+            },
+        }
+    )
+    scores.at[0, "type7"] = payload
+    scores.at[0, "buy_types"] = []
+    scores.at[0, "primary_type"] = None
+    monkeypatch.setattr(mobile_snapshot, "validate_screening_result", lambda _frame: [])
+
+    manifest, catalogue, signals = mobile_snapshot.build_mobile_snapshot(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    company = catalogue["companies"][0]
+    assert company["types"]["type7"]["status"] == "not_triggered"
+    assert company["conditional_types"] == []
+    assert signals["conditional_company_count"] == 0
+    assert signals["conditional_only_company_count"] == 0
+    assert manifest["summary"]["conditional_company_count"] == 0
+    assert signals["signals"] == []
 
 
 def test_mobile_snapshot_keeps_unresolved_possible_candidates_visible_without_calling_them_signals():
@@ -689,9 +792,11 @@ def test_mobile_snapshot_counts_a_mixed_trigger_and_conditional_company_in_both_
 
     assert manifest["summary"]["triggered_company_count"] == 1
     assert manifest["summary"]["conditional_company_count"] == 1
+    assert manifest["summary"]["action_confirmation_company_count"] == 0
     assert manifest["summary"]["conditional_only_company_count"] == 0
     assert signals["triggered_company_count"] == 1
     assert signals["conditional_company_count"] == 1
+    assert signals["action_confirmation_company_count"] == 0
     assert signals["conditional_only_company_count"] == 0
 
 

@@ -400,6 +400,8 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
         return {request["code"]: {"available": True} for request in requests}
 
     monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", cache_state)
+    monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
     monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
     loader = publisher._bounded_type3_growth_loader(limit=2)
     first = [{"code": code, "as_of": "2026-07-29"} for code in ("000003", "000001", "000002", "000004")]
@@ -408,6 +410,78 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     assert set(loader(first, progress_cb=progress)) == {"000001", "000002", "000003"}
     assert loader(second, progress_cb=progress) == {}
     assert calls == [(first[:3], progress)]
+
+
+def test_type3_growth_loader_retries_due_candidate_while_continuing_new_coverage(monkeypatch):
+    calls = []
+    retry_state = {}
+
+    def fetch(requests, *, progress_cb=None):
+        calls.append([request["code"] for request in requests])
+        return {request["code"]: {"available": False} for request in requests}
+
+    def record(requests, _results):
+        for request in requests:
+            retry_state[request["code"]] = {
+                "last_attempt_as_of": request["as_of"],
+                "retry_after": "2025-07-30" if request["as_of"] == "2025-07-29" else "2025-07-31",
+                "retry_class": "transient",
+                "reason": "source_unavailable:Timeout",
+            }
+        return dict(retry_state)
+
+    monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(
+        publisher,
+        "load_growth_evidence_retry_state_batch",
+        lambda requests: {
+            request["code"]: retry_state[request["code"]] for request in requests if request["code"] in retry_state
+        },
+    )
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", record)
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    first_run = [{"code": f"00000{index}", "as_of": "2025-07-29"} for index in range(1, 5)]
+    second_run = [{"code": f"00000{index}", "as_of": "2025-07-30"} for index in range(1, 5)]
+
+    assert set(publisher._bounded_type3_growth_loader(limit=2)(first_run)) == {"000001", "000002"}
+    # One slot remains available for the next unseen company while the other
+    # is reserved for the oldest due transient failure.  This makes progress
+    # on both fronts instead of allowing a permanent retry backlog.
+    assert set(publisher._bounded_type3_growth_loader(limit=2)(second_run)) == {"000001", "000003"}
+    # The fetcher receives the selected requests in source order; membership,
+    # rather than request ordering, is the scheduling contract.
+    assert calls == [["000001", "000002"], ["000001", "000003"]]
+
+
+def test_type3_growth_loader_reserves_due_retry_capacity_during_continuous_new_arrivals(monkeypatch):
+    calls = []
+    due_codes = [f"00010{index}" for index in range(1, 6)]
+    unseen_codes = [f"00020{index}" for index in range(1, 6)]
+    requests = [
+        *({"code": code, "as_of": "2025-07-30"} for code in unseen_codes),
+        *({"code": code, "as_of": "2025-07-30"} for code in due_codes),
+    ]
+    retry_state = {
+        code: {
+            "last_attempt_as_of": "2025-07-29",
+            "retry_after": "2025-07-30",
+            "retry_class": "transient",
+            "reason": "source_unavailable:Timeout",
+        }
+        for code in due_codes
+    }
+
+    def fetch(selected, *, progress_cb=None):
+        calls.append([request["code"] for request in selected])
+        return {request["code"]: {"available": False} for request in selected}
+
+    monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: retry_state)
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+
+    assert set(publisher._bounded_type3_growth_loader(limit=5)(requests)) == set(calls[0])
+    assert calls == [[*unseen_codes[:4], due_codes[0]]]
 
 
 @pytest.mark.parametrize("limit", [True, -1])

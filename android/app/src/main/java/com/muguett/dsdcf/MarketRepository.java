@@ -1295,6 +1295,11 @@ public final class MarketRepository {
             if (decision != null) {
                 decisionContractCount++;
             }
+            Set<String> investorActionDimensions = parseInvestorActionDimensions(
+                    type,
+                    key,
+                    decision
+            );
             Map<String, Double> subScores = parseSubScores(
                     type.optJSONObject("sub_scores"),
                     key
@@ -1311,6 +1316,7 @@ public final class MarketRepository {
                     if ("insufficient_evidence".equals(status) && decision != null) {
                         expected.removeAll(decision.missingDimensions);
                     }
+                    expected.removeAll(investorActionDimensions);
                 }
                 if (!subScores.keySet().equals(expected) || !subScoreReasons.keySet().equals(expected)) {
                     throw new IOException("公司记录缺少 " + typeNames.get(key) + " 的已知子指标分数或说明。");
@@ -1322,7 +1328,8 @@ public final class MarketRepository {
                     reason,
                     decision,
                     subScores,
-                    subScoreReasons
+                    subScoreReasons,
+                    investorActionDimensions
             ));
         }
         if (decisionContractCount != 0 && decisionContractCount != 7) {
@@ -1372,6 +1379,44 @@ public final class MarketRepository {
                 typeNames,
                 detailText
         );
+    }
+
+    private static Set<String> parseInvestorActionDimensions(
+            JSONObject type,
+            String typeKey,
+            DecisionSummary decision
+    ) throws IOException {
+        JSONArray dimensions = type.optJSONArray("investor_action_dimensions");
+        // Older signed generations recorded the same semantic only through
+        // ``action_required``.  Retain that read path so a valid cached
+        // generation stays usable after the app updates.
+        if (dimensions == null
+                && "type6".equals(typeKey)
+                && decision != null
+                && decision.missingDimensions.contains("6e")
+                && "position_confirmation".equals(type.optString("action_required"))) {
+            return Collections.singleton("6e");
+        }
+        if (dimensions == null) {
+            return Collections.emptySet();
+        }
+        if (!"type6".equals(typeKey) || decision == null) {
+            throw new IOException("公司记录包含不适用的投资者动作维度。");
+        }
+        Set<String> result = new HashSet<>();
+        for (int index = 0; index < dimensions.length(); index++) {
+            Object raw = dimensions.opt(index);
+            if (!(raw instanceof String)
+                    || !"6e".equals(raw)
+                    || !decision.missingDimensions.contains(raw)
+                    || !result.add((String) raw)) {
+                throw new IOException("公司记录包含无效的投资者动作维度。");
+            }
+        }
+        if (result.size() != 1) {
+            throw new IOException("公司记录缺少有效的投资者动作维度。");
+        }
+        return Collections.unmodifiableSet(result);
     }
 
     private static Map<String, Double> parseSubScores(JSONObject value, String typeKey)
@@ -2177,6 +2222,7 @@ public final class MarketRepository {
         public final DecisionSummary decision;
         public final Map<String, Double> subScores;
         public final Map<String, String> subScoreReasons;
+        public final Set<String> investorActionDimensions;
 
         TypeScore(String status, Double score, String reason) {
             this(status, score, reason, null, Collections.emptyMap(), Collections.emptyMap());
@@ -2194,6 +2240,26 @@ public final class MarketRepository {
                 Map<String, Double> subScores,
                 Map<String, String> subScoreReasons
         ) {
+            this(
+                    status,
+                    score,
+                    reason,
+                    decision,
+                    subScores,
+                    subScoreReasons,
+                    Collections.emptySet()
+            );
+        }
+
+        TypeScore(
+                String status,
+                Double score,
+                String reason,
+                DecisionSummary decision,
+                Map<String, Double> subScores,
+                Map<String, String> subScoreReasons,
+                Set<String> investorActionDimensions
+        ) {
             this.status = status;
             // Older signed server generations may still contain the scorer's
             // internal 0.0/0.9 placeholders.  Applicability and evidence state
@@ -2204,6 +2270,7 @@ public final class MarketRepository {
             this.potentiallyTriggerable = decision != null && decision.potentiallyTriggerable;
             this.subScores = Collections.unmodifiableMap(new HashMap<>(subScores));
             this.subScoreReasons = Collections.unmodifiableMap(new HashMap<>(subScoreReasons));
+            this.investorActionDimensions = Collections.unmodifiableSet(new HashSet<>(investorActionDimensions));
         }
 
         String describe() {
@@ -2228,6 +2295,15 @@ public final class MarketRepository {
         String describeDimension(String dimension) {
             if ("not_applicable".equals(status)) {
                 return "不适用";
+            }
+            if (investorActionDimensions.contains(dimension)) {
+                boolean liveConfirmation = "conditional".equals(status)
+                        && decision != null
+                        && !decision.complete
+                        && decision.potentiallyTriggerable;
+                return liveConfirmation
+                        ? "待确认仓位（投资者动作，不是公司资料缺失）"
+                        : "当前无需确认仓位（投资者动作，不是公司资料缺失）";
             }
             Double value = subScores.get(dimension);
             if (value == null) {

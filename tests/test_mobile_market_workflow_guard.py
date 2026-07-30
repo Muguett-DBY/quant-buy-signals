@@ -125,6 +125,7 @@ def _signed_generation(
     complete_veto_with_missing: bool = False,
     overlapping_candidate: bool = False,
     conditional_only_mismatch: bool = False,
+    action_confirmation_mismatch: bool = False,
     omit_uncompressed_size: bool = False,
     uncompressed_size_mismatch: bool = False,
 ) -> tuple[Path, Path, Path, Path]:
@@ -174,6 +175,7 @@ def _signed_generation(
     triggered_company_count = 0
     conditional_company_count = 0
     conditional_only_company_count = 0
+    action_confirmation_company_count = 0
     pending_company_count = 0
     visible_candidate_company_count = 0
     signal_rows: list[dict[str, str]] = []
@@ -182,6 +184,7 @@ def _signed_generation(
             raise ValueError("the overlap fixture requires the current decision contract")
         triggered_company_count = 1
         conditional_company_count = 1
+        action_confirmation_company_count = 1
         visible_candidate_company_count = 1
         signal_rows = [{"code": companies[0]["code"], "detail_text": "已校验候选详情"}]
         companies[0]["buy_types"] = ["type1"]
@@ -194,6 +197,9 @@ def _signed_generation(
         }
         companies[0]["types"]["type6"]["status"] = "conditional"
         companies[0]["types"]["type6"]["score"] = 7.2
+        companies[0]["types"]["type6"]["investor_action_dimensions"] = ["6e"]
+        companies[0]["types"]["type6"]["action_required"] = "position_confirmation"
+        companies[0]["types"]["type6"]["position_guidance"] = "请确认单票与组合仓位均符合建议上限"
         companies[0]["types"]["type6"]["decision"] = {
             "schema_version": 1,
             "model_id": DECISION_MODEL_ID,
@@ -298,6 +304,8 @@ def _signed_generation(
             else {
                 "pending_company_count": pending_company_count,
                 "visible_candidate_company_count": visible_candidate_company_count,
+                "action_confirmation_company_count": action_confirmation_company_count
+                + (1 if action_confirmation_mismatch else 0),
             }
         ),
         "signals": signal_rows,
@@ -345,6 +353,8 @@ def _signed_generation(
                 else {
                     "pending_company_count": pending_company_count,
                     "visible_candidate_company_count": visible_candidate_company_count,
+                    "action_confirmation_company_count": action_confirmation_company_count
+                    + (1 if action_confirmation_mismatch else 0),
                 }
             ),
             "type_coverage": coverage,
@@ -620,6 +630,7 @@ def test_legacy_signed_generation_remains_accepted_during_the_11_2_upgrade_windo
     "generation_options",
     [
         {"overlapping_candidate": True, "conditional_only_mismatch": True},
+        {"overlapping_candidate": True, "action_confirmation_mismatch": True},
         {"omit_uncompressed_size": True},
         {"uncompressed_size_mismatch": True},
     ],

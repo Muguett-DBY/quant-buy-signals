@@ -60,6 +60,7 @@ from engine.quantitative_evidence import (
     TYPE3_GROWTH_VALIDATION_TOKEN,
     derive_company_evidence,
     enrich_metrics,
+    validate_quantitative_evidence_record,
 )
 from engine.quality_equity import (
     MODEL_ID as QUALITY_EQUITY_MODEL_ID,
@@ -514,6 +515,59 @@ def _evidence_reason(container: Mapping[str, Any], key: str, fallback: str) -> s
     if "东方财富" in source or "eastmoney" in source.lower():
         return "东方财富的可核验数据"
     return "已登记的外部证据"
+
+
+def _quantitative_moat_durability_reason(
+    container: Mapping[str, Any],
+    *,
+    expected_score: float,
+) -> str | None:
+    """Describe the exact audited history used by the Type4 durability score.
+
+    Quantitative evidence IDs and formula labels are deliberately not public
+    copy.  The replayed durability ledger can, however, tell an investor how
+    many continuous years of overlapping ROIC and gross-margin data were
+    actually used.  Do not show that detail unless it still validates against
+    the current company and the score that Type4 is using.
+    """
+
+    quantitative = container.get("quantitative_evidence")
+    record = quantitative.get("moat_durability_score") if isinstance(quantitative, Mapping) else None
+    code = _canonical_evidence_code(container.get("code"))
+    if not code or not isinstance(record, Mapping):
+        return None
+    try:
+        validated = validate_quantitative_evidence_record(
+            record,
+            key="moat_durability_score",
+            code=code,
+        )
+    except (TypeError, ValueError):
+        return None
+    if validated.get("evidence_level") != "derived_proxy":
+        return None
+    recorded_score = _safe_float(validated.get("score"))
+    if recorded_score is None or not math.isclose(recorded_score, expected_score, rel_tol=0.0, abs_tol=1e-9):
+        return None
+    details = validated.get("details")
+    if not isinstance(details, Mapping):
+        return None
+    history_count = details.get("durability_history_years")
+    common_years = details.get("common_history_years")
+    if (
+        isinstance(history_count, bool)
+        or not isinstance(history_count, int)
+        or history_count < 1
+        or not isinstance(common_years, list)
+        or len(common_years) < history_count
+        or any(isinstance(year, bool) or not isinstance(year, int) for year in common_years)
+    ):
+        return None
+    used_years = common_years[-history_count:]
+    if not used_years or any(current - prior != 1 for prior, current in zip(used_years, used_years[1:])):
+        return None
+    coverage = f"{used_years[0]}年" if len(used_years) == 1 else f"{used_years[0]}–{used_years[-1]}年"
+    return f"ROIC与毛利率共同连续{history_count}年，覆盖{coverage}"
 
 
 def _normalise_structured_growth_evidence(
@@ -4370,7 +4424,11 @@ def score_type4_long_runway(
         evidence_key = (
             "moat_durability_score" if _verified_score(m, "moat_durability_score") is not None else "moat_score"
         )
-        reasons["4c"] = _evidence_reason(m, evidence_key, "护城河证据不可追溯")
+        reasons["4c"] = (
+            _quantitative_moat_durability_reason(m, expected_score=explicit_moat)
+            if evidence_key == "moat_durability_score"
+            else None
+        ) or _evidence_reason(m, evidence_key, "护城河证据不可追溯")
     else:
         moat_count = sum(
             (
@@ -6472,6 +6530,7 @@ def score_type7_quality_equity(
     }
     strict_pass = bool(ledger["all_scores_strictly_above_70"])
     decisive_failure = bool(ledger["decisively_not_triggered"])
+    known_strict_failure = bool(ledger["prerequisites_complete"] and not strict_pass)
     if decisive_failure:
         ledger_labels = {
             "template1": "长期质量与回报",
@@ -6485,12 +6544,24 @@ def score_type7_quality_equity(
             section = ledger.get(ledger_key)
             exact = isinstance(section, Mapping) and float(section.get("coverage") or 0.0) >= 1.0
             label = ledger_labels.get(ledger_key, ledger_key)
-            decisive_details.append(f"{label}{'已核验' if exact else '最高可能'}{float(upper_bound):.2f}分")
+            decisive_details.append(f"{label}{'当前已核验资料得分' if exact else '最高可能'}{float(upper_bound):.2f}分")
         reasons["_condition"] = (
             "；".join(decisive_details) + "，未严格超过70分"
             if decisive_details
             else "至少一套评分的最高可能分未严格超过70分"
         )
+    elif known_strict_failure:
+        ledger_labels = {
+            "template1": "长期质量与回报",
+            "template5": "产业质量与估值",
+            "patch5": "商业质量与安全边际",
+        }
+        failed_scores = [
+            f"{ledger_labels[key]}当前已核验资料得分{float(value):.2f}分"
+            for key, value in source_scores.items()
+            if float(value) <= 70.0
+        ]
+        reasons["_condition"] = "；".join(failed_scores) + "，未严格超过70分"
     elif not strict_pass:
         reasons["_condition"] = "三套分数均须严格大于70"
     failed_prerequisites = [key for key, record in ledger["prerequisites"].items() if not bool(record.get("passed"))]
@@ -6535,7 +6606,11 @@ def score_type7_quality_equity(
             veto=bool(ledger["safety_veto"]),
             extra_condition=strict_pass,
             evidence_complete=bool(ledger["prerequisites_complete"]),
-            status_override=STATUS_NOT_TRIGGERED if decisive_failure and not ledger["safety_veto"] else None,
+            status_override=(
+                STATUS_NOT_TRIGGERED
+                if (decisive_failure or known_strict_failure) and not ledger["safety_veto"]
+                else None
+            ),
             missing_dimensions=_type7_missing_dimensions(ledger),
         ),
         ledger,

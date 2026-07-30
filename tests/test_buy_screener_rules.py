@@ -21,7 +21,7 @@ from data.quality_history import replay_valuation_distribution
 from engine import buy_screener as bs
 from engine import scenarios
 from engine.market_coldness import build_market_coldness_evidence
-from engine.quantitative_evidence import MIN_SECTOR_COMPANIES
+from engine.quantitative_evidence import MIN_SECTOR_COMPANIES, derive_company_evidence
 
 
 def score_evidence(key: str, code: str = "000001", as_of: str = "2026-07-15") -> dict[str, str]:
@@ -1052,6 +1052,55 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertIn("_veto", outcome[3])
         self.assertEqual(decision["decision_basis"], "confirmed_veto")
         self.assertEqual(decision["veto_state"], "confirmed")
+
+    def test_type7_known_strict_subscore_failure_is_not_a_conditional_candidate(self):
+        ledger = {
+            "scores": {
+                "template1": 67.81,
+                "template5": 72.24,
+                "patch5": 68.48,
+            },
+            "patch5": {
+                "safety_margin_complete": True,
+                "safety_margin_score": 13.7,
+            },
+            "all_scores_strictly_above_70": False,
+            # These pre-history upper bounds are deliberately above 70, which
+            # reproduces the former path where a rounded 7.0 total became
+            # ``conditional`` despite complete, already-known source scores.
+            "decisively_not_triggered": False,
+            "decisive_score_upper_bounds": {
+                "template1": 80.0,
+                "template5": 80.0,
+                "patch5": 80.0,
+            },
+            "prerequisites": {
+                "complete_contract": {"passed": True},
+            },
+            "prerequisites_complete": True,
+            "safety_veto": False,
+        }
+        with (
+            patch.object(bs, "assess_quality_equity", return_value=ledger),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            outcome, returned_ledger = bs.score_type7_quality_equity(
+                {"code": "600988", "industry": "GOLD"},
+                bs._not_applicable("type1", "测试"),
+                valuation_evidence_complete=True,
+            )
+
+        self.assertIs(returned_ledger, ledger)
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[1], 7.0)
+        self.assertEqual(
+            outcome[2],
+            {"7a": 6.781, "7b": 7.224, "7c": 6.848},
+        )
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_TRIGGERED)
+        self.assertNotEqual(outcome[3]["_status"], bs.STATUS_CONDITIONAL)
+        self.assertIn("长期质量与回报当前已核验资料得分67.81分", outcome[3]["_condition"])
+        self.assertIn("商业质量与安全边际当前已核验资料得分68.48分", outcome[3]["_condition"])
 
     def test_evidence_reason_never_exposes_internal_model_or_evidence_ids(self):
         automatic = {
@@ -3384,6 +3433,99 @@ class TestTypeRules(unittest.TestCase):
         self.assertLessEqual(scores["4c"], 3.0)
         self.assertFalse(triggered)
         self.assertIn("_veto", reasons)
+
+    def test_type4_moat_durability_reason_shows_verified_history_period(self):
+        years = list(range(2016, 2026))
+        metric = complete_type4_metrics(
+            indicator_roic_history=[0.20] * len(years),
+            indicator_roic_years=years,
+            gross_margin_history=[0.40] * len(years),
+            gross_margin_years=years,
+            adjusted_profit_ratio=0.98,
+            share_dilution_1yr=0.0,
+            revenue_latest=190.0,
+        )
+        quantitative = derive_company_evidence(
+            metric,
+            {
+                "gross_margin_median_population": [0.30] * MIN_SECTOR_COMPANIES,
+                "revenue_latest_population": [100.0] * MIN_SECTOR_COMPANIES,
+            },
+        )
+        durability = quantitative["moat_durability_score"]
+        self.assertEqual(durability["evidence_level"], "derived_proxy")
+        self.assertEqual(durability["details"]["durability_history_years"], 10)
+        self.assertEqual(durability["details"]["common_history_years"], years)
+        metric.update(
+            {
+                "quantitative_evidence": {"moat_durability_score": durability},
+                "moat_durability_score": durability["score"],
+                "moat_durability_score_evidence": durability["evidence"],
+                "moat_durability_score_evidence_level": durability["evidence_level"],
+            }
+        )
+
+        _triggered, _total, scores, reasons = bs.score_type4_long_runway(
+            metric,
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+
+        self.assertEqual(scores["4c"], durability["score"])
+        self.assertEqual(reasons["4c"], "ROIC与毛利率共同连续10年，覆盖2016–2025年")
+        self.assertNotIn("patch", reasons["4c"].lower())
+
+    def test_type4_moat_durability_reason_keeps_generic_fallback_without_verified_ledger(self):
+        metric = complete_type4_metrics()
+        metric["moat_durability_score_evidence"] = {
+            "source": "test quantitative evidence",
+            "evidence_id": (f"{bs.QUANTITATIVE_EVIDENCE_MODEL_ID}:moat_durability_score:000001:20260715"),
+            "as_of": "2026-07-15",
+        }
+        _triggered, _total, _scores, reasons = bs.score_type4_long_runway(
+            metric,
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+
+        self.assertEqual(reasons["4c"], "多年盈利稳定性数据")
+
+    def test_type4_moat_durability_reason_hides_tampered_history_ledger(self):
+        years = list(range(2016, 2026))
+        metric = complete_type4_metrics(
+            indicator_roic_history=[0.20] * len(years),
+            indicator_roic_years=years,
+            gross_margin_history=[0.40] * len(years),
+            gross_margin_years=years,
+            adjusted_profit_ratio=0.98,
+            share_dilution_1yr=0.0,
+            revenue_latest=190.0,
+        )
+        durability = derive_company_evidence(
+            metric,
+            {
+                "gross_margin_median_population": [0.30] * MIN_SECTOR_COMPANIES,
+                "revenue_latest_population": [100.0] * MIN_SECTOR_COMPANIES,
+            },
+        )["moat_durability_score"]
+        tampered = copy.deepcopy(durability)
+        tampered["details"]["common_history_years"] = [2016, 2018, *range(2019, 2026)]
+        metric.update(
+            {
+                "quantitative_evidence": {"moat_durability_score": tampered},
+                "moat_durability_score": durability["score"],
+                "moat_durability_score_evidence": durability["evidence"],
+                "moat_durability_score_evidence_level": durability["evidence_level"],
+            }
+        )
+
+        _triggered, _total, _scores, reasons = bs.score_type4_long_runway(
+            metric,
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+
+        self.assertEqual(reasons["4c"], "多年盈利稳定性数据")
 
     def test_type4_missing_qualitative_evidence_is_unknown_not_a_company_veto(self):
         triggered, _, scores, reasons = bs.score_type4_long_runway(

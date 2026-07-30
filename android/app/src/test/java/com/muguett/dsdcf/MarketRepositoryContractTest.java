@@ -727,6 +727,49 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
+    public void type6InvestorActionDimensionIsNeverDisplayedAsMissingCompanyData() {
+        MarketRepository.DecisionSummary inactiveDecision = new MarketRepository.DecisionSummary(
+                false,
+                "conservative_upper_bound",
+                3.0,
+                6.0,
+                "none",
+                false,
+                Collections.singletonList("6e")
+        );
+        MarketRepository.TypeScore inactive = new MarketRepository.TypeScore(
+                "observe",
+                null,
+                "尚未达到其它前置条件",
+                inactiveDecision,
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.singleton("6e")
+        );
+        assertEquals("当前无需确认仓位（投资者动作，不是公司资料缺失）", inactive.describeDimension("6e"));
+
+        MarketRepository.DecisionSummary activeDecision = new MarketRepository.DecisionSummary(
+                false,
+                "action_condition",
+                7.0,
+                8.0,
+                "none",
+                true,
+                Collections.singletonList("6e")
+        );
+        MarketRepository.TypeScore active = new MarketRepository.TypeScore(
+                "conditional",
+                null,
+                "等待仓位确认",
+                activeDecision,
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.singleton("6e")
+        );
+        assertEquals("待确认仓位（投资者动作，不是公司资料缺失）", active.describeDimension("6e"));
+    }
+
+    @Test
     public void legacyMachineReasonsAreSanitizedBeforeAnyAndroidDisplay() {
         for (String machineText : Arrays.asList(
                 "证据:patch6-observable",
