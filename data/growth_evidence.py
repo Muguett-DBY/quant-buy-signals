@@ -1113,9 +1113,7 @@ def _load_reusable_external_cache(
         return {
             "external_growth_evidence": evidence,
             "source_as_of": source_as_of.isoformat(),
-            "cache_diagnostic": (
-                "hit" if source_as_of == as_of else f"reused_source_as_of:{source_as_of.isoformat()}"
-            ),
+            "cache_diagnostic": ("hit" if source_as_of == as_of else f"reused_source_as_of:{source_as_of.isoformat()}"),
         }
     return None
 
@@ -1883,10 +1881,7 @@ def build_external_growth_evidence(
     # perfectly valid non-integer cash-flow ratio can differ by one binary
     # floating-point ulp between construction and validation, producing a
     # different content hash and falsely downgrading the whole Type 3 record.
-    records = [
-        _normalise_external_record(record, latest_year=latest_year)
-        for record in records
-    ]
+    records = [_normalise_external_record(record, latest_year=latest_year) for record in records]
     status = "complete" if len(coverage_years) >= MIN_EXTERNAL_HISTORY_YEARS else "partial"
     acquisition_values = [float(record["acquisition_cash"]) for record in records]
     acquisition_ratios = [float(record["acquisition_cash_to_revenue"]) for record in records]

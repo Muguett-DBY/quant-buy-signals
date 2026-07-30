@@ -964,10 +964,10 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
                 "goodwill_records": goodwill,
             },
         ],
-            max_workers=2,
-            progress_cb=lambda done, total: progress.append((done, total)),
-            cache_dir=tmp_path,
-        )
+        max_workers=2,
+        progress_cb=lambda done, total: progress.append((done, total)),
+        cache_dir=tmp_path,
+    )
 
     assert list(result) == ["000001", "600519"]
     assert all(item["available"] for item in result.values())

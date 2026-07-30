@@ -426,9 +426,7 @@ def test_type3_growth_loader_does_not_treat_segment_only_cache_as_free(monkeypat
     monkeypatch.setattr(
         publisher,
         "load_growth_evidence_cache_batch_state",
-        lambda requests: {
-            "000002": {"segment_growth_sources": {}, "source_as_of": requests[0]["as_of"]}
-        },
+        lambda requests: {"000002": {"segment_growth_sources": {}, "source_as_of": requests[0]["as_of"]}},
     )
     monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
     monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
