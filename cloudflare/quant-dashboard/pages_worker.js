@@ -294,7 +294,7 @@ export default{
       if(path==="/api/methodology")return json({schema_version:1,methodology_version:METHODOLOGY_VERSION,qualify_threshold:7,types:METHODOLOGY},200,{"cache-control":"public, max-age=86400"});
       const requestedGeneration=url.searchParams.get("generation_id")||"";
       if(path==="/api/catalogue-index"&&!canonicalCatalogueIndexRequest(url))return headSafeResponse(request,json({error:"公司索引请求参数无效，请刷新页面"},400));
-      if((path==="/api/health"||path==="/api/meta"||path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
+      if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
       const generation=await currentGeneration(env,requestedGeneration);
       if(path==="/api/health"){
         const manifestRecord=await generationManifestRecord(env,generation),manifest=manifestRecord.manifest;

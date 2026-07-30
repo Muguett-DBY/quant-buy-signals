@@ -150,7 +150,10 @@ const objects = new Map([
 ]);
 const env = {
   DB: { prepare: () => ({ bind() { return this; }, first: async () => generation }) },
-  DATA_BUCKET: { get: async (key) => objects.get(key) || null },
+  DATA_BUCKET: {
+    get: async (key) => objects.get(key) || null,
+    head: async (key) => objects.get(key) || null,
+  },
 };
 const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
 const canonicalUrl = legacyUrl + "&index_contract=2";
@@ -195,6 +198,11 @@ const reordered = await worker.fetch(
 );
 assert.equal(reordered.status, 200);
 assert.equal((await reordered.json()).index_contract, 2);
+const cacheBustedHealth = await worker.fetch(
+  new Request("https://dashboard.test/api/health?verify=1"),
+  env,
+);
+assert.equal(cacheBustedHealth.status, 200);
 for (const invalidUrl of [
   legacyUrl,
   legacyUrl + "&index_contract=1",
