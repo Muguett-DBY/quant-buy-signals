@@ -3730,6 +3730,55 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreaterEqual(complete[2]["2d"], 9.0)
         self.assertIn("自身五年PB分位", complete[3]["2d"])
 
+    def test_type2_history_preflight_fills_2d_even_when_it_cannot_change_the_decision(self):
+        weak_with_other_gaps = bs._finish(
+            "type2",
+            {"2a": 1.0, "2b": 1.0, "2c": 1.0, "2d": 2.0},
+            {"2a": "弱产业", "2b": "弱公司", "2c": "市场不冷", "2d": "缺公司自身五年PE/PB分位"},
+            evidence_complete=False,
+            missing_dimensions=["2a", "2d"],
+        )
+        confirmed_veto_with_valuation_gap = bs._finish(
+            "type2",
+            {"2a": 1.0, "2b": 1.0, "2c": 8.0, "2d": 2.0},
+            {"2a": "产业弱", "2b": "公司弱", "2c": "市场冷", "2d": "缺公司自身五年PE/PB分位"},
+            veto=True,
+            evidence_complete=False,
+            missing_dimensions=["2d"],
+        )
+        complete = bs._finish(
+            "type2",
+            {"2a": 5.0, "2b": 5.0, "2c": 5.0, "2d": 5.0},
+            {"2a": "产业", "2b": "公司", "2c": "市场", "2d": "估值"},
+        )
+        not_applicable = bs._finish(
+            "type2",
+            {"2a": 0.0, "2b": 0.0, "2c": 0.0, "2d": 0.0},
+            {"_scope": "框架不适用"},
+            applicable=False,
+        )
+
+        self.assertTrue(bs._type2_history_request_needed(weak_with_other_gaps))
+        self.assertTrue(bs._type2_history_request_needed(confirmed_veto_with_valuation_gap))
+        self.assertFalse(bs._type2_history_request_needed(complete))
+        self.assertFalse(bs._type2_history_request_needed(not_applicable))
+
+    def test_quality_history_loader_is_batched_without_dropping_or_duplicating_codes(self):
+        requests = [{"code": str(index).zfill(6), "as_of": "2026-07-17"} for index in range(1, 4_503)]
+        calls = []
+
+        def loader(batch, *, progress_cb):
+            calls.append((list(batch), progress_cb))
+            return {item["code"]: {"code": item["code"]} for item in batch}
+
+        marker = object()
+        loaded = bs._load_quality_history_batches(loader, requests, progress_cb=marker)
+
+        self.assertEqual([len(batch) for batch, _progress in calls], [2_000, 2_000, 502])
+        self.assertTrue(all(progress is marker for _batch, progress in calls))
+        self.assertEqual(len(loaded), len(requests))
+        self.assertEqual(set(loaded), {item["code"] for item in requests})
+
     def test_reused_valuation_distribution_is_rebased_to_the_current_quote(self):
         metric = base_metrics(
             source_trade_date="2026-07-28",
@@ -4941,7 +4990,7 @@ class TestMarketScreen(unittest.TestCase):
         )
         with (
             patch.object(bs, "classify_industry", return_value="SOFTWARE"),
-            patch.object(bs, "extract_metrics", return_value=copy.deepcopy(metric)),
+            patch.object(bs, "extract_metrics", side_effect=lambda *_args, **_kwargs: copy.deepcopy(metric)),
             patch.object(bs, "enrich_metrics", side_effect=fake_enrich),
             patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
             patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
@@ -4957,6 +5006,11 @@ class TestMarketScreen(unittest.TestCase):
                 {"1": {}},
                 quotes,
                 type3_growth_loader=loader,
+            )
+            deferred = bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                type3_growth_loader=lambda _requests, *, progress_cb: {},
             )
 
         self.assertEqual(len(loader_calls), 1)
@@ -4987,6 +5041,10 @@ class TestMarketScreen(unittest.TestCase):
         self.assertEqual(row["growth_sustainability_score"], 9.0)
         self.assertEqual(row["growth_sustainability_score_evidence"], score_evidence("growth_sustainability_score"))
         self.assertEqual(row["growth_sustainability_score_evidence_level"], "derived_proxy")
+        self.assertEqual(
+            deferred.iloc[0]["type3"]["status"],
+            bs.STATUS_INSUFFICIENT_EVIDENCE,
+        )
 
     def test_type3_growth_request_keeps_segment_load_when_goodwill_history_is_missing(self):
         metric = complete_type3_metrics(
@@ -5001,6 +5059,106 @@ class TestMarketScreen(unittest.TestCase):
         self.assertIsNotNone(request)
         self.assertEqual(request["goodwill_records"], [])
         self.assertEqual(len(request["revenue_records"]), 5)
+
+    def test_type3_growth_preflight_requests_either_single_deep_evidence_gap(self):
+        def partial(key, missing_input):
+            return {
+                "score": 5.0,
+                "evidence_level": "partial",
+                "evidence": score_evidence(key),
+                "details": {
+                    "score_before_evidence_cap": 8.0,
+                    "evidence_quality": {"missing_inputs": [missing_input]},
+                },
+            }
+
+        complete = {
+            "score": 8.0,
+            "evidence_level": "derived_proxy",
+            "evidence": score_evidence("complete"),
+            "details": {},
+        }
+        eligible_outcome = bs._finish(
+            "type3",
+            {key: 6.0 for key in bs.TYPE_WEIGHTS["type3"]},
+            {key: "证据" for key in bs.TYPE_WEIGHTS["type3"]},
+        )
+        cases = (
+            (
+                "growth_quality_score",
+                partial("growth_quality_score", "acquisition_cash_and_goodwill_history"),
+                "growth_sustainability_score",
+                complete,
+            ),
+            (
+                "growth_sustainability_score",
+                partial("growth_sustainability_score", "segment_growth_sources"),
+                "growth_quality_score",
+                complete,
+            ),
+        )
+        for missing_key, missing_payload, complete_key, complete_payload in cases:
+            metric = {
+                "quantitative_evidence": {
+                    missing_key: missing_payload,
+                    complete_key: complete_payload,
+                }
+            }
+            with (
+                self.subTest(missing_key=missing_key),
+                patch.object(
+                    bs,
+                    "score_type3_sustainable_growth",
+                    return_value=eligible_outcome,
+                ),
+            ):
+                self.assertTrue(bs._type3_growth_request_needed(metric, {}))
+
+    def test_type3_growth_priority_puts_conclusion_unlocks_before_diagnostics(self):
+        metric = {
+            "quantitative_evidence": {
+                "growth_quality_score": {
+                    "evidence_level": "partial",
+                    "details": {
+                        "score_before_evidence_cap": 8.0,
+                        "evidence_quality": {
+                            "missing_inputs": ["acquisition_cash_and_goodwill_history"],
+                        },
+                    },
+                },
+                "growth_sustainability_score": {
+                    "evidence_level": "partial",
+                    "details": {
+                        "score_before_evidence_cap": 9.0,
+                        "evidence_quality": {
+                            "missing_inputs": ["segment_growth_sources"],
+                        },
+                    },
+                },
+            }
+        }
+        scores = {key: 5.0 for key in bs.TYPE_WEIGHTS["type3"]}
+        conclusive = bs._finish(
+            "type3",
+            scores,
+            {key: "证据" for key in scores},
+            evidence_complete=False,
+            missing_dimensions=["3b", "3d"],
+        )
+        diagnostic_only = bs._finish(
+            "type3",
+            scores,
+            {key: "证据" for key in scores},
+            evidence_complete=False,
+            missing_dimensions=["3a", "3b", "3d", "3e"],
+        )
+
+        conclusive_priority = bs._type3_growth_request_priority(metric, conclusive)
+        diagnostic_priority = bs._type3_growth_request_priority(metric, diagnostic_only)
+
+        self.assertLess(conclusive_priority, diagnostic_priority)
+        self.assertEqual(conclusive_priority[:2], (0, 0))
+        self.assertEqual(diagnostic_priority[:2], (1, 2))
 
     def test_type7_dcf_flag_is_independent_from_type1_overall_evidence(self):
         def neutral_outcome(type_key):
@@ -5101,6 +5259,70 @@ class TestMarketScreen(unittest.TestCase):
 
         self.assertEqual(loader_calls, [([{"code": "000001", "as_of": "2026-07-17"}], None)])
         self.assertEqual(type7_calls, [None, history])
+        self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
+
+    def test_partial_history_record_does_not_block_a_component_refresh_request(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        partial = {
+            "available": False,
+            "code": "000001",
+            "as_of": "2026-07-17",
+            "model_id": "type7-market-history-v1",
+            "shareholder_return": {"available": False},
+            "valuation_history": {"available": True},
+        }
+        complete = {
+            **partial,
+            "available": True,
+            "shareholder_return": {"available": True},
+        }
+        type7_calls = []
+
+        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+            self.assertIsInstance(valuation_evidence_complete, bool)
+            type7_calls.append(history_evidence)
+            return neutral_outcome("type7"), {
+                "history_request_needed": history_evidence is partial,
+                "research_request_needed": False,
+                "loaded_marker": history_evidence is complete,
+                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
+                "triggered": False,
+            }
+
+        loader_calls = []
+
+        def loader(requests, *, progress_cb):
+            loader_calls.append((requests, progress_cb))
+            return {"000001": complete}
+
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-17"}])
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
+            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
+        ):
+            result = bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                quality_history_evidence={"000001": partial},
+                quality_history_loader=loader,
+            )
+
+        request = [{"code": "000001", "as_of": "2026-07-17"}]
+        self.assertEqual(loader_calls, [(request, None)])
+        self.assertEqual(type7_calls, [partial, complete])
         self.assertTrue(result.iloc[0]["type7"]["ledger"]["loaded_marker"])
 
     def test_type7_patch4_loader_replays_bound_announcement_before_history_or_reports(self):

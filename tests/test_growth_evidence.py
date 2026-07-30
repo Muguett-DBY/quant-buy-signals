@@ -612,6 +612,173 @@ def test_segment_cache_is_validated_and_avoids_second_network_call(tmp_path):
     assert second.segment_growth_sources == first.segment_growth_sources
 
 
+def test_segment_cache_reuses_21_day_raw_capture_and_revalidates_current_as_of(tmp_path):
+    revenues, goodwill, acquisitions = _complete_inputs()
+    captured = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-08",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload())]),
+        cache_dir=tmp_path,
+        cache_ttl_seconds=1,
+        rate_limiter=_NoWait(),
+    )
+    offline = _FakeSession([])
+
+    rebased = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-29",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=offline,
+        cache_dir=tmp_path,
+        cache_ttl_seconds=1,
+        rate_limiter=_NoWait(),
+    )
+
+    assert offline.calls == []
+    assert rebased.available
+    assert rebased.cache_hit
+    assert rebased.cache_diagnostic == "reused_source_as_of:2026-07-08"
+    assert rebased.as_of == "2026-07-29"
+    assert rebased.segment_growth_sources["as_of"] == "2026-07-29"
+    assert rebased.segment_growth_sources["records"] == captured.segment_growth_sources["records"]
+    assert rebased.segment_growth_sources["evidence_id"] != captured.segment_growth_sources["evidence_id"]
+
+
+def test_segment_cache_does_not_reuse_after_21_days_or_across_annual_cutoff(tmp_path):
+    revenues, goodwill, acquisitions = _complete_inputs()
+    ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-08",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload())]),
+        cache_dir=tmp_path / "age",
+        rate_limiter=_NoWait(),
+    )
+    after_window = _FakeSession([_FakeResponse(_segment_payload())])
+    refreshed = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-30",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=after_window,
+        cache_dir=tmp_path / "age",
+        rate_limiter=_NoWait(),
+    )
+    assert len(after_window.calls) == 1
+    assert not refreshed.cache_hit
+
+    prior_revenues = _financial_records([(2020, 60.0), (2021, 70.0), (2022, 85.0), (2023, 100.0), (2024, 120.0)])
+    prior_goodwill = _financial_records([(2020, 0.5), (2021, 1.0), (2022, 1.5), (2023, 2.0), (2024, 3.0)])
+    prior_acquisitions = [_acquisition_row(year) for year in range(2020, 2025)]
+    ge.fetch_growth_evidence(
+        "600519",
+        "2026-04-30",
+        revenue_records=prior_revenues,
+        goodwill_records=prior_goodwill,
+        acquisition_cashflow_records=prior_acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload(years=(2022, 2023, 2024)))]),
+        cache_dir=tmp_path / "cutoff",
+        rate_limiter=_NoWait(),
+    )
+    state = ge.load_growth_evidence_cache_batch_state(
+        [{"code": "600519", "as_of": "2026-05-01"}],
+        cache_dir=tmp_path / "cutoff",
+    )
+    assert state == {}
+
+
+def test_segment_cache_never_reuses_a_future_dated_capture(tmp_path):
+    revenues, goodwill, acquisitions = _complete_inputs()
+    ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-30",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload())]),
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    older_session = _FakeSession([_FakeResponse(_segment_payload())])
+
+    result = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-29",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=older_session,
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+
+    assert len(older_session.calls) == 1
+    assert not result.cache_hit
+
+
+def test_historical_segment_reuse_excludes_failed_and_incomplete_captures(tmp_path):
+    revenues, goodwill, acquisitions = _complete_inputs()
+    incomplete = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-08",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload(years=(2024, 2025)))]),
+        cache_dir=tmp_path / "incomplete",
+        rate_limiter=_NoWait(),
+    )
+    assert incomplete.segment_growth_sources["status"] == "partial"
+    assert (
+        ge.load_growth_evidence_cache_batch_state(
+            [{"code": "600519", "as_of": "2026-07-09"}],
+            cache_dir=tmp_path / "incomplete",
+        )
+        == {}
+    )
+    refresh_session = _FakeSession([_FakeResponse(_segment_payload())])
+    refreshed_segment, cache_hit, diagnostic = ge._fetch_segment_growth_sources(
+        "600519",
+        date.fromisoformat("2026-07-08"),
+        session=refresh_session,
+        cache_dir=tmp_path / "incomplete",
+        rate_limiter=_NoWait(),
+        recent_cache_state={},
+    )
+    assert len(refresh_session.calls) == 1
+    assert refreshed_segment["status"] == "complete"
+    assert not cache_hit
+    assert diagnostic.endswith(";saved")
+
+    failed = ge.fetch_growth_evidence(
+        "600519",
+        "2026-07-08",
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([]),
+        cache_dir=tmp_path / "failed",
+        rate_limiter=_NoWait(),
+    )
+    assert failed.segment_growth_sources["status"] == "unavailable"
+    assert list((tmp_path / "failed").glob("*.json.gz")) == []
+    assert (
+        ge.load_growth_evidence_cache_batch_state(
+            [{"code": "600519", "as_of": "2026-07-09"}],
+            cache_dir=tmp_path / "failed",
+        )
+        == {}
+    )
+
+
 def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch):
     assert ge.MAX_BATCH_COMPANIES >= 5_200
     calls = []
@@ -620,7 +787,7 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
         calls.append((tuple(years), tuple(codes)))
         return pd.DataFrame([_acquisition_row(year, code=code) for code in codes for year in range(2021, 2026)])
 
-    def fake_segment(code, cutoff):
+    def fake_segment(code, cutoff, **_kwargs):
         payload = ge._validate_business_payload(
             _segment_payload(code=code),
             code=code,

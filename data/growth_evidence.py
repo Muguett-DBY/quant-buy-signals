@@ -57,6 +57,7 @@ MIN_SEGMENT_HISTORY_YEARS = 3
 EXTERNAL_HISTORY_YEARS = 5
 MIN_EXTERNAL_HISTORY_YEARS = 5
 CACHE_SCHEMA_VERSION = 1
+SEGMENT_CACHE_REUSE_DAYS = 21
 REQUEST_TIMEOUT = (15, 30)
 REQUEST_ATTEMPTS = 2
 REQUEST_INTERVAL_SECONDS = 0.25
@@ -182,6 +183,11 @@ _EXTERNAL_RECORD_FIELDS = {
     "source_report",
     "source_field",
     "source_url",
+}
+_SEGMENT_CACHE_STATE_FIELDS = {
+    "segment_growth_sources",
+    "source_as_of",
+    "cache_diagnostic",
 }
 
 
@@ -768,6 +774,134 @@ def _segment_cache_path(code: str, as_of: date, cache_dir: Path) -> Path:
     return cache_dir / f"{SEGMENT_MODEL_ID}_{code}_{as_of.strftime('%Y%m%d')}.json.gz"
 
 
+def _segment_cache_index(cache_dir: Path) -> dict[str, list[tuple[date, Path]]]:
+    """Index only canonical segment-cache filenames in one directory pass."""
+
+    pattern = re.compile(rf"^{re.escape(SEGMENT_MODEL_ID)}_(?P<code>[036][0-9]{{5}})_(?P<as_of>[0-9]{{8}})\.json\.gz$")
+    indexed: dict[str, list[tuple[date, Path]]] = {}
+    try:
+        paths = list(cache_dir.iterdir())
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return indexed
+    for path in paths:
+        match = pattern.fullmatch(path.name)
+        if match is None:
+            continue
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        try:
+            source_as_of = datetime.strptime(match.group("as_of"), "%Y%m%d").date()
+        except ValueError:
+            continue
+        indexed.setdefault(match.group("code"), []).append((source_as_of, path))
+    for values in indexed.values():
+        values.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+    return indexed
+
+
+def _load_reusable_segment_cache(
+    code: str,
+    as_of: date,
+    *,
+    cache_dir: Path,
+    cache_index: Mapping[str, Sequence[tuple[date, Path]]] | None = None,
+) -> dict[str, Any] | None:
+    """Revalidate a source capture no more than 21 days old for ``as_of``.
+
+    The cache filename and embedded contract bind the original capture to its
+    historical ``as_of``.  Reuse never rewrites that file under today's date,
+    so repeated rebasing cannot extend the source's 21-day freshness window.
+    Both the original and current cutoffs are validated before the annual raw
+    rows are rebuilt into current-date evidence.
+    """
+
+    indexed = _segment_cache_index(cache_dir) if cache_index is None else cache_index
+    for source_as_of, path in indexed.get(code, ()):
+        age_days = (as_of - source_as_of).days
+        if (
+            age_days < 0
+            or age_days > SEGMENT_CACHE_REUSE_DAYS
+            or _latest_completed_annual_year(source_as_of) != _latest_completed_annual_year(as_of)
+        ):
+            continue
+        cache = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        )
+        loaded = cache.load(allow_expired=True)
+        if not loaded.hit:
+            continue
+        try:
+            payload = loaded.value
+            if not isinstance(payload, Mapping) or set(payload) != {"contract", "records"}:
+                raise GrowthEvidenceError("segment cache payload shape is invalid")
+            if payload.get("contract") != _segment_cache_contract(code, source_as_of):
+                raise GrowthEvidenceError("segment cache contract mismatch")
+            source_records = _validate_cached_segment_records(
+                payload.get("records"),
+                code=code,
+                as_of=source_as_of,
+            )
+            current_records = _validate_cached_segment_records(
+                source_records,
+                code=code,
+                as_of=as_of,
+            )
+            evidence = _build_segment_growth_sources(code, as_of, current_records)
+            _validate_segment_evidence(evidence, code=code, as_of=as_of)
+            if evidence.get("status") != "complete":
+                continue
+        except GrowthEvidenceError:
+            continue
+        return {
+            "segment_growth_sources": evidence,
+            "source_as_of": source_as_of.isoformat(),
+            "cache_diagnostic": ("hit" if source_as_of == as_of else f"reused_source_as_of:{source_as_of.isoformat()}"),
+        }
+    return None
+
+
+def load_growth_evidence_cache_batch_state(
+    requests_: Sequence[Mapping[str, Any]],
+    *,
+    cache_dir: str | Path = SEGMENT_CACHE_DIR,
+) -> dict[str, dict[str, Any]]:
+    """Return safely reusable segment evidence for a deterministic request set."""
+
+    if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
+        raise TypeError("growth-evidence cache requests must be a sequence")
+    if len(requests_) > MAX_BATCH_COMPANIES:
+        raise ValueError("growth-evidence cache batch exceeds the company limit")
+    prepared: list[tuple[str, date]] = []
+    seen: set[str] = set()
+    for request in requests_:
+        if not isinstance(request, Mapping) or "code" not in request or "as_of" not in request:
+            raise ValueError("growth-evidence cache request shape is invalid")
+        code = _normalise_code(request.get("code"))
+        cutoff = _parse_as_of(request.get("as_of"))
+        if code in seen:
+            raise ValueError(f"growth-evidence cache batch contains duplicate code: {code}")
+        seen.add(code)
+        prepared.append((code, cutoff))
+    indexed = _segment_cache_index(Path(cache_dir))
+    result: dict[str, dict[str, Any]] = {}
+    for code, cutoff in sorted(prepared):
+        state = _load_reusable_segment_cache(
+            code,
+            cutoff,
+            cache_dir=Path(cache_dir),
+            cache_index=indexed,
+        )
+        if state is not None:
+            result[code] = state
+    return result
+
+
 def _fetch_segment_growth_sources(
     code: str,
     as_of: date,
@@ -778,6 +912,7 @@ def _fetch_segment_growth_sources(
     use_cache: bool = True,
     timeout: tuple[int, int] = REQUEST_TIMEOUT,
     rate_limiter: Any = _GLOBAL_RATE_LIMITER,
+    recent_cache_state: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], bool, str]:
     if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
         raise ValueError("cache_ttl_seconds must be non-negative")
@@ -793,6 +928,21 @@ def _fetch_segment_growth_sources(
         )
     ):
         raise ValueError("timeout must contain positive connect/read seconds no greater than 60")
+
+    if recent_cache_state is not None:
+        state = recent_cache_state.get(code)
+        if state is not None:
+            if not isinstance(state, Mapping) or set(state) != _SEGMENT_CACHE_STATE_FIELDS:
+                raise GrowthEvidenceError("preloaded segment cache state is invalid")
+            evidence = _validate_segment_evidence(
+                state.get("segment_growth_sources"),
+                code=code,
+                as_of=as_of,
+            )
+            diagnostic = state.get("cache_diagnostic")
+            if not isinstance(diagnostic, str):
+                raise GrowthEvidenceError("preloaded segment cache diagnostic is invalid")
+            return evidence, True, diagnostic
 
     cache: SafeFileCache | None = None
     initial = None
@@ -813,11 +963,26 @@ def _fetch_segment_growth_sources(
                 if payload.get("contract") != _segment_cache_contract(code, as_of):
                     raise GrowthEvidenceError("segment cache contract mismatch")
                 records = _validate_cached_segment_records(payload.get("records"), code=code, as_of=as_of)
-                return _build_segment_growth_sources(code, as_of, records), True, "hit"
+                evidence = _build_segment_growth_sources(code, as_of, records)
+                if recent_cache_state is None or evidence.get("status") == "complete":
+                    return evidence, True, "hit"
+                diagnostic = "incomplete_hit_requires_refresh"
             except GrowthEvidenceError as exc:
                 diagnostic = f"invalid_hit:{_error_label(exc)}"
         else:
             diagnostic = f"miss:{initial.reason}"
+        if recent_cache_state is None:
+            reusable = _load_reusable_segment_cache(
+                code,
+                as_of,
+                cache_dir=Path(cache_dir),
+            )
+            if reusable is not None:
+                return (
+                    dict(reusable["segment_growth_sources"]),
+                    True,
+                    str(reusable["cache_diagnostic"]),
+                )
 
     active_session = requests.Session() if session is requests else session
     owns_session = active_session is not session
@@ -1867,6 +2032,7 @@ def fetch_growth_evidence_batch(
     prepared.sort(key=lambda item: item[0])
     if not prepared:
         return {}
+    cache_state = load_growth_evidence_cache_batch_state(requests_)
 
     acquisition_by_code: dict[str, list[dict[str, Any]]] = {code: [] for code, *_ in prepared}
     acquisition_errors: dict[str, BaseException] = {}
@@ -1900,6 +2066,7 @@ def fetch_growth_evidence_batch(
                 _fetch_segment_growth_sources,
                 code,
                 cutoff,
+                recent_cache_state=cache_state,
             ): (code, cutoff, revenue_records, goodwill_records)
             for code, cutoff, revenue_records, goodwill_records in prepared
         }
@@ -1966,9 +2133,11 @@ __all__ = [
     "GrowthEvidence",
     "GrowthEvidenceError",
     "MODEL_ID",
+    "SEGMENT_CACHE_REUSE_DAYS",
     "SEGMENT_MODEL_ID",
     "build_external_growth_evidence",
     "fetch_growth_evidence",
     "fetch_growth_evidence_batch",
+    "load_growth_evidence_cache_batch_state",
     "validate_growth_evidence_record",
 ]

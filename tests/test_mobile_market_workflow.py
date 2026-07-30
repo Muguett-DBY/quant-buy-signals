@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import re
@@ -160,10 +161,29 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
         pytest.skip("Bash is not installed on this test host")
     release = tmp_path / "ds-dcf-mobile-market-data-release"
     release.mkdir()
-    (release / "manifest.json").write_text('{"schema_version":1}\n', encoding="utf-8")
-    (release / "manifest-generation.sig").write_bytes(b"signature")
-    (release / "catalog-generation.json.gz").write_bytes(b"catalogue")
-    (release / "signals-generation.json.gz").write_bytes(b"signals")
+    generation = "0123456789abcdef"
+    detail_names = [f"company-details-{generation}-{index:02x}.json.gz" for index in range(16)]
+    manifest = {
+        "schema_version": 1,
+        "catalogue": {"filename": f"catalog-{generation}.json.gz"},
+        "company_details": {
+            "schema_version": 2,
+            "record_schema": "company_detail_v2",
+            "partition": {"algorithm": "sha256_code_first_nibble", "shard_count": 16},
+            "root_algorithm": "SHA256_CANONICAL_SHARD_INDEX_V1",
+            "root_sha256": "a" * 64,
+            "shards": [{"id": f"{index:02x}", "filename": name} for index, name in enumerate(detail_names)],
+        },
+    }
+    (release / "manifest.json").write_text(
+        json.dumps(manifest, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    (release / f"manifest-{generation}.sig").write_bytes(b"signature")
+    (release / f"catalog-{generation}.json.gz").write_bytes(b"catalogue")
+    (release / f"signals-{generation}.json.gz").write_bytes(b"signals")
+    for name in detail_names:
+        (release / name).write_bytes(b"detail")
     workflow_script = tmp_path / "prepare-pages.sh"
     workflow_script.write_text(textwrap.dedent(script), encoding="utf-8")
     environment = os.environ.copy()
@@ -182,13 +202,74 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
     index = (pages / "index.html").read_text(encoding="utf-8")
     assert "DS_DCF 移动数据服务" in index
     assert (pages / "mobile-data" / "manifest.json").read_bytes() == (release / "manifest.json").read_bytes()
-    assert sorted(path.relative_to(pages).as_posix() for path in pages.rglob("*") if path.is_file()) == [
+    expected_files = [
         "index.html",
-        "mobile-data/catalog-generation.json.gz",
-        "mobile-data/manifest-generation.sig",
+        f"mobile-data/catalog-{generation}.json.gz",
+        *(f"mobile-data/{name}" for name in detail_names),
+        f"mobile-data/manifest-{generation}.sig",
         "mobile-data/manifest.json",
-        "mobile-data/signals-generation.json.gz",
+        f"mobile-data/signals-{generation}.json.gz",
     ]
+    assert sorted(path.relative_to(pages).as_posix() for path in pages.rglob("*") if path.is_file()) == sorted(
+        expected_files
+    )
+
+
+def test_company_detail_shards_are_part_of_every_signed_publication_boundary():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    jobs = parsed["jobs"]
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+
+    build_steps = jobs["build"]["steps"]
+    build = next(step for step in build_steps if step.get("name") == "Build validated market data")["run"]
+    verify = next(
+        step for step in build_steps if step.get("name") == "Verify the post-close, content-addressed manifest"
+    )["run"]
+    exact = next(step for step in build_steps if step.get("name") == "Verify the exact immutable release bundle")["run"]
+    transferred = next(
+        step for step in jobs["publish"]["steps"] if step.get("name") == "Reverify the transferred release bundle"
+    )["run"]
+    release = next(step for step in jobs["publish"]["steps"] if step.get("id") == "release")["run"]
+    public_verify = next(
+        step
+        for step in jobs["verify_cleanup"]["steps"]
+        if step.get("name") == "Verify the public Pages switch and immutable downloads"
+    )["run"]
+    cleanup = next(
+        step
+        for step in jobs["verify_cleanup"]["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )["run"]
+
+    for script in (build, verify, transferred, release):
+        assert "company_detail_v2" in script
+        assert "sha256_code_first_nibble" in script
+        assert "SHA256_CANONICAL_SHARD_INDEX_V1" in script
+        assert "root_sha256" in script
+        assert "company-details-$generation-" in script or "company-details-$previousGeneration-" in script
+    assert "[IO.Compression.GZipStream]::new" in verify
+    assert "uncompressed_sha256" in verify
+    assert "uncompressed_size" in verify
+    assert "$computedGeneration -cne $generation" in verify
+    assert "catalogue, signals, and company detail root generation" in verify
+    assert "MOBILE_DETAIL_NAMES" in exact
+    assert "MOBILE_DETAIL_NAMES" in transferred
+    assert "Publish-ImmutableAsset $name" in release
+    assert "$previousDetailNames" in release
+    assert "$computedPreviousGeneration -cne $previousGeneration" in release
+    assert "function Receive-ReleaseAssets" in release
+    assert "Receive-ReleaseAssets $previousAssetNames $previousDirectory" in release
+    assert "$arguments += @('--pattern', $name)" in release
+    assert "detail_names=$env:MOBILE_DETAIL_NAMES" in release
+    assert jobs["publish"]["outputs"]["detail_names"] == "${{ steps.release.outputs.detail_names }}"
+    assert jobs["publish"]["timeout-minutes"] == 45
+    assert jobs["verify_cleanup"]["env"]["MOBILE_DETAIL_NAMES"] == "${{ needs.publish.outputs.detail_names }}"
+    assert "$assetNames" in public_verify
+    assert "$detailNames" in public_verify
+    assert "generation-wide passes" in public_verify
+    assert "company-details-[0-9a-f]{16}-[0-9a-f]{2}" in cleanup
+    assert workflow.count('shard_count":16') >= 4
+    assert 'wc -l)" -eq 20' in workflow
 
 
 def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file_set():
@@ -259,7 +340,6 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert parsed["concurrency"] == {
         "group": "mobile-market-data",
         "cancel-in-progress": False,
-        "queue": "max",
     }
     assert jobs["build"]["environment"] == "mobile-production"
     assert jobs["deploy_pages"]["environment"]["name"] == "github-pages"
@@ -511,10 +591,9 @@ def test_pages_action_revisions_and_release_patterns_are_pinned_and_bounded():
     assert verify_cleanup["timeout-minutes"] == 60
     assert "for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++)" in public_verification
     assert "Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)" in public_verification
-    assert (
-        "verification attempt $attempt of $assetVerificationAttempts failed: $lastAssetFailure" in public_verification
-    )
-    assert "could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure" in public_verification
+    assert "verification attempt $attempt of $assetVerificationAttempts failed:" in public_verification
+    assert "$($assetFailures[$name])" in public_verification
+    assert "could not be verified after $assetVerificationAttempts attempts:" in public_verification
     assert "gh release delete-asset $tag $name --repo $env:GH_REPO --yes" in workflow
     assert "manifest\\.json" in workflow
 

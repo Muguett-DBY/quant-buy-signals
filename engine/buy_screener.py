@@ -5701,21 +5701,28 @@ def _type5_history_request_needed(m: Mapping[str, Any], outcome: tuple) -> bool:
 
 
 def _type2_history_request_needed(outcome: tuple) -> bool:
-    """Fetch valuation history only when 2d is the remaining decisive gap."""
+    """Fetch valuation history for every applicable Type 2 result missing 2d.
 
+    Five-year company-specific PE/PB history is a normal Type 2 input, not an
+    optimisation reserved for companies that could immediately cross the
+    trigger threshold.  Restricting the fetch to "decisive" candidates left
+    complete 2a/2b/2c diagnostics paired with a permanently unexplained 2d for
+    hundreds of companies.  Requesting the evidence here fills that factual
+    dimension without changing any score, veto, or trigger boundary.
+    """
     if not isinstance(outcome, tuple) or len(outcome) != 4:
         return False
     _triggered, _total, raw_scores, raw_reasons = outcome
     if not isinstance(raw_scores, Mapping) or not isinstance(raw_reasons, Mapping):
         return False
-    if raw_reasons.get("_status") != STATUS_INSUFFICIENT_EVIDENCE:
+    if raw_reasons.get("_applicable") != "yes":
         return False
-    missing = str(raw_reasons.get("_missing") or "")
-    if "估值" not in missing or any(label in missing for label in ("产业周期", "公司拐点", "市场冷度")):
-        return False
-    upper_scores = dict(raw_scores)
-    upper_scores["2d"] = 10.0
-    return _weighted_total(upper_scores, TYPE_WEIGHTS["type2"]) >= QUALIFY_THRESHOLD
+    missing_dimensions = raw_reasons.get(_DECISION_MISSING_DIMENSIONS_REASON)
+    return (
+        isinstance(missing_dimensions, Sequence)
+        and not isinstance(missing_dimensions, (str, bytes))
+        and "2d" in missing_dimensions
+    )
 
 
 TYPE3_GROWTH_EVIDENCE_MODEL_ID = "type3-growth-evidence-v1"
@@ -5765,27 +5772,27 @@ def _type3_growth_request_needed(
     dimensions; hard N/A/veto/blocked outcomes remain excluded.
     """
 
-    quality_score = _type3_uncapped_partial_score(m, "growth_quality_score")
-    sustainability_score = _type3_uncapped_partial_score(m, "growth_sustainability_score")
-    if quality_score is None or sustainability_score is None:
+    partial_scores = {
+        "growth_quality_score": _type3_uncapped_partial_score(m, "growth_quality_score"),
+        "growth_sustainability_score": _type3_uncapped_partial_score(m, "growth_sustainability_score"),
+    }
+    if all(score is None for score in partial_scores.values()):
         return False
     candidate = dict(m)
     quantitative = m.get("quantitative_evidence")
     if not isinstance(quantitative, Mapping):
         return False
-    for key, score in (
-        # The automatic acquisition adapter is an aggregate proxy, not a
-        # transaction census, so its Patch6 3b score cannot exceed six.
-        ("growth_quality_score", min(quality_score, 6.0)),
-        # Segment history can raise the current capped diagnostic.  Ten is the
-        # safe request upper bound; the loaded evidence later determines the
-        # actual source-count/time-depth band.
-        ("growth_sustainability_score", 10.0),
-    ):
+    for key, partial_score in partial_scores.items():
+        if partial_score is None:
+            continue
         payload = quantitative.get(key)
         evidence = payload.get("evidence") if isinstance(payload, Mapping) else None
         if not isinstance(evidence, Mapping):
             return False
+        # The acquisition adapter is an aggregate proxy rather than a complete
+        # transaction census, so 3b cannot exceed six.  Segment history can
+        # remove the 3d evidence cap; ten is only the safe request upper bound.
+        score = min(partial_score, 6.0) if key == "growth_quality_score" else 10.0
         candidate[key] = score
         candidate[f"{key}_evidence"] = dict(evidence)
         candidate[f"{key}_evidence_level"] = "derived_proxy"
@@ -5863,6 +5870,51 @@ def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
         "revenue_records": revenue_records,
         "goodwill_records": goodwill_records,
     }
+
+
+def _type3_growth_request_priority(
+    m: Mapping[str, Any],
+    outcome: tuple,
+) -> tuple[int, int, float]:
+    """Rank bounded deep-evidence work by its ability to settle Type 3.
+
+    Loading 3b/3d can make the framework conclusive only when no other Type 3
+    dimension is still missing.  Those rows are therefore first.  Within each
+    class, fewer unrelated gaps and the higher evidence-backed upper score
+    take precedence.  The caller adds the canonical code as the stable final
+    tie-breaker.
+    """
+
+    raw_scores: Mapping[str, Any] = {}
+    raw_reasons: Mapping[str, Any] = {}
+    if isinstance(outcome, tuple) and len(outcome) == 4:
+        if isinstance(outcome[2], Mapping):
+            raw_scores = outcome[2]
+        if isinstance(outcome[3], Mapping):
+            raw_reasons = outcome[3]
+    missing = raw_reasons.get(_DECISION_MISSING_DIMENSIONS_REASON)
+    missing_keys = (
+        {str(key) for key in missing}
+        if isinstance(missing, Sequence) and not isinstance(missing, (str, bytes))
+        else set()
+    )
+    unrelated_missing = missing_keys - {"3b", "3d"}
+    upper_scores: dict[str, float] = {}
+    for key in TYPE_WEIGHTS["type3"]:
+        score = _safe_float(raw_scores.get(key))
+        upper_scores[key] = score if score is not None else 0.0
+    quality = _type3_uncapped_partial_score(m, "growth_quality_score")
+    sustainability = _type3_uncapped_partial_score(m, "growth_sustainability_score")
+    if quality is not None:
+        upper_scores["3b"] = min(quality, 6.0)
+    if sustainability is not None:
+        upper_scores["3d"] = min(sustainability, 10.0)
+    upper_total = _weighted_total(upper_scores, TYPE_WEIGHTS["type3"])
+    return (
+        0 if not unrelated_missing else 1,
+        len(unrelated_missing),
+        -upper_total,
+    )
 
 
 def _type3_growth_components_from_evidence(
@@ -6528,6 +6580,28 @@ def _load_research_report_batches(
         duplicate = sorted(set(loaded_batches).intersection(normalized_batch))
         if duplicate:
             raise ValueError(f"优质股权研报元数据加载结果重复代码:{duplicate[:5]}")
+        loaded_batches.update(normalized_batch)
+    return loaded_batches
+
+
+def _load_quality_history_batches(
+    loader,
+    requests: Sequence[Mapping[str, str]],
+    *,
+    progress_cb=None,
+) -> dict[str, Any]:
+    """Load every history request without exceeding the 2,000-company contract."""
+
+    loaded_batches: dict[str, Any] = {}
+    for start in range(0, len(requests), 2_000):
+        batch = list(requests[start : start + 2_000])
+        loaded = loader(batch, progress_cb=progress_cb)
+        if not isinstance(loaded, Mapping):
+            raise TypeError("长期市场历史加载器必须返回代码映射")
+        normalized_batch = _canonicalize_mapping(loaded, "长期市场历史加载结果")
+        duplicate = sorted(set(loaded_batches).intersection(normalized_batch))
+        if duplicate:
+            raise ValueError(f"长期市场历史加载结果重复代码:{duplicate[:5]}")
         loaded_batches.update(normalized_batch)
     return loaded_batches
 
@@ -7441,6 +7515,7 @@ def screen_all_types(
     preliminary_type7_by_code: dict[str, tuple[tuple, Mapping[str, Any]]] = {}
     type7_valuation_evidence_by_code: dict[str, bool] = {}
     type3_growth_request_by_code: dict[str, dict[str, Any]] = {}
+    type3_growth_priority_by_code: dict[str, tuple[int, int, float]] = {}
     research_request_by_code: dict[str, dict[str, str]] = {}
     patch4_request_by_code: dict[str, dict[str, str]] = {}
     metric_by_code = {str(metric["code"]): metric for metric in scored_metrics}
@@ -7493,7 +7568,15 @@ def screen_all_types(
             growth_request = _type3_growth_request(m)
             if growth_request is not None:
                 type3_growth_request_by_code[code] = growth_request
-    type3_growth_requests = [type3_growth_request_by_code[code] for code in sorted(type3_growth_request_by_code)]
+                type3_growth_priority_by_code[code] = _type3_growth_request_priority(
+                    m,
+                    base_outcomes["type3"],
+                )
+    ordered_type3_growth_codes = sorted(
+        type3_growth_request_by_code,
+        key=lambda code: (*type3_growth_priority_by_code[code], code),
+    )
+    type3_growth_requests = [type3_growth_request_by_code[code] for code in ordered_type3_growth_codes]
     if type3_growth_loader is not None and type3_growth_requests:
         loaded = type3_growth_loader(type3_growth_requests, progress_cb=type3_growth_progress_cb)
         if not isinstance(loaded, Mapping):
@@ -7503,9 +7586,11 @@ def screen_all_types(
         unexpected = sorted(set(normalized_loaded) - requested_codes)
         if unexpected:
             raise ValueError(f"可持续增长加载结果包含未请求代码:{unexpected[:5]}")
-        missing = sorted(requested_codes - set(normalized_loaded))
-        if missing:
-            raise ValueError(f"可持续增长加载结果遗漏请求代码:{missing[:5]}")
+        # A bounded publication loader may intentionally return only its
+        # highest-priority daily tranche.  Unreturned rows keep their
+        # preliminary evidence-insufficient result and remain visible for
+        # later backfill; silently manufacturing an unavailable record here
+        # would make a budget decision look like source evidence.
         for code, evidence in normalized_loaded.items():
             metric = metric_by_code[code]
             as_of = str(metric.get("source_trade_date") or "")
@@ -7576,22 +7661,25 @@ def screen_all_types(
         _preliminary_outcome, preliminary_ledger = preliminary_type7_by_code[code]
         as_of = str(m.get("source_trade_date") or "")
         if (
-            (
-                preliminary_ledger.get("history_request_needed") is True
-                or _type5_history_request_needed(m, base_outcomes_by_code[code]["type5"])
-                or _type2_history_request_needed(base_outcomes_by_code[code]["type2"])
-            )
-            and code not in normalized_quality_history
-            and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of)
-        ):
+            preliminary_ledger.get("history_request_needed") is True
+            or _type5_history_request_needed(m, base_outcomes_by_code[code]["type5"])
+            or _type2_history_request_needed(base_outcomes_by_code[code]["type2"])
+        ) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of):
+            # Presence of a cache record is not proof that both independent
+            # components are usable.  A partial capture may legitimately fill
+            # Type 2 valuation while still lacking Type 7 shareholder return,
+            # or vice versa.  The component-aware loader decides whether the
+            # bounded retry is due and otherwise returns the cached record
+            # without network I/O.
             history_request_by_code[code] = {"code": code, "as_of": as_of}
     history_requests = [history_request_by_code[code] for code in sorted(history_request_by_code)]
     newly_loaded_history_codes: set[str] = set()
     if quality_history_loader is not None and history_requests:
-        loaded = quality_history_loader(history_requests, progress_cb=quality_history_progress_cb)
-        if not isinstance(loaded, Mapping):
-            raise TypeError("长期市场历史证据加载器必须返回代码映射")
-        normalized_loaded = _canonicalize_mapping(loaded, "长期市场历史加载结果")
+        normalized_loaded = _load_quality_history_batches(
+            quality_history_loader,
+            history_requests,
+            progress_cb=quality_history_progress_cb,
+        )
         requested_codes = {request["code"] for request in history_requests}
         unexpected = sorted(set(normalized_loaded) - requested_codes)
         if unexpected:

@@ -11,9 +11,14 @@
 const SOURCE_MANIFEST = "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json";
 const SOURCE_ASSET_BASE = "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/";
 const HEX64 = /^[0-9a-f]{64}$/;
+const MAX_MANIFEST_BYTES = 1_000_000;
+const MAX_DETAIL_COMPRESSED_TOTAL = 32_000_000;
+const MAX_DETAIL_UNCOMPRESSED_TOTAL = 96_000_000;
+const DETAIL_DOWNLOAD_BATCH_SIZE = 4;
 const ASSET_NAMES = {
   catalogue: /^catalog-[0-9a-f]{16}\.json\.gz$/,
   signals: /^signals-[0-9a-f]{16}\.json\.gz$/,
+  company_detail: /^company-details-[0-9a-f]{16}-[0-9a-f]{2}\.json\.gz$/,
   signature: /^manifest-[0-9a-f]{16}\.sig$/,
 };
 
@@ -29,6 +34,33 @@ async function sha256(bytes) {
   return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2, "0")).join("");
 }
 
+async function readBoundedStream(stream, maxBytes, label) {
+  if (!stream || !Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error(`${label} stream limit is invalid`);
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      total += chunk.byteLength;
+      if (total > maxBytes) throw new Error(`${label} exceeds its byte limit`);
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    try { await reader.cancel(error); } catch { /* best-effort cancellation */ }
+    throw error;
+  }
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output.buffer;
+}
+
 async function downloadAsset(name, kind, metadata = {}) {
   if (!ASSET_NAMES[kind]?.test(name)) throw new Error(`invalid ${kind} filename`);
   if (kind !== "signature" && (!Number.isSafeInteger(metadata.size) || metadata.size <= 0 || metadata.size > 16_000_000)) {
@@ -38,8 +70,13 @@ async function downloadAsset(name, kind, metadata = {}) {
   const response = await fetch(`${SOURCE_ASSET_BASE}${encodeURIComponent(name)}?mirror=${Date.now()}`, {
     cf: { cacheTtl: 0, cacheEverything: false },
   });
-  if (!response.ok) throw new Error(`${metadata.kind} download HTTP ${response.status}`);
-  const bytes = await response.arrayBuffer();
+  if (!response.ok) throw new Error(`${kind} download HTTP ${response.status}`);
+  const maxBytes = kind === "signature" ? 128 : metadata.size;
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (declaredLength > maxBytes || (kind !== "signature" && declaredLength > 0 && declaredLength !== metadata.size)) {
+    throw new Error(`${kind} response length mismatch`);
+  }
+  const bytes = await readBoundedStream(response.body, maxBytes, `${kind} response`);
   if (kind !== "signature") {
     if (bytes.byteLength !== metadata.size) throw new Error(`${kind} size mismatch`);
     const digest = await sha256(bytes);
@@ -89,27 +126,185 @@ function derToP1363(value) {
   const output = new Uint8Array(64); output.set(r); output.set(s, 32); return output;
 }
 
-async function verifyManifestSignature(manifestText, signatureBytes) {
+async function verifyManifestSignature(manifestBytes, signatureBytes) {
   const keyBytes = base64Bytes("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExQ3XrBYfIsZilmdQvnTqIcqo7mCPhRTOnntpt/hqA+mCkHaHRGhjEyd3ek5XNRyjhadmMl364s8MBOjAySPENg==");
   const key = await crypto.subtle.importKey("spki", keyBytes, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
-  const valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, derToP1363(signatureBytes), new TextEncoder().encode(manifestText));
+  const valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, derToP1363(signatureBytes), manifestBytes);
   if (!valid) throw new Error("manifest signature verification failed");
 }
 
-function generationFromNames(catalogue, signals, signature) {
+function companyDetailAssets(manifest, generationId) {
+  const details = manifest?.company_details;
+  if (!details) return null;
+  const partition = details?.partition;
+  const shards = details?.shards;
+  if (
+    details?.schema_version !== 2
+    || details?.record_schema !== "company_detail_v2"
+    || !Number.isSafeInteger(details?.company_count)
+    || details.company_count < 1
+    || partition?.algorithm !== "sha256_code_first_nibble"
+    || partition?.shard_count !== 16
+    || details?.root_algorithm !== "SHA256_CANONICAL_SHARD_INDEX_V1"
+    || !HEX64.test(String(details?.root_sha256 || ""))
+    || !Array.isArray(shards)
+    || shards.length !== 16
+  ) {
+    throw new Error("invalid company detail contract");
+  }
+  const expectedIds = Array.from({ length: 16 }, (_, index) => index.toString(16).padStart(2, "0"));
+  let companyCount = 0;
+  let compressedTotal = 0;
+  let uncompressedTotal = 0;
+  const assets = shards.map((metadata, index) => {
+    const id = String(metadata?.id || "");
+    const filename = String(metadata?.filename || "");
+    if (
+      id !== expectedIds[index]
+      || filename !== `company-details-${generationId}-${id}.json.gz`
+      || !ASSET_NAMES.company_detail.test(filename)
+      || !Number.isSafeInteger(metadata?.company_count)
+      || metadata.company_count < 0
+      || !HEX64.test(String(metadata?.sha256 || ""))
+      || !HEX64.test(String(metadata?.uncompressed_sha256 || ""))
+      || !Number.isSafeInteger(metadata?.size)
+      || metadata.size < 1
+      || metadata.size > 16_000_000
+      || !Number.isSafeInteger(metadata?.uncompressed_size)
+      || metadata.uncompressed_size < 1
+      || metadata.uncompressed_size > 64_000_000
+    ) {
+      throw new Error(`invalid company detail shard ${id || index}`);
+    }
+    companyCount += metadata.company_count;
+    compressedTotal += metadata.size;
+    uncompressedTotal += metadata.uncompressed_size;
+    return { ...metadata, id, filename };
+  });
+  if (
+    companyCount !== details.company_count
+    || companyCount !== Number(manifest?.summary?.company_count || 0)
+    || compressedTotal > MAX_DETAIL_COMPRESSED_TOTAL
+    || uncompressedTotal > MAX_DETAIL_UNCOMPRESSED_TOTAL
+  ) {
+    throw new Error("company detail coverage mismatch");
+  }
+  return assets;
+}
+
+function generationFromNames(catalogue, signals, signature, detailAssets = []) {
   const c = /^catalog-([0-9a-f]{16})\.json\.gz$/.exec(catalogue);
   const s = /^signals-([0-9a-f]{16})\.json\.gz$/.exec(signals);
   const g = /^manifest-([0-9a-f]{16})\.sig$/.exec(signature);
   if (!c || !s || !g || c[1] !== s[1] || c[1] !== g[1]) {
     throw new Error("manifest assets are not one generation");
   }
+  for (const asset of detailAssets) {
+    const match = /^company-details-([0-9a-f]{16})-[0-9a-f]{2}\.json\.gz$/.exec(asset.filename);
+    if (!match || match[1] !== c[1]) throw new Error("company detail assets are not one generation");
+  }
   return c[1];
+}
+
+async function downloadDetailAssets(assets) {
+  const results = [];
+  for (let start = 0; start < assets.length; start += DETAIL_DOWNLOAD_BATCH_SIZE) {
+    const batch = assets.slice(start, start + DETAIL_DOWNLOAD_BATCH_SIZE);
+    results.push(...await Promise.all(
+      batch.map((metadata) => downloadAsset(metadata.filename, "company_detail", metadata)),
+    ));
+  }
+  return results;
+}
+
+async function gunzip(bytes, maxBytes) {
+  const body = new Response(bytes).body;
+  if (!body) throw new Error("company detail compressed stream is unavailable");
+  return await readBoundedStream(
+    body.pipeThrough(new DecompressionStream("gzip")),
+    maxBytes,
+    "company detail uncompressed response",
+  );
+}
+
+async function detailShardId(code) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+  return ((new Uint8Array(digest)[0] >> 4).toString(16)).padStart(2, "0");
+}
+
+async function verifyCompanyDetailPayloads(manifest, assets, compressedAssets) {
+  if (!assets.length) return;
+  if (compressedAssets.length !== assets.length) throw new Error("company detail download coverage mismatch");
+  const seenCodes = new Set();
+  for (let index = 0; index < assets.length; index += 1) {
+    const metadata = assets[index];
+    const raw = await gunzip(compressedAssets[index], metadata.uncompressed_size);
+    if (raw.byteLength !== metadata.uncompressed_size) throw new Error(`company detail shard ${metadata.id} uncompressed size mismatch`);
+    if (await sha256(raw) !== metadata.uncompressed_sha256) throw new Error(`company detail shard ${metadata.id} uncompressed checksum mismatch`);
+    let payload;
+    try {
+      payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+    } catch {
+      throw new Error(`company detail shard ${metadata.id} JSON is invalid`);
+    }
+    const companies = payload?.companies;
+    if (
+      payload?.schema_version !== 2
+      || payload?.record_schema !== "company_detail_v2"
+      || payload?.product !== "DS_DCF"
+      || payload?.generated_at_utc !== manifest.generated_at_utc
+      || payload?.market_as_of !== manifest.market_as_of
+      || payload?.data_timestamp_utc !== manifest.data_timestamp_utc
+      || payload?.shard_id !== metadata.id
+      || !Array.isArray(companies)
+      || payload?.company_count !== companies.length
+      || companies.length !== metadata.company_count
+    ) {
+      throw new Error(`company detail shard ${metadata.id} payload contract mismatch`);
+    }
+    const assignments = await Promise.all(companies.map(async (company) => {
+      const code = String(company?.code || "");
+      if (
+        company?.schema_version !== 2
+        || !/^[036][0-9]{5}$/.test(code)
+        || !company?.types
+        || typeof company.types !== "object"
+        || Object.keys(company.types).sort().join(",") !== "type1,type2,type3,type4,type5,type6,type7"
+      ) {
+        throw new Error(`company detail shard ${metadata.id} contains an invalid company`);
+      }
+      return [code, await detailShardId(code)];
+    }));
+    for (const [code, assignedShard] of assignments) {
+      if (assignedShard !== metadata.id) throw new Error(`company ${code} is assigned to the wrong detail shard`);
+      if (seenCodes.has(code)) throw new Error(`company detail code ${code} is duplicated`);
+      seenCodes.add(code);
+    }
+  }
+  const details = manifest.company_details;
+  const rootContract = {
+    partition: { algorithm: "sha256_code_first_nibble", shard_count: 16 },
+    record_schema: "company_detail_v2",
+    schema_version: 2,
+    shards: assets.map((metadata) => ({
+      company_count: metadata.company_count,
+      id: metadata.id,
+      uncompressed_sha256: metadata.uncompressed_sha256,
+    })),
+  };
+  const rootHash = await sha256(new TextEncoder().encode(JSON.stringify(rootContract)));
+  if (rootHash !== details.root_sha256 || seenCodes.size !== details.company_count) {
+    throw new Error("company detail canonical root or unique company coverage mismatch");
+  }
 }
 
 async function refresh(env) {
   const response = await fetch(`${SOURCE_MANIFEST}?mirror=${Date.now()}`, { cf: { cacheTtl: 0, cacheEverything: false } });
   if (!response.ok) throw new Error(`manifest download HTTP ${response.status}`);
-  const manifestText = await response.text();
+  const declaredManifestLength = Number(response.headers.get("content-length") || 0);
+  if (declaredManifestLength > MAX_MANIFEST_BYTES) throw new Error("manifest is too large");
+  const sourceManifestBytes = await readBoundedStream(response.body, MAX_MANIFEST_BYTES, "manifest response");
+  const manifestText = new TextDecoder("utf-8", { fatal: true }).decode(sourceManifestBytes);
   const manifest = JSON.parse(manifestText);
   if (manifest.product !== "DS_DCF" || manifest.schema_version !== 1 || manifest.analysis_quality?.ok !== true) {
     throw new Error("manifest quality contract failed");
@@ -117,32 +312,49 @@ async function refresh(env) {
   const catalogueName = String(manifest.catalogue?.filename || "");
   const signalsName = String(manifest.signals?.filename || "");
   const signatureName = String(manifest.signature?.filename || "");
-  const generationId = generationFromNames(catalogueName, signalsName, signatureName);
-  const [catalogueBytes, signalsBytes, signatureBytes] = await Promise.all([
+  const preliminaryGeneration = generationFromNames(catalogueName, signalsName, signatureName);
+  const signatureBytes = await downloadAsset(signatureName, "signature");
+  await verifyManifestSignature(sourceManifestBytes, signatureBytes);
+  const detailAssets = companyDetailAssets(manifest, preliminaryGeneration) || [];
+  const generationId = generationFromNames(catalogueName, signalsName, signatureName, detailAssets);
+  const [catalogueBytes, signalsBytes] = await Promise.all([
     downloadAsset(catalogueName, "catalogue", manifest.catalogue),
     downloadAsset(signalsName, "signals", manifest.signals),
-    downloadAsset(signatureName, "signature"),
   ]);
-  await verifyManifestSignature(manifestText, signatureBytes);
+  const detailBytes = await downloadDetailAssets(detailAssets);
+  await verifyCompanyDetailPayloads(manifest, detailAssets, detailBytes);
   const now = new Date().toISOString();
-  const manifestBytes = new TextEncoder().encode(manifestText);
+  const manifestBytes = sourceManifestBytes;
   const manifestHash = await sha256(manifestBytes);
   const prefix = `generations/${generationId}`;
   const objects = [
-    ["manifest.json", manifestText, "application/json; charset=utf-8", null, manifestBytes.byteLength],
-    [catalogueName, catalogueBytes, "application/json", "gzip", catalogueBytes.byteLength],
-    [signalsName, signalsBytes, "application/json", "gzip", signalsBytes.byteLength],
-    [signatureName, signatureBytes, "application/octet-stream", null, signatureBytes.byteLength],
+    ["manifest.json", manifestBytes, "application/json; charset=utf-8", null, manifestBytes.byteLength, manifestHash],
+    [catalogueName, catalogueBytes, "application/json", "gzip", catalogueBytes.byteLength, manifest.catalogue.sha256],
+    [signalsName, signalsBytes, "application/json", "gzip", signalsBytes.byteLength, manifest.signals.sha256],
+    ...detailAssets.map((metadata, index) => [
+      metadata.filename,
+      detailBytes[index],
+      "application/json",
+      "gzip",
+      detailBytes[index].byteLength,
+      metadata.sha256,
+    ]),
+    [signatureName, signatureBytes, "application/octet-stream", null, signatureBytes.byteLength, await sha256(signatureBytes)],
   ];
   const previous = await env.DB.prepare("SELECT generation_id FROM current_generation WHERE singleton = 1").first();
   if (previous?.generation_id === generationId) {
     let repaired = false;
-    for (const [name, body, contentType, contentEncoding, expectedSize] of objects) {
+    for (const [name, body, contentType, contentEncoding, expectedSize, expectedHash] of objects) {
       const key = `${prefix}/${name}`;
       const existing = await env.DATA_BUCKET.head(key);
-      if (!existing || existing.size !== expectedSize) {
+      if (
+        !existing
+        || existing.size !== expectedSize
+        || String(existing.customMetadata?.sha256 || "").toLowerCase() !== String(expectedHash).toLowerCase()
+      ) {
         await env.DATA_BUCKET.put(key, body, {
           httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
+          customMetadata: { sha256: String(expectedHash).toLowerCase() },
         });
         repaired = true;
       }
@@ -151,18 +363,15 @@ async function refresh(env) {
     return { status: repaired ? "repaired" : "unchanged", generation_id: generationId, market_as_of: manifest.market_as_of };
   }
 
-  for (const [name, body, contentType, contentEncoding] of objects) {
-    await env.DATA_BUCKET.put(`${prefix}/${name}`, body, { httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) } });
+  for (const [name, body, contentType, contentEncoding, _expectedSize, expectedHash] of objects) {
+    await env.DATA_BUCKET.put(`${prefix}/${name}`, body, {
+      httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
+      customMetadata: { sha256: String(expectedHash).toLowerCase() },
+    });
   }
   const summary = manifest.summary || {};
   const sourceCommit = String(manifest.provenance?.source_commit || "");
-  await env.DB.prepare(
-    `INSERT INTO generations
-      (generation_id, market_as_of, data_timestamp_utc, generated_at_utc, manifest_sha256,
-       company_count, triggered_company_count, conditional_company_count, pending_company_count,
-       source_commit, created_at, last_checked_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
+  const generationValues = [
     generationId,
     String(manifest.market_as_of || ""),
     String(manifest.data_timestamp_utc || ""),
@@ -175,10 +384,57 @@ async function refresh(env) {
     sourceCommit,
     now,
     now,
-  ).run();
-  await env.DB.prepare(
-    "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET generation_id = excluded.generation_id, updated_at = excluded.updated_at"
-  ).bind(generationId, now).run();
+  ];
+  const generationStatement = env.DB.prepare(
+    `INSERT INTO generations
+      (generation_id, market_as_of, data_timestamp_utc, generated_at_utc, manifest_sha256,
+       company_count, triggered_company_count, conditional_company_count, pending_company_count,
+       source_commit, created_at, last_checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(generation_id) DO UPDATE SET last_checked_at = excluded.last_checked_at
+     WHERE generations.market_as_of = excluded.market_as_of
+       AND generations.data_timestamp_utc = excluded.data_timestamp_utc
+       AND generations.generated_at_utc = excluded.generated_at_utc
+       AND generations.manifest_sha256 = excluded.manifest_sha256
+       AND generations.company_count = excluded.company_count
+       AND generations.triggered_company_count = excluded.triggered_company_count
+       AND generations.conditional_company_count = excluded.conditional_company_count
+       AND generations.pending_company_count = excluded.pending_company_count
+       AND generations.source_commit = excluded.source_commit`
+  ).bind(...generationValues);
+  const pointerStatement = env.DB.prepare(
+    `INSERT INTO current_generation(singleton, generation_id, updated_at)
+     SELECT 1, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM generations
+       WHERE generation_id = ?
+         AND market_as_of = ?
+         AND data_timestamp_utc = ?
+         AND generated_at_utc = ?
+         AND manifest_sha256 = ?
+         AND company_count = ?
+         AND triggered_company_count = ?
+         AND conditional_company_count = ?
+         AND pending_company_count = ?
+         AND source_commit = ?
+     )
+     ON CONFLICT(singleton) DO UPDATE SET
+       generation_id = excluded.generation_id,
+       updated_at = excluded.updated_at`
+  ).bind(
+    generationId,
+    now,
+    ...generationValues.slice(0, 10),
+  );
+  const [generationResult, pointerResult] = await env.DB.batch([generationStatement, pointerStatement]);
+  if (
+    generationResult?.success !== true
+    || pointerResult?.success !== true
+    || Number(generationResult?.meta?.changes || 0) !== 1
+    || Number(pointerResult?.meta?.changes || 0) !== 1
+  ) {
+    throw new Error("generation database transaction did not commit one consistent pointer");
+  }
   return { status: "updated", generation_id: generationId, market_as_of: manifest.market_as_of, company_count: Number(summary.company_count || 0) };
 }
 

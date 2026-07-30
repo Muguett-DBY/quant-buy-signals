@@ -197,6 +197,28 @@ def test_mobile_source_commit_rejects_an_invalid_github_revision(monkeypatch):
         publisher._source_commit()
 
 
+def test_mobile_publisher_rejects_an_incomplete_company_detail_manifest():
+    generation = "a" * 16
+    manifest = {
+        "catalogue": {"filename": f"catalog-{generation}.json.gz"},
+        "company_details": {
+            "schema_version": publisher.COMPANY_DETAIL_SCHEMA_VERSION,
+            "record_schema": "company_detail_v2",
+            "company_count": 1,
+            "partition": {
+                "algorithm": "sha256_code_first_nibble",
+                "shard_count": publisher.COMPANY_DETAIL_SHARD_COUNT,
+            },
+            "root_algorithm": "SHA256_CANONICAL_SHARD_INDEX_V1",
+            "root_sha256": "b" * 64,
+            "shards": [],
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="invalid company detail contract"):
+        publisher._require_company_detail_manifest(manifest, 1)
+
+
 def test_mobile_source_commit_rejects_a_dirty_local_worktree(monkeypatch):
     monkeypatch.delenv("GITHUB_SHA", raising=False)
     monkeypatch.setattr(publisher.shutil, "which", lambda _name: "git")
@@ -240,8 +262,11 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
     codes = [f"{index:06d}" for index in range(1, 1_206)]
     monkeypatch.setattr(
         publisher,
-        "load_quality_history_cache_batch",
-        lambda requests: {request["code"]: {"available": True, "code": request["code"]} for request in requests[:5]},
+        "load_quality_history_cache_batch_state",
+        lambda requests: (
+            {request["code"]: {"available": True, "code": request["code"]} for request in requests[:5]},
+            (),
+        ),
     )
     captured = []
 
@@ -268,7 +293,7 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
 
 def test_quality_history_backfill_prioritises_large_companies_before_code_order(monkeypatch):
     codes = [f"{index:06d}" for index in range(1, 1_206)]
-    monkeypatch.setattr(publisher, "load_quality_history_cache_batch", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_quality_history_cache_batch_state", lambda _requests: ({}, ()))
     captured = []
 
     def fetch(requests):
@@ -305,6 +330,90 @@ def test_quality_history_priority_codes_rank_positive_market_caps_stably():
         quotes,
         ["000001", "000002", "000003", "600519"],
     ) == ("600519", "000001", "000002")
+
+
+def test_quality_history_decision_loader_has_one_cumulative_network_budget(monkeypatch):
+    captured = []
+    progress = object()
+
+    def fetch(requests, *, progress_cb=None):
+        captured.append((list(requests), progress_cb))
+        return {request["code"]: {"available": True} for request in requests}
+
+    monkeypatch.setattr(publisher, "fetch_quality_history_batch", fetch)
+    monkeypatch.setattr(publisher, "load_quality_history_cache_batch_state", lambda _requests: ({}, ()))
+    loader = publisher._bounded_quality_history_loader(limit=3)
+    first = [{"code": f"{index:06d}", "as_of": "2026-07-29"} for index in range(2)]
+    second = [{"code": f"{index:06d}", "as_of": "2026-07-29"} for index in range(2, 6)]
+
+    assert set(loader(first, progress_cb=progress)) == {"000000", "000001"}
+    assert set(loader(second, progress_cb=progress)) == {"000002"}
+    assert loader(second, progress_cb=progress) == {}
+    assert captured == [(first, progress), (second[:1], progress)]
+
+
+def test_quality_history_backfill_and_decision_budget_only_refresh_due_or_missing_records(monkeypatch):
+    requests = [
+        {"code": "000001", "as_of": "2026-07-29"},
+        {"code": "000002", "as_of": "2026-07-29"},
+        {"code": "000003", "as_of": "2026-07-29"},
+    ]
+    cached = {
+        "000001": {"available": False, "code": "000001"},
+        "000002": {"available": False, "code": "000002"},
+    }
+    monkeypatch.setattr(
+        publisher,
+        "load_quality_history_cache_batch_state",
+        lambda _requests: (cached, ("000002",)),
+    )
+    captured = []
+
+    def fetch(selected, *, progress_cb=None):
+        captured.extend(selected)
+        return {request["code"]: {"available": True, "code": request["code"]} for request in selected}
+
+    monkeypatch.setattr(publisher, "fetch_quality_history_batch", fetch)
+    loader = publisher._bounded_quality_history_loader(limit=2)
+    loaded = loader(requests)
+
+    assert captured == requests[1:]
+    assert set(loaded) == {"000001", "000002", "000003"}
+    assert loaded["000001"]["available"] is False
+    assert loaded["000002"]["available"] is True
+    assert loaded["000003"]["available"] is True
+
+
+def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free(monkeypatch):
+    calls = []
+    progress = object()
+
+    def cache_state(requests):
+        return {
+            request["code"]: {"segment_growth_sources": {}, "source_as_of": request["as_of"]}
+            for request in requests
+            if request["code"] == "000002"
+        }
+
+    def fetch(requests, *, progress_cb=None):
+        calls.append((list(requests), progress_cb))
+        return {request["code"]: {"available": True} for request in requests}
+
+    monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", cache_state)
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    loader = publisher._bounded_type3_growth_loader(limit=2)
+    first = [{"code": code, "as_of": "2026-07-29"} for code in ("000003", "000001", "000002", "000004")]
+    second = [{"code": "000005", "as_of": "2026-07-29"}]
+
+    assert set(loader(first, progress_cb=progress)) == {"000001", "000002", "000003"}
+    assert loader(second, progress_cb=progress) == {}
+    assert calls == [(first[:3], progress)]
+
+
+@pytest.mark.parametrize("limit", [True, -1])
+def test_type3_growth_loader_rejects_invalid_budget(limit):
+    with pytest.raises(ValueError, match="non-negative integer"):
+        publisher._bounded_type3_growth_loader(limit=limit)
 
 
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path):
@@ -346,6 +455,10 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert (tmp_path / "manifest.json").is_file()
     assert (tmp_path / manifest["catalogue"]["filename"]).is_file()
     assert (tmp_path / manifest["signals"]["filename"]).is_file()
+    assert manifest["company_details"]["schema_version"] == publisher.COMPANY_DETAIL_SCHEMA_VERSION
+    assert manifest["company_details"]["company_count"] == 1
+    assert len(manifest["company_details"]["shards"]) == publisher.COMPANY_DETAIL_SHARD_COUNT
+    assert all((tmp_path / shard["filename"]).is_file() for shard in manifest["company_details"]["shards"])
     assert manifest["provenance"]["snapshot_source"] == "cache"
     assert manifest["provenance"]["source_commit"] == "a" * 40
     assert manifest["provenance"]["screening_coverage"]["publication_readiness"]["artifact_integrity_ready"] is True

@@ -6,11 +6,14 @@ import math
 
 import pytest
 
+from data.cache import SafeFileCache
 from data.market_history import TencentWeeklyHistoryAdapter, WeeklyClose
 from data.quality_history import (
+    PARTIAL_STRUCTURAL_RETRY_DAYS,
     fetch_quality_history,
     fetch_quality_history_batch,
     load_quality_history_cache_batch,
+    load_quality_history_cache_batch_state,
     replay_valuation_distribution,
 )
 
@@ -310,6 +313,165 @@ def test_quality_history_reuse_slides_valuation_window_without_rejecting_older_r
     assert reused.valuation_history["start_date"] >= "2021-07-28"
     assert reused.valuation_history["pe_observations"] >= 500
     assert reused.valuation_history["pb_observations"] >= 500
+
+
+def test_quality_history_caches_and_reuses_partial_source_components(tmp_path):
+    short_shareholder_history = _weekly_bars()[-100:]
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(short_shareholder_history),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+
+    assert not first.available
+    assert first.shareholder_return["available"] is False
+    assert first.valuation_history["available"] is True
+    assert first.cache_diagnostic.endswith("saved_partial")
+
+    class _NoNetwork:
+        def fetch_weekly_closes(self, *_args, **_kwargs):
+            raise AssertionError("partial source capture unexpectedly performed network I/O")
+
+    reused = fetch_quality_history(
+        "600519",
+        "2026-07-18",
+        weekly_adapter=_NoNetwork(),
+        cache_dir=tmp_path,
+    )
+
+    assert not reused.available
+    assert reused.cache_hit
+    assert reused.valuation_history["available"] is True
+    assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
+
+
+def test_quality_history_reuses_legacy_complete_cache_without_component_dates(tmp_path):
+    saved = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+    assert saved.available
+
+    cache_path = next(tmp_path.glob("*.json.gz"))
+    cache = SafeFileCache(cache_path, schema_version=1)
+    current = cache.load()
+    assert current.hit
+    legacy_payload = dict(current.value)
+    legacy_payload.pop("component_checked_as_of")
+    cache.save(legacy_payload)
+
+    class _NoNetwork:
+        def fetch_weekly_closes(self, *_args, **_kwargs):
+            raise AssertionError("legacy complete cache unexpectedly performed network I/O")
+
+    reused = fetch_quality_history(
+        "600519",
+        "2026-07-18",
+        weekly_adapter=_NoNetwork(),
+        cache_dir=tmp_path,
+    )
+
+    assert reused.available
+    assert reused.cache_hit
+    assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
+
+
+def test_partial_cache_retries_only_the_due_structural_component_and_merges_it(tmp_path):
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()[-100:]),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+    )
+    assert not first.available
+    request_date = date(2026, 7, 17) + timedelta(days=PARTIAL_STRUCTURAL_RETRY_DAYS)
+    requests = [{"code": "600519", "as_of": request_date.isoformat()}]
+    cached, due = load_quality_history_cache_batch_state(requests, cache_dir=tmp_path)
+    assert cached["600519"]["valuation_history"]["available"] is True
+    assert due == ("600519",)
+
+    weekly = _WeeklyAdapter(_weekly_bars(as_of=request_date))
+    valuation = _Session(_Response(_valuation_payload(as_of=request_date)))
+    refreshed = fetch_quality_history(
+        "600519",
+        request_date,
+        weekly_adapter=weekly,
+        valuation_session=valuation,
+        cache_dir=tmp_path,
+    )
+
+    assert refreshed.available
+    assert len(weekly.calls) == 1
+    assert valuation.calls == []
+    assert refreshed.cache_diagnostic.endswith("saved_complete")
+
+
+def test_partial_cache_retries_missing_valuation_daily_without_refetching_shareholder_history(tmp_path):
+    empty_valuation = {"success": True, "result": {"pages": 1, "count": 0, "data": []}}
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(empty_valuation)),
+        cache_dir=tmp_path,
+    )
+    assert not first.available
+    assert first.shareholder_return["available"] is True
+    assert first.valuation_history["reason"] == "missing_valuation_history"
+
+    request_date = date(2026, 7, 18)
+    weekly = _WeeklyAdapter(_weekly_bars(as_of=request_date))
+    valuation = _Session(_Response(_valuation_payload(as_of=request_date)))
+    refreshed = fetch_quality_history(
+        "600519",
+        request_date,
+        weekly_adapter=weekly,
+        valuation_session=valuation,
+        cache_dir=tmp_path,
+    )
+
+    assert refreshed.available
+    assert weekly.calls == []
+    assert len(valuation.calls) == 1
+
+
+def test_structural_partial_retry_is_bounded_after_an_unsuccessful_refresh(tmp_path):
+    first_date = date(2026, 7, 17)
+    fetch_quality_history(
+        "600519",
+        first_date,
+        weekly_adapter=_WeeklyAdapter(_weekly_bars(as_of=first_date)[-100:]),
+        valuation_session=_Session(_Response(_valuation_payload(as_of=first_date))),
+        cache_dir=tmp_path,
+    )
+    retry_date = first_date + timedelta(days=PARTIAL_STRUCTURAL_RETRY_DAYS)
+    retried_weekly = _WeeklyAdapter(_weekly_bars(as_of=retry_date)[-100:])
+    retried = fetch_quality_history(
+        "600519",
+        retry_date,
+        weekly_adapter=retried_weekly,
+        valuation_session=_Session(_Response(_valuation_payload(as_of=retry_date))),
+        cache_dir=tmp_path,
+    )
+    assert not retried.available
+    assert len(retried_weekly.calls) == 1
+
+    next_day_weekly = _WeeklyAdapter(_weekly_bars(as_of=retry_date + timedelta(days=1)))
+    replay = fetch_quality_history(
+        "600519",
+        retry_date + timedelta(days=1),
+        weekly_adapter=next_day_weekly,
+        valuation_session=_Session(_Response(_valuation_payload(as_of=retry_date + timedelta(days=1)))),
+        cache_dir=tmp_path,
+    )
+    assert not replay.available
+    assert next_day_weekly.calls == []
 
 
 def test_quality_history_cache_batch_loads_recent_records_and_omits_real_misses(tmp_path):

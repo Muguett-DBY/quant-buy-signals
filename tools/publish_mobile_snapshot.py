@@ -23,12 +23,22 @@ import pandas as pd
 
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
-from data.growth_evidence import fetch_growth_evidence_batch
+from data.growth_evidence import (
+    fetch_growth_evidence_batch,
+    load_growth_evidence_cache_batch_state,
+)
 from data.patch4_evidence import fetch_patch4_evidence_batch
-from data.quality_history import fetch_quality_history_batch, load_quality_history_cache_batch
+from data.quality_history import (
+    fetch_quality_history_batch,
+    load_quality_history_cache_batch_state,
+)
 from data.research_reports import fetch_research_reports_batch
 from data.snapshot import DEFAULT_SNAPSHOT_PATH, SNAPSHOT_SCHEMA_VERSION, get_market_snapshot, save_market_snapshot
-from data.mobile_snapshot import write_mobile_snapshot
+from data.mobile_snapshot import (
+    COMPANY_DETAIL_SCHEMA_VERSION,
+    COMPANY_DETAIL_SHARD_COUNT,
+    write_mobile_snapshot,
+)
 from data.market_coldness import MARKET_COLDNESS_DECISION_READY_TIME, archive_market_coldness_session_snapshot
 from engine.audit import audit_state_hashes
 from engine.pipeline import run_market_analysis
@@ -48,6 +58,59 @@ _MOBILE_STRUCTURAL_EVIDENCE_GATES = (
     "candidate_recall_ready",
 )
 _QUALITY_HISTORY_BACKFILL_LIMIT = 2_000
+_QUALITY_HISTORY_DECISION_BACKFILL_LIMIT = 500
+_TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 500
+
+
+def _require_company_detail_manifest(manifest: Mapping[str, object], expected_companies: int) -> None:
+    details = manifest.get("company_details")
+    if not isinstance(details, Mapping):
+        raise RuntimeError("mobile publication omitted the company detail contract")
+    partition = details.get("partition")
+    shards = details.get("shards")
+    catalogue = manifest.get("catalogue")
+    catalogue_filename = str(catalogue.get("filename") or "") if isinstance(catalogue, Mapping) else ""
+    generation_match = re.fullmatch(r"catalog-([0-9a-f]{16})\.json\.gz", catalogue_filename)
+    expected_ids = [f"{index:02x}" for index in range(COMPANY_DETAIL_SHARD_COUNT)]
+    if (
+        details.get("schema_version") != COMPANY_DETAIL_SCHEMA_VERSION
+        or details.get("record_schema") != "company_detail_v2"
+        or details.get("company_count") != expected_companies
+        or not isinstance(partition, Mapping)
+        or partition.get("algorithm") != "sha256_code_first_nibble"
+        or partition.get("shard_count") != COMPANY_DETAIL_SHARD_COUNT
+        or details.get("root_algorithm") != "SHA256_CANONICAL_SHARD_INDEX_V1"
+        or re.fullmatch(r"[0-9a-f]{64}", str(details.get("root_sha256") or "")) is None
+        or not isinstance(shards, list)
+        or len(shards) != COMPANY_DETAIL_SHARD_COUNT
+        or generation_match is None
+    ):
+        raise RuntimeError("mobile publication emitted an invalid company detail contract")
+
+    generation = generation_match.group(1)
+    company_total = 0
+    observed_ids: list[str] = []
+    for shard in shards:
+        if not isinstance(shard, Mapping):
+            raise RuntimeError("mobile publication emitted invalid company detail shard metadata")
+        shard_id = str(shard.get("id") or "")
+        observed_ids.append(shard_id)
+        company_count = shard.get("company_count")
+        if not isinstance(company_count, int) or isinstance(company_count, bool) or company_count < 0:
+            raise RuntimeError("mobile publication emitted invalid company detail shard metadata")
+        company_total += company_count
+        if (
+            shard.get("filename") != f"company-details-{generation}-{shard_id}.json.gz"
+            or re.fullmatch(r"[0-9a-f]{64}", str(shard.get("uncompressed_sha256") or "")) is None
+            or re.fullmatch(r"[0-9a-f]{64}", str(shard.get("sha256") or "")) is None
+            or not isinstance(shard.get("size"), int)
+            or int(shard["size"]) <= 0
+            or not isinstance(shard.get("uncompressed_size"), int)
+            or int(shard["uncompressed_size"]) <= 0
+        ):
+            raise RuntimeError("mobile publication emitted invalid company detail shard metadata")
+    if observed_ids != expected_ids or company_total != expected_companies:
+        raise RuntimeError("mobile publication company detail coverage is incomplete")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -219,8 +282,9 @@ def _prepare_quality_history_evidence(
             seen.add(normalized)
     ordered_codes.extend(sorted(eligible - seen))
     requests_ = [{"code": code, "as_of": market_as_of} for code in ordered_codes]
-    cached = load_quality_history_cache_batch(requests_)
-    missing = [request for request in requests_ if request["code"] not in cached]
+    cached, refresh_due_codes = load_quality_history_cache_batch_state(requests_)
+    refresh_due = set(refresh_due_codes)
+    missing = [request for request in requests_ if request["code"] not in cached or request["code"] in refresh_due]
     tranche = missing[:_QUALITY_HISTORY_BACKFILL_LIMIT]
     fetched = fetch_quality_history_batch(tranche) if tranche else {}
     combined: dict[str, Mapping[str, object]] = {
@@ -258,6 +322,70 @@ def _quality_history_priority_codes(
         kind="mergesort",
     )
     return tuple(dict.fromkeys(ranked["code"].tolist()))
+
+
+def _bounded_quality_history_loader(limit: int = _QUALITY_HISTORY_DECISION_BACKFILL_LIMIT):
+    """Return a loader with one cumulative network budget for the whole analysis.
+
+    ``screen_all_types`` may split a market-wide request into several 2,000-row
+    calls.  Capping each call independently would therefore still allow almost
+    the entire market to be fetched after the publication prefill.  This
+    stateful adapter applies the limit across every call in one publication.
+    """
+
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ValueError("quality-history decision backfill limit must be a non-negative integer")
+    remaining = limit
+
+    def load(requests: Sequence[Mapping[str, object]], *, progress_cb=None):
+        nonlocal remaining
+        prepared = list(requests)
+        cached, refresh_due_codes = load_quality_history_cache_batch_state(prepared)
+        refresh_due = set(refresh_due_codes)
+        network_candidates = [
+            request
+            for request in prepared
+            if str(request.get("code") or "") not in cached or str(request.get("code") or "") in refresh_due
+        ]
+        selected = network_candidates[:remaining]
+        remaining -= len(selected)
+        fetched = fetch_quality_history_batch(selected, progress_cb=progress_cb) if selected else {}
+        combined = {str(code): dict(value) for code, value in cached.items() if isinstance(value, Mapping)}
+        combined.update({str(code): dict(value) for code, value in fetched.items() if isinstance(value, Mapping)})
+        return combined
+
+    return load
+
+
+def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT):
+    """Reuse recent annual evidence and cap new company fetches cumulatively.
+
+    ``screen_all_types`` supplies requests in conclusion-relevance order.
+    Recent, independently validated segment captures do not consume the
+    network budget; the first still-uncached tranche does.  Returning a subset
+    is intentional: companies outside the tranche retain their explicit
+    evidence-insufficient Type 3 result and are eligible for a later daily run.
+    """
+
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ValueError("Type 3 growth backfill limit must be a non-negative integer")
+    remaining = limit
+
+    def load(requests: Sequence[Mapping[str, object]], *, progress_cb=None):
+        nonlocal remaining
+        prepared = list(requests)
+        cached = load_growth_evidence_cache_batch_state(prepared)
+        network_candidates = [request for request in prepared if str(request.get("code") or "") not in cached]
+        selected_network = network_candidates[:remaining]
+        remaining -= len(selected_network)
+        selected_codes = set(cached)
+        selected_codes.update(str(request.get("code") or "") for request in selected_network)
+        selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
+        if not selected:
+            return {}
+        return fetch_growth_evidence_batch(selected, progress_cb=progress_cb)
+
+    return load
 
 
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
@@ -319,8 +447,8 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         reporting_period_contract=reporting_period_contract,
         market_coldness_evidence=coldness_evidence,
         quality_history_evidence=quality_history_evidence,
-        quality_history_loader=fetch_quality_history_batch,
-        type3_growth_loader=fetch_growth_evidence_batch,
+        quality_history_loader=_bounded_quality_history_loader(),
+        type3_growth_loader=_bounded_type3_growth_loader(),
         research_report_loader=fetch_research_reports_batch,
         patch4_loader=fetch_patch4_evidence_batch,
     )
@@ -371,6 +499,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
             "source_state": starting_state,
         },
     )
+    _require_company_detail_manifest(manifest, len(eligible_codes))
     return manifest
 
 

@@ -20,7 +20,6 @@ permissions:
 concurrency:
   group: mobile-market-data
   cancel-in-progress: false
-  queue: max
 
 jobs:
   preflight:
@@ -192,7 +191,65 @@ jobs:
               ) {
                 throw 'The publisher did not bind catalogue, signals, and signature to one generation.'
               }
-              $expected = @('manifest.json', $catalogueName, $signalsName) | Sort-Object
+              $details = $manifest.company_details
+              $detailShards = @($details.shards)
+              $expectedDetailIds = @(0..15 | ForEach-Object { $_.ToString('x2') })
+              if (
+                [int]$details.schema_version -ne 2 -or
+                [string]$details.record_schema -cne 'company_detail_v2' -or
+                [string]$details.partition.algorithm -cne 'sha256_code_first_nibble' -or
+                [int]$details.partition.shard_count -ne 16 -or
+                [string]$details.root_algorithm -cne 'SHA256_CANONICAL_SHARD_INDEX_V1' -or
+                [string]$details.root_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                $detailShards.Count -ne 16
+              ) {
+                throw 'The publisher did not emit the required company detail schema v2 shard contract.'
+              }
+              $detailNames = @()
+              $rootEntries = @()
+              [long]$detailCompanyCount = 0
+              for ($index = 0; $index -lt 16; $index++) {
+                $shard = $detailShards[$index]
+                $shardId = [string]$shard.id
+                $expectedId = $expectedDetailIds[$index]
+                $expectedName = "company-details-$generation-$expectedId.json.gz"
+                if (
+                  $shardId -cne $expectedId -or
+                  [string]$shard.filename -cne $expectedName -or
+                  [long]$shard.company_count -lt 0 -or
+                  [string]$shard.uncompressed_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                  [string]$shard.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                  [long]$shard.size -le 0 -or
+                  [long]$shard.uncompressed_size -le 0
+                ) {
+                  throw "The publisher emitted invalid company detail shard metadata at index $index."
+                }
+                $detailNames += $expectedName
+                $detailCompanyCount += [long]$shard.company_count
+                $rootEntries += (
+                  '{{"company_count":{0},"id":"{1}","uncompressed_sha256":"{2}"}}' -f
+                  [long]$shard.company_count,
+                  $shardId,
+                  [string]$shard.uncompressed_sha256
+                )
+              }
+              $rootJson = (
+                '{"partition":{"algorithm":"sha256_code_first_nibble","shard_count":16},' +
+                '"record_schema":"company_detail_v2","schema_version":2,"shards":[' +
+                ($rootEntries -join ',') +
+                ']}'
+              )
+              $rootHash = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($rootJson))
+              ).ToLowerInvariant()
+              if (
+                $rootHash -cne [string]$details.root_sha256 -or
+                $detailCompanyCount -ne [long]$details.company_count -or
+                $detailCompanyCount -ne [long]$manifest.summary.company_count
+              ) {
+                throw 'The publisher emitted an incomplete or non-canonical company detail shard index.'
+              }
+              $expected = @('manifest.json', $catalogueName, $signalsName) + $detailNames | Sort-Object
               $actual = @(Get-ChildItem -LiteralPath $output -File | Select-Object -ExpandProperty Name | Sort-Object)
               if (Compare-Object $actual $expected) {
                 throw "Unexpected mobile snapshot asset set: $($actual -join ', ')"
@@ -230,6 +287,64 @@ jobs:
             [string]$manifest.signature.algorithm -cne 'ECDSA_P256_SHA256'
           ) {
             throw 'Catalogue, signals, and detached signature are not bound to one generation.'
+          }
+          $details = $manifest.company_details
+          $detailShards = @($details.shards)
+          $expectedDetailIds = @(0..15 | ForEach-Object { $_.ToString('x2') })
+          if (
+            [int]$details.schema_version -ne 2 -or
+            [string]$details.record_schema -cne 'company_detail_v2' -or
+            [string]$details.partition.algorithm -cne 'sha256_code_first_nibble' -or
+            [int]$details.partition.shard_count -ne 16 -or
+            [string]$details.root_algorithm -cne 'SHA256_CANONICAL_SHARD_INDEX_V1' -or
+            [string]$details.root_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $detailShards.Count -ne 16
+          ) {
+            throw 'The mobile manifest has an invalid company detail schema v2 shard contract.'
+          }
+          $detailNames = @()
+          $rootEntries = @()
+          [long]$detailCompanyCount = 0
+          for ($index = 0; $index -lt 16; $index++) {
+            $shard = $detailShards[$index]
+            $shardId = [string]$shard.id
+            $expectedId = $expectedDetailIds[$index]
+            $expectedName = "company-details-$generation-$expectedId.json.gz"
+            if (
+              $shardId -cne $expectedId -or
+              [string]$shard.filename -cne $expectedName -or
+              [long]$shard.company_count -lt 0 -or
+              [string]$shard.uncompressed_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              [string]$shard.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              [long]$shard.size -le 0 -or
+              [long]$shard.uncompressed_size -le 0
+            ) {
+              throw "The mobile manifest has invalid company detail shard metadata at index $index."
+            }
+            $detailNames += $expectedName
+            $detailCompanyCount += [long]$shard.company_count
+            $rootEntries += (
+              '{{"company_count":{0},"id":"{1}","uncompressed_sha256":"{2}"}}' -f
+              [long]$shard.company_count,
+              $shardId,
+              [string]$shard.uncompressed_sha256
+            )
+          }
+          $rootJson = (
+            '{"partition":{"algorithm":"sha256_code_first_nibble","shard_count":16},' +
+            '"record_schema":"company_detail_v2","schema_version":2,"shards":[' +
+            ($rootEntries -join ',') +
+            ']}'
+          )
+          $rootHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($rootJson))
+          ).ToLowerInvariant()
+          if (
+            $rootHash -cne [string]$details.root_sha256 -or
+            $detailCompanyCount -ne [long]$details.company_count -or
+            $detailCompanyCount -ne [long]$manifest.summary.company_count
+          ) {
+            throw 'The company detail shard root or total company count is invalid.'
           }
           $cataloguePath = Join-Path $env:MOBILE_DATA_DIR $catalogueName
           $signalsPath = Join-Path $env:MOBILE_DATA_DIR $signalsName
@@ -320,9 +435,111 @@ jobs:
           if ($catalogueHash -ceq $signalsHash) {
             throw 'Catalogue and signals unexpectedly have identical bytes.'
           }
+          function Get-UncompressedGZipBytes([string]$path, [string]$label) {
+            $compressed = [IO.File]::ReadAllBytes($path)
+            $inputStream = [IO.MemoryStream]::new($compressed, $false)
+            $outputStream = [IO.MemoryStream]::new()
+            try {
+              $gzipStream = [IO.Compression.GZipStream]::new(
+                $inputStream,
+                [IO.Compression.CompressionMode]::Decompress
+              )
+              try {
+                $gzipStream.CopyTo($outputStream)
+              } finally {
+                $gzipStream.Dispose()
+              }
+              return ,$outputStream.ToArray()
+            } catch {
+              throw "The $label payload is not a valid gzip stream: $($_.Exception.Message)"
+            } finally {
+              $outputStream.Dispose()
+              $inputStream.Dispose()
+            }
+          }
+          $catalogueRaw = Get-UncompressedGZipBytes $cataloguePath 'catalogue'
+          $signalsRaw = Get-UncompressedGZipBytes $signalsPath 'signals'
+          if (
+            $catalogueRaw.Length -ne [long]$manifest.catalogue.uncompressed_size -or
+            $signalsRaw.Length -ne [long]$manifest.signals.uncompressed_size
+          ) {
+            throw 'Catalogue or signals does not match its uncompressed manifest size.'
+          }
+          $generationStream = [IO.MemoryStream]::new()
+          try {
+            $generationStream.Write($catalogueRaw, 0, $catalogueRaw.Length)
+            $generationStream.WriteByte(0)
+            $generationStream.Write($signalsRaw, 0, $signalsRaw.Length)
+            $generationStream.WriteByte(0)
+            $generationMarker = [Text.Encoding]::ASCII.GetBytes('company-details-v2')
+            $generationStream.Write($generationMarker, 0, $generationMarker.Length)
+            $generationStream.WriteByte(0)
+            $detailRootBytes = [Convert]::FromHexString([string]$details.root_sha256)
+            $generationStream.Write($detailRootBytes, 0, $detailRootBytes.Length)
+            $computedGeneration = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData($generationStream.ToArray())
+            ).ToLowerInvariant().Substring(0, 16)
+          } finally {
+            $generationStream.Dispose()
+          }
+          if ($computedGeneration -cne $generation) {
+            throw 'The immutable filenames do not match the catalogue, signals, and company detail root generation.'
+          }
+          $detailCompanyCodes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          for ($index = 0; $index -lt $detailShards.Count; $index++) {
+            $shard = $detailShards[$index]
+            $shardId = [string]$shard.id
+            $shardPath = Join-Path $env:MOBILE_DATA_DIR ([string]$shard.filename)
+            [void](Get-VerifiedAsset $shardPath $shard "company detail shard $shardId")
+            $uncompressed = Get-UncompressedGZipBytes $shardPath "company detail shard $shardId"
+            $uncompressedHash = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData($uncompressed)
+            ).ToLowerInvariant()
+            if (
+              $uncompressed.Length -ne [long]$shard.uncompressed_size -or
+              $uncompressedHash -cne [string]$shard.uncompressed_sha256
+            ) {
+              throw "Company detail shard $shardId does not match its uncompressed manifest contract."
+            }
+            $payload = [Text.Encoding]::UTF8.GetString($uncompressed) | ConvertFrom-Json
+            $companies = @($payload.companies)
+            if (
+              [int]$payload.schema_version -ne 2 -or
+              [string]$payload.record_schema -cne 'company_detail_v2' -or
+              [string]$payload.product -cne 'DS_DCF' -or
+              [string]$payload.market_as_of -cne [string]$manifest.market_as_of -or
+              [string]$payload.data_timestamp_utc -cne [string]$manifest.data_timestamp_utc -or
+              [string]$payload.shard_id -cne $shardId -or
+              [long]$payload.company_count -ne [long]$shard.company_count -or
+              $companies.Count -ne [long]$shard.company_count
+            ) {
+              throw "Company detail shard $shardId has invalid payload identity or company coverage."
+            }
+            foreach ($company in $companies) {
+              $companyCode = [string]$company.code
+              if (
+                [int]$company.schema_version -ne 2 -or
+                $companyCode -cnotmatch '^[0-9]{6}$' -or
+                -not $detailCompanyCodes.Add($companyCode)
+              ) {
+                throw "Company detail shard $shardId contains an invalid or duplicate company record."
+              }
+              $codeHash = [Security.Cryptography.SHA256]::HashData(
+                [Text.Encoding]::ASCII.GetBytes($companyCode)
+              )
+              $expectedShardId = ([int]($codeHash[0] -shr 4)).ToString('x2')
+              if ($expectedShardId -cne $shardId) {
+                throw "Company $companyCode is stored in the wrong detail shard $shardId."
+              }
+            }
+          }
+          if ($detailCompanyCodes.Count -ne [long]$details.company_count) {
+            throw 'Company detail shards do not contain one unique record for every catalogue company.'
+          }
           "MOBILE_CATALOG_NAME=$catalogueName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_SIGNALS_NAME=$signalsName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_SIGNATURE_NAME=$signatureName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MOBILE_DETAIL_NAMES=$($detailNames -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Sign the exact market manifest and verify the app-pinned key
         shell: pwsh
@@ -375,22 +592,33 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $detailNames = @([string]$env:MOBILE_DETAIL_NAMES -split '\|' | Where-Object { $_ })
           $expected = @(
             'manifest.json',
             $env:MOBILE_CATALOG_NAME,
             $env:MOBILE_SIGNALS_NAME,
             $env:MOBILE_SIGNATURE_NAME
-          ) | Sort-Object
+          ) + $detailNames | Sort-Object
           $actual = @(Get-ChildItem -LiteralPath $env:MOBILE_DATA_DIR -File | Select-Object -ExpandProperty Name | Sort-Object)
           if (Compare-Object $actual $expected) {
             throw "Unexpected prepared mobile release asset set: $($actual -join ', ')"
           }
+          if ($env:MOBILE_CATALOG_NAME -notmatch '^catalog-(?<generation>[0-9a-f]{16})\.json\.gz$') {
+            throw 'Prepared catalogue filename is not content addressed.'
+          }
+          $generation = $Matches.generation
           if (
-            $env:MOBILE_CATALOG_NAME -notmatch '^catalog-[0-9a-f]{16}\.json\.gz$' -or
-            $env:MOBILE_SIGNALS_NAME -notmatch '^signals-[0-9a-f]{16}\.json\.gz$' -or
-            $env:MOBILE_SIGNATURE_NAME -notmatch '^manifest-[0-9a-f]{16}\.sig$'
+            $env:MOBILE_SIGNALS_NAME -cne "signals-$generation.json.gz" -or
+            $env:MOBILE_SIGNATURE_NAME -cne "manifest-$generation.sig" -or
+            $detailNames.Count -ne 16
           ) {
             throw 'Prepared mobile release filenames are not content addressed.'
+          }
+          for ($index = 0; $index -lt 16; $index++) {
+            $expectedDetailName = "company-details-$generation-$($index.ToString('x2')).json.gz"
+            if ($detailNames[$index] -cne $expectedDetailName) {
+              throw "Prepared company detail filename at index $index is invalid."
+            }
           }
           $manifestPath = Join-Path $env:MOBILE_DATA_DIR 'manifest.json'
           $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding utf8 | ConvertFrom-Json
@@ -405,7 +633,7 @@ jobs:
           foreach ($entry in @(
             @($manifest.catalogue, $env:MOBILE_CATALOG_NAME),
             @($manifest.signals, $env:MOBILE_SIGNALS_NAME)
-          )) {
+          ) + @($manifest.company_details.shards | ForEach-Object { ,@($_, [string]$_.filename) })) {
             $path = Join-Path $env:MOBILE_DATA_DIR $entry[1]
             $item = Get-Item -LiteralPath $path
             $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -455,7 +683,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 20
+    # The signed release now contains 19 immutable payloads. GitHub validates
+    # every upload digest and may need bounded retries during CDN/API lag.
+    timeout-minutes: 45
     permissions:
       contents: write
     outputs:
@@ -463,6 +693,7 @@ jobs:
       catalogue_name: ${{ steps.release.outputs.catalogue_name }}
       signals_name: ${{ steps.release.outputs.signals_name }}
       signature_name: ${{ steps.release.outputs.signature_name }}
+      detail_names: ${{ steps.release.outputs.detail_names }}
       previous_assets: ${{ steps.release.outputs.previous_assets }}
       previous_manifest_state: ${{ steps.release.outputs.previous_manifest_state }}
     env:
@@ -507,10 +738,68 @@ jobs:
           ) {
             throw 'Transferred bundle does not use one signed generation.'
           }
+          $details = $manifest.company_details
+          $detailShards = @($details.shards)
+          $expectedDetailIds = @(0..15 | ForEach-Object { $_.ToString('x2') })
+          if (
+            [int]$details.schema_version -ne 2 -or
+            [string]$details.record_schema -cne 'company_detail_v2' -or
+            [string]$details.partition.algorithm -cne 'sha256_code_first_nibble' -or
+            [int]$details.partition.shard_count -ne 16 -or
+            [string]$details.root_algorithm -cne 'SHA256_CANONICAL_SHARD_INDEX_V1' -or
+            [string]$details.root_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $detailShards.Count -ne 16
+          ) {
+            throw 'Transferred manifest has an invalid company detail schema v2 shard contract.'
+          }
+          $detailNames = @()
+          $rootEntries = @()
+          [long]$detailCompanyCount = 0
+          for ($index = 0; $index -lt 16; $index++) {
+            $shard = $detailShards[$index]
+            $shardId = [string]$shard.id
+            $expectedId = $expectedDetailIds[$index]
+            $expectedName = "company-details-$generation-$expectedId.json.gz"
+            if (
+              $shardId -cne $expectedId -or
+              [string]$shard.filename -cne $expectedName -or
+              [long]$shard.company_count -lt 0 -or
+              [string]$shard.uncompressed_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              [string]$shard.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              [long]$shard.size -le 0 -or
+              [long]$shard.uncompressed_size -le 0
+            ) {
+              throw "Transferred company detail shard metadata at index $index is invalid."
+            }
+            $detailNames += $expectedName
+            $detailCompanyCount += [long]$shard.company_count
+            $rootEntries += (
+              '{{"company_count":{0},"id":"{1}","uncompressed_sha256":"{2}"}}' -f
+              [long]$shard.company_count,
+              $shardId,
+              [string]$shard.uncompressed_sha256
+            )
+          }
+          $rootJson = (
+            '{"partition":{"algorithm":"sha256_code_first_nibble","shard_count":16},' +
+            '"record_schema":"company_detail_v2","schema_version":2,"shards":[' +
+            ($rootEntries -join ',') +
+            ']}'
+          )
+          $rootHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($rootJson))
+          ).ToLowerInvariant()
+          if (
+            $rootHash -cne [string]$details.root_sha256 -or
+            $detailCompanyCount -ne [long]$details.company_count -or
+            $detailCompanyCount -ne [long]$manifest.summary.company_count
+          ) {
+            throw 'Transferred company detail shard root or company count is invalid.'
+          }
           if ([string]$manifest.provenance.source_commit -cne $env:GITHUB_SHA) {
             throw 'Transferred manifest is not bound to this main source revision.'
           }
-          $expected = @('manifest.json', $catalogueName, $signalsName, $signatureName) | Sort-Object
+          $expected = @('manifest.json', $catalogueName, $signalsName, $signatureName) + $detailNames | Sort-Object
           $actual = @(Get-ChildItem -LiteralPath $env:MOBILE_DATA_DIR -File | Select-Object -ExpandProperty Name | Sort-Object)
           if (Compare-Object $actual $expected) {
             throw "Transferred release bundle has an unexpected file set: $($actual -join ', ')"
@@ -518,7 +807,7 @@ jobs:
           foreach ($entry in @(
             @($manifest.catalogue, $catalogueName),
             @($manifest.signals, $signalsName)
-          )) {
+          ) + @($detailShards | ForEach-Object { ,@($_, [string]$_.filename) })) {
             $path = Join-Path $env:MOBILE_DATA_DIR $entry[1]
             $item = Get-Item -LiteralPath $path
             $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -556,6 +845,7 @@ jobs:
           "MOBILE_CATALOG_NAME=$catalogueName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_SIGNALS_NAME=$signalsName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_SIGNATURE_NAME=$signatureName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MOBILE_DETAIL_NAMES=$($detailNames -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_PUBLIC_KEY=$($keyMatch.Groups['key'].Value)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish immutable payload assets and validate the previous generation
@@ -721,6 +1011,61 @@ jobs:
             throw "Release asset $name remained unavailable after three attempts."
           }
 
+          function Receive-ReleaseAssets([string[]]$names, [string]$directory) {
+            if ($names.Count -eq 0) {
+              throw 'A complete generation download requires at least one release asset.'
+            }
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              foreach ($name in $names) {
+                Remove-Item -LiteralPath (Join-Path $directory $name) -Force -ErrorAction SilentlyContinue
+              }
+              $arguments = @('release', 'download', $tag, '--repo', $env:GH_REPO, '--dir', $directory, '--clobber')
+              foreach ($name in $names) {
+                $arguments += @('--pattern', $name)
+              }
+              & gh @arguments
+              $missing = @(
+                $names | Where-Object {
+                  -not (Test-Path -LiteralPath (Join-Path $directory $_) -PathType Leaf)
+                }
+              )
+              if ($LASTEXITCODE -eq 0 -and $missing.Count -eq 0) {
+                return
+              }
+              Write-Warning (
+                "Complete previous-generation download attempt $attempt failed; " +
+                "$($missing.Count) exact assets remain missing."
+              )
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            throw 'The complete previous generation remained unavailable after three attempts.'
+          }
+
+          function Get-UncompressedGZipBytes([string]$path, [string]$label) {
+            $compressed = [IO.File]::ReadAllBytes($path)
+            $inputStream = [IO.MemoryStream]::new($compressed, $false)
+            $outputStream = [IO.MemoryStream]::new()
+            try {
+              $gzipStream = [IO.Compression.GZipStream]::new(
+                $inputStream,
+                [IO.Compression.CompressionMode]::Decompress
+              )
+              try {
+                $gzipStream.CopyTo($outputStream)
+              } finally {
+                $gzipStream.Dispose()
+              }
+              return ,$outputStream.ToArray()
+            } catch {
+              throw "The $label payload is not a valid gzip stream: $($_.Exception.Message)"
+            } finally {
+              $outputStream.Dispose()
+              $inputStream.Dispose()
+            }
+          }
+
           function Publish-ImmutableAsset([string]$name) {
             $path = Join-Path $env:MOBILE_DATA_DIR $name
             $item = Get-Item -LiteralPath $path
@@ -843,6 +1188,13 @@ jobs:
 
           Publish-ImmutableAsset $env:MOBILE_CATALOG_NAME
           Publish-ImmutableAsset $env:MOBILE_SIGNALS_NAME
+          $currentDetailNames = @([string]$env:MOBILE_DETAIL_NAMES -split '\|' | Where-Object { $_ })
+          if ($currentDetailNames.Count -ne 16) {
+            throw 'The current release does not contain all 16 company detail shards.'
+          }
+          foreach ($name in $currentDetailNames) {
+            Publish-ImmutableAsset $name
+          }
           Publish-ImmutableAsset $env:MOBILE_SIGNATURE_NAME
 
           $previousNames = @()
@@ -899,24 +1251,133 @@ jobs:
             ) {
               throw 'Previous manifest does not bind one generation.'
             }
-            foreach ($name in @($previousCatalogue, $previousSignals, $previousSignature)) {
-              [void](Receive-ReleaseAsset $name $previousDirectory)
+            $previousDetails = $previous.company_details
+            $previousDetailShards = @($previousDetails.shards)
+            $expectedPreviousDetailIds = @(0..15 | ForEach-Object { $_.ToString('x2') })
+            if (
+              [int]$previousDetails.schema_version -ne 2 -or
+              [string]$previousDetails.record_schema -cne 'company_detail_v2' -or
+              [string]$previousDetails.partition.algorithm -cne 'sha256_code_first_nibble' -or
+              [int]$previousDetails.partition.shard_count -ne 16 -or
+              [string]$previousDetails.root_algorithm -cne 'SHA256_CANONICAL_SHARD_INDEX_V1' -or
+              [string]$previousDetails.root_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              $previousDetailShards.Count -ne 16
+            ) {
+              throw 'Previous manifest has an invalid company detail schema v2 shard contract.'
             }
+            $previousDetailNames = @()
+            $previousRootEntries = @()
+            [long]$previousDetailCompanyCount = 0
+            for ($index = 0; $index -lt 16; $index++) {
+              $shard = $previousDetailShards[$index]
+              $shardId = [string]$shard.id
+              $expectedId = $expectedPreviousDetailIds[$index]
+              $expectedName = "company-details-$previousGeneration-$expectedId.json.gz"
+              if (
+                $shardId -cne $expectedId -or
+                [string]$shard.filename -cne $expectedName -or
+                [long]$shard.company_count -lt 0 -or
+                [string]$shard.uncompressed_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                [string]$shard.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                [long]$shard.size -le 0 -or
+                [long]$shard.uncompressed_size -le 0
+              ) {
+                throw "Previous company detail shard metadata at index $index is invalid."
+              }
+              $previousDetailNames += $expectedName
+              $previousDetailCompanyCount += [long]$shard.company_count
+              $previousRootEntries += (
+                '{{"company_count":{0},"id":"{1}","uncompressed_sha256":"{2}"}}' -f
+                [long]$shard.company_count,
+                $shardId,
+                [string]$shard.uncompressed_sha256
+              )
+            }
+            $previousRootJson = (
+              '{"partition":{"algorithm":"sha256_code_first_nibble","shard_count":16},' +
+              '"record_schema":"company_detail_v2","schema_version":2,"shards":[' +
+              ($previousRootEntries -join ',') +
+              ']}'
+            )
+            $previousRootHash = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($previousRootJson))
+            ).ToLowerInvariant()
+            if (
+              $previousRootHash -cne [string]$previousDetails.root_sha256 -or
+              $previousDetailCompanyCount -ne [long]$previousDetails.company_count -or
+              $previousDetailCompanyCount -ne [long]$previous.summary.company_count
+            ) {
+              throw 'Previous company detail shard root or company count is invalid.'
+            }
+            $previousAssetNames = @(
+              $previousCatalogue,
+              $previousSignals,
+              $previousSignature
+            ) + $previousDetailNames
+            Receive-ReleaseAssets $previousAssetNames $previousDirectory
             if (-not (Test-DetachedSignature $previousManifest (Join-Path $previousDirectory $previousSignature))) {
               throw 'Previous manifest signature is invalid.'
             }
             foreach ($entry in @(
               @($previous.catalogue, $previousCatalogue),
               @($previous.signals, $previousSignals)
-            )) {
+            ) + @($previousDetailShards | ForEach-Object { ,@($_, [string]$_.filename) })) {
               $path = Join-Path $previousDirectory $entry[1]
               $item = Get-Item -LiteralPath $path
               $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
               if ([long]$entry[0].size -ne $item.Length -or [string]$entry[0].sha256 -cne $hash) {
                 throw "Previous asset $($entry[1]) is incomplete."
               }
+              if ($entry[0].PSObject.Properties.Name -contains 'uncompressed_sha256') {
+                $uncompressed = Get-UncompressedGZipBytes $path "previous asset $($entry[1])"
+                $uncompressedHash = [Convert]::ToHexString(
+                  [Security.Cryptography.SHA256]::HashData($uncompressed)
+                ).ToLowerInvariant()
+                if (
+                  $uncompressed.Length -ne [long]$entry[0].uncompressed_size -or
+                  $uncompressedHash -cne [string]$entry[0].uncompressed_sha256
+                ) {
+                  throw "Previous asset $($entry[1]) does not match its uncompressed shard contract."
+                }
+              }
             }
-            $previousNames = @($previousCatalogue, $previousSignals, $previousSignature)
+            $previousCatalogueRaw = Get-UncompressedGZipBytes (
+              Join-Path $previousDirectory $previousCatalogue
+            ) 'previous catalogue'
+            $previousSignalsRaw = Get-UncompressedGZipBytes (
+              Join-Path $previousDirectory $previousSignals
+            ) 'previous signals'
+            if (
+              $previousCatalogueRaw.Length -ne [long]$previous.catalogue.uncompressed_size -or
+              $previousSignalsRaw.Length -ne [long]$previous.signals.uncompressed_size
+            ) {
+              throw 'Previous catalogue or signals has an invalid uncompressed size.'
+            }
+            $previousGenerationStream = [IO.MemoryStream]::new()
+            try {
+              $previousGenerationStream.Write($previousCatalogueRaw, 0, $previousCatalogueRaw.Length)
+              $previousGenerationStream.WriteByte(0)
+              $previousGenerationStream.Write($previousSignalsRaw, 0, $previousSignalsRaw.Length)
+              $previousGenerationStream.WriteByte(0)
+              $previousGenerationMarker = [Text.Encoding]::ASCII.GetBytes('company-details-v2')
+              $previousGenerationStream.Write($previousGenerationMarker, 0, $previousGenerationMarker.Length)
+              $previousGenerationStream.WriteByte(0)
+              $previousDetailRootBytes = [Convert]::FromHexString([string]$previousDetails.root_sha256)
+              $previousGenerationStream.Write(
+                $previousDetailRootBytes,
+                0,
+                $previousDetailRootBytes.Length
+              )
+              $computedPreviousGeneration = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData($previousGenerationStream.ToArray())
+              ).ToLowerInvariant().Substring(0, 16)
+            } finally {
+              $previousGenerationStream.Dispose()
+            }
+            if ($computedPreviousGeneration -cne $previousGeneration) {
+              throw 'Previous immutable filenames do not match their complete generation content.'
+            }
+            $previousNames = $previousAssetNames
             $previousManifestState = 'found'
             } catch {
               $previousManifestState = 'error'
@@ -933,6 +1394,7 @@ jobs:
           "catalogue_name=$env:MOBILE_CATALOG_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "signals_name=$env:MOBILE_SIGNALS_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "signature_name=$env:MOBILE_SIGNATURE_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "detail_names=$env:MOBILE_DETAIL_NAMES" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "previous_assets=$($previousNames -join '|')" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "previous_manifest_state=$previousManifestState" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           'published=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -994,8 +1456,42 @@ jobs:
           </html>
           HTML
           test -s "${RUNNER_TEMP}/mobile-pages/index.html"
-          test -s "${RUNNER_TEMP}/mobile-pages/mobile-data/manifest.json"
-          test "$(find "${RUNNER_TEMP}/mobile-pages/mobile-data" -maxdepth 1 -type f | wc -l)" -eq 4
+          manifest="${RUNNER_TEMP}/mobile-pages/mobile-data/manifest.json"
+          test -s "${manifest}"
+          python - "${manifest}" "${RUNNER_TEMP}/mobile-pages/mobile-data" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          manifest_path = Path(sys.argv[1])
+          data_dir = Path(sys.argv[2])
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          match = re.fullmatch(r"catalog-([0-9a-f]{16})\.json\.gz", manifest["catalogue"]["filename"])
+          if match is None:
+              raise SystemExit("Pages manifest catalogue generation is invalid")
+          generation = match.group(1)
+          details = manifest.get("company_details")
+          expected_ids = [f"{index:02x}" for index in range(16)]
+          if (
+              not isinstance(details, dict)
+              or details.get("schema_version") != 2
+              or details.get("record_schema") != "company_detail_v2"
+              or details.get("partition") != {
+                  "algorithm": "sha256_code_first_nibble",
+                  "shard_count": 16,
+              }
+              or details.get("root_algorithm") != "SHA256_CANONICAL_SHARD_INDEX_V1"
+              or re.fullmatch(r"[0-9a-f]{64}", str(details.get("root_sha256") or "")) is None
+              or [shard.get("id") for shard in details.get("shards", [])] != expected_ids
+          ):
+              raise SystemExit("Pages manifest company detail contract is invalid")
+          for shard_id, shard in zip(expected_ids, details["shards"], strict=True):
+              expected_name = f"company-details-{generation}-{shard_id}.json.gz"
+              if shard.get("filename") != expected_name or not (data_dir / expected_name).is_file():
+                  raise SystemExit(f"Pages company detail shard {shard_id} is missing or misnamed")
+          PY
+          test "$(find "${RUNNER_TEMP}/mobile-pages/mobile-data" -maxdepth 1 -type f | wc -l)" -eq 20
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
@@ -1027,9 +1523,8 @@ jobs:
       - publish
       - deploy_pages
     runs-on: windows-latest
-    # Three public assets are verified independently.  Leave explicit headroom
-    # beyond the worst-case bounded verification and cleanup retries so a slow
-    # CDN/network incident does not terminate the job before its own diagnosis.
+    # The full immutable bundle is verified in bounded parallel-generation
+    # passes. Leave explicit headroom beyond CDN and cleanup retries.
     timeout-minutes: 60
     permissions:
       contents: write
@@ -1039,6 +1534,7 @@ jobs:
       MOBILE_CATALOG_NAME: ${{ needs.publish.outputs.catalogue_name }}
       MOBILE_SIGNALS_NAME: ${{ needs.publish.outputs.signals_name }}
       MOBILE_SIGNATURE_NAME: ${{ needs.publish.outputs.signature_name }}
+      MOBILE_DETAIL_NAMES: ${{ needs.publish.outputs.detail_names }}
       MOBILE_PREVIOUS_ASSETS: ${{ needs.publish.outputs.previous_assets }}
       MOBILE_PREVIOUS_MANIFEST_STATE: ${{ needs.publish.outputs.previous_manifest_state }}
     steps:
@@ -1081,24 +1577,31 @@ jobs:
           if (-not $verified) {
             throw 'GitHub Pages did not retain the exact newly signed stable manifest.'
           }
-          foreach ($name in @(
+          $detailNames = @([string]$env:MOBILE_DETAIL_NAMES -split '\|' | Where-Object { $_ })
+          if ($detailNames.Count -ne 16) {
+            throw 'The published output did not retain all 16 company detail shard names.'
+          }
+          $assetNames = @(
             $env:MOBILE_CATALOG_NAME,
             $env:MOBILE_SIGNALS_NAME,
             $env:MOBILE_SIGNATURE_NAME
-          )) {
-            $expected = Join-Path $env:MOBILE_DATA_DIR $name
-            $downloaded = Join-Path $env:RUNNER_TEMP "public-$name"
-            $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
-            $assetVerified = $false
-            $lastAssetFailure = 'public release asset remained unavailable'
-            # GitHub's release CDN can lag the release API for several minutes.
-            # Keep the job green when that public download path is transiently
-            # unavailable; the release API digest was already checked in the
-            # publish job, and retention cleanup is deferred rather than
-            # deleting a generation we could not re-read.
-            $assetVerificationAttempts = 8
-            $assetVerificationBaseDelaySeconds = 10
-            for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++) {
+          ) + $detailNames
+          $pendingAssets = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $assetFailures = @{}
+          foreach ($name in $assetNames) {
+            [void]$pendingAssets.Add($name)
+            $assetFailures[$name] = 'public release asset remained unavailable'
+          }
+          # GitHub's release CDN can lag the release API for several minutes.
+          # Retry the complete pending set in generation-wide passes so adding
+          # shards does not multiply the maximum backoff duration.
+          $assetVerificationAttempts = 8
+          $assetVerificationBaseDelaySeconds = 10
+          for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++) {
+            foreach ($name in @($pendingAssets)) {
+              $expected = Join-Path $env:MOBILE_DATA_DIR $name
+              $downloaded = Join-Path $env:RUNNER_TEMP "public-$name"
+              $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
               try {
                 Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
                 $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/${name}?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
@@ -1107,20 +1610,24 @@ jobs:
                 if ($downloadedAssetHash -cne $expectedAssetHash) {
                   throw "Public immutable asset $name differs from the verified build artifact."
                 }
-                $assetVerified = $true
-                break
+                [void]$pendingAssets.Remove($name)
               } catch {
-                $lastAssetFailure = $_.Exception.Message
-                Write-Warning "Public immutable asset $name verification attempt $attempt of $assetVerificationAttempts failed: $lastAssetFailure"
-              }
-              if ($attempt -lt $assetVerificationAttempts) {
-                Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)
+                $assetFailures[$name] = $_.Exception.Message
+                Write-Warning "Public immutable asset $name verification attempt $attempt of $assetVerificationAttempts failed: $($assetFailures[$name])"
               }
             }
-            if (-not $assetVerified) {
-              Write-Warning "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $lastAssetFailure"
-              'MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED=true' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            if ($pendingAssets.Count -eq 0) {
+              break
             }
+            if ($attempt -lt $assetVerificationAttempts) {
+              Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)
+            }
+          }
+          if ($pendingAssets.Count -gt 0) {
+            foreach ($name in @($pendingAssets)) {
+              Write-Warning "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $($assetFailures[$name])"
+            }
+            'MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED=true' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
       - name: Retain only the current and previous complete generations
@@ -1184,18 +1691,22 @@ jobs:
             throw "Could not delete obsolete mobile asset $name after three attempts."
           }
           $retained = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $detailNames = @([string]$env:MOBILE_DETAIL_NAMES -split '\|' | Where-Object { $_ })
+          if ($detailNames.Count -ne 16) {
+            throw 'Retention cleanup did not receive all 16 current company detail shard names.'
+          }
           foreach ($name in @(
             $env:MOBILE_CATALOG_NAME,
             $env:MOBILE_SIGNALS_NAME,
             $env:MOBILE_SIGNATURE_NAME
-          )) {
+          ) + $detailNames) {
             [void]$retained.Add($name)
           }
           foreach ($name in ([string]$env:MOBILE_PREVIOUS_ASSETS -split '\|' | Where-Object { $_ })) {
             [void]$retained.Add($name)
           }
           $release = Get-MobileRelease
-          $managedPattern = '^(?:manifest\.json|catalog-[0-9a-f]{16}\.json\.gz|signals-[0-9a-f]{16}\.json\.gz|manifest-[0-9a-f]{16}\.sig|catalog\.json\.gz|signals\.json\.gz)$'
+          $managedPattern = '^(?:manifest\.json|catalog-[0-9a-f]{16}\.json\.gz|signals-[0-9a-f]{16}\.json\.gz|company-details-[0-9a-f]{16}-[0-9a-f]{2}\.json\.gz|manifest-[0-9a-f]{16}\.sig|catalog\.json\.gz|signals\.json\.gz)$'
           foreach ($asset in @($release.assets)) {
             $name = [string]$asset.name
             if ($name -match $managedPattern -and -not $retained.Contains($name)) {
@@ -1207,7 +1718,7 @@ jobs:
             $env:MOBILE_CATALOG_NAME,
             $env:MOBILE_SIGNALS_NAME,
             $env:MOBILE_SIGNATURE_NAME
-          )) {
+          ) + $detailNames) {
             if ($required -cnotin $remaining) {
               throw "Retention cleanup removed required mobile asset $required."
             }

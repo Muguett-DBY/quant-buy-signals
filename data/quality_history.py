@@ -51,6 +51,20 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_BATCH_COMPANIES = 2_000
 CACHE_SCHEMA_VERSION = 1
 REUSABLE_CACHE_MAX_AGE_DAYS = LATEST_MAX_AGE_DAYS
+PARTIAL_STRUCTURAL_RETRY_DAYS = 7
+PARTIAL_TRANSIENT_RETRY_DAYS = 1
+
+_COMPONENT_SHAREHOLDER_RETURN = "shareholder_return"
+_COMPONENT_VALUATION_HISTORY = "valuation_history"
+_QUALITY_HISTORY_COMPONENTS = (
+    _COMPONENT_SHAREHOLDER_RETURN,
+    _COMPONENT_VALUATION_HISTORY,
+)
+_LEGACY_CACHE_PAYLOAD_FIELDS = {"contract", "weekly_bars", "valuation_rows"}
+_COMPONENT_CACHE_PAYLOAD_FIELDS = {
+    *_LEGACY_CACHE_PAYLOAD_FIELDS,
+    "component_checked_as_of",
+}
 
 _A_SHARE_CODE = re.compile(r"^[036][0-9]{5}$")
 _CANONICAL_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -80,6 +94,14 @@ class QualityHistoryEvidence:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _QualityHistoryCacheCapture:
+    evidence: QualityHistoryEvidence
+    weekly_bars: list[WeeklyClose]
+    valuation_rows: list[dict[str, Any]]
+    component_checked_as_of: dict[str, date]
 
 
 def _error_label(exc: BaseException, *, limit: int = 180) -> str:
@@ -561,32 +583,87 @@ def _reusable_cache_candidates(code: str, as_of: date, cache_dir: Path) -> list[
     remains satisfied.
     """
 
-    earliest = as_of.toordinal() - REUSABLE_CACHE_MAX_AGE_DAYS
-    prefix = f"{MODEL_ID}_{code}_"
     candidates: list[tuple[date, Path]] = []
-    for path in cache_dir.glob(f"{prefix}????????.json.gz"):
-        stamp = path.name[len(prefix) : len(prefix) + 8]
-        try:
-            cached_as_of = datetime.strptime(stamp, "%Y%m%d").date()
-        except ValueError:
-            continue
-        if earliest <= cached_as_of.toordinal() <= as_of.toordinal():
+    # The filename contract is deterministic and the reuse horizon is short.
+    # Probing those exact dates avoids rescanning a market-wide cache directory
+    # once per company (quadratic directory-walk cost on Windows runners).
+    for age_days in range(1, REUSABLE_CACHE_MAX_AGE_DAYS + 1):
+        cached_as_of = date.fromordinal(as_of.toordinal() - age_days)
+        path = _cache_path(code, cached_as_of, cache_dir)
+        if path.is_file():
             candidates.append((cached_as_of, path))
-    candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
     return candidates
 
 
-def _from_cache(payload: Any, code: str, as_of: date) -> QualityHistoryEvidence:
-    if not isinstance(payload, Mapping) or set(payload) != {"contract", "weekly_bars", "valuation_rows"}:
+def _component_checked_dates(payload: Mapping[str, Any], cached_as_of: date) -> dict[str, date]:
+    raw = payload.get("component_checked_as_of")
+    if raw is None:
+        # Cache generations written before component-aware retry support
+        # acquired both sources on the contract date.
+        return {component: cached_as_of for component in _QUALITY_HISTORY_COMPONENTS}
+    if not isinstance(raw, Mapping) or set(raw) != set(_QUALITY_HISTORY_COMPONENTS):
+        raise QualityHistoryError("market-history cache component dates are invalid")
+    result: dict[str, date] = {}
+    for component in _QUALITY_HISTORY_COMPONENTS:
+        value = raw.get(component)
+        if not isinstance(value, str) or not _CANONICAL_DATE.fullmatch(value):
+            raise QualityHistoryError("market-history cache component date is invalid")
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise QualityHistoryError("market-history cache component date is invalid") from exc
+        if parsed > cached_as_of:
+            raise QualityHistoryError("market-history cache component date exceeds its contract")
+        result[component] = parsed
+    return result
+
+
+def _capture_from_cache(
+    payload: Any,
+    code: str,
+    *,
+    cached_as_of: date,
+    requested_as_of: date,
+    diagnostic: str,
+) -> _QualityHistoryCacheCapture:
+    payload_fields = frozenset(payload) if isinstance(payload, Mapping) else frozenset()
+    if not isinstance(payload, Mapping) or payload_fields not in {
+        frozenset(_LEGACY_CACHE_PAYLOAD_FIELDS),
+        frozenset(_COMPONENT_CACHE_PAYLOAD_FIELDS),
+    }:
         raise QualityHistoryError("market-history cache payload shape is invalid")
-    if payload.get("contract") != _cache_contract(code, as_of):
+    if payload.get("contract") != _cache_contract(code, cached_as_of):
         raise QualityHistoryError("market-history cache contract mismatch")
     bars = _deserialize_bars(payload.get("weekly_bars"))
-    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, as_of)
-    result = _calculate_evidence(code, as_of, bars, rows, cache_hit=True, cache_diagnostic="hit")
-    if not result.available:
-        raise QualityHistoryError(f"cached quality history is incomplete: {result.reason}")
-    return result
+    # Validate every persisted row against the contract that created it before
+    # sliding the usable five-year window to the requested session.
+    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, cached_as_of)
+    requested_start = _years_before(requested_as_of, 5)
+    rows = [row for row in rows if requested_start <= date.fromisoformat(str(row["date"])) <= requested_as_of]
+    evidence = _calculate_evidence(
+        code,
+        requested_as_of,
+        bars,
+        rows,
+        cache_hit=True,
+        cache_diagnostic=diagnostic,
+    )
+    return _QualityHistoryCacheCapture(
+        evidence=evidence,
+        weekly_bars=bars,
+        valuation_rows=rows,
+        component_checked_as_of=_component_checked_dates(payload, cached_as_of),
+    )
+
+
+def _from_cache(payload: Any, code: str, as_of: date) -> QualityHistoryEvidence:
+    return _capture_from_cache(
+        payload,
+        code,
+        cached_as_of=as_of,
+        requested_as_of=as_of,
+        diagnostic="hit",
+    ).evidence
 
 
 def _from_recent_cache(
@@ -596,40 +673,49 @@ def _from_recent_cache(
     cached_as_of: date,
     requested_as_of: date,
 ) -> QualityHistoryEvidence:
-    if not isinstance(payload, Mapping) or set(payload) != {"contract", "weekly_bars", "valuation_rows"}:
-        raise QualityHistoryError("market-history cache payload shape is invalid")
-    if payload.get("contract") != _cache_contract(code, cached_as_of):
-        raise QualityHistoryError("market-history cache contract mismatch")
-    bars = _deserialize_bars(payload.get("weekly_bars"))
-    # Validate the persisted rows against the date contract that created them
-    # before sliding the five-year window forward.  Re-validating the complete
-    # older capture directly against ``requested_as_of`` rejects every trading
-    # day that has legitimately fallen out of the newer window, which makes
-    # the documented 21-day reusable-cache path unusable after a long weekend
-    # or any request shift greater than the first observed trading-day delay.
-    rows = _normalise_valuation_rows(payload.get("valuation_rows"), code, cached_as_of)
-    requested_start = _years_before(requested_as_of, 5)
-    rows = [row for row in rows if requested_start <= date.fromisoformat(str(row["date"])) <= requested_as_of]
-    result = _calculate_evidence(
+    return _capture_from_cache(
+        payload,
         code,
-        requested_as_of,
-        bars,
-        rows,
-        cache_hit=True,
-        cache_diagnostic=f"recent_source_capture:{cached_as_of.isoformat()}",
-    )
-    if not result.available:
-        raise QualityHistoryError(f"recent quality history is incomplete: {result.reason}")
-    return result
+        cached_as_of=cached_as_of,
+        requested_as_of=requested_as_of,
+        diagnostic=f"recent_source_capture:{cached_as_of.isoformat()}",
+    ).evidence
 
 
-def _load_reusable_cache(
+def _partial_retry_days(record: Mapping[str, Any]) -> int:
+    reason = str(record.get("reason") or "")
+    if reason in {
+        "missing_weekly_history",
+        "stale_latest_weekly_price",
+        "missing_valuation_history",
+        "stale_latest_valuation",
+    }:
+        return PARTIAL_TRANSIENT_RETRY_DAYS
+    return PARTIAL_STRUCTURAL_RETRY_DAYS
+
+
+def _capture_refresh_components(
+    capture: _QualityHistoryCacheCapture,
+    requested_as_of: date,
+) -> tuple[str, ...]:
+    due: list[str] = []
+    for component in _QUALITY_HISTORY_COMPONENTS:
+        record = getattr(capture.evidence, component)
+        if record.get("available") is True:
+            continue
+        checked_as_of = capture.component_checked_as_of[component]
+        if (requested_as_of - checked_as_of).days >= _partial_retry_days(record):
+            due.append(component)
+    return tuple(due)
+
+
+def _load_reusable_capture(
     code: str,
     as_of: date,
     *,
     cache_dir: Path,
     cache_ttl_seconds: int,
-) -> QualityHistoryEvidence | None:
+) -> _QualityHistoryCacheCapture | None:
     exact_path = _cache_path(code, as_of, cache_dir)
     exact = SafeFileCache(
         exact_path,
@@ -639,7 +725,13 @@ def _load_reusable_cache(
     ).load()
     if exact.hit:
         try:
-            return _from_cache(exact.value, code, as_of)
+            return _capture_from_cache(
+                exact.value,
+                code,
+                cached_as_of=as_of,
+                requested_as_of=as_of,
+                diagnostic="hit",
+            )
         except QualityHistoryError:
             pass
     for cached_as_of, path in _reusable_cache_candidates(code, as_of, cache_dir):
@@ -654,15 +746,110 @@ def _load_reusable_cache(
         if not cached.hit:
             continue
         try:
-            return _from_recent_cache(
+            return _capture_from_cache(
                 cached.value,
                 code,
                 cached_as_of=cached_as_of,
                 requested_as_of=as_of,
+                diagnostic=f"recent_source_capture:{cached_as_of.isoformat()}",
             )
         except QualityHistoryError:
             continue
     return None
+
+
+def _load_reusable_cache(
+    code: str,
+    as_of: date,
+    *,
+    cache_dir: Path,
+    cache_ttl_seconds: int,
+) -> QualityHistoryEvidence | None:
+    capture = _load_reusable_capture(
+        code,
+        as_of,
+        cache_dir=cache_dir,
+        cache_ttl_seconds=cache_ttl_seconds,
+    )
+    return capture.evidence if capture is not None else None
+
+
+def _weekly_component_rank(code: str, as_of: date, bars: Sequence[WeeklyClose]) -> tuple[int, int, int, int]:
+    record = _calculate_evidence(
+        code,
+        as_of,
+        bars,
+        [],
+        cache_hit=False,
+        cache_diagnostic="component_rank",
+    ).shareholder_return
+    end_date = record.get("end_date")
+    try:
+        end_ordinal = date.fromisoformat(str(end_date)).toordinal() if end_date else 0
+    except ValueError:
+        end_ordinal = 0
+    return (
+        int(record.get("available") is True),
+        int(record.get("span_days") or 0),
+        end_ordinal,
+        int(record.get("observations") or 0),
+    )
+
+
+def _valuation_component_rank(
+    code: str,
+    as_of: date,
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[int, int, int, int, int]:
+    record = _calculate_evidence(
+        code,
+        as_of,
+        [],
+        rows,
+        cache_hit=False,
+        cache_diagnostic="component_rank",
+    ).valuation_history
+    end_date = record.get("end_date")
+    try:
+        end_ordinal = date.fromisoformat(str(end_date)).toordinal() if end_date else 0
+    except ValueError:
+        end_ordinal = 0
+    return (
+        int(record.get("available") is True),
+        int(record.get("span_days") or 0),
+        max(int(record.get("pe_observations") or 0), int(record.get("pb_observations") or 0)),
+        end_ordinal,
+        int(record.get("row_count") or 0),
+    )
+
+
+def _prefer_weekly_bars(
+    code: str,
+    as_of: date,
+    cached: Sequence[WeeklyClose],
+    fresh: Sequence[WeeklyClose],
+) -> list[WeeklyClose]:
+    cached_list, fresh_list = list(cached), list(fresh)
+    return (
+        fresh_list
+        if _weekly_component_rank(code, as_of, fresh_list) >= _weekly_component_rank(code, as_of, cached_list)
+        else cached_list
+    )
+
+
+def _prefer_valuation_rows(
+    code: str,
+    as_of: date,
+    cached: Sequence[Mapping[str, Any]],
+    fresh: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    cached_list = [dict(row) for row in cached]
+    fresh_list = [dict(row) for row in fresh]
+    return (
+        fresh_list
+        if _valuation_component_rank(code, as_of, fresh_list) >= _valuation_component_rank(code, as_of, cached_list)
+        else cached_list
+    )
 
 
 def fetch_quality_history(
@@ -686,18 +873,23 @@ def fetch_quality_history(
         stock_adjustment="hfq",
     )
     cache: SafeFileCache | None = None
+    capture: _QualityHistoryCacheCapture | None = None
     initial = None
     diagnostic = "disabled"
+    refresh_components = tuple(_QUALITY_HISTORY_COMPONENTS)
     if use_cache:
         cache_root = Path(cache_dir)
-        reusable = _load_reusable_cache(
+        capture = _load_reusable_capture(
             normalized_code,
             cutoff,
             cache_dir=cache_root,
             cache_ttl_seconds=int(cache_ttl_seconds),
         )
-        if reusable is not None:
-            return reusable
+        if capture is not None:
+            refresh_components = _capture_refresh_components(capture, cutoff)
+            if capture.evidence.available or not refresh_components:
+                return capture.evidence
+            diagnostic = "partial_retry:" + ",".join(refresh_components)
         cache = SafeFileCache(
             _cache_path(normalized_code, cutoff, cache_root),
             schema_version=CACHE_SCHEMA_VERSION,
@@ -707,44 +899,80 @@ def fetch_quality_history(
         initial = cache.load()
         if initial.hit:
             try:
-                return _from_cache(initial.value, normalized_code, cutoff)
+                exact_capture = _capture_from_cache(
+                    initial.value,
+                    normalized_code,
+                    cached_as_of=cutoff,
+                    requested_as_of=cutoff,
+                    diagnostic="hit",
+                )
+                exact_refresh = _capture_refresh_components(exact_capture, cutoff)
+                if exact_capture.evidence.available or not exact_refresh:
+                    return exact_capture.evidence
+                capture = exact_capture
+                refresh_components = exact_refresh
+                diagnostic = "partial_retry:" + ",".join(refresh_components)
             except QualityHistoryError as exc:
                 diagnostic = f"invalid_hit:{_error_label(exc)}"
-        else:
+        elif capture is None:
             diagnostic = f"miss:{initial.reason}"
 
-    try:
-        bars = adapter.fetch_weekly_closes(
-            ("sh" if normalized_code.startswith("6") else "sz") + normalized_code,
-            cutoff,
-            require_forward_adjusted=True,
-        )
-        valuation_rows = _fetch_valuation_rows(normalized_code, cutoff, session=valuation_session)
-        result = _calculate_evidence(
-            normalized_code,
-            cutoff,
-            bars,
-            valuation_rows,
-            cache_hit=False,
-            cache_diagnostic=diagnostic,
-        )
-    except Exception as exc:
-        empty = _calculate_evidence(
-            normalized_code,
-            cutoff,
-            [],
-            [],
-            cache_hit=False,
-            cache_diagnostic=diagnostic,
-        )
-        return replace(empty, reason=f"source_unavailable:{_error_label(exc)}")
+    bars = list(capture.weekly_bars) if capture is not None else []
+    valuation_rows = [dict(row) for row in capture.valuation_rows] if capture is not None else []
+    checked_dates = (
+        dict(capture.component_checked_as_of)
+        if capture is not None
+        else {component: cutoff for component in _QUALITY_HISTORY_COMPONENTS}
+    )
+    source_errors: list[tuple[str, str]] = []
+    if _COMPONENT_SHAREHOLDER_RETURN in refresh_components:
+        checked_dates[_COMPONENT_SHAREHOLDER_RETURN] = cutoff
+        try:
+            fresh_bars = adapter.fetch_weekly_closes(
+                ("sh" if normalized_code.startswith("6") else "sz") + normalized_code,
+                cutoff,
+                require_forward_adjusted=True,
+            )
+            bars = _prefer_weekly_bars(normalized_code, cutoff, bars, fresh_bars)
+        except Exception as exc:
+            source_errors.append((_COMPONENT_SHAREHOLDER_RETURN, _error_label(exc)))
+    if _COMPONENT_VALUATION_HISTORY in refresh_components:
+        checked_dates[_COMPONENT_VALUATION_HISTORY] = cutoff
+        try:
+            fresh_rows = _fetch_valuation_rows(normalized_code, cutoff, session=valuation_session)
+            valuation_rows = _prefer_valuation_rows(
+                normalized_code,
+                cutoff,
+                valuation_rows,
+                fresh_rows,
+            )
+        except Exception as exc:
+            source_errors.append((_COMPONENT_VALUATION_HISTORY, _error_label(exc)))
 
-    if not result.available or cache is None:
+    result = _calculate_evidence(
+        normalized_code,
+        cutoff,
+        bars,
+        valuation_rows,
+        cache_hit=False,
+        cache_diagnostic=diagnostic,
+    )
+    if source_errors:
+        result = replace(
+            result,
+            reason="source_unavailable:"
+            + "|".join(f"{error};component={component}" for component, error in source_errors),
+        )
+
+    if cache is None or (not bars and not valuation_rows):
         return result
     payload = {
         "contract": _cache_contract(normalized_code, cutoff),
         "weekly_bars": _serialize_bars(bars),
         "valuation_rows": valuation_rows,
+        "component_checked_as_of": {
+            component: checked_dates[component].isoformat() for component in _QUALITY_HISTORY_COMPONENTS
+        },
     }
     expected_hash = None
     if initial is not None and isinstance(initial.metadata, Mapping):
@@ -757,7 +985,8 @@ def fetch_quality_history(
             expected_payload_sha256=expected_hash,
             allow_replace_invalid=True,
         )
-        return replace(result, cache_diagnostic=f"{diagnostic};saved")
+        saved_state = "complete" if result.available else "partial"
+        return replace(result, cache_diagnostic=f"{diagnostic};saved_{saved_state}")
     except SafeCacheConflict:
         winner = cache.load()
         if winner.hit:
@@ -770,15 +999,15 @@ def fetch_quality_history(
         return replace(result, cache_diagnostic=f"{diagnostic};write_failed:{_error_label(exc)}")
 
 
-def load_quality_history_cache_batch(
+def load_quality_history_cache_batch_state(
     requests_: Sequence[Mapping[str, Any]],
     *,
     max_workers: int = 16,
     progress_cb: Any = None,
     cache_dir: str | Path = QUALITY_HISTORY_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
-) -> dict[str, dict[str, Any]]:
-    """Load all currently reusable histories without performing network I/O."""
+) -> tuple[dict[str, dict[str, Any]], tuple[str, ...]]:
+    """Load reusable histories and identify partial records whose retry is due."""
 
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
         raise TypeError("market-history cache requests must be a sequence")
@@ -802,30 +1031,54 @@ def load_quality_history_cache_batch(
         prepared.append((code, as_of))
     prepared.sort(key=lambda item: item[0])
     if not prepared:
-        return {}
+        return {}, ()
 
     results: dict[str, dict[str, Any]] = {}
+    refresh_due: set[str] = set()
     with ThreadPoolExecutor(max_workers=min(int(max_workers), len(prepared))) as executor:
-        future_to_code = {
+        future_to_item = {
             executor.submit(
-                _load_reusable_cache,
+                _load_reusable_capture,
                 code,
                 as_of,
                 cache_dir=cache_root,
                 cache_ttl_seconds=cache_ttl_seconds,
-            ): code
+            ): (code, as_of)
             for code, as_of in prepared
         }
         completed = 0
-        for future in as_completed(future_to_code):
-            code = future_to_code[future]
-            evidence = future.result()
-            if evidence is not None:
-                results[code] = evidence.to_dict()
+        for future in as_completed(future_to_item):
+            code, as_of = future_to_item[future]
+            capture = future.result()
+            if capture is not None:
+                results[code] = capture.evidence.to_dict()
+                if _capture_refresh_components(capture, as_of):
+                    refresh_due.add(code)
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
-    return {code: results[code] for code, _ in prepared if code in results}
+    ordered_results = {code: results[code] for code, _ in prepared if code in results}
+    return ordered_results, tuple(code for code, _ in prepared if code in refresh_due)
+
+
+def load_quality_history_cache_batch(
+    requests_: Sequence[Mapping[str, Any]],
+    *,
+    max_workers: int = 16,
+    progress_cb: Any = None,
+    cache_dir: str | Path = QUALITY_HISTORY_CACHE_DIR,
+    cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+) -> dict[str, dict[str, Any]]:
+    """Load all currently reusable histories without performing network I/O."""
+
+    results, _refresh_due = load_quality_history_cache_batch_state(
+        requests_,
+        max_workers=max_workers,
+        progress_cb=progress_cb,
+        cache_dir=cache_dir,
+        cache_ttl_seconds=cache_ttl_seconds,
+    )
+    return results
 
 
 def fetch_quality_history_batch(
@@ -888,10 +1141,13 @@ def fetch_quality_history_batch(
 __all__ = [
     "EASTMONEY_VALUATION_ENDPOINT",
     "MODEL_ID",
+    "PARTIAL_STRUCTURAL_RETRY_DAYS",
+    "PARTIAL_TRANSIENT_RETRY_DAYS",
     "QualityHistoryError",
     "QualityHistoryEvidence",
     "fetch_quality_history",
     "fetch_quality_history_batch",
     "load_quality_history_cache_batch",
+    "load_quality_history_cache_batch_state",
     "replay_valuation_distribution",
 ]

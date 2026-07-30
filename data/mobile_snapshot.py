@@ -46,11 +46,14 @@ from engine.buy_screener import (
 
 
 SNAPSHOT_SCHEMA_VERSION = 1
+COMPANY_DETAIL_SCHEMA_VERSION = 2
+COMPANY_DETAIL_SHARD_COUNT = 16
 MAX_COMPRESSED_ASSET_BYTES = 8_000_000
 MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000
 MAX_PUBLIC_REASON_UTF16_UNITS = 200
 CATALOG_FILENAME = "catalog-{generation}.json.gz"
 SIGNALS_FILENAME = "signals-{generation}.json.gz"
+COMPANY_DETAIL_FILENAME = "company-details-{generation}-{shard_id}.json.gz"
 SIGNATURE_FILENAME = "manifest-{generation}.sig"
 MANIFEST_FILENAME = "manifest.json"
 _TYPE_KEYS = tuple(f"type{number}" for number in range(1, 8))
@@ -66,6 +69,15 @@ _DECISION_FIELDS = {
     "missing_dimensions",
 }
 _PUBLIC_META_REASON_KEYS = ("_scope", "_veto", "_missing", "_condition", "_downgrade", "_risk")
+_PUBLIC_DETAIL_META_REASON_KEYS = (
+    *_PUBLIC_META_REASON_KEYS,
+    "_blocked",
+    "_adjustment",
+    "_coverage",
+    "_profile",
+    "_score_quality",
+    "_4f_formula",
+)
 _SCORELESS_STATUSES = frozenset({"not_applicable", "insufficient_evidence"})
 _STATUS_LABELS = {
     "triggered": "已触发",
@@ -287,6 +299,12 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         "score": round(total, 3) if total is not None else None,
         "reason": public_reason,
         "decision": decision,
+        # Keep these two booleans in the lightweight catalogue as well as the
+        # detail shards.  The website needs them to distinguish an honest
+        # scope exclusion from an applicable framework whose missing evidence
+        # is currently bounded by a confirmed veto.
+        "applicable": payload.get("applicable") is True,
+        "evidence_complete": payload.get("evidence_complete") is True,
     }
     if isinstance(reasons, Mapping) and isinstance(reasons.get("_missing"), str):
         evidence_gap = _public_reason_text(reasons["_missing"])
@@ -326,7 +344,7 @@ def _public_type_detail(payload: Any, type_key: str) -> dict[str, Any]:
     if isinstance(reasons, Mapping):
         sub_scores = payload.get("sub_scores")
         public_keys = [
-            *_PUBLIC_META_REASON_KEYS,
+            *_PUBLIC_DETAIL_META_REASON_KEYS,
             *(str(key) for key in sub_scores if isinstance(sub_scores, Mapping)),
         ]
         public_reasons = dict.fromkeys(
@@ -339,6 +357,8 @@ def _public_type_detail(payload: Any, type_key: str) -> dict[str, Any]:
             "sub_score_reasons": compact.get("sub_score_reasons", {}),
             "reasons": public_reasons,
             "veto": payload.get("veto") is True,
+            "applicable": payload.get("applicable") is True,
+            "evidence_complete": payload.get("evidence_complete") is True,
         }
     )
     return compact
@@ -419,6 +439,88 @@ def _signal_detail(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _company_detail_shard_id(code: str) -> str:
+    """Return the stable first-nibble SHA-256 partition for one company code."""
+
+    digest = hashlib.sha256(code.encode("ascii")).digest()
+    return f"{digest[0] >> 4:02x}"
+
+
+def _company_detail_v2(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one validated score row into the public website detail contract."""
+
+    catalog = _catalog_company(row)
+    detail = {
+        "schema_version": COMPANY_DETAIL_SCHEMA_VERSION,
+        **{key: value for key, value in catalog.items() if key != "types"},
+        "types": {type_key: _public_type_detail(row.get(type_key), type_key) for type_key in _TYPE_KEYS},
+    }
+    source_trade_date = str(row.get("source_trade_date") or "").strip()
+    if source_trade_date and source_trade_date.casefold() not in {"nan", "nat", "none"}:
+        detail["source_trade_date"] = source_trade_date
+    return detail
+
+
+def _build_company_detail_shards(
+    raw_records: Sequence[Mapping[str, Any]],
+    *,
+    generated_at_utc: str,
+    market_as_of: str,
+    data_timestamp_utc: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    shard_ids = tuple(f"{index:02x}" for index in range(COMPANY_DETAIL_SHARD_COUNT))
+    companies_by_shard: dict[str, list[dict[str, Any]]] = {shard_id: [] for shard_id in shard_ids}
+    for row in raw_records:
+        detail = _company_detail_v2(row)
+        shard_id = _company_detail_shard_id(detail["code"])
+        companies_by_shard[shard_id].append(detail)
+
+    payloads: dict[str, dict[str, Any]] = {}
+    root_entries: list[dict[str, Any]] = []
+    for shard_id in shard_ids:
+        companies = sorted(companies_by_shard[shard_id], key=lambda item: item["code"])
+        payload = {
+            "schema_version": COMPANY_DETAIL_SCHEMA_VERSION,
+            "record_schema": "company_detail_v2",
+            "product": "DS_DCF",
+            "generated_at_utc": generated_at_utc,
+            "market_as_of": market_as_of,
+            "data_timestamp_utc": data_timestamp_utc,
+            "shard_id": shard_id,
+            "company_count": len(companies),
+            "companies": companies,
+        }
+        raw = _canonical_json_bytes(payload)
+        payloads[shard_id] = payload
+        root_entries.append(
+            {
+                "id": shard_id,
+                "company_count": len(companies),
+                "uncompressed_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        )
+
+    root_contract = {
+        "schema_version": COMPANY_DETAIL_SCHEMA_VERSION,
+        "record_schema": "company_detail_v2",
+        "partition": {
+            "algorithm": "sha256_code_first_nibble",
+            "shard_count": COMPANY_DETAIL_SHARD_COUNT,
+        },
+        "shards": root_entries,
+    }
+    descriptor = {
+        "schema_version": COMPANY_DETAIL_SCHEMA_VERSION,
+        "record_schema": "company_detail_v2",
+        "company_count": len(raw_records),
+        "partition": dict(root_contract["partition"]),
+        "root_algorithm": "SHA256_CANONICAL_SHARD_INDEX_V1",
+        "root_sha256": hashlib.sha256(_canonical_json_bytes(root_contract)).hexdigest(),
+        "shards": root_entries,
+    }
+    return payloads, descriptor
+
+
 def _type_coverage(companies: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, int]]:
     result: dict[str, dict[str, int]] = {}
     for type_key in _TYPE_KEYS:
@@ -436,7 +538,7 @@ def _type_coverage(companies: Sequence[Mapping[str, Any]]) -> dict[str, dict[str
     return result
 
 
-def build_mobile_snapshot(
+def _build_mobile_snapshot_bundle(
     scores: pd.DataFrame,
     *,
     market_as_of: str,
@@ -444,7 +546,7 @@ def build_mobile_snapshot(
     analysis_quality: Mapping[str, Any],
     dcf_results: Mapping[str, Any] | None = None,
     provenance: Mapping[str, Any] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     """Build portable manifest, catalogue, and candidate-detail payloads.
 
     ``scores`` is the fully validated production screen result.  No external
@@ -533,13 +635,34 @@ def build_mobile_snapshot(
         "candidate_detail_count": candidate_detail_count,
         "signals": signals,
     }
+    detail_shards, detail_descriptor = _build_company_detail_shards(
+        raw_records,
+        generated_at_utc=generated_at,
+        market_as_of=market_as_of,
+        data_timestamp_utc=data_timestamp_utc,
+    )
     generation = hashlib.sha256(
-        _canonical_json_bytes(catalogue) + b"\0" + _canonical_json_bytes(signal_payload)
+        _canonical_json_bytes(catalogue)
+        + b"\0"
+        + _canonical_json_bytes(signal_payload)
+        + b"\0company-details-v2\0"
+        + bytes.fromhex(detail_descriptor["root_sha256"])
     ).hexdigest()[:16]
+    detail_descriptor = {
+        **detail_descriptor,
+        "shards": [
+            {
+                **entry,
+                "filename": COMPANY_DETAIL_FILENAME.format(generation=generation, shard_id=entry["id"]),
+            }
+            for entry in detail_descriptor["shards"]
+        ],
+    }
     manifest = {
         **shared,
         "catalogue": {"filename": CATALOG_FILENAME.format(generation=generation)},
         "signals": {"filename": SIGNALS_FILENAME.format(generation=generation)},
+        "company_details": detail_descriptor,
         "signature": {
             "filename": SIGNATURE_FILENAME.format(generation=generation),
             "algorithm": "ECDSA_P256_SHA256",
@@ -555,7 +678,29 @@ def build_mobile_snapshot(
             "type_coverage": coverage,
         },
     }
-    return manifest, catalogue, signal_payload
+    return manifest, catalogue, signal_payload, detail_shards
+
+
+def build_mobile_snapshot(
+    scores: pd.DataFrame,
+    *,
+    market_as_of: str,
+    data_timestamp_utc: str,
+    analysis_quality: Mapping[str, Any],
+    dcf_results: Mapping[str, Any] | None = None,
+    provenance: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Build the backwards-compatible catalogue/signals view and signed manifest."""
+
+    manifest, catalogue, signals, _detail_shards = _build_mobile_snapshot_bundle(
+        scores,
+        market_as_of=market_as_of,
+        data_timestamp_utc=data_timestamp_utc,
+        analysis_quality=analysis_quality,
+        dcf_results=dcf_results,
+        provenance=provenance,
+    )
+    return manifest, catalogue, signals
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -592,7 +737,7 @@ def write_mobile_snapshot(
     provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write an atomically replaceable mobile snapshot and return its manifest."""
-    manifest, catalogue, signals = build_mobile_snapshot(
+    manifest, catalogue, signals, detail_shards = _build_mobile_snapshot_bundle(
         scores,
         market_as_of=market_as_of,
         data_timestamp_utc=data_timestamp_utc,
@@ -606,14 +751,26 @@ def write_mobile_snapshot(
     output.parent.mkdir(parents=True, exist_ok=True)
     catalogue_raw = _canonical_json_bytes(catalogue)
     signals_raw = _canonical_json_bytes(signals)
-    for label, raw in (("catalogue", catalogue_raw), ("signals", signals_raw)):
+    detail_raw = {shard_id: _canonical_json_bytes(payload) for shard_id, payload in detail_shards.items()}
+    raw_assets = [
+        ("catalogue", catalogue_raw),
+        ("signals", signals_raw),
+        *((f"company detail shard {shard_id}", raw) for shard_id, raw in detail_raw.items()),
+    ]
+    for label, raw in raw_assets:
         if len(raw) > MAX_UNCOMPRESSED_ASSET_BYTES:
             raise MobileSnapshotError(
                 f"{label} exceeds the Android uncompressed limit: {len(raw)} > {MAX_UNCOMPRESSED_ASSET_BYTES}"
             )
     catalogue_bytes = _gzip_bytes(catalogue_raw)
     signals_bytes = _gzip_bytes(signals_raw)
-    for label, compressed in (("catalogue", catalogue_bytes), ("signals", signals_bytes)):
+    detail_bytes = {shard_id: _gzip_bytes(raw) for shard_id, raw in detail_raw.items()}
+    compressed_assets = [
+        ("catalogue", catalogue_bytes),
+        ("signals", signals_bytes),
+        *((f"company detail shard {shard_id}", compressed) for shard_id, compressed in detail_bytes.items()),
+    ]
+    for label, compressed in compressed_assets:
         if len(compressed) > MAX_COMPRESSED_ASSET_BYTES:
             raise MobileSnapshotError(
                 f"{label} exceeds the Android download limit: {len(compressed)} > {MAX_COMPRESSED_ASSET_BYTES}"
@@ -633,11 +790,27 @@ def write_mobile_snapshot(
             "uncompressed_size": len(signals_raw),
         }
     )
+    detail_metadata_by_id = {str(entry["id"]): entry for entry in manifest["company_details"]["shards"]}
+    for shard_id, compressed in detail_bytes.items():
+        metadata = detail_metadata_by_id[shard_id]
+        raw = detail_raw[shard_id]
+        if metadata["uncompressed_sha256"] != hashlib.sha256(raw).hexdigest():
+            raise MobileSnapshotError(f"company detail shard {shard_id} root metadata is inconsistent")
+        metadata.update(
+            {
+                "sha256": hashlib.sha256(compressed).hexdigest(),
+                "size": len(compressed),
+                "uncompressed_size": len(raw),
+            }
+        )
     staging = Path(tempfile.mkdtemp(prefix=output.name + ".", suffix=".tmp", dir=output.parent))
     committed = False
     try:
         _atomic_write(staging / manifest["catalogue"]["filename"], catalogue_bytes)
         _atomic_write(staging / manifest["signals"]["filename"], signals_bytes)
+        for metadata in manifest["company_details"]["shards"]:
+            shard_id = str(metadata["id"])
+            _atomic_write(staging / str(metadata["filename"]), detail_bytes[shard_id])
         _atomic_write(staging / MANIFEST_FILENAME, _canonical_json_bytes(manifest) + b"\n")
         if output.exists():
             output.rmdir()
@@ -651,6 +824,9 @@ def write_mobile_snapshot(
 
 __all__ = [
     "CATALOG_FILENAME",
+    "COMPANY_DETAIL_FILENAME",
+    "COMPANY_DETAIL_SCHEMA_VERSION",
+    "COMPANY_DETAIL_SHARD_COUNT",
     "MANIFEST_FILENAME",
     "MobileSnapshotError",
     "SIGNATURE_FILENAME",
