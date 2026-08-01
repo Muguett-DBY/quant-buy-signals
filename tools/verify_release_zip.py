@@ -3280,7 +3280,7 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
             if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
                 exact_upper = _finite_number(ledger.get("upper_bound"))
                 failures = ledger.get("condition_failures")
-                theoretical = bool(
+                theoretical = theoretical and bool(
                     exact_upper is not None
                     and exact_upper > _AUDIT_QUALIFY_THRESHOLD
                     and isinstance(failures, list)
@@ -3289,7 +3289,21 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
             else:
                 theoretical = all(upper_dimensions[key] > _AUDIT_QUALIFY_THRESHOLD for key in weights)
 
-        if action_condition:
+        type7_action_condition = bool(
+            type_key == "type7"
+            and isinstance(ledger, Mapping)
+            and ledger.get("quality_certified") is True
+            and ledger.get("complete") is not True
+            and any(
+                isinstance(gate, Mapping) and gate.get("complete") is not True
+                for gate in (
+                    ledger.get("decision_gates", {}).values()
+                    if isinstance(ledger.get("decision_gates"), Mapping)
+                    else []
+                )
+            )
+        )
+        if action_condition or type7_action_condition:
             complete = not theoretical
             basis = "action_condition" if theoretical else "conservative_upper_bound"
             potential = theoretical

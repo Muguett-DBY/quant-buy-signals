@@ -1369,7 +1369,8 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
                 exact_upper = _finite_numeric(ledger.get("upper_bound")) if isinstance(ledger, Mapping) else None
                 condition_failures = ledger.get("condition_failures") if isinstance(ledger, Mapping) else None
                 theoretical_possible = bool(
-                    exact_upper is not None
+                    upper >= 7.0
+                    and exact_upper is not None
                     and exact_upper > 7.0
                     and isinstance(condition_failures, list)
                     and not condition_failures
@@ -1381,7 +1382,21 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
                     else all(upper_scores[dimension] > 7.0 for dimension in weights)
                 )
 
-        if type6_action_condition:
+        type7_action_condition = bool(
+            type_key == "type7"
+            and isinstance(ledger, Mapping)
+            and ledger.get("quality_certified") is True
+            and ledger.get("complete") is not True
+            and any(
+                isinstance(gate, Mapping) and gate.get("complete") is not True
+                for gate in (
+                    ledger.get("decision_gates", {}).values()
+                    if isinstance(ledger.get("decision_gates"), Mapping)
+                    else []
+                )
+            )
+        )
+        if type6_action_condition or type7_action_condition:
             expected_complete = not theoretical_possible
             expected_basis = "action_condition" if theoretical_possible else "conservative_upper_bound"
             expected_potential = theoretical_possible

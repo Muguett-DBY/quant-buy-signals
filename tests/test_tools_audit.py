@@ -789,6 +789,92 @@ def test_partial_source_failure_stays_visible_without_becoming_a_trigger():
     assert payload["triggered"] is False
 
 
+def test_independent_type7_replay_keeps_conservative_basis_when_weighted_upper_is_below_7():
+    # Regression: the independent replay previously overwrote the weighted
+    # upper-bound check (upper >= 7) for the classified Type 7 model and only
+    # consulted ledger.upper_bound.  Real companies whose weighted decision
+    # ceiling stays below 7 (e.g. 000978 with missing 7c) were then replayed
+    # as potentially triggerable ("unresolved_missing_evidence") while
+    # production correctly reported "conservative_upper_bound", failing the
+    # whole-market screening evidence contract.
+    ledger = {
+        "model_id": bs.PATCH6_TYPE7_MODEL_ID,
+        "dimensions": {"BM": {"upper_bound": 10.0}, "MOAT": {"upper_bound": 10.0}, "G": {"upper_bound": 10.0}},
+        "classification": {"route_complete": False},
+        "upper_bound": 10.0,
+        "condition_failures": [],
+        "quality_certified": False,
+        "complete": False,
+        "decision_gates": {},
+    }
+    payload = _outcome_payload(
+        "type7",
+        bs._finish(
+            "type7",
+            {"7a": 4.83, "7b": 3.63, "7c": 1.40},
+            {"7a": "商业模式4.83", "7b": "护城河3.63", "7c": "长期成长1.40"},
+            evidence_complete=False,
+            missing_dimensions=["7c"],
+        ),
+        ledger=ledger,
+    )
+    assert payload["decision"]["decision_basis"] == "conservative_upper_bound"
+    replayed = run_full_audit._independent_decision_replay("type7", payload)
+    assert replayed is not None
+    assert {key: replayed[key] for key in payload["decision"]} == payload["decision"]
+    assert replayed["potentially_triggerable"] is False
+    assert replayed["visible"] is True
+
+
+def test_independent_type7_replay_applies_the_action_condition_basis():
+    # Regression: production reports "conservative_upper_bound" when quality
+    # is certified but a decision gate is still incomplete (001337 with
+    # future_fcf failing), while the independent replay forced "full_evidence"
+    # because all company evidence was complete.  The replay must mirror the
+    # type7 action-condition branch.
+    ledger = {
+        "model_id": bs.PATCH6_TYPE7_MODEL_ID,
+        "dimensions": {"BM": {"upper_bound": 10.0}, "MOAT": {"upper_bound": 10.0}, "G": {"upper_bound": 10.0}},
+        "classification": {"route_complete": True},
+        "upper_bound": 7.003,
+        "condition_failures": ["future_fcf"],
+        "quality_certified": True,
+        "complete": False,
+        "decision_gates": {
+            "future_fcf": {"complete": True, "passed": False},
+            "route_path": {"complete": False, "passed": False},
+            "price_reasonableness": {"complete": False, "passed": False, "required": True},
+        },
+    }
+    payload = {
+        "triggered": False,
+        "total": 7.003,
+        "sub_scores": {"7a": 6.494, "7b": 7.398, "7c": 7.118},
+        "reasons": {
+            "7a": "强周期商业模式6.49",
+            "7b": "强周期护城河7.40",
+            "7c": "强周期长期成长7.12",
+            "_status": "conditional",
+            "_applicable": "yes",
+            "_evidence": "complete",
+            "_decision_missing_dimensions": [],
+            "_quality_certified": "yes",
+        },
+        "veto": False,
+        "status": "conditional",
+        "applicable": True,
+        "evidence_complete": True,
+        "ledger": ledger,
+        "decision_market_context": {"tradable": True, "reference_price": False, "risk_status": ""},
+    }
+    payload["decision"] = bs.replay_buy_decision("type7", payload)
+    assert payload["decision"]["decision_basis"] == "conservative_upper_bound"
+    replayed = run_full_audit._independent_decision_replay("type7", payload)
+    assert replayed is not None
+    assert {key: replayed[key] for key in payload["decision"]} == payload["decision"]
+    assert replayed["potentially_triggerable"] is False
+
+
 def test_independent_decision_replay_rejects_coordinated_status_and_veto_forgery():
     row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
     type5 = row["type5"]
