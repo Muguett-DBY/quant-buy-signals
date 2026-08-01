@@ -5,7 +5,10 @@ from datetime import date
 
 import pytest
 
-from engine.audit import _audit_type7_ledger
+from engine.audit import (
+    _audit_type7_ledger as _audit_current_type7_ledger,
+    _audit_type7_ledger_impl as _audit_legacy_type7_ledger,
+)
 from engine.buy_screener import (
     STATUS_INSUFFICIENT_EVIDENCE,
     STATUS_NOT_TRIGGERED,
@@ -28,7 +31,19 @@ from engine.quality_equity import (
     research_metadata_precheck,
     validate_quality_equity_ledger,
 )
-from tools.verify_release_zip import _audit_type7_ledger_valid
+from engine.type7_patch6 import MODEL_ID as PATCH6_TYPE7_MODEL_ID, SCHEMA_VERSION as PATCH6_TYPE7_SCHEMA_VERSION
+from tools.verify_release_zip import (
+    _audit_type7_ledger_valid as _audit_current_type7_ledger_valid,
+    _audit_type7_ledger_valid_impl as _audit_legacy_type7_ledger_valid,
+)
+
+
+def _audit_type7_ledger(code, ledger, status, *, patch4_bindings=None):
+    return _audit_legacy_type7_ledger(code, ledger, status, patch4_bindings)
+
+
+def _audit_type7_ledger_valid(code, ledger, status, *, patch4_bindings=None):
+    return _audit_legacy_type7_ledger_valid(code, ledger, status, patch4_bindings)
 
 
 def assess_quality_equity(metric, type1_outcome, history_evidence):
@@ -58,7 +73,7 @@ def _evidence(key, score=9.0):
         key: score,
         f"{key}_evidence": {
             "source": "audited fixture",
-            "evidence_id": f"fixture:{key}",
+            "evidence_id": f"fixture:{key}:600519",
             "as_of": "2026-07-17",
             "summary": f"{key}={score}",
         },
@@ -301,14 +316,9 @@ def _history():
     }
 
 
-def test_type7_preserves_three_scores_but_metadata_does_not_impersonate_body_review():
-    outcome, ledger = score_type7_quality_equity(_metric(), _type1(), _history())
-    triggered, total, scores, reasons = outcome
+def test_legacy_type7_preserves_three_scores_but_metadata_does_not_impersonate_body_review():
+    ledger = assess_quality_equity(_metric(), _type1(), _history())
 
-    assert not triggered
-    assert reasons["_status"] == STATUS_INSUFFICIENT_EVIDENCE
-    assert all(scores[key] > 7.0 for key in ("7a", "7b", "7c"))
-    assert total >= 7.0
     assert not ledger["triggered"]
     assert ledger["all_scores_strictly_above_70"]
     assert ledger["prerequisites"]["three_external_reports"]["passed"]
@@ -329,27 +339,23 @@ def test_type7_preserves_three_scores_but_metadata_does_not_impersonate_body_rev
     assert projection["market_cap_to_year_10_profit"] > 0
 
 
-def test_type7_missing_three_independent_reports_is_evidence_insufficient_not_a_zero_score():
+def test_legacy_type7_missing_three_independent_reports_remains_a_diagnostic_gap():
     metric = _metric()
     metric["type7_research_sources"] = []
-    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+    ledger = assess_quality_equity(metric, _type1(), _history())
 
-    assert not outcome[0]
-    assert outcome[3]["_status"] == STATUS_INSUFFICIENT_EVIDENCE
-    assert outcome[1] > 0
     assert not ledger["prerequisites"]["three_external_reports"]["passed"]
     assert not ledger["history_request_needed"]
     assert ledger["research_request_needed"]
     assert not ledger["triggered"]
 
 
-def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus():
+def test_legacy_type7_three_body_consensus_is_replayable_but_not_the_current_decision_rule():
     metric = _metric()
     metric["type7_research_content_verification"] = _research_content_verification()
 
-    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+    ledger = assess_quality_equity(metric, _type1(), _history())
 
-    assert outcome[0]
     assert ledger["triggered"]
     assert ledger["prerequisites_complete"]
     assert ledger["prerequisites"]["core_modules_80pct"]["required_items_complete"]
@@ -366,8 +372,10 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
     }
     assert not ledger["research_request_needed"]
     assert validate_quality_equity_ledger(ledger) == []
-    assert _audit_type7_ledger("600519", ledger, "triggered") == []
-    assert _audit_type7_ledger_valid("600519", ledger, "triggered")
+    assert _audit_current_type7_ledger("600519", ledger, "triggered") == [
+        "600519:type7:unsupported Type 7 ledger model; refresh required"
+    ]
+    assert not _audit_current_type7_ledger_valid("600519", ledger, "triggered")
 
 
 @pytest.mark.parametrize(
@@ -381,7 +389,7 @@ def test_type7_can_trigger_only_after_three_bodies_and_two_report_fact_consensus
         ("wacc", "template1.t1_06"),
     ),
 )
-def test_type7_80pct_core_gate_allows_conservatively_scored_incomplete_items(
+def test_legacy_type7_80pct_core_gate_allows_conservatively_scored_incomplete_items(
     missing_field,
     expected_incomplete_item,
 ):
@@ -389,7 +397,7 @@ def test_type7_80pct_core_gate_allows_conservatively_scored_incomplete_items(
     metric["type7_research_content_verification"] = _research_content_verification()
     metric.pop(missing_field)
 
-    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+    ledger = assess_quality_equity(metric, _type1(), _history())
     core = ledger["prerequisites"]["core_modules_80pct"]
 
     # Patch 5 explicitly permits incomplete subdimensions to receive a
@@ -403,8 +411,6 @@ def test_type7_80pct_core_gate_allows_conservatively_scored_incomplete_items(
     assert core["passed"]
     assert ledger["prerequisites_complete"]
     assert ledger["triggered"]
-    assert outcome[0]
-    assert outcome[3]["_status"] == "triggered"
     assert validate_quality_equity_ledger(ledger) == []
     assert _audit_type7_ledger("600519", ledger, "triggered") == []
     assert _audit_type7_ledger_valid("600519", ledger, "triggered")
@@ -452,11 +458,11 @@ def test_type7_long_term_growth_uses_all_ten_consecutive_financial_years():
     assert validate_quality_equity_ledger(ledger) == []
 
 
-def test_type7_three_validators_reject_a_forged_required_item_completeness_gate():
+def test_legacy_type7_three_validators_reject_a_forged_required_item_completeness_gate():
     metric = _metric()
     metric["type7_research_content_verification"] = _research_content_verification()
     metric.pop("fcf_history")
-    ledger = score_type7_quality_equity(metric, _type1(), _history())[1]
+    ledger = assess_quality_equity(metric, _type1(), _history())
     forged = deepcopy(ledger)
     core = forged["prerequisites"]["core_modules_80pct"]
     core["required_items_complete"] = True
@@ -548,8 +554,8 @@ def test_type7_is_explicitly_not_applicable_to_financial_industries(industry):
 
     assert outcome[3]["_status"] == "not_applicable"
     assert ledger == {
-        "schema_version": 7,
-        "model_id": "patch6-type7-quality-equity-v7",
+        "schema_version": PATCH6_TYPE7_SCHEMA_VERSION,
+        "model_id": PATCH6_TYPE7_MODEL_ID,
         "code": "600519",
         "applicable": False,
         "reason": "金融需专属优质股权模型",
@@ -573,7 +579,7 @@ def test_type7_without_history_requests_only_candidates_whose_safe_upper_bound_c
     assert not weak_ledger["research_request_needed"]
 
 
-def test_type7_decisive_upper_bound_turns_known_failure_into_not_triggered():
+def test_legacy_type7_decisive_upper_bound_remains_replayable_diagnostic():
     weak = _metric()
     for key in (
         "business_model_score",
@@ -584,12 +590,10 @@ def test_type7_decisive_upper_bound_turns_known_failure_into_not_triggered():
     ):
         weak.update(_evidence(key, score=0.0))
 
-    outcome, ledger = score_type7_quality_equity(weak, _type1(score=2.0), _history())
+    ledger = assess_quality_equity(weak, _type1(score=2.0), _history())
 
     assert ledger["decisively_not_triggered"]
     assert any(value <= 70 for value in ledger["decisive_score_upper_bounds"].values())
-    assert outcome[3]["_status"] == STATUS_NOT_TRIGGERED
-    assert outcome[3]["_evidence"] == "incomplete"
     assert not ledger["research_request_needed"]
     assert validate_quality_equity_ledger(ledger) == []
     assert _audit_type7_ledger("600519", ledger, STATUS_NOT_TRIGGERED) == []
@@ -698,7 +702,7 @@ def test_type7_technology_company_requires_patch4_culture_evidence():
     assert not ledger["triggered"]
 
 
-def test_type7_missing_technology_applicability_evidence_cannot_waive_patch4():
+def test_legacy_type7_missing_technology_applicability_evidence_cannot_waive_patch4():
     metric = _metric()
     metric["type7_research_content_verification"] = _research_content_verification()
     metric.pop("rd_intensity")
@@ -706,14 +710,12 @@ def test_type7_missing_technology_applicability_evidence_cannot_waive_patch4():
     metric.pop("technology_score_evidence")
     metric.pop("technology_score_evidence_level")
 
-    outcome, ledger = score_type7_quality_equity(metric, _type1(), _history())
+    ledger = assess_quality_equity(metric, _type1(), _history())
 
     prerequisite = ledger["prerequisites"]["technology_patch4"]
     assert prerequisite["applicable"] is True
     assert prerequisite["passed"] is False
     assert prerequisite["validation_status"] == "missing_validated_patch4_assessment"
-    assert outcome[0] is False
-    assert outcome[3]["_status"] == STATUS_INSUFFICIENT_EVIDENCE
     assert validate_quality_equity_ledger(ledger) == []
 
 

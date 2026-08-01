@@ -27,6 +27,8 @@ from statistics import median
 from datetime import date
 from typing import Any
 
+from engine.market_coldness import MarketColdnessScoringError, validate_market_coldness_evidence_record
+
 
 MODEL_ID = "patch6-observable-outcomes-v2"
 SOURCE_LABEL = "Eastmoney reported data; Patch6 observable-outcome formula v2"
@@ -416,6 +418,81 @@ def _finite_sequence_count(value: Any) -> int:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return 0
     return sum(_finite(item) is not None for item in value)
+
+
+def _pressure_breadth_record(
+    context: Mapping[str, Any],
+    *,
+    population_key: str,
+    share_key: str,
+) -> dict[str, Any]:
+    """Replay an industry pressure share from the exact leave-one-out population."""
+
+    raw_population = context.get(population_key)
+    if not isinstance(raw_population, Sequence) or isinstance(raw_population, (str, bytes)):
+        return {"ready": False, "share": None, "count": 0, "sample_count": 0, "coverage": 0.0}
+    if isinstance(raw_population, _SortedFinitePopulation):
+        sample_count = len(raw_population)
+        count = raw_population.count_at_most(0.0)
+        population_valid = True
+    else:
+        parsed = [_finite(value) for value in raw_population]
+        population_valid = all(value is not None for value in parsed)
+        clean = [float(value) for value in parsed if value is not None]
+        sample_count = len(clean)
+        count = sum(value <= 0 for value in clean)
+    peer_count = int(context.get("peer_count") or 0)
+    coverage = sample_count / max(peer_count, 1)
+    replayed_share = count / sample_count if sample_count else None
+    declared_share = _finite(context.get(share_key))
+    share_matches = bool(
+        replayed_share is not None
+        and declared_share is not None
+        and 0.0 <= declared_share <= 1.0
+        and math.isclose(declared_share, replayed_share, rel_tol=0.0, abs_tol=1e-12)
+    )
+    ready = bool(
+        population_valid
+        and context.get("target_excluded") is True
+        and peer_count >= MIN_SECTOR_COMPANIES
+        and sample_count >= MIN_SECTOR_COMPANIES
+        and coverage >= MIN_COMPARABLE_COVERAGE
+        and share_matches
+    )
+    return {
+        "ready": ready,
+        "share": declared_share if share_matches else None,
+        "count": count,
+        "sample_count": sample_count,
+        "coverage": coverage,
+    }
+
+
+def _market_coldness_envelope(metric: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "market_coldness_score": metric.get("market_coldness_score"),
+        "market_coldness_score_evidence_level": metric.get("market_coldness_score_evidence_level"),
+        "market_coldness_score_evidence": metric.get("market_coldness_score_evidence"),
+        "components": metric.get("market_coldness_components"),
+    }
+
+
+def _validated_market_coldness(metric: Mapping[str, Any]) -> float | None:
+    """Return only a company/date-bound quantity-price score that independently replays."""
+
+    code = str(metric.get("code") or "")
+    session = metric.get("source_trade_date")
+    if not code or not isinstance(session, str):
+        return None
+    record = _market_coldness_envelope(metric)
+    try:
+        return validate_market_coldness_evidence_record(
+            record,
+            expected_code=code,
+            expected_session=session,
+        )
+    except (MarketColdnessScoringError, TypeError, ValueError):
+        return None
 
 
 def _complete_status(value: Any) -> bool:
@@ -2191,22 +2268,36 @@ def _score_growth_sustainability(
         positive_growth_share = segment_inputs["positive_growth_share"]
         revenue_hhi = segment_inputs["revenue_hhi"]
         if source_count >= 4 and history_years >= 10:
-            segment_band_score = 9.5
+            # Ten years and diversified segment growth are observable, but the
+            # automatic statements adapter cannot prove that those sources are
+            # operationally replicable.  Keep it in the 7-8 band; a validated
+            # primary assessment is required for Patch 6's 9-10 band.
+            segment_band_score = 8.0
+            band_floor, band_ceiling = 7.0, 8.0
         elif source_count >= 3 and history_years >= 5:
             segment_band_score = 7.5
+            band_floor, band_ceiling = 7.0, 8.0
         elif source_count >= 2 and history_years >= 3:
             segment_band_score = 5.5
+            band_floor, band_ceiling = 5.0, 6.0
         elif source_count >= 1:
             segment_band_score = 3.5
+            band_floor, band_ceiling = 3.0, 4.0
         else:
             segment_band_score = 1.5
+            band_floor, band_ceiling = 0.0, 2.0
         # The Patch6 source-count/time-depth band is a hard ceiling.  Positive
         # growth breadth and concentration provide only a bounded within-band
         # adjustment, and weak aggregate persistence may reduce the result.
         # This preserves the explicit 3d<=3 veto for zero/one weak source.
         breadth_adjustment = (positive_growth_share - 0.5) * 1.0
         concentration_adjustment = (0.5 - revenue_hhi) * 0.5
-        segment_band_score = _round_score(segment_band_score + breadth_adjustment + concentration_adjustment)
+        segment_band_score = _round_score(
+            min(
+                band_ceiling,
+                max(band_floor, segment_band_score + breadth_adjustment + concentration_adjustment),
+            )
+        )
         score = min(score_before_evidence_cap, segment_band_score)
     return score, {
         "scope": "observable_growth_longevity_not_product_level_source_count",
@@ -2335,12 +2426,25 @@ def _score_industry_bubble(context: Mapping[str, Any]) -> tuple[float, dict[str,
         [(0.0, 0), (0.02, 2), (0.05, 5), (0.10, 8), (0.15, 10)],
         missing=5.0,
     )
-    loss_share = _finite(context.get("loss_share"))
-    negative_fcf_share = _finite(context.get("negative_fcf_share"))
-    pressure_share = max(value for value in (loss_share, negative_fcf_share, 0.0) if value is not None)
+    loss_breadth = _pressure_breadth_record(
+        context,
+        population_key="profit_population",
+        share_key="loss_share",
+    )
+    negative_fcf_breadth = _pressure_breadth_record(
+        context,
+        population_key="fcf_population",
+        share_key="negative_fcf_share",
+    )
+    loss_share = _finite(loss_breadth["share"])
+    negative_fcf_share = _finite(negative_fcf_breadth["share"])
+    pressure_share = (
+        max(loss_share, negative_fcf_share) if loss_share is not None and negative_fcf_share is not None else None
+    )
     pressure_risk = _linear_score(
         pressure_share,
         [(0.10, 0), (0.20, 2), (0.35, 5), (0.50, 7), (0.70, 9), (0.80, 10)],
+        missing=5.0,
     )
     bubble_risk = _round_score(
         0.35 * supply_risk + 0.25 * expansion_risk + 0.20 * profit_squeeze_risk + 0.20 * pressure_risk
@@ -2354,6 +2458,7 @@ def _score_industry_bubble(context: Mapping[str, Any]) -> tuple[float, dict[str,
             (capex_acceleration is not None and capex_acceleration >= 0.50)
             or (margin_decline is not None and margin_decline >= 0.05)
         )
+        and pressure_share is not None
         and pressure_share >= 0.35
     ):
         score = min(score, 2.0)
@@ -2367,7 +2472,13 @@ def _score_industry_bubble(context: Mapping[str, Any]) -> tuple[float, dict[str,
         "capex_intensity_acceleration": capex_acceleration,
         "aggregate_margin_decline": margin_decline,
         "loss_share": loss_share,
+        "loss_count": loss_breadth["count"],
+        "loss_sample_count": loss_breadth["sample_count"],
+        "loss_coverage": loss_breadth["coverage"],
         "negative_fcf_share": negative_fcf_share,
+        "negative_fcf_count": negative_fcf_breadth["count"],
+        "negative_fcf_sample_count": negative_fcf_breadth["sample_count"],
+        "negative_fcf_coverage": negative_fcf_breadth["coverage"],
         "components": {
             "supply_mismatch_risk": supply_risk,
             "capex_acceleration_risk": expansion_risk,
@@ -2381,7 +2492,8 @@ def _score_industry_bubble(context: Mapping[str, Any]) -> tuple[float, dict[str,
 
 
 def _score_type3_bubble(metric: Mapping[str, Any], industry_bubble_score: float) -> tuple[float, dict[str, Any]]:
-    coldness = _finite(metric.get("market_coldness_score"))
+    coldness = _validated_market_coldness(metric)
+    coldness_record = _market_coldness_envelope(metric) if coldness is not None else None
     peg = _finite(metric.get("peg"))
     price_score = (
         coldness if coldness is not None else _linear_score(peg, [(0.0, 9), (0.8, 8), (1.2, 6), (2.0, 3), (3.0, 1)])
@@ -2400,6 +2512,7 @@ def _score_type3_bubble(metric: Mapping[str, Any], industry_bubble_score: float)
     return score, {
         "scope": "weakest_of_industry_and_company_price_anti_bubble_evidence",
         "market_coldness_score": coldness,
+        "market_coldness_record": coldness_record,
         "peg": peg,
         "change_60d_pct": change_60d,
         "change_ytd_pct": change_ytd,
@@ -3141,16 +3254,23 @@ def _build_evidence_qualities(
             2,
             expected_latest_year=expected_latest_year,
         ),
-        "industry_pressure_breadth": any(
-            _finite(context.get(key)) is not None for key in ("loss_share", "negative_fcf_share")
-        ),
+        "industry_loss_share": _pressure_breadth_record(
+            context,
+            population_key="profit_population",
+            share_key="loss_share",
+        )["ready"],
+        "industry_negative_fcf_share": _pressure_breadth_record(
+            context,
+            population_key="fcf_population",
+            share_key="negative_fcf_share",
+        )["ready"],
     }
     qualities["industry_bubble_score"] = _quality_record(bubble_inputs)
     industry_bubble_complete = qualities["industry_bubble_score"]["level"] == "derived_proxy"
     qualities["type3_bubble_score"] = _quality_record(
         {
             "industry_anti_bubble_proxy": industry_bubble_complete,
-            "company_price_anti_bubble": finite("market_coldness_score") or finite("peg"),
+            "company_quantity_price_anti_bubble": _validated_market_coldness(metric) is not None,
         }
     )
 
@@ -3376,7 +3496,7 @@ def _replay_history_cap(details: Mapping[str, Any]) -> float:
     return expected_cap
 
 
-def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
+def _replay_quantitative_score(key: str, details: Mapping[str, Any], *, code: str | None = None) -> float:
     """Recompute one derived diagnostic only from its exported formula ledger."""
 
     if key == "industry_durability_score":
@@ -3844,16 +3964,29 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
             )
             revenue_hhi = _required_detail_number(segment_proxy, "revenue_hhi", maximum=1.0)
             if source_count >= 4 and history_years >= 10:
-                segment_band = 9.5
+                segment_band = 8.0
+                band_floor, band_ceiling = 7.0, 8.0
             elif source_count >= 3 and history_years >= 5:
                 segment_band = 7.5
+                band_floor, band_ceiling = 7.0, 8.0
             elif source_count >= 2 and history_years >= 3:
                 segment_band = 5.5
+                band_floor, band_ceiling = 5.0, 6.0
             elif source_count >= 1:
                 segment_band = 3.5
+                band_floor, band_ceiling = 3.0, 4.0
             else:
                 segment_band = 1.5
-            segment_band = _round_score(segment_band + (positive_growth_share - 0.5) * 1.0 + (0.5 - revenue_hhi) * 0.5)
+                band_floor, band_ceiling = 0.0, 2.0
+            segment_band = _round_score(
+                min(
+                    band_ceiling,
+                    max(
+                        band_floor,
+                        segment_band + (positive_growth_share - 0.5) * 1.0 + (0.5 - revenue_hhi) * 0.5,
+                    ),
+                )
+            )
             _assert_replayed_detail(details.get("segment_band_score"), segment_band, "segment_band_score")
             return min(score_before_cap, segment_band)
         if details.get("segment_band_score") is not None:
@@ -3935,7 +4068,36 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
         margin_decline = _optional_detail_number(details, "aggregate_margin_decline")
         loss_share = _optional_detail_number(details, "loss_share")
         negative_fcf_share = _optional_detail_number(details, "negative_fcf_share")
-        pressure_share = max(value for value in (loss_share, negative_fcf_share, 0.0) if value is not None)
+        peer_count = _required_detail_number(details, "peer_count", maximum=100_000.0)
+        quality = details.get("evidence_quality")
+        available_inputs = set(quality.get("available_inputs", [])) if isinstance(quality, Mapping) else set()
+        for prefix, share, quality_key in (
+            ("loss", loss_share, "industry_loss_share"),
+            ("negative_fcf", negative_fcf_share, "industry_negative_fcf_share"),
+        ):
+            count = _required_detail_number(details, f"{prefix}_count", maximum=100_000.0)
+            sample_count = _required_detail_number(details, f"{prefix}_sample_count", maximum=100_000.0)
+            coverage = _required_detail_number(details, f"{prefix}_coverage", maximum=1.0)
+            if not float(count).is_integer() or not float(sample_count).is_integer() or count > sample_count:
+                raise ValueError("quantitative evidence pressure breadth counts are invalid")
+            expected_coverage = sample_count / max(peer_count, 1.0)
+            if not math.isclose(coverage, expected_coverage, rel_tol=0.0, abs_tol=1e-12):
+                raise ValueError("quantitative evidence pressure breadth coverage does not replay")
+            if share is not None:
+                expected_share = count / sample_count if sample_count else None
+                if expected_share is None or not math.isclose(share, expected_share, rel_tol=0.0, abs_tol=1e-12):
+                    raise ValueError("quantitative evidence pressure breadth share does not replay")
+            if quality_key in available_inputs and (
+                details.get("target_excluded") is not True
+                or peer_count < MIN_SECTOR_COMPANIES
+                or sample_count < MIN_SECTOR_COMPANIES
+                or coverage < MIN_COMPARABLE_COVERAGE
+                or share is None
+            ):
+                raise ValueError("quantitative evidence pressure breadth quality is overstated")
+        pressure_share = (
+            max(loss_share, negative_fcf_share) if loss_share is not None and negative_fcf_share is not None else None
+        )
         expected_components = {
             "supply_mismatch_risk": _linear_score(
                 asset_gap,
@@ -3955,6 +4117,7 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
             "pressure_breadth_risk": _linear_score(
                 pressure_share,
                 [(0.10, 0), (0.20, 2), (0.35, 5), (0.50, 7), (0.70, 9), (0.80, 10)],
+                missing=5.0,
             ),
         }
         for component, expected in expected_components.items():
@@ -3980,6 +4143,7 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
                 (capex_acceleration is not None and capex_acceleration >= 0.50)
                 or (margin_decline is not None and margin_decline >= 0.05)
             )
+            and pressure_share is not None
             and pressure_share >= 0.35
         ):
             return min(score, 2.0)
@@ -3990,6 +4154,25 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any]) -> float:
         components = _replay_components(details, {"industry", "company_price"})
         industry_score = _required_detail_number(details, "industry_bubble_score")
         coldness = _optional_detail_number(details, "market_coldness_score")
+        coldness_record = details.get("market_coldness_record")
+        if coldness is None:
+            if coldness_record is not None:
+                raise ValueError("quantitative evidence missing coldness has a source record")
+        else:
+            if not isinstance(coldness_record, Mapping) or not code:
+                raise ValueError("quantitative evidence coldness record is missing")
+            nested_components = coldness_record.get("components")
+            nested_session = nested_components.get("as_of_session") if isinstance(nested_components, Mapping) else None
+            try:
+                replayed_coldness = validate_market_coldness_evidence_record(
+                    coldness_record,
+                    expected_code=code,
+                    expected_session=nested_session,
+                )
+            except (MarketColdnessScoringError, TypeError, ValueError) as exc:
+                raise ValueError("quantitative evidence coldness record does not replay") from exc
+            if not math.isclose(coldness, replayed_coldness, rel_tol=0.0, abs_tol=1e-9):
+                raise ValueError("quantitative evidence coldness score does not replay")
         peg = _optional_detail_number(details, "peg")
         price_score = (
             coldness if coldness is not None else _linear_score(peg, [(0.0, 9), (0.8, 8), (1.2, 6), (2.0, 3), (3.0, 1)])
@@ -4467,7 +4650,7 @@ def validate_quantitative_evidence_record(
     ):
         raise ValueError("quantitative evidence quality partition is invalid")
     if level != "primary":
-        replayed_score = _replay_quantitative_score(key, details)
+        replayed_score = _replay_quantitative_score(key, details, code=code)
         if not math.isclose(float(score), replayed_score, rel_tol=0.0, abs_tol=1e-9):
             raise ValueError("quantitative evidence score does not replay from its formula ledger")
     return {

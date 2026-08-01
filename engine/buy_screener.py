@@ -63,17 +63,19 @@ from engine.quantitative_evidence import (
     validate_quantitative_evidence_record,
 )
 from engine.quality_equity import (
-    MODEL_ID as QUALITY_EQUITY_MODEL_ID,
-    PATCH5_SAFETY_VETO,
     RESEARCH_EVIDENCE_MODEL_ID,
-    SCHEMA_VERSION as QUALITY_EQUITY_SCHEMA_VERSION,
     TYPE7_DIRECT_SCORE_KEYS,
     assess_quality_equity,
     normalise_patch4_assessment,
     normalise_research_content_verification,
     normalise_research_sources,
     research_metadata_precheck,
-    validate_quality_equity_ledger,
+)
+from engine.type7_patch6 import (
+    MODEL_ID as PATCH6_TYPE7_MODEL_ID,
+    SCHEMA_VERSION as PATCH6_TYPE7_SCHEMA_VERSION,
+    assess_patch6_type7,
+    validate_patch6_type7_ledger,
 )
 from engine.valuation_status import (
     DCF_SKIP_ECONOMIC_NOT_APPLICABLE,
@@ -150,7 +152,8 @@ _POTENTIAL_VETO_DIMENSIONS = {
     "type4": frozenset({"4c", "4e", "4f"}),
     # The authoritative Type 5 appendix currently has no post-applicability
     # hard veto.  Type 6 can be ruled out when fewer than two of 6a..6d can
-    # reach five.  Type 7's safety veto lives in 7c.
+    # reach five.  Type 7's strong-cycle veto is replayed from its classified
+    # ledger rather than inferred from a public display score.
     "type5": frozenset(),
     "type6": frozenset({"6a", "6b", "6c", "6d"}),
     "type7": frozenset({"7c"}),
@@ -1293,9 +1296,15 @@ def _sanitize_scores(
     return result
 
 
-def _weighted_total(scores: Mapping[str, Any], weights: Mapping[str, float], *, decimals: int = 2) -> float:
+def _weighted_total(
+    scores: Mapping[str, Any],
+    weights: Mapping[str, float],
+    *,
+    decimals: int = 2,
+    total_decimals: int = 1,
+) -> float:
     clean = _sanitize_scores(scores, weights, decimals=decimals)
-    return round(sum(clean[key] * weight for key, weight in weights.items()), 1)
+    return round(sum(clean[key] * weight for key, weight in weights.items()), total_decimals)
 
 
 def _finish(
@@ -1355,9 +1364,10 @@ def _finish(
         else:
             clean_reasons.setdefault("_missing", "关键评分证据不完整")
             clean_reasons["_score_quality"] = "缺失项以0占位" if missing_score_keys else "证据不足，分数仅供诊断"
-    total = _weighted_total(clean_scores, weights, decimals=score_decimals)
+    total_decimals = 3 if type_key == "type7" else 1
+    total = _weighted_total(clean_scores, weights, decimals=score_decimals, total_decimals=total_decimals)
     if total_cap is not None:
-        total = min(total, round(float(total_cap), 1))
+        total = min(total, round(float(total_cap), total_decimals))
     qualifies = applicable and evidence_complete and total >= QUALIFY_THRESHOLD and not veto and extra_condition
     if status_override is not None:
         if status_override not in TYPE_STATUSES:
@@ -2180,9 +2190,17 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     # score.  Preserve it for Type 7, whose validator binds every criterion to
     # the current company/date and independently replays the formula.
     m["type7_patch4_assessment"] = fin_data.get("type7_patch4_assessment")
+    # Type 6 may award the 9-10 industry-explosion band only when an explicit
+    # primary record confirms that the industry is still in its early stage.
+    # Preserve the raw envelope; ``score_type6_vc`` revalidates identity/date.
+    m["industry_early_stage_confirmed"] = fin_data.get("industry_early_stage_confirmed") is True
+    m["industry_early_stage_evidence_level"] = fin_data.get("industry_early_stage_evidence_level")
+    m["industry_early_stage_evidence"] = fin_data.get("industry_early_stage_evidence")
     for key in ("position_size_pct", "type6_portfolio_pct"):
-        value = _safe_float(fin_data.get(key))
-        m[key] = value if value is not None and 0 < value <= 100 else None
+        # Preserve every finite user-supplied position.  Range validation is a
+        # Type 6 hard rule, so turning 0, a negative value or >100 into ``None``
+        # here would incorrectly disguise a known violation as missing input.
+        m[key] = _safe_float(fin_data.get(key))
     return m
 
 
@@ -3973,8 +3991,7 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
     trend_growth = _trend_adjusted_growth(revenue_values)
     if trend_growth is None:
         return _insufficient_evidence("type3", "趋势增长证据缺失")
-    if trend_growth < 0.10:
-        return _not_applicable("type3", "趋势增速不足10%")
+    high_growth_core_ready = trend_growth >= 0.10
 
     roe = _safe_float(m.get("roe"))
     margin = _safe_float(m.get("margin_median_hist"))
@@ -4172,6 +4189,8 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
         reasons["_veto"] = "增长不可持续"
     if cap is not None:
         reasons["_downgrade"] = "产业或股价泡沫风险"
+    if not high_growth_core_ready:
+        reasons["_condition"] = f"长期趋势增速{trend_growth:.1%}低于10%高增长门槛"
     missing_dimensions: list[str] = []
     missing_dimension_keys: list[str] = []
     if not moat_evidence_complete:
@@ -4197,6 +4216,7 @@ def score_type3_sustainable_growth(m: Mapping[str, Any], benchmarks: Mapping[str
         reasons,
         veto=veto,
         total_cap=cap,
+        extra_condition=high_growth_core_ready,
         evidence_complete=all(
             (
                 moat_evidence_complete,
@@ -4416,19 +4436,13 @@ def score_type4_long_runway(
     debt = _safe_float(m.get("debt_ratio"))
     roe = _safe_float(m.get("roe"))
     explicit_moat = _verified_score(m, "moat_durability_score")
-    if explicit_moat is None:
-        explicit_moat = _verified_score(m, "moat_score")
+    current_moat = _verified_score(m, "moat_score")
     moat_complete = explicit_moat is not None
     if explicit_moat is not None and 0 <= explicit_moat <= 10:
         scores["4c"] = explicit_moat
-        evidence_key = (
-            "moat_durability_score" if _verified_score(m, "moat_durability_score") is not None else "moat_score"
+        reasons["4c"] = (_quantitative_moat_durability_reason(m, expected_score=explicit_moat)) or _evidence_reason(
+            m, "moat_durability_score", "护城河耐久证据不可追溯"
         )
-        reasons["4c"] = (
-            _quantitative_moat_durability_reason(m, expected_score=explicit_moat)
-            if evidence_key == "moat_durability_score"
-            else None
-        ) or _evidence_reason(m, evidence_key, "护城河证据不可追溯")
     else:
         moat_count = sum(
             (
@@ -4439,8 +4453,13 @@ def score_type4_long_runway(
             )
         )
         proxy_moat_score = {0: 2.0, 1: 4.0, 2: 5.0, 3: 6.0, 4: 6.0}[moat_count]
-        scores["4c"] = 5.0
-        reasons["4c"] = f"耐久财务弱代理{proxy_moat_score:.0f}分"
+        diagnostic = min(5.0, current_moat if current_moat is not None else proxy_moat_score)
+        scores["4c"] = diagnostic
+        reasons["4c"] = (
+            f"当前护城河{current_moat:.1f}分，缺多年耐久证据"
+            if current_moat is not None
+            else f"耐久财务代理{diagnostic:.1f}分，缺多年耐久证据"
+        )
 
     price = _safe_float(m.get("price"))
     dcf_points = dcf_result.get("dcf_10y_points", {}) if valuation_evidence_valid else {}
@@ -6154,32 +6173,23 @@ def _type7_patch4_assessment_from_evidence(
 def _type7_patch4_request_needed(ledger: Mapping[str, Any]) -> bool:
     """Fetch Patch 4 only when it can still change a viable Type 7 decision."""
 
-    prerequisites = ledger.get("prerequisites")
-    upper_bounds = ledger.get("decisive_score_upper_bounds")
-    if not isinstance(prerequisites, Mapping) or not isinstance(upper_bounds, Mapping):
+    if ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
         return False
-    technology = prerequisites.get("technology_patch4")
-    if (
-        not isinstance(technology, Mapping)
-        or technology.get("applicable") is not True
-        or technology.get("passed") is not False
-        or technology.get("validation_status") != "missing_validated_patch4_assessment"
-        or ledger.get("safety_veto") is True
-        or ledger.get("decisively_not_triggered") is True
-    ):
-        return False
-    permanent_prerequisites = {
-        "core_modules_80pct",
-        "three_year_financials",
-        "latest_quote_and_valuation",
-    }
-    if any(
-        not isinstance(prerequisites.get(key), Mapping) or prerequisites[key].get("passed") is not True
-        for key in permanent_prerequisites
-    ):
-        return False
-    return set(upper_bounds) == {"template1", "template5", "patch5"} and all(
-        (_safe_float(value) or 0.0) > 70.0 for value in upper_bounds.values()
+    classification = ledger.get("classification")
+    gates = ledger.get("decision_gates")
+    route = gates.get("route_path") if isinstance(gates, Mapping) else None
+    inputs = route.get("inputs") if isinstance(route, Mapping) else None
+    upper_bound = _safe_float(ledger.get("upper_bound"))
+    return bool(
+        isinstance(classification, Mapping)
+        and classification.get("class_code") == "T"
+        and classification.get("route_complete") is True
+        and isinstance(route, Mapping)
+        and isinstance(inputs, Mapping)
+        and inputs.get("patch4_complete") is not True
+        and upper_bound is not None
+        and upper_bound > 7.0
+        and ledger.get("veto") is not True
     )
 
 
@@ -6268,11 +6278,29 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     if growth is None:
         return _insufficient_evidence("type6", "产业增速样本不足,无法判定高景气或反转类型")
 
-    growth_subtype = growth >= 0.08
+    company_growth = _safe_float(m.get("trend_growth"))
+    # 第19模板的高景气技术型不是“行业略有增长”即可进入：产业至少
+    # 20%，公司自身趋势至少30%。否则按反转型的100亿元边界处理。
+    growth_subtype = bool(growth >= 0.20 and company_growth is not None and company_growth >= 0.30)
     subtype = "高景气技术型" if growth_subtype else "平稳产业反转型"
     market_cap_limit = TYPE6_GROWTH_MARKET_CAP_LIMIT if growth_subtype else TYPE6_TURNAROUND_MARKET_CAP_LIMIT
     if market_cap > market_cap_limit:
         limit_label = "300亿元" if growth_subtype else "100亿元"
+        if not growth_subtype and growth >= 0.20 and company_growth is None:
+            return _not_applicable(
+                "type6",
+                f"公司趋势增速缺失，未进入高景气技术型；按反转型边界市值超过{limit_label}",
+            )
+        if not growth_subtype and growth >= 0.20 and company_growth is not None:
+            return _not_applicable(
+                "type6",
+                f"公司趋势增速{company_growth:.1%}低于30%，按反转型边界市值超过{limit_label}",
+            )
+        if not growth_subtype and growth < 0.20:
+            return _not_applicable(
+                "type6",
+                f"行业增速{growth:.1%}低于20%，按反转型边界市值超过{limit_label}",
+            )
         return _not_applicable("type6", f"{subtype}市值超过{limit_label}")
 
     net_profit = _safe_float(m.get("net_profit"))
@@ -6289,9 +6317,14 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
 
     scores: dict[str, float] = {}
     reasons: dict[str, str] = {"_profile": subtype}
-    if growth is None:
-        scores["6a"], reasons["6a"] = 2.0, "产业爆发证据不足"
-    elif growth < 0:
+    if not growth_subtype:
+        if company_growth is None:
+            reasons["_profile_basis"] = "公司趋势增速缺失，未进入高景气技术型"
+        elif growth < 0.20:
+            reasons["_profile_basis"] = f"行业增速{growth:.1%}低于20%，按反转型评估"
+        else:
+            reasons["_profile_basis"] = f"公司趋势增速{company_growth:.1%}低于30%，按反转型评估"
+    if growth < 0:
         scores["6a"], reasons["6a"] = 1.0, f"产业增速{growth:.1%}"
     elif growth < 0.08:
         scores["6a"], reasons["6a"] = 3.0, f"产业增速{growth:.1%}"
@@ -6300,21 +6333,45 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     elif growth < 0.50:
         scores["6a"], reasons["6a"] = 8.0, f"产业高速{growth:.1%}"
     else:
-        scores["6a"], reasons["6a"] = 10.0, f"产业爆发{growth:.1%}"
+        early_stage_container = {
+            "code": m.get("code"),
+            "source_trade_date": m.get("source_trade_date"),
+            "industry_early_stage_score": 10.0 if m.get("industry_early_stage_confirmed") is True else None,
+            "industry_early_stage_score_evidence_level": m.get("industry_early_stage_evidence_level"),
+            "industry_early_stage_score_evidence": m.get("industry_early_stage_evidence"),
+        }
+        early_stage_score, _early_stage_evidence = _normalise_score_evidence(
+            early_stage_container,
+            "industry_early_stage_score",
+            expected_code=m.get("code"),
+            reference_date=m.get("source_trade_date"),
+        )
+        if (
+            early_stage_score is not None
+            and early_stage_container["industry_early_stage_score_evidence_level"] == "primary"
+        ):
+            scores["6a"], reasons["6a"] = 10.0, f"产业增速{growth:.1%}且产业初期原始证据已确认"
+        else:
+            scores["6a"], reasons["6a"] = 8.0, f"产业增速{growth:.1%}；缺产业初期原始证据，最高8分"
 
-    technology_score = _verified_score(m, "technology_score")
-    if technology_score is not None and 0 <= technology_score <= 10:
-        scores["6b"] = technology_score
-        reasons["6b"] = _evidence_reason(m, "technology_score", "技术证据不可追溯")
-    else:
-        scores["6b"], reasons["6b"] = 0.0, "无技术验证原始数据"
+    def strict_primary_score(key: str, label: str) -> tuple[float, str, bool]:
+        score, _evidence = _normalise_score_evidence(
+            m,
+            key,
+            expected_code=m.get("code"),
+            reference_date=m.get("source_trade_date"),
+        )
+        level = m.get(f"{key}_evidence_level")
+        if score is not None and level == "primary":
+            return score, _evidence_reason(m, key, f"{label}原始证据不可追溯"), True
+        if score is not None and level == "derived_proxy":
+            return min(score, 4.0), f"{label}仅有模型代理证据，诊断最高4分；缺原始资料", False
+        return 0.0, f"缺{label}可追溯原始资料", False
 
-    model_score = _verified_score(m, "business_model_score")
-    if model_score is not None and 0 <= model_score <= 10:
-        scores["6c"] = model_score
-        reasons["6c"] = _evidence_reason(m, "business_model_score", "模式证据不可追溯")
-    else:
-        scores["6c"], reasons["6c"] = 0.0, "无模式创新原始数据"
+    technology_score, reasons["6b"], technology_complete = strict_primary_score("technology_score", "技术")
+    scores["6b"] = technology_score
+    model_score, reasons["6c"], model_complete = strict_primary_score("business_model_score", "商业模式")
+    scores["6c"] = model_score
 
     raw_profits = m.get("net_profit_history", [])
     raw_profits = list(raw_profits) if isinstance(raw_profits, (list, tuple)) else []
@@ -6370,14 +6427,41 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     recommended_portfolio = 8.0 if growth_subtype else 15.0
     # 补丁6的统一硬上限是单票5%、VC组合15%；第19模板的1%/3%
     # 是更保守的子类型建议，展示但不覆盖补丁6硬规则。
-    discipline_ready = bool(
-        position is not None and portfolio is not None and 0 < position <= 5.0 and 0 < portfolio <= 15.0
-    )
-    if position is None or portfolio is None:
+    position_violations: list[str] = []
+    if position is not None and not 0 < position <= 5.0:
+        position_violations.append(f"单票仓位{position:g}%不在0%至5%范围内")
+    if portfolio is not None and not 0 < portfolio <= 15.0:
+        position_violations.append(f"高风险组合仓位{portfolio:g}%不在0%至15%范围内")
+    if position is not None and portfolio is not None and position > portfolio:
+        position_violations.append(f"单票仓位{position:g}%超过高风险组合仓位{portfolio:g}%")
+    missing_position_labels = []
+    if position is None:
+        missing_position_labels.append("实际单票仓位")
+    if portfolio is None:
+        missing_position_labels.append("实际高风险组合仓位")
+    discipline_ready = not position_violations and not missing_position_labels
+    if position_violations:
+        scores["6e"] = 0.0
+        reasons["6e"] = "；".join(
+            position_violations + (["缺" + "及".join(missing_position_labels)] if missing_position_labels else [])
+        )
+        reasons["_condition"] = "实际仓位违反强制风控条件"
+    elif missing_position_labels:
         # 6e描述的是投资动作而非公司属性。系统可以量化给出纪律上限，
         # 但在用户确认实际仓位之前只能是条件候选，不能伪装成已触发。
         scores["6e"] = 10.0 if growth_subtype else 9.0
-        reasons["6e"] = f"建议单票≤{recommended_single:.0f}%,组合≤{recommended_portfolio:.0f}%"
+        known = []
+        if position is not None:
+            known.append(f"已知单票{position:g}%")
+        if portfolio is not None:
+            known.append(f"已知组合{portfolio:g}%")
+        reasons["6e"] = "；".join(
+            [
+                f"缺{'及'.join(missing_position_labels)}",
+                *known,
+                f"建议单票≤{recommended_single:.0f}%,组合≤{recommended_portfolio:.0f}%",
+            ]
+        )
         reasons["_condition"] = "须确认实际仓位符合建议上限"
     else:
         single_score = 10.0 if position <= 3 else 8.0 if position <= 5 else 5.0 if position <= 10 else 2.0
@@ -6390,16 +6474,21 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
     reasons["_risk"] = f"最坏归零时组合最大损失≤{risk_cap:.0f}%"
 
     high_elements = sum(scores[key] >= 5 for key in ("6a", "6b", "6c", "6d"))
-    evidence_complete = bool(technology_score is not None and model_score is not None and turnaround_evidence_complete)
+    turnaround_ready = bool(growth_subtype or scores["6d"] >= 5.0)
+    if not turnaround_ready:
+        existing_condition = str(reasons.get("_condition") or "").strip()
+        turnaround_condition = "平稳产业反转型须有困境反转证据达到5分"
+        reasons["_condition"] = "；".join(part for part in (existing_condition, turnaround_condition) if part)
+    evidence_complete = bool(technology_complete and model_complete and turnaround_evidence_complete)
     evidence_veto = evidence_complete and high_elements < 2
     if evidence_veto:
         reasons["_veto"] = f"仅{high_elements}项核心证据≥5"
     missing_dimensions: list[str] = []
     missing_dimension_keys: list[str] = []
-    if technology_score is None:
+    if not technology_complete:
         missing_dimensions.append("技术")
         missing_dimension_keys.append("6b")
-    if model_score is None:
+    if not model_complete:
         missing_dimensions.append("商业模式")
         missing_dimension_keys.append("6c")
     if not turnaround_evidence_complete:
@@ -6412,7 +6501,7 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         scores,
         reasons,
         veto=evidence_veto,
-        extra_condition=discipline_ready,
+        extra_condition=bool(discipline_ready and turnaround_ready),
         evidence_complete=evidence_complete,
         missing_dimensions=missing_dimension_keys,
     )
@@ -6421,75 +6510,179 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
 def _type7_missing_dimensions(ledger: Mapping[str, Any]) -> list[str]:
     """Map incomplete Type 7 source ledgers to the three public dimensions."""
 
-    scores = ledger.get("scores")
-    upper_bounds = ledger.get("decisive_score_upper_bounds")
-    missing: list[str] = []
-    if isinstance(scores, Mapping) and isinstance(upper_bounds, Mapping):
-        for dimension, source_key in {
-            "7a": "template1",
-            "7b": "template5",
-            "7c": "patch5",
-        }.items():
-            score = _safe_float(scores.get(source_key))
-            upper = _safe_float(upper_bounds.get(source_key))
-            if score is None or upper is None or upper > score + 1e-9:
-                missing.append(dimension)
-    else:
-        missing = list(TYPE_WEIGHTS["type7"])
-
-    if ledger.get("prerequisites_complete") is not True and not missing:
-        # A prerequisite failure with no usable item-level interval cannot be
-        # assigned to a narrower dimension.  Keep all three unresolved rather
-        # than certifying a score whose source contract is incomplete.
-        missing = list(TYPE_WEIGHTS["type7"])
+    if ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+        return list(TYPE_WEIGHTS["type7"])
+    dimensions = ledger.get("dimensions")
+    if not isinstance(dimensions, Mapping):
+        return list(TYPE_WEIGHTS["type7"])
+    missing = [
+        public_key
+        for public_key, source_key in {"7a": "BM", "7b": "MOAT", "7c": "G"}.items()
+        if not isinstance(dimensions.get(source_key), Mapping) or dimensions[source_key].get("complete") is not True
+    ]
+    if ledger.get("complete") is not True and not missing:
+        return list(TYPE_WEIGHTS["type7"])
     return missing
 
 
 def _type7_incomplete_evidence_labels(ledger: Mapping[str, Any]) -> list[str]:
     """Return ordinary-language labels for incomplete Type 7 source items."""
 
-    prerequisites = ledger.get("prerequisites")
-    core = prerequisites.get("core_modules_80pct") if isinstance(prerequisites, Mapping) else None
-    identifiers = core.get("incomplete_required_items") if isinstance(core, Mapping) else None
-    if not isinstance(identifiers, list):
-        return []
-
-    template1 = ledger.get("template1")
-    template5 = ledger.get("template5")
-    patch5 = ledger.get("patch5")
-    template1_labels = {
-        str(item.get("key")): str(item.get("label"))
-        for item in template1.get("items", [])
-        if isinstance(template1, Mapping) and isinstance(item, Mapping) and item.get("key") and item.get("label")
-    }
-    template5_labels = {
-        str(item.get("key")): str(item.get("label"))
-        for item in template5.get("items", [])
-        if isinstance(template5, Mapping) and isinstance(item, Mapping) and item.get("key") and item.get("label")
-    }
-    patch5_labels: dict[tuple[str, str], str] = {}
-    if isinstance(patch5, Mapping):
-        for section in patch5.get("dimensions", []):
+    if ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+        labels: list[str] = []
+        dimensions = ledger.get("dimensions")
+        if not isinstance(dimensions, Mapping):
+            return labels
+        for dimension in ("BM", "MOAT", "G"):
+            section = dimensions.get(dimension)
             if not isinstance(section, Mapping):
                 continue
-            section_key = str(section.get("key") or "")
-            for component in section.get("components", []):
-                if isinstance(component, Mapping) and component.get("key") and component.get("label"):
-                    patch5_labels[(section_key, str(component["key"]))] = str(component["label"])
+            for item in section.get("items", []):
+                if isinstance(item, Mapping) and item.get("complete") is not True and item.get("label"):
+                    labels.append(str(item["label"]))
+        gates = ledger.get("decision_gates")
+        if isinstance(gates, Mapping):
+            future_fcf = gates.get("future_fcf")
+            route_path = gates.get("route_path")
+            valuation = gates.get("price_reasonableness")
+            if isinstance(future_fcf, Mapping) and future_fcf.get("complete") is not True:
+                labels.append("连续自由现金流")
+            if isinstance(route_path, Mapping) and route_path.get("complete") is not True:
+                labels.append("分类专用评估路径")
+            if isinstance(valuation, Mapping) and valuation.get("complete") is not True:
+                labels.append("价格合理性")
+        return labels
 
-    labels: list[str] = []
-    for raw_identifier in identifiers:
-        parts = str(raw_identifier).split(".")
-        label = None
-        if len(parts) == 2 and parts[0] == "template1":
-            label = template1_labels.get(parts[1])
-        elif len(parts) == 2 and parts[0] == "template5":
-            label = template5_labels.get(parts[1])
-        elif len(parts) == 3 and parts[0] == "patch5":
-            label = patch5_labels.get((parts[1], parts[2]))
-        if label and label not in labels:
-            labels.append(label)
-    return labels
+    return []
+
+
+def _type7_classified_route_evidence(
+    m: Mapping[str, Any],
+    legacy: Mapping[str, Any],
+    history_evidence: Mapping[str, Any] | None,
+    type5_outcome: tuple | None,
+    *,
+    valuation_evidence_complete: bool,
+    valuation_score: float | None,
+) -> dict[str, Any]:
+    """Normalize only replayable facts consumed by the class-specific path."""
+
+    prerequisites = legacy.get("prerequisites")
+    technology = prerequisites.get("technology_patch4") if isinstance(prerequisites, Mapping) else None
+    template5 = legacy.get("template5")
+    patch5 = legacy.get("patch5")
+    patch4_complete = bool(
+        isinstance(technology, Mapping)
+        and technology.get("validation_status") == "validated_replayable_assessment"
+        and technology.get("passed") is True
+        and _safe_float(technology.get("score")) is not None
+    )
+    patch5_coverage = _safe_float(patch5.get("coverage")) if isinstance(patch5, Mapping) else None
+    patch5_safety_score = _safe_float(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
+    patch5_safety_complete = bool(
+        isinstance(patch5, Mapping) and patch5.get("safety_margin_complete") is True and patch5_safety_score is not None
+    )
+    template5_items = {
+        str(item.get("key")): item
+        for item in (template5.get("items", []) if isinstance(template5, Mapping) else [])
+        if isinstance(item, Mapping) and item.get("key")
+    }
+    template5_valuation_items = {
+        key: {
+            "complete": item.get("complete")
+            if isinstance(item, Mapping) and type(item.get("complete")) is bool
+            else None,
+            "points": _safe_float(item.get("points")) if isinstance(item, Mapping) else None,
+        }
+        for key in ("t5_v1", "t5_v2", "t5_v3")
+        for item in (template5_items.get(key),)
+    }
+
+    type5_applicable = False
+    type5_cycle_complete = False
+    type5_cycle_score = None
+    type5_bottom_complete = False
+    type5_bottom_score = None
+    type5_survival_complete = False
+    type5_survival_score = None
+    type5_upside_complete = False
+    type5_upside_score = None
+    type5_valuation_complete = False
+    type5_valuation_score = None
+    type5_evidence_complete = False
+    type5_triggered = False
+    type5_total = None
+    if isinstance(type5_outcome, tuple) and len(type5_outcome) == 4:
+        raw_triggered, raw_total, raw_scores, raw_reasons = type5_outcome
+        if isinstance(raw_scores, Mapping) and isinstance(raw_reasons, Mapping):
+            status = str(raw_reasons.get("_status") or "")
+            type5_applicable = status != STATUS_NOT_APPLICABLE
+            type5_evidence_complete = raw_reasons.get("_evidence") == "complete"
+            type5_triggered = raw_triggered is True
+            type5_total = _safe_float(raw_total)
+            missing = raw_reasons.get(_DECISION_MISSING_DIMENSIONS_REASON)
+            missing_set = set(missing) if isinstance(missing, (list, tuple)) else set()
+            type5_cycle_score = _safe_float(raw_scores.get("5a"))
+            type5_bottom_score = _safe_float(raw_scores.get("5b"))
+            type5_survival_score = _safe_float(raw_scores.get("5c"))
+            type5_upside_score = _safe_float(raw_scores.get("5d"))
+            type5_valuation_score = _safe_float(raw_scores.get("5e"))
+            type5_cycle_complete = bool(type5_applicable and type5_cycle_score is not None and "5a" not in missing_set)
+            type5_bottom_complete = bool(
+                type5_applicable and type5_bottom_score is not None and "5b" not in missing_set
+            )
+            type5_valuation_complete = bool(
+                type5_applicable and type5_valuation_score is not None and "5e" not in missing_set
+            )
+            type5_survival_complete = bool(
+                type5_applicable and type5_survival_score is not None and "5c" not in missing_set
+            )
+            type5_upside_complete = bool(
+                type5_applicable and type5_upside_score is not None and "5d" not in missing_set
+            )
+
+    pb_inputs = _type5_pb_history_inputs(m, history_evidence)
+    pb_percentile = pb_inputs[0] if pb_inputs is not None else None
+    current_pb = pb_inputs[1] if pb_inputs is not None else None
+    monetary_funds = _safe_float(m.get("monetary_funds"))
+    interest_debt = _safe_float(m.get("interest_debt"))
+    template25_net_debt_complete = bool(monetary_funds is not None and interest_debt is not None)
+    net_debt = interest_debt - monetary_funds if template25_net_debt_complete else None
+    template25_complete = bool(
+        valuation_evidence_complete is True and valuation_score is not None and template25_net_debt_complete
+    )
+    return {
+        "template5_valuation_items": template5_valuation_items,
+        "patch5_safety_complete": patch5_safety_complete,
+        "patch5_safety_score": patch5_safety_score,
+        "patch4_complete": patch4_complete,
+        "patch4_score": _safe_float(technology.get("score"))
+        if patch4_complete and isinstance(technology, Mapping)
+        else None,
+        "patch5_coverage": patch5_coverage,
+        "type5_applicable": type5_applicable,
+        "type5_cycle_complete": type5_cycle_complete,
+        "type5_cycle_score": type5_cycle_score,
+        "type5_bottom_complete": type5_bottom_complete,
+        "type5_bottom_score": type5_bottom_score,
+        "type5_survival_complete": type5_survival_complete,
+        "type5_survival_score": type5_survival_score,
+        "type5_upside_complete": type5_upside_complete,
+        "type5_upside_score": type5_upside_score,
+        "type5_valuation_complete": type5_valuation_complete,
+        "type5_valuation_score": type5_valuation_score,
+        "type5_evidence_complete": type5_evidence_complete,
+        "type5_triggered": type5_triggered,
+        "type5_total": type5_total,
+        "template25_complete": template25_complete,
+        "template25_buy_zone_score": valuation_score if template25_complete else None,
+        "monetary_funds": monetary_funds,
+        "interest_debt": interest_debt,
+        "net_debt": net_debt,
+        "pb_history_complete": pb_inputs is not None,
+        "pb_percentile": pb_percentile,
+        "current_pb": current_pb,
+    }
 
 
 def score_type7_quality_equity(
@@ -6498,124 +6691,112 @@ def score_type7_quality_equity(
     history_evidence: Mapping[str, Any] | None = None,
     *,
     valuation_evidence_complete: bool,
+    type5_outcome: tuple | None = None,
+    other_type_triggered: bool = False,
 ) -> tuple[tuple[bool, float, dict, dict], dict[str, Any]]:
-    """情况七：三项独立质量与估值评分必须分别严格超过70。"""
+    """情况七：先归类，再按商业模式、护城河、长期成长三项判断。"""
 
     industry = str(m.get("industry") or "")
     if industry in FINANCIAL_INDUSTRIES:
         reason = "金融需专属优质股权模型"
         return _not_applicable("type7", reason), {
-            "schema_version": QUALITY_EQUITY_SCHEMA_VERSION,
-            "model_id": QUALITY_EQUITY_MODEL_ID,
+            "schema_version": PATCH6_TYPE7_SCHEMA_VERSION,
+            "model_id": PATCH6_TYPE7_MODEL_ID,
             "code": str(m.get("code") or ""),
             "applicable": False,
             "reason": reason,
         }
 
-    ledger = assess_quality_equity(
+    legacy = assess_quality_equity(
         m,
         type1_outcome,
         history_evidence,
         valuation_evidence_complete=valuation_evidence_complete,
     )
-    ledger_errors = validate_quality_equity_ledger(ledger)
+    type1_scores = type1_outcome[2] if isinstance(type1_outcome[2], Mapping) else {}
+    valuation_score = _safe_float(type1_scores.get("1a"))
+    route_evidence = _type7_classified_route_evidence(
+        m,
+        legacy,
+        history_evidence,
+        type5_outcome,
+        valuation_evidence_complete=valuation_evidence_complete,
+        valuation_score=valuation_score,
+    )
+    ledger = assess_patch6_type7(
+        m,
+        valuation_evidence_complete=valuation_evidence_complete,
+        valuation_score=valuation_score,
+        route_evidence=route_evidence,
+        legacy_diagnostic=legacy,
+        # The latest classified-asset addendum defines each class's price
+        # ruler as part of Type 7's own buy point.  Another framework may
+        # trigger independently, but it cannot waive Type 7's price gate.
+        price_required=True,
+    )
+    ledger_errors = validate_patch6_type7_ledger(
+        ledger,
+        expected_code=str(m.get("code") or ""),
+        expected_as_of=str(m.get("source_trade_date") or ""),
+    )
     if ledger_errors:
         raise AssertionError("情况七量化账本不变量失败:" + ";".join(ledger_errors[:3]))
     source_scores = ledger["scores"]
     scores = {
-        "7a": round(float(source_scores["template1"]) / 10.0, 3),
-        "7b": round(float(source_scores["template5"]) / 10.0, 3),
-        "7c": round(float(source_scores["patch5"]) / 10.0, 3),
+        "7a": round(float(source_scores["BM"]), 3),
+        "7b": round(float(source_scores["MOAT"]), 3),
+        "7c": round(float(source_scores["G"]), 3),
     }
-    safety = float(ledger["patch5"]["safety_margin_score"])
+    class_label = str(ledger["classification"]["class_label"])
     reasons = {
-        "7a": f"长期质量回报{source_scores['template1']:.2f}",
-        "7b": f"产业质量估值{source_scores['template5']:.2f}",
-        "7c": f"商业安全{source_scores['patch5']:.2f}；边际{safety:.1f}",
+        "7a": f"{class_label}商业模式{source_scores['BM']:.2f}",
+        "7b": f"{class_label}护城河{source_scores['MOAT']:.2f}",
+        "7c": f"{class_label}长期成长{source_scores['G']:.2f}",
     }
-    strict_pass = bool(ledger["all_scores_strictly_above_70"])
-    decisive_failure = bool(ledger["decisively_not_triggered"])
-    known_strict_failure = bool(ledger["prerequisites_complete"] and not strict_pass)
-    if decisive_failure:
-        ledger_labels = {
-            "template1": "长期质量与回报",
-            "template5": "产业质量与估值",
-            "patch5": "商业质量与安全边际",
-        }
-        decisive_details = []
-        for ledger_key, upper_bound in ledger["decisive_score_upper_bounds"].items():
-            if float(upper_bound) > 70.0:
-                continue
-            section = ledger.get(ledger_key)
-            exact = isinstance(section, Mapping) and float(section.get("coverage") or 0.0) >= 1.0
-            label = ledger_labels.get(ledger_key, ledger_key)
-            decisive_details.append(f"{label}{'当前已核验资料得分' if exact else '最高可能'}{float(upper_bound):.2f}分")
-        reasons["_condition"] = (
-            "；".join(decisive_details) + "，未严格超过70分"
-            if decisive_details
-            else "至少一套评分的最高可能分未严格超过70分"
+    strict_pass = bool(float(ledger["unrounded_mean"]) > 7.0)
+    condition_failures = list(ledger.get("condition_failures") or [])
+    condition_reasons: list[str] = []
+    if not strict_pass:
+        condition_reasons.append(
+            f"商业模式、护城河、长期成长三项均值{float(ledger['unrounded_mean']):.3f}，须严格大于7"
         )
-    elif known_strict_failure:
-        ledger_labels = {
-            "template1": "长期质量与回报",
-            "template5": "产业质量与估值",
-            "patch5": "商业质量与安全边际",
+    if "future_fcf" in condition_failures:
+        condition_reasons.append("连续自由现金流未证明未来现金流前提")
+    if "route_path" in condition_failures:
+        condition_reasons.append("分类专用评估路径未通过")
+    if "price_reasonableness" in condition_failures:
+        condition_reasons.append("价格未达到合理或低估区间")
+    if "technology_dimension_floor" in condition_failures:
+        condition_reasons.append("强科技商业模式、护城河、长期成长三项均须至少7分")
+    decision_gates = ledger.get("decision_gates")
+    if isinstance(decision_gates, Mapping):
+        incomplete_gate_labels = {
+            "future_fcf": "连续自由现金流资料待补",
+            "route_path": "分类专用评估路径资料待补",
+            "price_reasonableness": "该类别价格检查所需资料待补",
         }
-        failed_scores = [
-            f"{ledger_labels[key]}当前已核验资料得分{float(value):.2f}分"
-            for key, value in source_scores.items()
-            if float(value) <= 70.0
-        ]
-        reasons["_condition"] = "；".join(failed_scores) + "，未严格超过70分"
-    elif not strict_pass:
-        reasons["_condition"] = "三套分数均须严格大于70"
-    failed_prerequisites = [key for key, record in ledger["prerequisites"].items() if not bool(record.get("passed"))]
-    if failed_prerequisites:
-        patch4_source_status = str(m.get("_type7_patch4_evidence_status") or "")
-        technology_missing = (
-            "公告数据源暂时不可用"
-            if patch4_source_status == "source_unavailable"
-            else "公告未直接披露全部五项"
-            if patch4_source_status == "incomplete"
-            else "缺核心研发持股与长期激励资料"
-        )
-        labels = {
-            "core_modules_80pct": "核心分析证据不完整",
-            "technology_patch4": technology_missing,
-            "three_year_financials": "不足3年财报",
-            "latest_quote_and_valuation": "缺最新估值",
-            "three_external_reports": "外部研报可获取性预检不足",
-            "external_report_content_verification": "研报正文尚未读取并交叉核验",
-            "ten_year_return_and_five_year_valuation": "缺十年回报或估值史",
-        }
-        missing_reason = labels.get(failed_prerequisites[0], "优质股权前置证据不足")
+        for gate_key, label in incomplete_gate_labels.items():
+            gate = decision_gates.get(gate_key)
+            if isinstance(gate, Mapping) and gate.get("complete") is not True:
+                condition_reasons.append(label)
+    if condition_reasons:
+        reasons["_condition"] = "；".join(condition_reasons)
+    reasons["_quality_certified"] = "yes" if ledger.get("quality_certified") is True else "no"
+    if ledger.get("quality_complete") is not True:
         incomplete_labels = _type7_incomplete_evidence_labels(ledger)
-        if "core_modules_80pct" in failed_prerequisites and incomplete_labels:
-            missing_reason = (
-                "缺" + "、".join(incomplete_labels[:4]) + ("等证据" if len(incomplete_labels) > 4 else "证据")
-            )
-        report_gaps = {
-            "three_external_reports",
-            "external_report_content_verification",
-        }.intersection(failed_prerequisites)
-        if report_gaps and "研报" not in missing_reason:
-            missing_reason += "；另缺3份研报正文核验"
-        reasons["_missing"] = missing_reason
-    if ledger["safety_veto"]:
-        reasons["_veto"] = "安全边际低于8/20"
+        reasons["_missing"] = (
+            "缺" + "、".join(incomplete_labels[:4]) + ("等证据" if len(incomplete_labels) > 4 else "证据")
+        )
+    if ledger["veto"]:
+        reasons["_veto"] = "强周期公司的商业模式或护城河低于5分"
     return (
         _finish(
             "type7",
             scores,
             reasons,
-            veto=bool(ledger["safety_veto"]),
-            extra_condition=strict_pass,
-            evidence_complete=bool(ledger["prerequisites_complete"]),
-            status_override=(
-                STATUS_NOT_TRIGGERED
-                if (decisive_failure or known_strict_failure) and not ledger["safety_veto"]
-                else None
-            ),
+            veto=bool(ledger["veto"]),
+            extra_condition=bool(ledger.get("buy_ready")),
+            evidence_complete=bool(ledger.get("quality_complete")),
             missing_dimensions=_type7_missing_dimensions(ledger),
         ),
         ledger,
@@ -6751,17 +6932,18 @@ def _decision_dimension_bounds(
     upper_dimensions: dict[str, float] = {}
     type7_upper: dict[str, float] = {}
     if type_key == "type7" and isinstance(ledger, Mapping):
-        raw_upper = ledger.get("decisive_score_upper_bounds")
-        if isinstance(raw_upper, Mapping):
-            for dimension, source_key in {
-                "7a": "template1",
-                "7b": "template5",
-                "7c": "patch5",
-            }.items():
-                value = _safe_float(raw_upper.get(source_key))
-                if value is not None and 0.0 <= value <= 100.0:
-                    type7_upper[dimension] = min(10.0, value / 10.0)
-
+        if ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            dimensions = ledger.get("dimensions")
+            classification = ledger.get("classification")
+            route_complete = isinstance(classification, Mapping) and classification.get("route_complete") is True
+            if not route_complete:
+                type7_upper = {"7a": 10.0, "7b": 10.0, "7c": 10.0}
+            elif isinstance(dimensions, Mapping):
+                for dimension, source_key in {"7a": "BM", "7b": "MOAT", "7c": "G"}.items():
+                    section = dimensions.get(source_key)
+                    value = _safe_float(section.get("upper_bound")) if isinstance(section, Mapping) else None
+                    if value is not None and 0.0 <= value <= 10.0:
+                        type7_upper[dimension] = value
     for dimension in weights:
         score = _safe_float(sub_scores.get(dimension))
         known_score = min(10.0, max(0.0, score if score is not None else 0.0))
@@ -6813,6 +6995,7 @@ def _decision_possible_veto(
     type_key: str,
     missing_dimensions: Sequence[str],
     upper_dimensions: Mapping[str, float],
+    ledger: Mapping[str, Any] | None = None,
 ) -> tuple[bool, bool]:
     """Return (possible veto, logically confirmed veto) from score intervals."""
 
@@ -6839,6 +7022,16 @@ def _decision_possible_veto(
         if maximum_high < 2:
             return False, True
         return known_high < 2, False
+    if type_key == "type7":
+        if not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+            return False, False
+        classification = ledger.get("classification")
+        route_complete = isinstance(classification, Mapping) and classification.get("route_complete") is True
+        class_code = str(classification.get("class_code") or "") if isinstance(classification, Mapping) else ""
+        possible = bool(
+            (not route_complete) or (class_code == "C" and set(missing_dimensions).intersection({"7a", "7b"}))
+        )
+        return possible, False
     return bool(missing.intersection(_POTENTIAL_VETO_DIMENSIONS[type_key])), False
 
 
@@ -6879,11 +7072,9 @@ def _decision_confirmed_hard_veto(
         core = ("6a", "6b", "6c", "6d")
         return bool(all(known(key) for key in core) and sum(dimensions[key] >= 5.0 for key in core) < 2)
     if type_key == "type7":
-        patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
-        if not isinstance(patch5, Mapping) or patch5.get("safety_margin_complete") is not True:
-            return False
-        safety_score = _safe_float(patch5.get("safety_margin_score"))
-        return bool(safety_score is not None and safety_score < PATCH5_SAFETY_VETO)
+        if not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+            raise ValueError("type7 current classified ledger is required")
+        return ledger.get("veto") is True
     raise ValueError(f"unknown decision type: {type_key}")
 
 
@@ -6894,6 +7085,7 @@ def _decision_theoretically_triggerable(
     upper_dimensions: Mapping[str, float],
     missing_dimensions: Sequence[str],
     reasons: Mapping[str, Any],
+    ledger: Mapping[str, Any] | None = None,
 ) -> bool:
     """Return whether one assignment inside the evidence bounds can trigger."""
 
@@ -6921,7 +7113,16 @@ def _decision_theoretically_triggerable(
         # maps to a high numeric score through the display rubric.
         return bool(upper_dimensions["6e"] >= 8.0 and not reasons.get("_condition"))
     if type_key == "type7":
-        return all(upper_dimensions[key] > QUALIFY_THRESHOLD for key in TYPE_WEIGHTS[type_key])
+        if not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+            raise ValueError("type7 current classified ledger is required")
+        exact_upper = _safe_float(ledger.get("upper_bound"))
+        condition_failures = ledger.get("condition_failures")
+        return bool(
+            exact_upper is not None
+            and exact_upper > QUALIFY_THRESHOLD
+            and isinstance(condition_failures, list)
+            and not condition_failures
+        )
     return True
 
 
@@ -6968,6 +7169,9 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
             "missing_dimensions": [],
         }
 
+    if type_key == "type7" and (not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID):
+        raise ValueError("type7 current classified ledger is required")
+
     lower, upper, upper_dimensions = _decision_dimension_bounds(type_key, sub_scores, missing, ledger)
     market_blocked = _decision_market_block_reason(payload) is not None
     confirmed_hard_veto = _decision_confirmed_hard_veto(
@@ -6976,7 +7180,12 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
         upper_dimensions,
         ledger,
     )
-    possible_veto, bounded_veto = _decision_possible_veto(type_key, missing, upper_dimensions)
+    possible_veto, bounded_veto = _decision_possible_veto(
+        type_key,
+        missing,
+        upper_dimensions,
+        ledger if isinstance(ledger, Mapping) else None,
+    )
 
     if confirmed_hard_veto or bounded_veto:
         complete = True
@@ -6993,15 +7202,30 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
         action_condition = bool(
             type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and "6e" in missing
         )
+        type7_action_condition = bool(
+            type_key == "type7"
+            and isinstance(ledger, Mapping)
+            and ledger.get("quality_certified") is True
+            and ledger.get("complete") is not True
+            and any(
+                isinstance(gate, Mapping) and gate.get("complete") is not True
+                for gate in (
+                    ledger.get("decision_gates", {}).values()
+                    if isinstance(ledger.get("decision_gates"), Mapping)
+                    else []
+                )
+            )
+        )
         theoretically_triggerable = _decision_theoretically_triggerable(
             type_key,
             upper=upper,
             upper_dimensions=upper_dimensions,
             missing_dimensions=missing,
             reasons=reasons,
+            ledger=ledger if isinstance(ledger, Mapping) else None,
         )
 
-        if action_condition:
+        if action_condition or type7_action_condition:
             if theoretically_triggerable:
                 complete = False
                 basis = "action_condition"
@@ -7059,6 +7283,8 @@ def _decision_source_hard_veto(type_key: str, payload: Mapping[str, Any]) -> boo
         evidence_complete=evidence_marker == "complete",
     )
     ledger = payload.get("ledger") if type_key == "type7" else None
+    if type_key == "type7" and (not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID):
+        raise ValueError("type7 current classified ledger is required")
     _lower, _upper, upper_dimensions = _decision_dimension_bounds(type_key, sub_scores, missing, ledger)
     return _decision_confirmed_hard_veto(type_key, missing, upper_dimensions, ledger)
 
@@ -7144,7 +7370,12 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
                 errors.append(f"{row_index}:{type_key}分数非法")
             if any(len(str(reasons.get(key, ""))) > EVIDENCE_MAX_LENGTH for key in weights):
                 errors.append(f"{row_index}:{type_key}理由过长")
-            expected_total = _weighted_total(sub_scores, weights, decimals=3 if type_key == "type7" else 2)
+            expected_total = _weighted_total(
+                sub_scores,
+                weights,
+                decimals=3 if type_key == "type7" else 2,
+                total_decimals=3 if type_key == "type7" else 1,
+            )
             actual_total = _safe_float(payload.get("total"))
             # 补丁6：3e泡沫降级必须严格低于5.0。
             bubble_cap = (
@@ -7256,21 +7487,27 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
                 if status == STATUS_NOT_APPLICABLE:
                     if not isinstance(ledger, Mapping) or ledger.get("applicable") is not False:
                         errors.append(f"{row_index}:type7不适用账本错误")
-                else:
-                    ledger_errors = validate_quality_equity_ledger(ledger)
+                elif isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+                    ledger_errors = validate_patch6_type7_ledger(
+                        ledger,
+                        expected_code=str(row.get("code") or ""),
+                        expected_as_of=str(row.get("source_trade_date") or ""),
+                    )
                     if ledger_errors:
                         errors.append(f"{row_index}:type7账本错误:{ledger_errors[0]}")
-                    elif isinstance(ledger, Mapping):
+                    else:
                         source_scores = ledger.get("scores", {})
                         expected_sub_scores = {
-                            "7a": round(float(source_scores["template1"]) / 10.0, 3),
-                            "7b": round(float(source_scores["template5"]) / 10.0, 3),
-                            "7c": round(float(source_scores["patch5"]) / 10.0, 3),
+                            "7a": round(float(source_scores["BM"]), 3),
+                            "7b": round(float(source_scores["MOAT"]), 3),
+                            "7c": round(float(source_scores["G"]), 3),
                         }
                         if sub_scores != expected_sub_scores:
                             errors.append(f"{row_index}:type7展示分与账本不一致")
                         if status != STATUS_BLOCKED and bool(payload.get("triggered")) != bool(ledger.get("triggered")):
                             errors.append(f"{row_index}:type7触发与账本不一致")
+                else:
+                    errors.append(f"{row_index}:type7账本错误:仅接受当前分类量化账本")
             if bool(payload.get("applicable")) != (status != STATUS_NOT_APPLICABLE):
                 errors.append(f"{row_index}:{type_key}适用字段错误")
             reason_evidence_complete = reasons.get("_evidence") == "complete"
@@ -7635,6 +7872,8 @@ def screen_all_types(
             base_outcomes["type1"],
             normalized_quality_history.get(code),
             valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+            type5_outcome=base_outcomes["type5"],
+            other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
         )
         preliminary_type7_by_code[code] = (preliminary_outcome, preliminary_ledger)
         as_of = str(m.get("source_trade_date") or "")
@@ -7698,6 +7937,8 @@ def screen_all_types(
                 base_outcomes["type1"],
                 normalized_quality_history.get(code),
                 valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+                type5_outcome=base_outcomes["type5"],
+                other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
             )
 
     patch4_requests = [patch4_request_by_code[code] for code in sorted(patch4_request_by_code)]
@@ -7733,6 +7974,8 @@ def screen_all_types(
                 base_outcomes["type1"],
                 normalized_quality_history.get(code),
                 valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+                type5_outcome=base_outcomes["type5"],
+                other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
             )
 
     history_request_by_code: dict[str, dict[str, str]] = {}
@@ -7795,6 +8038,8 @@ def screen_all_types(
             base_outcomes["type1"],
             normalized_quality_history.get(code),
             valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+            type5_outcome=base_outcomes["type5"],
+            other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
         )
 
     for metric in scored_metrics:
@@ -7837,6 +8082,8 @@ def screen_all_types(
                 base_outcomes["type1"],
                 normalized_quality_history.get(code),
                 valuation_evidence_complete=type7_valuation_evidence_by_code[code],
+                type5_outcome=base_outcomes["type5"],
+                other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
             )
 
     def score_one(m: Mapping[str, Any]) -> dict[str, Any]:

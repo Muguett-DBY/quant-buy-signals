@@ -619,6 +619,93 @@ def test_industry_bubble_score_is_independent_of_target_company_pe() -> None:
     }
 
 
+@pytest.mark.parametrize("missing_field", ["loss_share", "negative_fcf_share"])
+def test_industry_bubble_score_requires_both_industry_pressure_breadth_inputs(missing_field: str) -> None:
+    target = _metric("BREADTH-GAP")
+    peers = [_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]
+    context = build_company_contexts([target, *peers])["BREADTH-GAP"]
+    context[missing_field] = None
+
+    evidence = derive_company_evidence(target, context)
+    industry = evidence["industry_bubble_score"]
+    combined = evidence["type3_bubble_score"]
+
+    assert industry["evidence_level"] == "partial"
+    assert combined["evidence_level"] == "missing"
+    missing_input = {
+        "loss_share": "industry_loss_share",
+        "negative_fcf_share": "industry_negative_fcf_share",
+    }[missing_field]
+    assert missing_input in industry["details"]["evidence_quality"]["missing_inputs"]
+    assert "industry_anti_bubble_proxy" in combined["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_industry_bubble_score_requires_replayable_peer_samples_and_coverage() -> None:
+    target = _metric("BREADTH-COVERAGE")
+    peers = [_metric(f"P{index}", free_cash_flow=None if index == 0 else 10.0) for index in range(MIN_SECTOR_COMPANIES)]
+    context = build_company_contexts([target, *peers])["BREADTH-COVERAGE"]
+
+    bubble = derive_company_evidence(target, context)["industry_bubble_score"]
+
+    assert bubble["evidence_level"] == "partial"
+    assert "industry_negative_fcf_share" in bubble["details"]["evidence_quality"]["missing_inputs"]
+    assert bubble["details"]["negative_fcf_sample_count"] == MIN_SECTOR_COMPANIES - 1
+    assert bubble["details"]["negative_fcf_coverage"] == pytest.approx(
+        (MIN_SECTOR_COMPANIES - 1) / MIN_SECTOR_COMPANIES
+    )
+
+
+def test_industry_bubble_score_rejects_a_share_that_does_not_replay_from_its_population() -> None:
+    target = _metric("BREADTH-MISMATCH")
+    peers = [_metric(f"P{index}", net_profit=-1.0) for index in range(MIN_SECTOR_COMPANIES)]
+    context = build_company_contexts([target, *peers])["BREADTH-MISMATCH"]
+    assert context["loss_share"] == 1.0
+    context["loss_share"] = 0.0
+
+    bubble = derive_company_evidence(target, context)["industry_bubble_score"]
+
+    assert bubble["evidence_level"] == "partial"
+    assert bubble["details"]["loss_share"] is None
+    assert "industry_loss_share" in bubble["details"]["evidence_quality"]["missing_inputs"]
+
+
+def test_industry_bubble_validator_replays_pressure_breadth_counts() -> None:
+    target = _metric("BREADTH-TAMPER")
+    peers = [_metric(f"P{index}", net_profit=-1.0) for index in range(MIN_SECTOR_COMPANIES)]
+    context = build_company_contexts([target, *peers])["BREADTH-TAMPER"]
+    bubble = copy.deepcopy(derive_company_evidence(target, context)["industry_bubble_score"])
+    bubble["details"]["loss_count"] = 0
+
+    with pytest.raises(ValueError, match="share does not replay"):
+        validate_quantitative_evidence_record(
+            bubble,
+            key="industry_bubble_score",
+            code="BREADTH-TAMPER",
+        )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "missing_input"),
+    [
+        ({"market_coldness_score": 9.0, "peg": None}, "company_quantity_price_anti_bubble"),
+        ({"market_coldness_score": None, "peg": 0.5}, "company_quantity_price_anti_bubble"),
+    ],
+)
+def test_type3_bubble_does_not_promote_a_naked_coldness_or_peg_proxy(
+    overrides: dict[str, object],
+    missing_input: str,
+) -> None:
+    target = _metric("000001", source_trade_date="2025-12-31", **overrides)
+    peers = [_metric(f"P{index}") for index in range(MIN_SECTOR_COMPANIES)]
+    context = build_company_contexts([target, *peers])["000001"]
+
+    evidence = derive_company_evidence(target, context)
+
+    assert evidence["industry_bubble_score"]["evidence_level"] == "derived_proxy"
+    assert evidence["type3_bubble_score"]["evidence_level"] == "partial"
+    assert missing_input in evidence["type3_bubble_score"]["details"]["evidence_quality"]["missing_inputs"]
+
+
 def test_all_derived_scores_emit_metadata_accepted_by_the_scoring_boundary() -> None:
     metric = _metric("META")
     derived = derive_company_evidence(metric, _context())

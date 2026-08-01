@@ -8,8 +8,11 @@ catalogue, signal index, all 16 company-detail shards, and the ECDSA signature
 pass size, hash, schema, partition, and coverage validation.
 
 - `schema.sql` is applied once to the D1 database.
-- `refresh_worker.js` is deployed as `quant-market-refresh` with a weekday
-  `45 8 * * 1-5` UTC trigger (16:45 Beijing), after the 16:17 GitHub refresh.
+- `refresh_worker.js` is deployed as `quant-market-refresh`.  The GitHub
+  publication workflow calls its key-protected `/refresh` endpoint immediately
+  after the stable Pages manifest is deployed; the weekday `0 15 * * 1-5` UTC
+  trigger (23:00 Beijing) remains a recovery-only mirror check after the 16:17
+  GitHub refresh and leaves room for delayed GitHub runners.  It never calculates scores.
 - `pages_worker.js` is the Pages advanced-mode worker.  Its API is GET-only:
   `/api/health`, `/api/meta`, `/api/manifest`, `/api/catalogue-index`,
   `/api/company/{code}`, and the backward-compatible `/api/catalogue` used by
@@ -34,5 +37,11 @@ model yet.
 
 The drawer traps keyboard focus while open and restores focus to the company
 row on close.  Name/code searches deliberately span every status and disable
-the status selector while the query is active.  Type 7's three scores are
-displayed as independent gates rather than additive contributions.
+  the status selector while the query is active.  Type 7 first classifies the
+  company, calculates 12 class-specific items, then uses the arithmetic mean
+  of business model, moat and long-term growth for quality certification.  The
+  page separately shows the class-specific current-buy gates; technology
+  companies require all three dimensions at least 7 and a five-year P/B
+  percentile no higher than 20%.  Type 7 always applies its own class-specific
+  price gate even when another framework also triggers.  It shows
+  ranges, rather than zeroes, whenever a required item is incomplete.

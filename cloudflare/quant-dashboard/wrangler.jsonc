@@ -2,9 +2,10 @@
   "$schema": "https://developers.cloudflare.com/workers/wrangler/configuration/#supported-properties",
   "name": "quant-market-refresh",
   "main": "refresh_worker.js",
+  "workers_dev": true,
   "compatibility_date": "2026-07-25",
   "compatibility_flags": ["nodejs_compat"],
-  "triggers": { "crons": ["45 8 * * 1-5"] },
+  "triggers": { "crons": ["0 15 * * 1-5"] },
   "d1_databases": [{ "binding": "DB", "database_name": "quant-market-data", "database_id": "1ea1f08e-640f-4e75-a25e-c47d0a41ae66" }],
   "r2_buckets": [{ "binding": "DATA_BUCKET", "bucket_name": "quant-market-data" }]
 }

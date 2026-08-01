@@ -30,6 +30,12 @@ from engine.quantitative_evidence import (
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
     validate_quantitative_evidence_record,
 )
+from engine.audit import _independent_type7_ledger_errors
+from engine.type7_patch6 import (
+    MODEL_ID as PATCH6_TYPE7_MODEL_ID,
+    SCHEMA_VERSION as PATCH6_TYPE7_SCHEMA_VERSION,
+    validate_patch6_type7_ledger,
+)
 from tools.run_full_audit import (
     _canonical_market_coldness_json,
     _replay_market_coldness_reference_artifact,
@@ -125,6 +131,7 @@ _REQUIRED_FILES = {
     "engine/quality_equity.py",
     "engine/risk.py",
     "engine/scenarios.py",
+    "engine/type7_patch6.py",
     "engine/valuation_status.py",
     "ui/buy_types_page.py",
     "ui/leaders_page.py",
@@ -183,6 +190,10 @@ _EXPECTED_TYPE7_SOURCE_DOCUMENTS = {
         "sha256": "8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4",
     },
     "patch6": dict(_EXPECTED_PATCH6_SOURCE),
+    "subsequent_addenda": {
+        "path_at_model_authoring": r"E:\模板汇总MD\后续附加补丁们.md",
+        "sha256": "0dea9125bbe2039acf741ac997e62b53c49b6e3dc32e7d956ed96f9d7054b64f",
+    },
 }
 _EXPECTED_DIRECT_DEPENDENCIES = {
     "numpy",
@@ -666,6 +677,7 @@ _RULE_FILES = {
     "engine/quality_equity.py",
     "engine/risk.py",
     "engine/scenarios.py",
+    "engine/type7_patch6.py",
     "engine/valuation_status.py",
 }
 _INDUSTRY_FILES = {
@@ -2926,7 +2938,21 @@ def _audit_type7_ledger_valid(
     """Fail closed when release JSON contains hostile Type 7 values."""
 
     try:
-        return _audit_type7_ledger_valid_impl(code, ledger, status, patch4_bindings)
+        if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            if status == "not_applicable":
+                return bool(
+                    set(ledger) == {"schema_version", "model_id", "code", "applicable", "reason"}
+                    and ledger.get("schema_version") == PATCH6_TYPE7_SCHEMA_VERSION
+                    and ledger.get("code") == code
+                    and ledger.get("applicable") is False
+                    and str(ledger.get("reason") or "").strip()
+                )
+            return (
+                not validate_patch6_type7_ledger(ledger, expected_code=code)
+                and not _independent_type7_ledger_errors(ledger, expected_code=code)
+                and bool(ledger.get("triggered")) is (status == "triggered")
+            )
+        return False
     except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
         return False
 
@@ -3052,6 +3078,10 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
         or set(decision) != _AUDIT_DECISION_FIELDS
     ):
         return False
+    if type_key == "type7":
+        ledger = payload.get("ledger")
+        if not isinstance(ledger, Mapping) or ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+            return False
     scores: dict[str, float] = {}
     for dimension in weights:
         value = _finite_number(sub_scores.get(dimension))
@@ -3084,15 +3114,32 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
         upper_dimensions[dimension] = 10.0
     if type_key == "type7" and missing:
         ledger = payload.get("ledger")
-        raw_upper = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
-        mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
-        if not isinstance(raw_upper, Mapping):
-            return False
-        for dimension in missing:
-            value = _finite_number(raw_upper.get(mapping[dimension]))
-            if value is None or not 0.0 <= value <= 100.0:
+        if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            raw_dimensions = ledger.get("dimensions")
+            mapping = {"7a": "BM", "7b": "MOAT", "7c": "G"}
+            classification = ledger.get("classification")
+            route_complete = isinstance(classification, Mapping) and classification.get("route_complete") is True
+            if not isinstance(raw_dimensions, Mapping):
                 return False
-            upper_dimensions[dimension] = min(10.0, value / 10.0)
+            for dimension in missing:
+                if not route_complete:
+                    upper_dimensions[dimension] = 10.0
+                    continue
+                section = raw_dimensions.get(mapping[dimension])
+                value = _finite_number(section.get("upper_bound")) if isinstance(section, Mapping) else None
+                if value is None or not 0.0 <= value <= 10.0:
+                    return False
+                upper_dimensions[dimension] = value
+        else:
+            raw_upper = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
+            mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
+            if not isinstance(raw_upper, Mapping):
+                return False
+            for dimension in missing:
+                value = _finite_number(raw_upper.get(mapping[dimension]))
+                if value is None or not 0.0 <= value <= 100.0:
+                    return False
+                upper_dimensions[dimension] = min(10.0, value / 10.0)
 
     lower = round(math.fsum(lower_dimensions[key] * weights[key] for key in weights), 1)
     upper = round(math.fsum(upper_dimensions[key] * weights[key] for key in weights), 1)
@@ -3122,6 +3169,16 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
         maximum_high = known_high + sum(key in missing for key in core)
         bounded_veto = maximum_high < 2
         possible_veto = not bounded_veto and known_high < 2
+    elif (
+        type_key == "type7"
+        and isinstance(payload.get("ledger"), Mapping)
+        and payload["ledger"].get("model_id") == PATCH6_TYPE7_MODEL_ID
+    ):
+        classification = payload["ledger"].get("classification")
+        route_complete = isinstance(classification, Mapping) and classification.get("route_complete") is True
+        class_code = str(classification.get("class_code") or "") if isinstance(classification, Mapping) else ""
+        bounded_veto = False
+        possible_veto = bool((not route_complete) or (class_code == "C" and set(missing).intersection({"7a", "7b"})))
     else:
         bounded_veto = False
         possible_veto = bool(set(missing).intersection(_AUDIT_DECISION_POTENTIAL_VETO_DIMENSIONS[type_key]))
@@ -3183,14 +3240,17 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
         )
     else:
         ledger = payload.get("ledger")
-        patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
-        safety_score = _finite_number(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
-        confirmed_hard_veto = bool(
-            isinstance(patch5, Mapping)
-            and patch5.get("safety_margin_complete") is True
-            and safety_score is not None
-            and safety_score < 8.0
-        )
+        if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            confirmed_hard_veto = ledger.get("veto") is True
+        else:
+            patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
+            safety_score = _finite_number(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
+            confirmed_hard_veto = bool(
+                isinstance(patch5, Mapping)
+                and patch5.get("safety_margin_complete") is True
+                and safety_score is not None
+                and safety_score < 8.0
+            )
     if not applicable:
         lower = upper = 0.0
         complete, basis, veto_state, potential = True, "scope_exclusion", "none", False
@@ -3216,7 +3276,18 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
             if "6e" not in missing:
                 theoretical = theoretical and (upper_dimensions["6e"] >= 8.0 and not reasons.get("_condition"))
         elif type_key == "type7":
-            theoretical = all(upper_dimensions[key] > _AUDIT_QUALIFY_THRESHOLD for key in weights)
+            ledger = payload.get("ledger")
+            if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+                exact_upper = _finite_number(ledger.get("upper_bound"))
+                failures = ledger.get("condition_failures")
+                theoretical = bool(
+                    exact_upper is not None
+                    and exact_upper > _AUDIT_QUALIFY_THRESHOLD
+                    and isinstance(failures, list)
+                    and not failures
+                )
+            else:
+                theoretical = all(upper_dimensions[key] > _AUDIT_QUALIFY_THRESHOLD for key in weights)
 
         if action_condition:
             complete = not theoretical
@@ -3492,9 +3563,10 @@ def _audit_company_codes(
             scores_for_type = {
                 dimension: float(_finite_number(sub_scores[dimension])) for dimension in _AUDIT_TYPE_WEIGHTS[type_key]
             }
+            total_decimals = 3 if type_key == "type7" else 1
             raw_total = round(
                 sum(scores_for_type[dimension] * weight for dimension, weight in _AUDIT_TYPE_WEIGHTS[type_key].items()),
-                1,
+                total_decimals,
             )
             expected_total = min(raw_total, 4.9) if type_key == "type3" and scores_for_type["3e"] <= 3 else raw_total
             if (
@@ -3532,16 +3604,26 @@ def _audit_company_codes(
                     source_scores = ledger.get("scores")
                     if not isinstance(source_scores, Mapping):
                         return None
-                    source_values = {
-                        key: _finite_number(source_scores.get(key)) for key in ("template1", "template5", "patch5")
-                    }
-                    if any(value is None for value in source_values.values()):
-                        return None
-                    expected_type7_scores = {
-                        "7a": round(source_values["template1"] / 10.0, 3),
-                        "7b": round(source_values["template5"] / 10.0, 3),
-                        "7c": round(source_values["patch5"] / 10.0, 3),
-                    }
+                    if ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+                        source_values = {key: _finite_number(source_scores.get(key)) for key in ("BM", "MOAT", "G")}
+                        if any(value is None for value in source_values.values()):
+                            return None
+                        expected_type7_scores = {
+                            "7a": round(source_values["BM"], 3),
+                            "7b": round(source_values["MOAT"], 3),
+                            "7c": round(source_values["G"], 3),
+                        }
+                    else:
+                        source_values = {
+                            key: _finite_number(source_scores.get(key)) for key in ("template1", "template5", "patch5")
+                        }
+                        if any(value is None for value in source_values.values()):
+                            return None
+                        expected_type7_scores = {
+                            "7a": round(source_values["template1"] / 10.0, 3),
+                            "7b": round(source_values["template5"] / 10.0, 3),
+                            "7c": round(source_values["patch5"] / 10.0, 3),
+                        }
                     if scores_for_type != expected_type7_scores:
                         return None
                     if status != "blocked" and triggered is not ledger.get("triggered"):
@@ -3734,6 +3816,111 @@ def _audit_valuation_bindings_valid(
             continue
         if status == "not_applicable" or applicable is not True or not isinstance(ledger, Mapping):
             return False
+        if ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+            return False
+
+        if ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            classification = ledger.get("classification")
+            gates = ledger.get("decision_gates")
+            route = gates.get("route_path") if isinstance(gates, Mapping) else None
+            valuation = gates.get("price_reasonableness") if isinstance(gates, Mapping) else None
+            class_code = str(classification.get("class_code") or "") if isinstance(classification, Mapping) else ""
+            if (
+                class_code not in {"W", "C", "T"}
+                or not isinstance(route, Mapping)
+                or not isinstance(valuation, Mapping)
+                or route.get("class_code") != class_code
+                or valuation.get("class_code") != class_code
+                or ledger.get("code") != code
+                or ledger.get("as_of") != str(company.get("source_trade_date") or "")
+            ):
+                return False
+            if class_code != "W":
+                valuation_inputs = valuation.get("inputs")
+                current_pb = (
+                    _finite_number(valuation_inputs.get("current_pb"))
+                    if isinstance(valuation_inputs, Mapping)
+                    else None
+                )
+                company_pb = _finite_number(company.get("pb"))
+                source_complete = valuation.get("source_evidence_complete") is True
+                price_required = valuation.get("required") is True
+                if (
+                    not isinstance(valuation_inputs, Mapping)
+                    or set(valuation_inputs) != {"pb_percentile", "current_pb"}
+                    or type(valuation.get("required")) is not bool
+                    or valuation.get("complete") is not (source_complete or not price_required)
+                    or (
+                        source_complete
+                        and (
+                            current_pb is None
+                            or company_pb is None
+                            or current_pb <= 0
+                            or company_pb <= 0
+                            or abs(current_pb - company_pb) / max(current_pb, company_pb) > 0.20
+                        )
+                    )
+                ):
+                    return False
+                if class_code == "C":
+                    route_inputs = route.get("inputs")
+                    type5 = company.get("type5")
+                    type5_scores = type5.get("sub_scores") if isinstance(type5, Mapping) else None
+                    type5_reasons = type5.get("reasons") if isinstance(type5, Mapping) else None
+                    missing = (
+                        type5_reasons.get("_decision_missing_dimensions")
+                        if isinstance(type5_reasons, Mapping)
+                        else None
+                    )
+                    missing_set = set(missing) if isinstance(missing, list) else set()
+                    type5_status = str(type5.get("status") or "") if isinstance(type5, Mapping) else ""
+                    cycle_score = _finite_number(type5_scores.get("5a")) if isinstance(type5_scores, Mapping) else None
+                    survival_score = (
+                        _finite_number(type5_scores.get("5c")) if isinstance(type5_scores, Mapping) else None
+                    )
+                    valuation_score = (
+                        _finite_number(type5_scores.get("5e")) if isinstance(type5_scores, Mapping) else None
+                    )
+                    expected_route_inputs = {
+                        "type5_applicable": type5_status != "not_applicable",
+                        "type5_cycle_complete": bool(
+                            type5_status != "not_applicable" and cycle_score is not None and "5a" not in missing_set
+                        ),
+                        "type5_cycle_score": cycle_score,
+                        "type5_survival_complete": bool(
+                            type5_status != "not_applicable" and survival_score is not None and "5c" not in missing_set
+                        ),
+                        "type5_survival_score": survival_score,
+                        "type5_valuation_complete": bool(
+                            type5_status != "not_applicable" and valuation_score is not None and "5e" not in missing_set
+                        ),
+                        "type5_valuation_score": valuation_score,
+                    }
+                    if route_inputs != expected_route_inputs:
+                        return False
+                continue
+
+            type1 = company.get("type1")
+            type1_scores = type1.get("sub_scores") if isinstance(type1, Mapping) else None
+            type1_1a = _finite_number(type1_scores.get("1a")) if isinstance(type1_scores, Mapping) else None
+            ledger_score = _finite_number(valuation.get("buy_zone_score")) if isinstance(valuation, Mapping) else None
+            expected_nonfinancial_score = expected_nonfinancial_type1_1a.get(code)
+            expected_complete = expected_nonfinancial_score is not None
+            expected_score = expected_nonfinancial_score if expected_nonfinancial_score is not None else type1_1a
+            price_required = valuation.get("required") is True if isinstance(valuation, Mapping) else True
+            if (
+                not isinstance(valuation, Mapping)
+                or valuation.get("source_evidence_complete") is not expected_complete
+                or type(valuation.get("required")) is not bool
+                or valuation.get("complete") is not (expected_complete or not price_required)
+                or type1_1a is None
+                or ledger_score is None
+                or expected_score is None
+                or not math.isclose(type1_1a, expected_score, rel_tol=0.0, abs_tol=1e-9)
+                or not math.isclose(ledger_score, expected_score, rel_tol=0.0, abs_tol=1e-9)
+            ):
+                return False
+            continue
 
         prerequisites = ledger.get("prerequisites")
         valuation = prerequisites.get("latest_quote_and_valuation") if isinstance(prerequisites, Mapping) else None
@@ -5413,8 +5600,8 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     caller = caller if isinstance(caller, Mapping) else {}
                     git_state = provenance.get("git", {})
                     git_state = git_state if isinstance(git_state, Mapping) else {}
-                    if provenance.get("audit_schema_version") != 4:
-                        errors.append("audit schema version is not 4")
+                    if provenance.get("audit_schema_version") != 5:
+                        errors.append("audit schema version is not 5")
                     if provenance.get("patch6_source") != _EXPECTED_PATCH6_SOURCE:
                         errors.append("audit is not bound to the authoritative Patch 6 source hash")
                     if provenance.get("type7_source_documents") != _EXPECTED_TYPE7_SOURCE_DOCUMENTS:

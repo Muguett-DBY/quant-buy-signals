@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from engine.type7_patch6 import MODEL_ID as PATCH6_TYPE7_MODEL_ID
 from ui import buy_types_page
 from ui.buy_types_page import (
     TYPE_DIMENSIONS,
@@ -522,7 +523,7 @@ def test_radar_threshold_has_same_length_as_axes(monkeypatch, type_key):
     assert len(figure.data[0].r) == len(figure.data[0].theta)
     assert len(figure.data[1].r) == len(figure.data[1].theta)
     assert len(figure.data[1].r) == len(dims) + 1
-    expected = "每项须严格高于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）"
+    expected = "三项算术平均严格大于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）"
     assert figure.data[1].name == expected
 
 
@@ -682,8 +683,8 @@ def test_display_reason_expands_finance_abbreviations():
 @pytest.mark.parametrize(
     "machine_text",
     [
-        "model_id=patch6-type7-quality-equity-v7",
-        "schema_version=7",
+        "model_id=patch6-type7-classified-equity-v1",
+        "schema_version=1",
         "derived_proxy",
         "reported_formula",
         "financial_fade_horizon_not_tam_or_penetration_proof",
@@ -779,78 +780,127 @@ def test_dcf_parameters_are_presented_as_a_chinese_summary_without_raw_audit_fie
         assert marker not in public_text
 
 
-def test_type7_ledger_is_presented_as_chinese_scores_and_prerequisites_only():
+def test_legacy_type7_ledger_is_rejected_as_outdated_public_data():
     summary = _type7_ledger_summary(
         {
             "model_id": "patch6-type7-quality-equity-v7",
             "schema_version": 7,
-            "scores": {"template1": 69.5, "template5": 72.0, "patch5": 71.0},
-            "strict_checks": {"template1": False, "template5": True, "patch5": True},
-            "prerequisites": {
-                "core_modules_80pct": {
-                    "passed": False,
-                    "actual": 0.95,
-                    "required": 0.80,
-                    "required_items_complete": False,
-                    "incomplete_required_items": ["template5.t5_v3"],
-                },
-                "three_year_financials": {"passed": True, "consecutive_years": 10},
-                "three_external_reports": {
-                    "passed": False,
-                    "source_count": 1,
-                    "distinct_publishers": 1,
-                    "validation_status": "derived_proxy",
-                },
-            },
-            "prerequisites_complete": False,
-            "safety_veto": False,
-            "patch5": {"safety_margin_score": 9.0},
-            "decisively_not_triggered": True,
-            "derived_proxy": "financial_fade_horizon_not_tam_or_penetration_proof",
         }
     )
 
-    assert summary["score_rows"][0] == {
-        "评分体系": "长期质量与回报评分",
-        "百分制得分": "69.50",
-        "是否严格高于70分": "否",
-    }
-    assert summary["prerequisite_rows"] == [
+    assert summary["score_rows"] == []
+    assert summary["item_rows"] == []
+    assert summary["prerequisite_rows"] == []
+    assert "旧数据格式" in summary["conclusion"]
+    assert "请刷新" in summary["conclusion"]
+
+
+def test_current_type7_summary_explains_dimensions_items_and_evidence_in_chinese():
+    dimensions = {}
+    for key, base_label in (("BM", "商业模式"), ("MOAT", "护城河"), ("G", "长期成长")):
+        dimensions[key] = {
+            "score": 7.25,
+            "coverage": 0.75,
+            "items": [
+                {
+                    "label": f"{base_label}子项{index}",
+                    "score": 6.0 + index,
+                    "evidence_level": "derived_proxy" if index < 4 else "partial",
+                    "missing_inputs": [] if index < 4 else ["internal_input"],
+                }
+                for index in range(1, 5)
+            ],
+        }
+    summary = _type7_ledger_summary(
         {
-            "前置核验": "全部必需子项完整，且核心质量资料覆盖至少80%",
-            "结果": "未通过",
-            "说明": "仍有1个必需子项资料不完整；核心质量资料覆盖95.0%，要求至少80%",
-        },
-        {"前置核验": "至少三年连续财务数据", "结果": "通过", "说明": "已有10年连续财务数据"},
-        {"前置核验": "至少三份外部研究资料", "结果": "未通过", "说明": "已有1份资料，来自1个不同发布方"},
-        {
-            "前置核验": "安全边际不得触发否决",
-            "结果": "通过",
-            "说明": "当前安全边际9.00/20；低于8分即否决",
-        },
-    ]
-    assert "即使补全当前缺失资料" in summary["conclusion"]
+            "model_id": PATCH6_TYPE7_MODEL_ID,
+            "dimensions": dimensions,
+            "classification": {"class_label": "弱周期"},
+            "decision_gates": {
+                "future_fcf": {"complete": True, "passed": True, "scope": "多年自由现金流为正"},
+                "route_path": {"complete": True, "passed": True, "basis": "弱周期估值路径"},
+                "price_reasonableness": {"complete": False, "passed": False, "basis": "价格资料待补"},
+            },
+            "unrounded_mean": 7.25,
+            "complete": False,
+            "triggered": False,
+            "veto": False,
+        }
+    )
+
+    assert len(summary["score_rows"]) == 3
+    assert len(summary["item_rows"]) == 12
+    assert set(summary["score_rows"][0]) == {"本类别三项", "0至10分", "证据覆盖"}
+    assert summary["item_rows"][0]["证据状态"] == "根据财务表现间接判断"
+    assert summary["item_rows"][3]["证据状态"] == "部分资料，缺1项输入"
     public_text = json.dumps(summary, ensure_ascii=False)
-    for marker in (
-        "model_id",
-        "schema_version",
-        "derived_proxy",
-        "validation_status",
-        "template5.t5_v3",
-        "第1模板",
-        "第5模板",
-        "补丁5",
-    ):
+    for marker in ("BM", "MOAT", "derived_proxy", "internal_input", "model_id"):
         assert marker not in public_text
 
 
-def test_type7_rule_text_does_not_present_an_average_score_as_the_trigger_threshold():
+def test_current_type7_summary_explains_strong_cycle_route_and_price_rules():
+    summary = _type7_ledger_summary(
+        {
+            "model_id": PATCH6_TYPE7_MODEL_ID,
+            "dimensions": {},
+            "classification": {"class_label": "强周期", "class_code": "C", "route_complete": True},
+            "decision_gates": {
+                "future_fcf": {"complete": True, "passed": True, "basis": "连续年度自由现金流已核对"},
+                "route_path": {"complete": True, "passed": True},
+                "price_reasonableness": {"complete": True, "passed": True, "required": True},
+            },
+            "quality_complete": False,
+            "complete": False,
+            "triggered": False,
+            "veto": False,
+        }
+    )
+
+    gates = {row["前置核验"]: row["说明"] for row in summary["prerequisite_rows"]}
+    assert "第五类必须适用、证据完整、已经触发且总分不低于7分" in gates["本类别的买点条件"]
+    assert "带息债务减货币资金后的净债" in gates["本类别的买点条件"]
+    assert "当前市净率需不高于1.20" in gates["第七类自身价格检查"]
+    assert "近五年市净率分位需不高于20%" in gates["第七类自身价格检查"]
+    assert "程序对接近净资产和历史底部区的量化定义" in gates["第七类自身价格检查"]
+
+
+def test_type7_rule_text_uses_the_latest_classified_arithmetic_mean_threshold():
     rule = _type_trigger_rule_text("type7")
 
-    assert "三项百分制评分必须分别严格高于70分" in rule
-    assert "不能用平均分相互补偿" in rule
-    assert "全部必需子项" in rule
-    assert "安全边际不得低于8/20" in rule
+    assert "三项算术平均必须严格大于7.000" in rule
+    assert "强周期的商业模式或护城河低于5分即否决" in rule
+    assert "本类别的买点条件" in rule
+    assert "分类专用路径" not in rule
+    assert "其他买入情况触发也不能免除" in rule
+    assert "仅第七类单独触发" not in rule
+    assert "分别严格高于70分" not in rule
+    assert "BM" not in rule
+    assert "MOAT" not in rule
+
+
+def test_type3_to_type6_rule_text_matches_the_current_engine_hard_gates():
+    type3 = _type_trigger_rule_text("type3")
+    assert "连续4年营收" in type3
+    assert "长期趋势增速至少10%" in type3
+    assert "护城河支撑度（3a）或增长可持续性（3d）不高于3分时否决" in type3
+    assert "总分封顶4.9分" in type3
+
+    type4 = _type_trigger_rule_text("type4")
+    assert "护城河耐久度（4c）不高于3分时否决" in type4
+    assert "4e）和股价泡沫防范（4f）同时不高于3分才否决" in type4
+
+    type5 = _type_trigger_rule_text("type5")
+    assert "强周期属性（5a）至少7分" in type5
+    assert "五项加权总分至少7分即触发" in type5
+    assert "不另设5分门槛，也不存在3分否决线" in type5
+
+    type6 = _type_trigger_rule_text("type6")
+    assert "行业增速至少20%" in type6
+    assert "公司趋势增速至少30%" in type6
+    assert "市值不超过300亿元" in type6
+    assert "反转型市值不超过100亿元" in type6
+    assert "前四项至少两项达到5分" in type6
+    assert "实际单票仓位不超过5%、高风险组合不超过15%" in type6
 
 
 def test_ordinary_stock_detail_never_renders_raw_json_ledgers_or_parameters():
@@ -865,8 +915,8 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
                 "code": "600519",
                 "type7": {
                     "ledger": {
-                        "model_id": "patch6-type7-quality-equity-v7",
-                        "schema_version": 7,
+                        "model_id": "patch6-type7-classified-equity-v1",
+                        "schema_version": 1,
                         "derived_proxy": True,
                     }
                 },
@@ -876,7 +926,7 @@ def test_raw_analysis_export_remains_available_but_is_explicitly_labelled_for_te
     context = {"buy_types_dcf_results": {"600519": {"params": {"neutral": {"formula": "internal_formula"}}}}}
 
     exported = json.loads(_analysis_export_json(frame, context=context))
-    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-quality-equity-v7"
+    assert exported["scores"][0]["type7"]["ledger"]["model_id"] == "patch6-type7-classified-equity-v1"
     assert exported["dcf_results"]["600519"]["params"]["neutral"]["formula"] == "internal_formula"
     render_source = inspect.getsource(buy_types_page._render_analysis_evidence)
     assert "供技术审计" in render_source

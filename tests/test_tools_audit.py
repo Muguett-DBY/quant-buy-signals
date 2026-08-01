@@ -493,18 +493,25 @@ def _complete_framework_row(*, quantitative_evidence=...):
             )
     for type_key, dimensions in run_full_audit.TYPE_WEIGHTS.items():
         framework_score = 7.0 if type_key == "type1" else 6.0
-        row[type_key] = _with_decision(
-            type_key,
-            {
-                "status": "triggered" if type_key == "type1" else "not_triggered",
-                "triggered": type_key == "type1",
+        payload = {
+            "status": "triggered" if type_key == "type1" else "not_triggered",
+            "triggered": type_key == "type1",
+            "veto": False,
+            "applicable": True,
+            "evidence_complete": True,
+            "sub_scores": {dimension: framework_score for dimension in dimensions},
+            "reasons": {},
+        }
+        if type_key == "type7":
+            payload["ledger"] = {
+                "model_id": "patch6-type7-classified-equity-v2",
+                "classification": {"class_code": "W", "route_complete": True},
+                "dimensions": {},
+                "upper_bound": framework_score,
+                "condition_failures": [],
                 "veto": False,
-                "applicable": True,
-                "evidence_complete": True,
-                "sub_scores": {dimension: framework_score for dimension in dimensions},
-                "reasons": {},
-            },
-        )
+            }
+        row[type_key] = _with_decision(type_key, payload)
     return row
 
 
@@ -700,7 +707,7 @@ def test_independent_decision_replay_rejects_tampering_and_preserves_type3_theor
     assert run_full_audit._independent_decision_replay("type3", payload) is None
 
 
-def test_independent_decision_replay_handles_scope_exclusion_and_type7_strict_upper_bound():
+def test_independent_decision_replay_handles_scope_exclusion_and_rejects_legacy_type7():
     excluded = _outcome_payload("type5", bs._not_applicable("type5", "不属于强周期公司"))
     excluded_replay = run_full_audit._independent_decision_replay("type5", excluded)
     assert excluded_replay is not None
@@ -713,22 +720,53 @@ def test_independent_decision_replay_handles_scope_exclusion_and_type7_strict_up
         "decisive_score_upper_bounds": {"template1": 80.0, "template5": 80.0, "patch5": 70.0},
         "prerequisites_complete": False,
     }
-    quality = _outcome_payload(
+    triggered, total, sub_scores, reasons = bs._finish(
         "type7",
-        bs._finish(
-            "type7",
-            scores,
-            {key: "部分质量证据" for key in scores},
-            evidence_complete=False,
-            missing_dimensions=["7c"],
-        ),
-        ledger=ledger,
+        scores,
+        {key: "部分质量证据" for key in scores},
+        evidence_complete=False,
+        missing_dimensions=["7c"],
     )
-    quality_replay = run_full_audit._independent_decision_replay("type7", quality)
-    assert quality_replay is not None
-    assert quality_replay["decision_basis"] == "conservative_upper_bound"
-    assert quality_replay["score_upper_bound"] == 7.7
-    assert quality_replay["potentially_triggerable"] is False
+    quality = {
+        "triggered": triggered,
+        "total": total,
+        "sub_scores": sub_scores,
+        "reasons": reasons,
+        "veto": bool(reasons.get("_veto")),
+        "status": reasons["_status"],
+        "applicable": True,
+        "evidence_complete": False,
+        "ledger": ledger,
+        "decision_market_context": {
+            "tradable": True,
+            "reference_price": False,
+            "risk_status": "",
+        },
+        # A shape-valid decision makes the independent replay reach the
+        # classified-ledger guard instead of failing on an unrelated field.
+        "decision": dict(excluded["decision"]),
+    }
+    with pytest.raises(ValueError, match="current classified ledger is required"):
+        bs.replay_buy_decision("type7", quality)
+    assert run_full_audit._independent_decision_replay("type7", quality) is None
+
+    type1 = bs._finish(
+        "type1",
+        {"1a": 5.0, "1b": 8.0, "1c": 6.0, "1d": 5.0},
+        {key: "审计夹具" for key in ("1a", "1b", "1c", "1d")},
+    )
+    current_outcome, current_ledger = bs.score_type7_quality_equity(
+        {"code": "000001", "industry": "SOFTWARE", "source_trade_date": "2026-07-15"},
+        type1,
+        None,
+        valuation_evidence_complete=True,
+    )
+    current = _outcome_payload("type7", current_outcome, ledger=current_ledger)
+    current_replay = run_full_audit._independent_decision_replay("type7", current)
+    assert current_replay is not None
+    assert {key: current_replay[key] for key in current["decision"]} == current["decision"]
+    assert current_replay["visible"] is True
+    assert current_replay["recall_safe"] is True
 
 
 def test_partial_source_failure_stays_visible_without_becoming_a_trigger():

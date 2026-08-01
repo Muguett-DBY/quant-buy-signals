@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
+import re
 import shutil
+import sqlite3
 import subprocess
 
 
@@ -8,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js"
 REFRESH_WORKER = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
 WRANGLER_CONFIG = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "wrangler.jsonc"
+SCHEMA = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "schema.sql"
+TRADING_CALENDAR = PROJECT_ROOT / "tools" / "china_a_share_trading_calendar.json"
 
 
 def test_dashboard_embedded_browser_script_has_valid_javascript_syntax():
@@ -35,6 +39,71 @@ new Function(match[1]);
         check=False,
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_dashboard_sanitizes_legacy_machine_reasons_before_browser_rendering():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the dashboard reason sanitizer"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(response.status, 200);
+const html = await response.text();
+const scriptMatch = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const start = script.indexOf("function publicReasonText(value)");
+const end = script.indexOf("function addFact", start);
+assert.ok(start >= 0 && end > start, "reason sanitizer source was not found");
+const helpers = new Function(script.slice(start, end) + ";return {publicReasonText,publicClassName};")();
+const { publicReasonText, publicClassName } = helpers;
+
+assert.equal(publicReasonText("证据:patch6-observable"), "可核验的财务与行业数据");
+assert.equal(publicReasonText("坡的长度是短板(证据:patch6-observable)"), "坡的长度是短板");
+assert.equal(
+  publicReasonText("坡的长度是短板；model_id=patch6-type7-classified-equity-v1"),
+  "坡的长度是短板",
+);
+assert.equal(publicReasonText("schema_version=1"), "可核验的财务与行业数据");
+assert.equal(publicReasonText("derived_proxy"), "根据财务表现间接判断");
+assert.equal(
+  publicReasonText("financial_fade_horizon_not_tam_or_penetration_proof"),
+  "可核验的财务与行业数据",
+);
+assert.equal(
+  publicReasonText("(normalised_roe - g) / (cost_of_equity - g)"),
+  "可核验的财务与行业数据",
+);
+assert.equal(publicReasonText("证据:patch6-type2c-quantity-price-v1"), "量价与换手数据");
+for (const readable of ["PB分位与库存去化", "行业营收与利润数据", "现金流改善；收入增速回升"]) {
+  assert.equal(publicReasonText(readable), readable);
+}
+for (const legacy of ["patch6-observable", "model_id", "schema_version", "derived_proxy"]) {
+  assert.ok(!publicReasonText("中文说明；" + legacy).includes(legacy), legacy);
+}
+assert.deepEqual(["C", "T", "N", "W"].map(publicClassName), ["强周期", "强科技", "弱周期", "弱周期"]);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    assert "publicReasonText(v.reason)" in source
+    assert "publicReasonText(v.evidence_gap)" in source
+    assert "publicValue=publicReasonText(value)" in source
+    assert "publicReasonText(v.reasons?.[dimension]||subReasons[dimension])" in source
+    assert ".map(publicReasonText).filter(Boolean)" in source
+    assert "text.textContent=String(value)" not in source
 
 
 def test_catalogue_index_enforces_contract_and_aggregates_action_and_evidence_gaps():
@@ -252,7 +321,7 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert "TYPE_DIMENSIONS" in source
-    for label in ("买入区深度", "底部信号", "技术壁垒", "长期质量与回报", "商业质量与安全边际"):
+    for label in ("买入区深度", "底部信号", "技术壁垒", "本类别的商业模式", "本类别的长期成长"):
         assert label in source
     assert "sub_scores" in source
     assert "sub_score_reasons" in source
@@ -325,6 +394,11 @@ def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_al
         "last_mirror_check_at",
         "data_age_hours",
         "stale",
+        "stale_reason",
+        "expected_market_as_of",
+        "market_date_current",
+        "calendar_coverage",
+        "hard_age_limit_hours",
         "manifest_ok",
         "manifest_bytes",
         "signals_bytes",
@@ -338,6 +412,98 @@ def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_al
     assert "object.size!==bytes.byteLength" in source
     assert "updated_at:generation?.data_timestamp_utc" in source
     assert 'requestedGeneration?"public, max-age=31536000, immutable":"no-store"' in source
+    assert "数据生成时间距今不超过36小时" not in source
+
+
+def test_dashboard_health_uses_closed_trading_sessions_for_weekends_and_holidays():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to validate dashboard freshness rules"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const start = source.indexOf("const A_SHARE_EXCHANGE_CLOSURES=");
+const end = source.indexOf("function limitedGzipStream", start);
+assert.ok(start >= 0 && end > start, "trading-calendar freshness source was not found");
+const helpers = new Function(
+  source.slice(start, end) + ";return {latestExpectedClosedTradingDate,tradingDataFreshness};",
+)();
+const { latestExpectedClosedTradingDate, tradingDataFreshness } = helpers;
+const utc = value => Date.parse(value);
+
+// Saturday/Sunday retain Friday's already-closed session even after 36 hours.
+const sunday = utc("2026-08-02T04:00:00Z"); // 12:00 Beijing
+assert.equal(latestExpectedClosedTradingDate(sunday), "2026-07-31");
+let result = tradingDataFreshness("2026-07-31", "2026-07-31T09:00:00Z", sunday);
+assert.equal(result.stale, false);
+assert.ok(result.data_age_hours > 36);
+assert.equal(result.expected_market_as_of, "2026-07-31");
+assert.equal(result.calendar_coverage, "交易所公告日历");
+
+// A trading day is not required until the explicit 18:00 Beijing deadline.
+const mondayBeforeDeadline = utc("2026-08-03T09:59:00Z");
+const mondayAtDeadline = utc("2026-08-03T10:00:00Z");
+assert.equal(latestExpectedClosedTradingDate(mondayBeforeDeadline), "2026-07-31");
+assert.equal(latestExpectedClosedTradingDate(mondayAtDeadline), "2026-08-03");
+assert.equal(
+  tradingDataFreshness("2026-07-31", "2026-07-31T09:00:00Z", mondayAtDeadline).stale_reason,
+  "尚未覆盖最近应完成的交易日",
+);
+assert.equal(
+  tradingDataFreshness("2026-08-04", "2026-08-03T09:00:00Z", mondayAtDeadline).stale_reason,
+  "市场日期晚于最近已收盘交易日",
+);
+
+// Official 2026 exchange closures come from tools/china_a_share_trading_calendar.json.
+const springFestival = utc("2026-02-23T12:00:00Z"); // 20:00 Beijing
+assert.equal(latestExpectedClosedTradingDate(springFestival), "2026-02-13");
+result = tradingDataFreshness("2026-02-13", "2026-02-13T10:00:00Z", springFestival);
+assert.equal(result.stale, false);
+assert.ok(result.data_age_hours > 9 * 24);
+assert.equal(latestExpectedClosedTradingDate(utc("2026-10-07T12:00:00Z")), "2026-09-30");
+assert.equal(latestExpectedClosedTradingDate(utc("2026-02-24T09:59:00Z")), "2026-02-13");
+assert.equal(latestExpectedClosedTradingDate(utc("2026-02-24T10:00:00Z")), "2026-02-24");
+
+// The calendar cannot suppress alarms indefinitely, even if market_as_of looks current.
+const hardLimitNow = utc("2026-08-03T12:00:00Z");
+result = tradingDataFreshness("2026-08-03", new Date(hardLimitNow - 337 * 3600000).toISOString(), hardLimitNow);
+assert.equal(result.stale, true);
+assert.equal(result.stale_reason, "数据生成时间超过14天安全上限");
+
+// An unregistered calendar year is deliberately weekday-only (fail closed).
+const unknownYear = utc("2027-01-01T12:00:00Z"); // Friday, 20:00 Beijing
+result = tradingDataFreshness("2026-12-31", "2026-12-31T10:00:00Z", unknownYear);
+assert.equal(result.expected_market_as_of, "2027-01-01");
+assert.equal(result.calendar_coverage, "仅周末规则（该年份节假日表尚未登记）");
+assert.equal(result.stale, true);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_dashboard_embedded_exchange_closures_match_the_audited_calendar_file():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    calendar = json.loads(TRADING_CALENDAR.read_text(encoding="utf-8"))
+    expected = {
+        (period["start"], period["end"]) for year in calendar["years"].values() for period in year["closure_periods"]
+    }
+    embedded = set(
+        re.findall(
+            r'Object\.freeze\(\["(\d{4}-\d{2}-\d{2})","(\d{4}-\d{2}-\d{2})"\]\)',
+            source,
+        )
+    )
+
+    assert embedded == expected
+    assert "tools/china_a_share_trading_calendar.json" in source
 
 
 def test_dashboard_loads_a_lightweight_index_and_company_details_on_demand():
@@ -376,6 +542,7 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
 
     assert 'if(path==="/api/methodology")' in source
     assert "METHODOLOGY_VERSION" in source
+    assert "summary.type7_quality_certified_company_count??record.quality_certified??0" in source
     for text in (
         "指标含义",
         "所需数据",
@@ -414,7 +581,7 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
     assert "function conditionalCoverageLabel" in source
     assert "待满足其它条件" in source
     assert "EVIDENCE_META_NAMES" in source
-    assert "v.reasons?.[dimension]||subReasons[dimension]" in source
+    assert "publicReasonText(v.reasons?.[dimension]||subReasons[dimension])" in source
     assert (
         "actionConfirmationCount=Number(summary.action_confirmation_company_count??s.action_confirmation_company_count??0)"
         in source
@@ -427,27 +594,84 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
 def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail_facts():
     source = DASHBOARD.read_text(encoding="utf-8")
 
-    assert 'const METHODOLOGY_LABEL="七类量化买入方法（2026年7月）"' in source
+    assert 'const METHODOLOGY_LABEL="七类量化买入方法（2026年8月）"' in source
+    assert 'const METHODOLOGY_VERSION="patch6-seven-types-2026-08-01-classified-type7-v4"' in source
     assert '" · 量化口径："+METHODOLOGY_LABEL' in source
     assert '" · 量化口径："+METHODOLOGY_VERSION' not in source
     assert '.replace("__QUANT_METHODOLOGY_LABEL__",METHODOLOGY_LABEL)' in source
     assert 'addFact(facts,"行情日期",String(r.source_trade_date||marketAsOf||"—"))' in source
     assert 'addFact(facts,"可追溯版本",sourceVersion||"—")' in source
-    assert "该子指标的单独财报报告期未随公开详情提供" in source
+    assert "Array.isArray(r.annual_history)" in source
+    assert "年度历史只在现有证据能够确认起止年份和连续年数时展示" in source
+    assert "不会根据行情日期倒推" in source
+    assert "各子指标可能只使用其中一部分年度" in source
     assert "公开详情未附该子指标的单独来源链接" in source
-    assert "不会猜测补全" in source
+    for developer_phrase in ("白名单量化输入", "代理证据最高分", "分类专用评估路径", "分类专用路径"):
+        assert developer_phrase not in source
 
 
-def test_dashboard_distinguishes_model_coverage_from_scope_and_type7_independent_gates():
+def test_dashboard_distinguishes_model_coverage_and_uses_latest_type7_mean_rule():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert "function isModelCoverageGap" in source
     assert 'typeKey==="type7"&&/金融/.test(explanation)' in source
     assert 'scope.classList.add("model-gap")' in source
-    assert "三项不可相互抵消" in source
-    assert "独立门槛：严格高于7.0分" in source
-    assert '&&!independentGate)addDefinition(definitions,"总分贡献"' in source
-    assert '&&independentGate)addDefinition(definitions,"门槛结果"' in source
+    assert "质量认证取三项算术平均并严格大于7.000" in source
+    assert "强科技三项还必须各自不低于7分" in source
+    assert "强科技近五年市净率分位不高于20%" in source
+    assert "强周期当前市净率不高于1.20且近五年分位不高于20%" in source
+    assert "其他买入情况已触发也不能免除" in source
+    assert "1.20和20%是程序对“接近净资产”和“处于历史底部区”的量化定义" in source
+    assert "仅第七类单独触发时执行该类别的价格门槛" not in source
+    assert "算术平均权重33.3%" in source
+    assert "第七类三项平均中的贡献＝该维度分÷3" in source
+    assert "独立门槛：严格高于7.0分" not in source
+    assert "三项不可相互抵消" not in source
+    for opaque_text in ("类内商业模式(BM)", "类内护城河(MOAT)", "Type7三维"):
+        assert opaque_text not in source
+
+
+def test_dashboard_renders_type7_classification_twelve_items_gates_and_outdated_warning():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    assert "function renderType7MethodDetail" in source
+    assert "第七类完整量化明细" in source
+    assert "确定归类：" in source
+    assert "暂定归类：" in source
+    assert "三项算术平均：" in source
+    assert "质量认证：" in source
+    assert "当前买点：" in source
+    assert "公司类别是怎样算出来的" in source
+    assert "强周期、强科技和弱周期特征" in source
+    assert "强周期（C）、强科技（T）和弱周期特征（N）" not in source
+    assert 'publicClassName(route?.name)||"公司类别"' in source
+    assert "route?.code" not in source
+    assert "classification_scores" in source
+    assert "uses_industry_proxy" in source
+    assert "uses_financial_proxy" in source
+    assert "当前采用" in source
+    assert "资料性质：" in source
+    assert "实际依据：" in source
+    assert "证据覆盖" in source
+    assert "实际计算数据：" in source
+    assert "计算规则：" in source
+    assert "资料未齐，仅表示范围" in source
+    assert "旧数据待刷新" in source
+    assert "未通过项目：" in source
+    assert 'method.status==="outdated"' in source
+    assert "数据版本过旧，请刷新" in source
+    assert 'const type7MethodDetail=k==="type7"?renderType7MethodDetail(v):null' in source
+
+
+def test_dashboard_type5_trigger_text_matches_the_weighted_model_without_invented_5c_gates():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    assert "强周期属性（5a）至少7分才进入本模型" in source
+    assert "其余子项证据完整后，五项加权总分至少7分即触发" in source
+    assert "抗周期能力（5c）只按20%权重进入总分" in source
+    assert "不另设5分门槛，也不存在3分否决线" in source
+    assert "抗周期能力至少5分" not in source
+    assert "抗周期能力不高于3分时直接否决" not in source
 
 
 def test_dashboard_focus_pagination_search_and_zero_bar_interactions_are_explicit():
@@ -458,6 +682,7 @@ def test_dashboard_focus_pagination_search_and_zero_bar_interactions_are_explici
     assert "function syncSearchStatus()" in source
     assert '$("status").disabled=searching' in source
     assert "代码/名称搜索会跨全部状态，状态筛选暂时停用。" in source
+    assert "typeState&&(q||s?(!s||typeStatusMatches(typeState,s))" in source
     assert "function changePage(delta)" in source
     assert '$("resultsPanel").scrollIntoView({block:"start"})' in source
     assert '$("resultMeta").focus({preventScroll:true})' in source
@@ -493,7 +718,7 @@ def test_dashboard_search_is_frame_scheduled_and_ime_safe():
 def test_refresh_worker_repairs_missing_objects_even_when_generation_is_unchanged():
     source = REFRESH_WORKER.read_text(encoding="utf-8")
 
-    assert 'status: repaired ? "repaired" : "unchanged"' in source
+    assert 'repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged"' in source
     assert "existing.size !== expectedSize" in source
     assert "existing.customMetadata?.sha256" in source
     assert "await env.DATA_BUCKET.put(key, body" in source
@@ -502,11 +727,182 @@ def test_refresh_worker_repairs_missing_objects_even_when_generation_is_unchange
 def test_refresh_worker_switches_generation_with_one_idempotent_d1_transaction():
     source = REFRESH_WORKER.read_text(encoding="utf-8")
 
-    assert "ON CONFLICT(generation_id) DO UPDATE SET last_checked_at" in source
+    assert "ON CONFLICT(generation_id) DO UPDATE SET" in source
+    assert "last_checked_at = excluded.last_checked_at" in source
     assert "WHERE generations.market_as_of = excluded.market_as_of" in source
     assert "WHERE EXISTS (" in source
     assert "await env.DB.batch([generationStatement, pointerStatement])" in source
     assert "generation database transaction did not commit one consistent pointer" in source
+
+
+def test_refresh_worker_same_generation_validates_and_repairs_d1_before_returning_unchanged():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+
+    assert "LEFT JOIN generations AS g ON g.generation_id = c.generation_id" in source
+    assert "CASE WHEN g.generation_id IS NULL THEN 0 ELSE 1 END AS target_exists" in source
+    assert "stored generation metadata does not match the signed manifest" in source
+    assert "const databaseRepairNeeded = pointerIsDangling" in source
+    assert "if (previous?.generation_id === generationId)" not in source
+    assert source.index("await env.DB.batch([generationStatement, pointerStatement])") < source.index(
+        'repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged"'
+    )
+
+
+def test_refresh_worker_generation_upsert_repairs_missing_same_generation_but_rejects_metadata_mismatch():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+    generation_sql_match = re.search(
+        r"const generationStatement = env\.DB\.prepare\(\s*`(?P<sql>.*?)`\s*\)\.bind\(",
+        source,
+        flags=re.DOTALL,
+    )
+    assert generation_sql_match is not None
+    generation_sql = generation_sql_match.group("sql")
+    pointer_sql_match = re.search(
+        r"const pointerStatement = env\.DB\.prepare\(\s*`(?P<sql>.*?)`\s*\)\.bind\(",
+        source,
+        flags=re.DOTALL,
+    )
+    assert pointer_sql_match is not None
+    pointer_sql = pointer_sql_match.group("sql")
+
+    expected = (
+        "0123456789abcdef",
+        "2026-07-31",
+        "2026-07-31T08:30:00Z",
+        "2026-07-31T08:31:00Z",
+        "a" * 64,
+        4_986,
+        17,
+        2,
+        3,
+        "b" * 40,
+        "2026-07-31T08:32:00Z",
+        "2026-08-01T00:00:00Z",
+    )
+    pointer_parameters = (
+        expected[0],
+        expected[11],
+        *expected[:10],
+        expected[1],
+        expected[1],
+        expected[2],
+        expected[1],
+        expected[2],
+        expected[3],
+    )
+
+    # D1 normally enforces this reference, but a damaged/legacy database can
+    # contain the pointer without its generation row when foreign keys were off.
+    missing_row_database = sqlite3.connect(":memory:")
+    missing_row_database.executescript(SCHEMA.read_text(encoding="utf-8"))
+    missing_row_database.execute("PRAGMA foreign_keys = OFF")
+    missing_row_database.execute(
+        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+        (expected[0], expected[10]),
+    )
+    inserted = missing_row_database.execute(generation_sql, expected)
+    assert inserted.rowcount == 1
+    repaired_pointer = missing_row_database.execute(pointer_sql, pointer_parameters)
+    assert repaired_pointer.rowcount == 1
+    assert missing_row_database.execute(
+        "SELECT market_as_of, manifest_sha256, company_count FROM generations WHERE generation_id = ?",
+        (expected[0],),
+    ).fetchone() == (expected[1], expected[4], expected[5])
+    assert missing_row_database.execute(
+        "SELECT generation_id, updated_at FROM current_generation WHERE singleton = 1"
+    ).fetchone() == (expected[0], expected[11])
+
+    mismatch_database = sqlite3.connect(":memory:")
+    mismatch_database.executescript(SCHEMA.read_text(encoding="utf-8"))
+    mismatched = list(expected)
+    mismatched[5] += 1
+    mismatch_database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", mismatched)
+    mismatch_database.execute(
+        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+        (expected[0], expected[10]),
+    )
+    rejected = mismatch_database.execute(generation_sql, expected)
+    assert rejected.rowcount == 0
+    rejected_pointer = mismatch_database.execute(pointer_sql, pointer_parameters)
+    assert rejected_pointer.rowcount == 0
+    assert mismatch_database.execute(
+        "SELECT company_count FROM generations WHERE generation_id = ?", (expected[0],)
+    ).fetchone() == (mismatched[5],)
+
+
+def test_refresh_worker_never_moves_the_public_pointer_back_to_an_older_generation():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+
+    assert "AND NOT EXISTS (" in source
+    assert "served.market_as_of > ?" in source
+    assert "served.data_timestamp_utc > ?" in source
+    assert "served.generated_at_utc > ?" in source
+    assert "served.generation_id <> ?" not in source
+    assert 'status: "superseded"' in source
+    assert "current_generation_id: current.generation_id" in source
+
+    pointer_sql_match = re.search(
+        r"const pointerStatement = env\.DB\.prepare\(\s*`(?P<sql>.*?)`\s*\)\.bind\(",
+        source,
+        flags=re.DOTALL,
+    )
+    assert pointer_sql_match is not None
+    pointer_sql = pointer_sql_match.group("sql")
+
+    def generation(generation_id: str, market_as_of: str, timestamp: str, generated_at: str) -> tuple[object, ...]:
+        return (
+            generation_id,
+            market_as_of,
+            timestamp,
+            generated_at,
+            generation_id.rjust(64, "0"),
+            4_986,
+            1,
+            0,
+            0,
+            "a" * 40,
+            generated_at,
+            generated_at,
+        )
+
+    older = generation("1111111111111111", "2026-07-30", "2026-07-30T08:30:00Z", "2026-07-30T08:31:00Z")
+    newer = generation("2222222222222222", "2026-07-31", "2026-07-31T08:30:00Z", "2026-07-31T08:31:00Z")
+
+    def pointer_parameters(target: tuple[object, ...]) -> tuple[object, ...]:
+        generation_id, market_as_of, timestamp, generated_at = target[:4]
+        return (
+            generation_id,
+            "2026-08-01T00:00:00Z",
+            *target[:10],
+            market_as_of,
+            market_as_of,
+            timestamp,
+            market_as_of,
+            timestamp,
+            generated_at,
+        )
+
+    database = sqlite3.connect(":memory:")
+    database.executescript(SCHEMA.read_text(encoding="utf-8"))
+    database.executemany("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [older, newer])
+    database.execute(
+        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+        (newer[0], newer[3]),
+    )
+    rejected = database.execute(pointer_sql, pointer_parameters(older))
+    assert rejected.rowcount == 0
+    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
+
+    database.execute("UPDATE current_generation SET generation_id = ?, updated_at = ?", (older[0], older[3]))
+    advanced = database.execute(pointer_sql, pointer_parameters(newer))
+    assert advanced.rowcount == 1
+    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
+
+    rebuilt = generation("3333333333333333", newer[1], newer[2], newer[3])
+    database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rebuilt)
+    replaced = database.execute(pointer_sql, pointer_parameters(rebuilt))
+    assert replaced.rowcount == 1
+    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (rebuilt[0],)
 
 
 def test_cloudflare_pipeline_validates_mirrors_and_serves_all_company_detail_shards():
@@ -536,9 +932,77 @@ def test_cloudflare_pipeline_validates_mirrors_and_serves_all_company_detail_sha
     )
 
 
+def test_refresh_worker_enforces_matching_company_detail_asset_and_total_boundaries():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the refresh capacity contract"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+source += "\nexport { companyDetailAssets };";
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const { companyDetailAssets } = await import(url);
+
+const generation = "0123456789abcdef";
+const checksum = "a".repeat(64);
+const manifest = {
+  summary: { company_count: 16 },
+  company_details: {
+    schema_version: 2,
+    record_schema: "company_detail_v2",
+    company_count: 16,
+    partition: { algorithm: "sha256_code_first_nibble", shard_count: 16 },
+    root_algorithm: "SHA256_CANONICAL_SHARD_INDEX_V1",
+    root_sha256: checksum,
+    shards: Array.from({ length: 16 }, (_, index) => {
+      const id = index.toString(16).padStart(2, "0");
+      return {
+        id,
+        filename: `company-details-${generation}-${id}.json.gz`,
+        company_count: 1,
+        sha256: checksum,
+        uncompressed_sha256: checksum,
+        size: 3_000_000,
+        uncompressed_size: 9_000_000,
+      };
+    }),
+  },
+};
+
+assert.equal(companyDetailAssets(manifest, generation).length, 16);
+
+const compressedOverflow = structuredClone(manifest);
+compressedOverflow.company_details.shards[0].size += 1;
+assert.throws(() => companyDetailAssets(compressedOverflow, generation), /company detail coverage mismatch/);
+
+const uncompressedOverflow = structuredClone(manifest);
+uncompressedOverflow.company_details.shards[0].uncompressed_size += 1;
+assert.throws(() => companyDetailAssets(uncompressedOverflow, generation), /company detail coverage mismatch/);
+
+const compressedAssetOverflow = structuredClone(manifest);
+compressedAssetOverflow.company_details.shards[0].size = 8_000_001;
+assert.throws(() => companyDetailAssets(compressedAssetOverflow, generation), /invalid company detail shard/);
+
+const uncompressedAssetOverflow = structuredClone(manifest);
+uncompressedAssetOverflow.company_details.shards[0].uncompressed_size = 24_000_001;
+assert.throws(() => companyDetailAssets(uncompressedAssetOverflow, generation), /invalid company detail shard/);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
 def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
     config = json.loads(WRANGLER_CONFIG.read_text(encoding="utf-8"))
 
+    assert config["workers_dev"] is True
     assert config["d1_databases"] == [
         {
             "binding": "DB",

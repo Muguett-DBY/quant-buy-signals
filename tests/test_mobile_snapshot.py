@@ -8,6 +8,7 @@ import pytest
 
 from data import mobile_snapshot
 from engine.buy_screener import screen_all_types
+from engine.type7_patch6 import assess_patch6_type7
 
 
 def _scores():
@@ -164,10 +165,26 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
         "dimension_scores": True,
         "dimension_score_estimates": True,
         "decision_contract": True,
+        "type7_method_detail": True,
     }
     assert catalogue["capabilities"] == manifest["capabilities"]
     assert signals["capabilities"] == manifest["capabilities"]
     assert sum(catalogue["coverage"]["type1"].values()) == 1
+    assert manifest["summary"]["type7_quality_certified_company_count"] == 0
+    assert all(
+        set(record)
+        == {
+            "triggered",
+            "conditional",
+            "observe",
+            "insufficient_evidence",
+            "vetoed",
+            "not_triggered",
+            "not_applicable",
+            "blocked",
+        }
+        for record in catalogue["coverage"].values()
+    )
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
         [
             catalog_filename,
@@ -181,6 +198,20 @@ def test_mobile_snapshot_exports_verified_compact_catalogue_and_hashes(tmp_path)
 def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalogue(tmp_path, monkeypatch):
     scores = _scores()
     scores.at[0, "source_trade_date"] = "2026-07-17"
+    scores.at[0, "quantitative_evidence"] = {
+        "runway_score": {
+            "details": {
+                "financial_history_periods": list(range(2016, 2026)),
+                "financial_history_years": 10,
+            }
+        },
+        "moat_durability_score": {
+            "details": {
+                "common_history_years": list(range(2016, 2026)),
+                "durability_history_years": 10,
+            }
+        },
+    }
     type4 = dict(scores.at[0, "type4"])
     type4.update(
         {
@@ -232,6 +263,7 @@ def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalo
     company = catalogue["companies"][0]
     assert "company_details" not in catalogue
     assert "type_details" not in company
+    assert "annual_history" not in company
     assert set(company) == {
         "code",
         "name",
@@ -255,6 +287,7 @@ def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalo
         "dimension_scores": True,
         "dimension_score_estimates": True,
         "decision_contract": True,
+        "type7_method_detail": True,
     }
 
     shard_id = mobile_snapshot._company_detail_shard_id("000001")
@@ -262,6 +295,24 @@ def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalo
     shard = json.loads(gzip.decompress((tmp_path / shard_meta["filename"]).read_bytes()))
     detail = shard["companies"][0]
     assert detail["source_trade_date"] == "2026-07-17"
+    assert detail["annual_history"] == [
+        {
+            "name": "营业收入年度历史",
+            "start_year": 2016,
+            "end_year": 2025,
+            "year_count": 10,
+            "display": "2016–2025，共10年",
+            "basis": "连续营业收入年度数据",
+        },
+        {
+            "name": "耐久度共同历史",
+            "start_year": 2016,
+            "end_year": 2025,
+            "year_count": 10,
+            "display": "2016–2025，共10年",
+            "basis": "投入资本回报率与毛利率共同具备的连续年度",
+        },
+    ]
     assert set(detail["types"]) == {f"type{number}" for number in range(1, 8)}
     exported = detail["types"]["type4"]
     assert exported["applicable"] is True
@@ -284,6 +335,24 @@ def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalo
     catalogue_text = json.dumps(catalogue, ensure_ascii=False)
     assert "同行样本调整完成" not in catalogue_text
     assert "同行样本覆盖八成" not in catalogue_text
+
+
+def test_company_detail_never_infers_an_annual_range_from_a_count_or_trade_date():
+    row = _scores().iloc[0].to_dict()
+    row["source_trade_date"] = "2026-07-17"
+    row["quantitative_evidence"] = {
+        "runway_score": {"details": {"financial_history_years": 10}},
+        "moat_durability_score": {
+            "details": {
+                "common_history_years": list(range(2016, 2026)),
+                "durability_history_years": 5,
+            }
+        },
+    }
+
+    detail = mobile_snapshot._company_detail_v2(row)
+
+    assert "annual_history" not in detail
 
 
 def test_mobile_catalogue_exposes_each_verified_sub_score_and_plain_evidence(monkeypatch):
@@ -714,6 +783,158 @@ def test_mobile_snapshot_does_not_publish_a_known_type7_strict_failure_as_condit
     assert signals["signals"] == []
 
 
+def test_company_detail_publishes_only_whitelisted_chinese_type7_method_detail():
+    payload = dict(_scores().at[0, "type7"])
+    ledger = assess_patch6_type7({"code": "000001", "industry": "SOFTWARE", "source_trade_date": "2026-07-15"})
+    ledger["dimensions"]["BM"]["items"][0]["evidence_level"] = "derived_proxy"
+    payload["ledger"] = ledger
+
+    exported = mobile_snapshot._public_type_detail(payload, "type7")
+    method = exported["method_detail"]
+
+    assert method["status"] == "current"
+    assert method["classification"] in {
+        "弱周期",
+        "强科技",
+        "强周期",
+        "归类资料不足",
+        "暂按弱周期评估",
+        "暂按强科技评估",
+        "暂按强周期评估",
+    }
+    assert method["classification_complete"] is False
+    assert method["possible_classifications"]
+    classification_scores = method["classification_scores"]
+    assert [route["code"] for route in classification_scores] == ["C", "T", "N"]
+    assert [route["name"] for route in classification_scores] == ["强周期敏感度", "强科技敏感度", "弱周期特征"]
+    assert all(route["max_score"] == 10.0 for route in classification_scores)
+    assert all(len(route["items"]) == 4 for route in classification_scores)
+    assert sum(route["selected"] is True for route in classification_scores) == 1
+    classification_items = {item["name"]: item for route in classification_scores for item in route["items"]}
+    assert classification_items["商品价格或产能驱动"]["uses_industry_proxy"] is True
+    assert classification_items["低宏观敏感度"]["uses_financial_proxy"] is True
+    assert "产品路线图" in classification_items["技术或产品迭代速度"]["evidence_explanation"]
+    assert all(item["evidence_basis"] and item["evidence_explanation"] for item in classification_items.values())
+    assert [dimension["name"] for dimension in method["dimensions"]] == ["商业模式", "护城河", "长期成长"]
+    assert sum(len(dimension["items"]) for dimension in method["dimensions"]) == 12
+    assert [gate["name"] for gate in method["gates"]] == [
+        "未来自由现金流前提",
+        "按公司类别检查买点条件",
+        "第七类自身价格检查",
+    ]
+    assert method["mean_score"] is None
+    assert method["mean_lower_bound"] <= method["mean_upper_bound"]
+    for dimension in method["dimensions"]:
+        assert dimension["score"] is None
+        assert dimension["score_lower_bound"] <= dimension["score_upper_bound"]
+        for item in dimension["items"]:
+            assert item["score"] is None
+            assert item["score_lower_bound"] <= item["score_upper_bound"]
+            assert item["weight_percent"] > 0
+            assert item["calculation"]
+            assert item["missing_inputs"]
+    public_text = json.dumps(method, ensure_ascii=False)
+    assert "根据财务表现间接判断" in public_text
+    for marker in (
+        "patch6",
+        "Patch",
+        "Template",
+        "Type1",
+        "model_id",
+        "formula",
+        "source_rule",
+        "derived_proxy",
+        "BM",
+        "MOAT",
+        "PRECONDITION",
+        "VALUATION",
+    ):
+        assert marker not in public_text
+
+
+def test_company_detail_explains_the_strong_technology_dimension_and_price_gates():
+    from tests.test_type7_patch6 import _complete_metric, _technology_route
+
+    metric = _complete_metric(industry="SOFTWARE")
+    metric.update(
+        {
+            "rd_intensity": 0.15,
+            "moat_score": 3.0,
+            "business_model_score": 10.0,
+            "management_alignment_score": 0.0,
+            "technology_score": 10.0,
+        }
+    )
+    route = _technology_route()
+    route["pb_percentile"] = 0.21
+    ledger = assess_patch6_type7(
+        metric,
+        valuation_evidence_complete=True,
+        valuation_score=9.0,
+        route_evidence=route,
+    )
+    method = mobile_snapshot._public_type7_method_detail({"ledger": ledger})
+
+    assert ledger["quality_certified"] is True
+    assert ledger["buy_ready"] is False
+    assert all(route["score"] is not None for route in method["classification_scores"])
+    assert all(len(route["items"]) == 4 for route in method["classification_scores"])
+    gate_by_name = {gate["name"]: gate for gate in method["gates"]}
+    assert gate_by_name["强科技三维逐项门槛"]["status"] == "未通过"
+    assert "各自不低于7分" in gate_by_name["强科技三维逐项门槛"]["detail"]
+    assert "不高于20%" in gate_by_name["第七类自身价格检查"]["detail"]
+    assert "程序对“处于历史底部区”的量化定义" in gate_by_name["第七类自身价格检查"]["detail"]
+    assert "强科技商业模式、护城河、长期成长未全部达到7分" in method["failures"]
+    assert "优质股权质量已达标，但当前不构成第七类买点" in method["conclusion"]
+    assert "独立买点" not in method["conclusion"]
+
+
+def test_company_detail_explains_the_strong_cycle_type5_net_debt_and_price_rules():
+    from tests.test_type7_patch6 import _complete_metric, _cycle_route
+
+    metric = _complete_metric(industry="NONFERROUS")
+    metric.update(
+        {
+            "gross_margin_history": [0.10, 0.45, 0.12, 0.48, 0.15],
+            "revenue_values": [100, 110, 121, 133.1, 146.41],
+            "net_profit_history": [10, 14, 8, 18, 7],
+            "capex_history": [35, 40, 45, 50, 55],
+        }
+    )
+    route = _cycle_route()
+    route.update({"current_pb": 1.2, "pb_percentile": 0.20})
+    ledger = assess_patch6_type7(metric, route_evidence=route)
+    method = mobile_snapshot._public_type7_method_detail({"ledger": ledger})
+
+    assert ledger["classification"]["class_code"] == "C"
+    gate_by_name = {gate["name"]: gate for gate in method["gates"]}
+    route_detail = gate_by_name["按公司类别检查买点条件"]["detail"]
+    assert "第五类必须适用、证据完整、已经触发且总分不低于7分" in route_detail
+    assert "带息债务和货币资金" in route_detail
+    assert "差额核对净债" in route_detail
+    price_detail = gate_by_name["第七类自身价格检查"]["detail"]
+    assert "当前市净率需不高于1.20" in price_detail
+    assert "近五年市净率分位需不高于20%" in price_detail
+    assert "当前市净率1.20" in price_detail
+    assert "近五年分位20.0%" in price_detail
+    assert "程序分别对“接近净资产”和“处于历史底部区”的量化定义" in price_detail
+
+
+def test_company_detail_marks_legacy_type7_method_data_as_outdated():
+    payload = dict(_scores().at[0, "type7"])
+    payload["ledger"] = {
+        "model_id": "patch6-type7-quality-equity-v7",
+        "scores": {"template1": 80.0, "template5": 80.0, "patch5": 80.0},
+    }
+
+    method = mobile_snapshot._public_type_detail(payload, "type7")["method_detail"]
+
+    assert method == {
+        "status": "outdated",
+        "conclusion": "这份第七类结果使用的是旧数据格式，已停止参与判断；请刷新到最新市场数据。",
+    }
+
+
 def test_mobile_snapshot_keeps_unresolved_possible_candidates_visible_without_calling_them_signals():
     manifest, catalogue, signals = mobile_snapshot.build_mobile_snapshot(
         _scores(),
@@ -949,8 +1170,8 @@ def test_mobile_snapshot_hides_legacy_model_identifiers_from_all_public_text(mon
     type4["sub_scores"] = {"4a": 6.0, "4b": 6.0, "4c": 6.0, "4d": 6.0, "4e": 6.0, "4f": 6.0}
     type4["reasons"] = {
         "_condition": "证据:patch6-observable",
-        "4a": "model_id=patch6-type7-quality-equity-v7",
-        "4b": "schema_version=7",
+        "4a": "model_id=patch6-type7-classified-equity-v1",
+        "4b": "schema_version=1",
         "4c": "derived_proxy",
         "4d": "reported_formula",
         "4e": "financial_fade_horizon_not_tam_or_penetration_proof",
@@ -1038,6 +1259,52 @@ def test_mobile_snapshot_refuses_payloads_the_android_client_cannot_open(tmp_pat
         )
 
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "compressed", "message"),
+    [
+        ("MAX_DETAIL_UNCOMPRESSED_TOTAL", False, "uncompressed total limit"),
+        ("MAX_DETAIL_COMPRESSED_TOTAL", True, "download total limit"),
+    ],
+)
+def test_mobile_snapshot_enforces_company_detail_total_at_the_exact_boundary(
+    tmp_path,
+    monkeypatch,
+    limit_name,
+    compressed,
+    message,
+):
+    scores = _scores()
+    _manifest, _catalogue, _signals, detail_shards = mobile_snapshot._build_mobile_snapshot_bundle(
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+    raw_shards = [mobile_snapshot._canonical_json_bytes(payload) for payload in detail_shards.values()]
+    total = sum(len(mobile_snapshot._gzip_bytes(raw)) if compressed else len(raw) for raw in raw_shards)
+
+    monkeypatch.setattr(mobile_snapshot, limit_name, total)
+    mobile_snapshot.write_mobile_snapshot(
+        tmp_path / "at-limit",
+        scores,
+        market_as_of="2026-07-17",
+        data_timestamp_utc="2026-07-17T08:20:00+00:00",
+        analysis_quality={"ok": True},
+    )
+
+    monkeypatch.setattr(mobile_snapshot, limit_name, total - 1)
+    rejected = tmp_path / "over-limit"
+    with pytest.raises(mobile_snapshot.MobileSnapshotError, match=message):
+        mobile_snapshot.write_mobile_snapshot(
+            rejected,
+            scores,
+            market_as_of="2026-07-17",
+            data_timestamp_utc="2026-07-17T08:20:00+00:00",
+            analysis_quality={"ok": True},
+        )
+    assert not rejected.exists()
 
 
 def test_five_thousand_company_catalogue_retains_one_megabyte_of_android_headroom(monkeypatch):

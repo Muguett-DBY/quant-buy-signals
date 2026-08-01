@@ -1524,11 +1524,138 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
+  mirror_cloudflare:
+    if: github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'
+    needs:
+      - publish
+      - deploy_pages
+    runs-on: ubuntu-latest
+    # A full immutable generation can take several minutes to upload.  The
+    # refresh and public-projection retries are deliberately separate below;
+    # this cap covers their combined worst-case transport budget.
+    timeout-minutes: 60
+    permissions: {}
+    env:
+      REFRESH_URL: https://quant-market-refresh.1203135430.workers.dev/refresh
+      REFRESH_KEY: ${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}
+    steps:
+      - name: Download the exact published generation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mobile-market-data-published-${{ github.run_id }}
+          path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
+
+      - name: Mirror and verify the public Cloudflare dashboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${REFRESH_KEY}" ]]; then
+            echo "CLOUDFLARE_MARKET_REFRESH_KEY is required for the protected dashboard mirror." >&2
+            exit 1
+          fi
+          manifest="${RUNNER_TEMP}/ds-dcf-mobile-market-data-release/manifest.json"
+          test -s "${manifest}"
+          expected_generation="$(jq -er '.catalogue.filename | capture("^catalog-(?<generation>[0-9a-f]{16})\\.json\\.gz$").generation' "${manifest}")"
+          expected_market_as_of="$(jq -er '.market_as_of' "${manifest}")"
+          expected_company_count="$(jq -er '.summary.company_count' "${manifest}")"
+          expected_source_commit="$(jq -er '.provenance.source_commit' "${manifest}")"
+          expected_manifest_sha256="$(sha256sum "${manifest}" | cut -d' ' -f1)"
+          if [[ "${expected_source_commit}" != "${GITHUB_SHA}" ]]; then
+            echo "Published generation is not bound to this workflow revision." >&2
+            exit 1
+          fi
+          mirror_ok=false
+          mirror_attempt_limit=8
+          mirror_retry_base_delay_seconds=10
+          for ((attempt=1; attempt<=mirror_attempt_limit; attempt++)); do
+            response_file="$(mktemp)"
+            transport_ok=false
+            response_generation=""
+            if status="$(curl --silent --show-error --location --retry 3 --retry-all-errors \
+                --connect-timeout 20 --max-time 180 --output "${response_file}" \
+                --write-out '%{http_code}' --request POST \
+                --header "x-refresh-key: ${REFRESH_KEY}" "${REFRESH_URL}")"; then
+              transport_ok=true
+            else
+              status="transport_error"
+            fi
+            if [[ "${transport_ok}" == "true" && "${status}" == "200" ]]; then
+              response_generation="$(jq -er '(.current_generation_id // .generation_id) | select(type == "string")' "${response_file}" 2>/dev/null || true)"
+            fi
+            cat "${response_file}"
+            printf '\n'
+            rm -f "${response_file}"
+            if [[ "${transport_ok}" == "true" && "${status}" == "200" && "${response_generation}" == "${expected_generation}" ]]; then
+              mirror_ok=true
+              break
+            fi
+            echo "Cloudflare dashboard mirror returned HTTP ${status} and generation '${response_generation:-none}' on attempt ${attempt} of ${mirror_attempt_limit}; expected ${expected_generation}." >&2
+            if [[ "${attempt}" -lt "${mirror_attempt_limit}" ]]; then
+              # GitHub Pages and release assets can become visible at different
+              # times. Re-running the protected refresh retries the whole signed
+              # generation instead of merely polling an unchanged projection.
+              sleep $((mirror_retry_base_delay_seconds * attempt))
+            fi
+          done
+          if [[ "${mirror_ok}" != "true" ]]; then
+            echo "Cloudflare dashboard could not accept the published generation." >&2
+            exit 1
+          fi
+
+          verify_cloudflare_projection() {
+            local attempt="$1"
+            local metadata actual health catalogue_index moutai homepage
+            metadata="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+                  --connect-timeout 20 --max-time 45 https://quant.custard.top/api/meta)" && \
+              actual="$(jq -er '[.generation_id, .market_as_of, .manifest_sha256, .company_count, .source_commit] | @tsv' <<<"${metadata}")" || return 1
+            local actual_generation actual_market_as_of actual_manifest_sha256 actual_company_count actual_source_commit
+            IFS=$'\t' read -r actual_generation actual_market_as_of actual_manifest_sha256 actual_company_count actual_source_commit <<<"${actual}"
+            [[ "${actual_generation}" == "${expected_generation}" && \
+               "${actual_market_as_of}" == "${expected_market_as_of}" && \
+               "${actual_manifest_sha256}" == "${expected_manifest_sha256}" && \
+               "${actual_company_count}" == "${expected_company_count}" && \
+               "${actual_source_commit}" == "${expected_source_commit}" ]] || return 1
+            health="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              --connect-timeout 20 --max-time 60 \
+              "https://quant.custard.top/api/health?generation_id=${expected_generation}&attempt=${attempt}")" || return 1
+            jq -e --arg generation "${expected_generation}" \
+              '.ok == true and .generation_id == $generation' <<<"${health}" >/dev/null || return 1
+            catalogue_index="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              --connect-timeout 20 --max-time 60 \
+              "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=2")" || return 1
+            jq -e --arg generation "${expected_generation}" --argjson company_count "${expected_company_count}" \
+              '.generation_id == $generation and .summary.company_count == $company_count and .capabilities.type7_method_detail == true' \
+              <<<"${catalogue_index}" >/dev/null || return 1
+            moutai="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              --connect-timeout 20 --max-time 60 \
+              "https://quant.custard.top/api/company/600519?generation_id=${expected_generation}")" || return 1
+            jq -e --arg generation "${expected_generation}" \
+              '.generation_id == $generation and .detail_contract == "company_detail_v2" and .capabilities.type7_method_detail == true and .company.code == "600519" and (.company.types.type7.method_detail.status == "current" or .company.types.type7.method_detail.status == "not_applicable")' \
+              <<<"${moutai}" >/dev/null || return 1
+            homepage="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              --connect-timeout 20 --max-time 60 "https://quant.custard.top/?generation_id=${expected_generation}")" || return 1
+            grep -Fq 'patch6-seven-types-2026-08-01-classified-type7-v4' <<<"${homepage}"
+          }
+
+          for attempt in {1..6}; do
+            if verify_cloudflare_projection "${attempt}"; then
+              echo "Cloudflare dashboard is serving the exact published generation."
+              exit 0
+            fi
+            echo "Cloudflare public projection has not converged on attempt ${attempt} of 6." >&2
+            if [[ "${attempt}" -lt 6 ]]; then
+              sleep $((5 * attempt))
+            fi
+          done
+          echo "Cloudflare dashboard did not retain the exact published generation." >&2
+          exit 1
+
   verify_cleanup:
     if: github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'
     needs:
       - publish
       - deploy_pages
+      - mirror_cloudflare
     runs-on: windows-latest
     # The full immutable bundle is verified in bounded parallel-generation
     # passes. Leave explicit headroom beyond CDN and cleanup retries.

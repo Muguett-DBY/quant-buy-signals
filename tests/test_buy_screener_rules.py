@@ -22,6 +22,7 @@ from engine import buy_screener as bs
 from engine import scenarios
 from engine.market_coldness import build_market_coldness_evidence
 from engine.quantitative_evidence import MIN_SECTOR_COMPANIES, derive_company_evidence
+from engine.type7_patch6 import assess_patch6_type7
 
 
 def score_evidence(key: str, code: str = "000001", as_of: str = "2026-07-15") -> dict[str, str]:
@@ -293,6 +294,16 @@ def base_metrics(**overrides):
             # non-trading dates.  Their generic fixture must not masquerade as
             # a valid production coldness record.
             pass
+    return metrics
+
+
+def primary_type6_metrics(**overrides):
+    """Build a Type 6 fixture whose 6b/6c inputs are formal primary evidence."""
+
+    metrics = base_metrics(**overrides)
+    for key in ("technology_score", "business_model_score"):
+        if metrics.get(key) is not None:
+            metrics[f"{key}_evidence_level"] = "primary"
     return metrics
 
 
@@ -920,7 +931,7 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertEqual(decision["decision_basis"], "conservative_upper_bound")
         self.assertFalse(decision["potentially_triggerable"])
 
-    def test_decision_contract_type7_uses_strict_per_ledger_upper_bounds(self):
+    def test_decision_contract_type7_rejects_the_legacy_top_level_ledger(self):
         scores = {"7a": 8.0, "7b": 8.0, "7c": 6.0}
         ledger = {
             "scores": {"template1": 80.0, "template5": 80.0, "patch5": 60.0},
@@ -939,13 +950,8 @@ class TestFrameworkInvariants(unittest.TestCase):
             ledger=ledger,
         )
 
-        decision = bs.replay_buy_decision("type7", payload)
-
-        self.assertEqual(decision["missing_dimensions"], ["7c"])
-        self.assertEqual((decision["score_lower_bound"], decision["score_upper_bound"]), (5.3, 7.7))
-        self.assertTrue(decision["decision_complete"])
-        self.assertEqual(decision["decision_basis"], "conservative_upper_bound")
-        self.assertFalse(decision["potentially_triggerable"])
+        with self.assertRaisesRegex(ValueError, "current classified ledger"):
+            bs.replay_buy_decision("type7", payload)
 
     def test_decision_contract_market_block_is_not_misreported_as_a_company_veto(self):
         scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type1"]}
@@ -976,15 +982,6 @@ class TestFrameworkInvariants(unittest.TestCase):
             "type3": ({"3a": 8.0, "3b": 8.0, "3c": 8.0, "3d": 3.0, "3e": 8.0}, None),
             "type4": ({"4a": 8.0, "4b": 8.0, "4c": 8.0, "4d": 8.0, "4e": 3.0, "4f": 3.0}, None),
             "type6": ({"6a": 6.0, "6b": 4.0, "6c": 4.0, "6d": 4.0, "6e": 8.0}, None),
-            "type7": (
-                {"7a": 8.0, "7b": 8.0, "7c": 8.0},
-                {
-                    "scores": {"template1": 80.0, "template5": 80.0, "patch5": 80.0},
-                    "decisive_score_upper_bounds": {"template1": 80.0, "template5": 80.0, "patch5": 80.0},
-                    "prerequisites_complete": True,
-                    "patch5": {"safety_margin_complete": True, "safety_margin_score": 7.0},
-                },
-            ),
         }
 
         for type_key, (scores, ledger) in cases.items():
@@ -1021,7 +1018,7 @@ class TestFrameworkInvariants(unittest.TestCase):
         self.assertEqual(decision["decision_basis"], "full_evidence")
         self.assertFalse(decision["potentially_triggerable"])
 
-    def test_type7_safety_veto_survives_a_separate_decisive_score_failure(self):
+    def test_legacy_type7_safety_veto_is_diagnostic_and_cannot_veto_the_classified_model(self):
         ledger = {
             "scores": {"template1": 60.0, "template5": 80.0, "patch5": 60.0},
             "patch5": {
@@ -1035,25 +1032,14 @@ class TestFrameworkInvariants(unittest.TestCase):
             "prerequisites_complete": True,
             "safety_veto": True,
         }
-        with (
-            patch.object(bs, "assess_quality_equity", return_value=ledger),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
-        ):
-            outcome, returned_ledger = bs.score_type7_quality_equity(
-                {"code": "000001", "industry": "SOFTWARE"},
-                bs._not_applicable("type1", "测试"),
-                valuation_evidence_complete=True,
-            )
+        returned_ledger = assess_patch6_type7({"code": "000001", "industry": "SOFTWARE"}, legacy_diagnostic=ledger)
 
-        payload = self._decision_payload("type7", outcome, ledger=returned_ledger)
-        decision = bs.replay_buy_decision("type7", payload)
+        self.assertEqual(returned_ledger["model_id"], bs.PATCH6_TYPE7_MODEL_ID)
+        self.assertEqual(returned_ledger["legacy_diagnostic"]["scores"], ledger["scores"])
+        self.assertFalse(returned_ledger["legacy_diagnostic"]["decisive"])
+        self.assertFalse(returned_ledger["veto"])
 
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_VETOED)
-        self.assertIn("_veto", outcome[3])
-        self.assertEqual(decision["decision_basis"], "confirmed_veto")
-        self.assertEqual(decision["veto_state"], "confirmed")
-
-    def test_type7_known_strict_subscore_failure_is_not_a_conditional_candidate(self):
+    def test_legacy_type7_strict_subscore_failure_does_not_decide_the_classified_model(self):
         ledger = {
             "scores": {
                 "template1": 67.81,
@@ -1080,27 +1066,13 @@ class TestFrameworkInvariants(unittest.TestCase):
             "prerequisites_complete": True,
             "safety_veto": False,
         }
-        with (
-            patch.object(bs, "assess_quality_equity", return_value=ledger),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
-        ):
-            outcome, returned_ledger = bs.score_type7_quality_equity(
-                {"code": "600988", "industry": "GOLD"},
-                bs._not_applicable("type1", "测试"),
-                valuation_evidence_complete=True,
-            )
+        returned_ledger = assess_patch6_type7({"code": "600988", "industry": "GOLD"}, legacy_diagnostic=ledger)
 
-        self.assertIs(returned_ledger, ledger)
-        self.assertFalse(outcome[0])
-        self.assertEqual(outcome[1], 7.0)
-        self.assertEqual(
-            outcome[2],
-            {"7a": 6.781, "7b": 7.224, "7c": 6.848},
-        )
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_TRIGGERED)
-        self.assertNotEqual(outcome[3]["_status"], bs.STATUS_CONDITIONAL)
-        self.assertIn("长期质量与回报当前已核验资料得分67.81分", outcome[3]["_condition"])
-        self.assertIn("商业质量与安全边际当前已核验资料得分68.48分", outcome[3]["_condition"])
+        self.assertEqual(returned_ledger["model_id"], bs.PATCH6_TYPE7_MODEL_ID)
+        self.assertEqual(returned_ledger["legacy_diagnostic"]["scores"], ledger["scores"])
+        self.assertFalse(returned_ledger["legacy_diagnostic"]["decisive"])
+        self.assertFalse(returned_ledger["triggered"])
+        self.assertNotEqual(returned_ledger["scores"], ledger["scores"])
 
     def test_evidence_reason_never_exposes_internal_model_or_evidence_ids(self):
         automatic = {
@@ -1573,6 +1545,11 @@ class TestMetricExtraction(unittest.TestCase):
                 "business_model_score": 7.0,
                 "business_model_score_evidence": score_evidence("business_model_score"),
                 "business_model_score_evidence_level": "primary",
+                "industry_early_stage_confirmed": True,
+                "industry_early_stage_evidence": score_evidence("industry_early_stage_score"),
+                "industry_early_stage_evidence_level": "primary",
+                "position_size_pct": 0.0,
+                "type6_portfolio_pct": 20.0,
             },
             {"code": "1", "name": "样本"},
             "SOFTWARE",
@@ -1592,6 +1569,10 @@ class TestMetricExtraction(unittest.TestCase):
 
         self.assertEqual(valid["technology_score"], 8.0)
         self.assertEqual(valid["business_model_score"], 7.0)
+        self.assertTrue(valid["industry_early_stage_confirmed"])
+        self.assertEqual(valid["industry_early_stage_evidence_level"], "primary")
+        self.assertEqual(valid["position_size_pct"], 0.0)
+        self.assertEqual(valid["type6_portfolio_pct"], 20.0)
         self.assertIsNone(invalid["technology_score"])
         self.assertIsNone(invalid["business_model_score"])
 
@@ -2322,6 +2303,26 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(total, bs._weighted_total(scores, bs.TYPE_WEIGHTS["type2"]))
         self.assertFalse(triggered)
 
+    def test_type7_public_total_preserves_the_strict_three_decimal_boundary(self):
+        scores = {"7a": 7.001, "7b": 7.001, "7c": 7.001}
+        reasons = {key: "严格阈值边界" for key in scores}
+
+        triggered, total, published_scores, published_reasons = bs._finish(
+            "type7",
+            scores,
+            reasons,
+            extra_condition=True,
+        )
+
+        self.assertTrue(triggered)
+        self.assertEqual(total, 7.001)
+        self.assertEqual(published_scores, scores)
+        self.assertEqual(published_reasons["_status"], bs.STATUS_TRIGGERED)
+        self.assertEqual(
+            bs._weighted_total(scores, bs.TYPE_WEIGHTS["type7"], decimals=3, total_decimals=3),
+            7.001,
+        )
+
     def test_type2_significant_overvaluation_cannot_trigger_despite_three_strong_cycles(self):
         m = base_metrics(
             peg=4.0,
@@ -2885,6 +2886,7 @@ class TestTypeRules(unittest.TestCase):
             metric = base_metrics(
                 code=code,
                 industry="SOFTWARE",
+                source_trade_date="2026-07-17",
                 revenue_values=[100.0, 125.0, 156.0, 195.0],
                 revenue_years=[2022, 2023, 2024, 2025],
                 cagr_3yr=0.20,
@@ -2921,7 +2923,7 @@ class TestTypeRules(unittest.TestCase):
                 peg=0.8,
             )
             metric["financial_indicator_as_of"] = "2025-12-31"
-            metric["source_trade_date"] = "2026-07-18"
+            metric["source_trade_date"] = "2026-07-17"
             return metric
 
         target = rich_metric("000001")
@@ -2940,6 +2942,7 @@ class TestTypeRules(unittest.TestCase):
 
         self.assertEqual(target["growth_quality_score_evidence_level"], "derived_proxy")
         self.assertEqual(target["growth_sustainability_score_evidence_level"], "derived_proxy")
+        self.assertLessEqual(target["growth_sustainability_score"], 8.0)
         self.assertTrue(outcome[0])
         self.assertEqual(outcome[3]["_status"], bs.STATUS_TRIGGERED)
 
@@ -3024,9 +3027,9 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(total, 4.9)
         self.assertIn("_downgrade", reasons)
 
-    def test_type3_below_ten_percent_trend_is_not_applicable_not_zero_score_failure(self):
+    def test_type3_below_ten_percent_trend_is_scored_instead_of_marked_not_applicable(self):
         outcome = bs.score_type3_sustainable_growth(
-            base_metrics(
+            complete_type3_metrics(
                 revenue_values=[100.0, 104.0, 108.0, 113.0, 118.0],
                 trend_growth=0.0999,
             ),
@@ -3034,9 +3037,12 @@ class TestTypeRules(unittest.TestCase):
         )
 
         self.assertFalse(outcome[0])
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
-        self.assertEqual(outcome[3]["_applicable"], "no")
-        self.assertIn("不足10%", outcome[3]["_scope"])
+        self.assertEqual(outcome[3]["_applicable"], "yes")
+        self.assertNotIn("_scope", outcome[3])
+        self.assertEqual(outcome[2]["3d"], 9.0)
+        self.assertGreaterEqual(outcome[1], bs.QUALIFY_THRESHOLD)
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_CONDITIONAL)
+        self.assertIn("低于10%高增长门槛", outcome[3]["_condition"])
         self.assertNotIn("_veto", outcome[3])
 
     def test_type3_missing_trend_is_insufficient_not_not_applicable(self):
@@ -3526,6 +3532,24 @@ class TestTypeRules(unittest.TestCase):
         )
 
         self.assertEqual(reasons["4c"], "多年盈利稳定性数据")
+
+    def test_type4_current_moat_cannot_substitute_for_missing_durability_evidence(self):
+        metric = complete_type4_metrics(moat_score=9.0)
+        metric["moat_durability_score"] = None
+        metric["moat_durability_score_evidence"] = None
+        metric["moat_durability_score_evidence_level"] = None
+
+        triggered, _total, scores, reasons = bs.score_type4_long_runway(
+            metric,
+            benchmarks(),
+            complete_dcf_evidence(),
+        )
+
+        self.assertFalse(triggered)
+        self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("4c", reasons["_decision_missing_dimensions"])
+        self.assertLessEqual(scores["4c"], 5.0)
+        self.assertIn("缺多年耐久证据", reasons["4c"])
 
     def test_type4_missing_qualitative_evidence_is_unknown_not_a_company_veto(self):
         triggered, _, scores, reasons = bs.score_type4_long_runway(
@@ -4140,7 +4164,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(growth_oversize[3]["_status"], bs.STATUS_NOT_APPLICABLE)
         self.assertEqual(turnaround_oversize[3]["_status"], bs.STATUS_NOT_APPLICABLE)
         triggered, _, _, reasons = bs.score_type6_vc(
-            base_metrics(
+            primary_type6_metrics(
                 market_cap=300e8,
                 technology_score=8,
                 business_model_score=8,
@@ -4156,7 +4180,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertTrue(triggered)
         self.assertNotIn("_condition", reasons)
         turnaround_at_cap = bs.score_type6_vc(
-            base_metrics(
+            primary_type6_metrics(
                 market_cap=100e8,
                 technology_score=10,
                 business_model_score=10,
@@ -4172,7 +4196,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(turnaround_at_cap[3]["_profile"], "平稳产业反转型")
         self.assertNotIn("_scope", turnaround_at_cap[3])
         _, _, scores, reasons = bs.score_type6_vc(
-            base_metrics(
+            primary_type6_metrics(
                 market_cap=300e8,
                 technology_score=8,
                 business_model_score=8,
@@ -4196,7 +4220,7 @@ class TestTypeRules(unittest.TestCase):
 
     def test_type6_missing_user_position_never_becomes_automatic_buy(self):
         triggered, _, scores, reasons = bs.score_type6_vc(
-            base_metrics(
+            primary_type6_metrics(
                 market_cap=10e8,
                 technology_score=10,
                 business_model_score=10,
@@ -4207,10 +4231,170 @@ class TestTypeRules(unittest.TestCase):
             benchmarks(median_cagr=0.60, median_cagr_count=20),
         )
 
-        self.assertEqual(scores["6e"], 10.0)
+        self.assertEqual(scores["6e"], 9.0)
         self.assertFalse(triggered)
         self.assertIn("_condition", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_CONDITIONAL)
+
+    def test_type6_proxy_technology_and_model_scores_are_diagnostic_only(self):
+        outcome = bs.score_type6_vc(
+            base_metrics(
+                market_cap=10e8,
+                technology_score=9.0,
+                business_model_score=8.0,
+                trend_growth=0.30,
+                net_profit_history=[-3.0, -1.0, 2.0],
+                net_profit=2.0,
+                net_margin=0.02,
+                position_size_pct=3.0,
+                type6_portfolio_pct=10.0,
+            ),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["6b"], 4.0)
+        self.assertEqual(outcome[2]["6c"], 4.0)
+        self.assertIn("模型代理证据", outcome[3]["6b"])
+        self.assertIn("模型代理证据", outcome[3]["6c"])
+        self.assertEqual(outcome[3]["_decision_missing_dimensions"], ["6b", "6c"])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+
+    def test_type6_primary_technology_and_model_scores_remain_formal_scores(self):
+        outcome = bs.score_type6_vc(
+            primary_type6_metrics(
+                market_cap=10e8,
+                technology_score=9.0,
+                business_model_score=8.0,
+                trend_growth=0.30,
+                net_profit_history=[-3.0, -1.0, 2.0],
+                net_profit=2.0,
+                net_margin=0.02,
+                position_size_pct=3.0,
+                type6_portfolio_pct=10.0,
+            ),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+
+        self.assertTrue(outcome[0])
+        self.assertEqual(outcome[2]["6b"], 9.0)
+        self.assertEqual(outcome[2]["6c"], 8.0)
+        self.assertNotIn("技术", outcome[3].get("_missing", ""))
+        self.assertNotIn("商业模式", outcome[3].get("_missing", ""))
+
+    def test_type6_high_growth_subtype_requires_both_industry_and_company_growth(self):
+        cases = (
+            (0.19, 0.50, "行业增速19.0%低于20%"),
+            (0.20, 0.299, "公司趋势增速29.9%低于30%"),
+            (0.20, None, "公司趋势增速缺失"),
+        )
+        for industry_growth, company_growth, expected_reason in cases:
+            with self.subTest(industry_growth=industry_growth, company_growth=company_growth):
+                outcome = bs.score_type6_vc(
+                    primary_type6_metrics(
+                        market_cap=100e8 + 1,
+                        technology_score=10.0,
+                        business_model_score=10.0,
+                        trend_growth=company_growth,
+                        net_profit=-1.0,
+                        net_margin=-0.01,
+                    ),
+                    benchmarks(median_cagr=industry_growth, median_cagr_count=20),
+                )
+                self.assertEqual(outcome[3]["_status"], bs.STATUS_NOT_APPLICABLE)
+                self.assertIn(expected_reason, outcome[3]["_scope"])
+
+        high_growth = bs.score_type6_vc(
+            primary_type6_metrics(
+                market_cap=300e8,
+                technology_score=10.0,
+                business_model_score=10.0,
+                trend_growth=0.30,
+                net_profit_history=[-3.0, -1.0, 2.0],
+                net_profit=2.0,
+                net_margin=0.02,
+                position_size_pct=3.0,
+                type6_portfolio_pct=10.0,
+            ),
+            benchmarks(median_cagr=0.20, median_cagr_count=20),
+        )
+        self.assertEqual(high_growth[3]["_profile"], "高景气技术型")
+        self.assertTrue(high_growth[0])
+
+    def test_type6_ten_point_industry_score_requires_primary_early_stage_evidence(self):
+        metric = primary_type6_metrics(
+            market_cap=10e8,
+            technology_score=10.0,
+            business_model_score=10.0,
+            trend_growth=0.30,
+            net_profit_history=[-3.0, -1.0, 2.0],
+            net_profit=2.0,
+            net_margin=0.02,
+            position_size_pct=3.0,
+            type6_portfolio_pct=10.0,
+        )
+        without_early_stage = bs.score_type6_vc(
+            metric,
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+        self.assertEqual(without_early_stage[2]["6a"], 8.0)
+        self.assertIn("缺产业初期原始证据", without_early_stage[3]["6a"])
+
+        metric.update(
+            industry_early_stage_confirmed=True,
+            industry_early_stage_evidence_level="primary",
+            industry_early_stage_evidence=score_evidence("industry_early_stage_score"),
+        )
+        with_early_stage = bs.score_type6_vc(
+            metric,
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+        self.assertEqual(with_early_stage[2]["6a"], 10.0)
+        self.assertIn("产业初期原始证据已确认", with_early_stage[3]["6a"])
+
+    def test_type6_known_position_violation_is_never_hidden_by_another_missing_input(self):
+        base = {
+            "market_cap": 10e8,
+            "technology_score": 10.0,
+            "business_model_score": 10.0,
+            "trend_growth": 0.30,
+            "net_profit_history": [-3.0, -1.0, 2.0],
+            "net_profit": 2.0,
+            "net_margin": 0.02,
+        }
+        cases = (
+            (
+                {"position_size_pct": 6.0, "type6_portfolio_pct": None},
+                "单票仓位6%不在0%至5%范围内",
+                "缺实际高风险组合仓位",
+            ),
+            (
+                {"position_size_pct": None, "type6_portfolio_pct": 20.0},
+                "高风险组合仓位20%不在0%至15%范围内",
+                "缺实际单票仓位",
+            ),
+            ({"position_size_pct": 4.0, "type6_portfolio_pct": 3.0}, "单票仓位4%超过高风险组合仓位3%", None),
+            ({"position_size_pct": 0.0, "type6_portfolio_pct": 10.0}, "单票仓位0%不在0%至5%范围内", None),
+        )
+        for positions, violation, missing in cases:
+            with self.subTest(positions=positions):
+                outcome = bs.score_type6_vc(
+                    primary_type6_metrics(**base, **positions),
+                    benchmarks(median_cagr=0.60, median_cagr_count=20),
+                )
+                self.assertFalse(outcome[0])
+                self.assertEqual(outcome[2]["6e"], 0.0)
+                self.assertIn(violation, outcome[3]["6e"])
+                if missing is not None:
+                    self.assertIn(missing, outcome[3]["6e"])
+                self.assertEqual(outcome[3]["_condition"], "实际仓位违反强制风控条件")
+
+        valid = bs.score_type6_vc(
+            primary_type6_metrics(**base, position_size_pct=5.0, type6_portfolio_pct=15.0),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+        self.assertTrue(valid[0])
+        self.assertNotIn("_condition", valid[3])
 
     def test_type6_unknown_profit_profile_is_insufficient_not_not_applicable(self):
         cases = (
@@ -4255,6 +4439,32 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertIn("反转历史", outcome[3]["_missing"])
         self.assertIn("仅供诊断", outcome[3]["_score_quality"])
+
+    def test_type6_turnaround_profile_cannot_trigger_while_profit_is_still_deteriorating(self):
+        outcome = bs.score_type6_vc(
+            primary_type6_metrics(
+                market_cap=10e8,
+                trend_growth=0.20,
+                technology_score=10.0,
+                business_model_score=10.0,
+                net_profit=-3.0,
+                net_margin=-0.03,
+                net_profit_history=[-1.0, -2.0, -3.0],
+                interim_current_profit=5.0,
+                interim_prior_profit=10.0,
+                interim_profit_yoy=-0.50,
+                position_size_pct=3.0,
+                type6_portfolio_pct=10.0,
+            ),
+            benchmarks(median_cagr=0.20, median_cagr_count=20),
+        )
+
+        self.assertFalse(outcome[0])
+        self.assertGreaterEqual(outcome[1], 7.0)
+        self.assertEqual(outcome[2]["6d"], 2.0)
+        self.assertEqual(outcome[3]["_profile"], "平稳产业反转型")
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_CONDITIONAL)
+        self.assertIn("困境反转证据达到5分", outcome[3]["_condition"])
 
     def test_type6_requires_loss_or_microprofit_and_consecutive_recovery_years(self):
         profitable = bs.score_type6_vc(
@@ -4465,8 +4675,9 @@ class TestTypeRules(unittest.TestCase):
                 complete_dcf_evidence(),
             ),
             "type6": lambda metric: bs.score_type6_vc(
-                base_metrics(
+                primary_type6_metrics(
                     market_cap=10e8,
+                    trend_growth=0.30,
                     technology_score=10.0,
                     business_model_score=10.0,
                     net_profit_history=[-3.0, -1.0, 2.0],
@@ -4518,8 +4729,9 @@ class TestTypeRules(unittest.TestCase):
                     complete_dcf_evidence(),
                 )
                 type6 = bs.score_type6_vc(
-                    base_metrics(
+                    primary_type6_metrics(
                         market_cap=10e8,
+                        trend_growth=0.30,
                         technology_score=10.0,
                         business_model_score=10.0,
                         net_profit_history=[-3.0, -1.0, 2.0],
@@ -4557,8 +4769,9 @@ class TestTypeRules(unittest.TestCase):
         self.assertNotIn("_veto", outcome[3])
 
     def test_type6_allows_exact_same_period_losses_and_cash_burn_that_are_improving(self):
-        improving = base_metrics(
+        improving = primary_type6_metrics(
             market_cap=10e8,
+            trend_growth=0.30,
             technology_score=10.0,
             business_model_score=10.0,
             net_profit_history=[-9.0, -6.0, -3.0],
@@ -4692,7 +4905,7 @@ class TestTypeRules(unittest.TestCase):
                 cyclical_benchmarks,
             ),
             "type6": bs.score_type6_vc(
-                base_metrics(
+                primary_type6_metrics(
                     market_cap=10e8,
                     technology_score=10.0,
                     business_model_score=10.0,
@@ -5111,9 +5324,18 @@ class TestMarketScreen(unittest.TestCase):
                 metric_[f"{key}_evidence"] = score_evidence(key)
                 metric_[f"{key}_evidence_level"] = "derived_proxy"
 
-        def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            _history,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "research_request_needed": False,
                 "history_request_needed": False,
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
@@ -5142,7 +5364,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
             patch.object(bs, "_type3_growth_components_from_evidence", side_effect=accept_loaded_growth),
             patch.object(bs, "_refresh_type3_quantitative_evidence", side_effect=refresh_growth),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types(
                 {"1": {}},
@@ -5344,9 +5565,19 @@ class TestMarketScreen(unittest.TestCase):
         for expected in (True, False):
             captured = []
 
-            def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete, captured=captured):
+            def fake_type7(
+                _metric,
+                _type1,
+                _history,
+                *,
+                valuation_evidence_complete,
+                type5_outcome=None,
+                other_type_triggered=False,
+                captured=captured,
+            ):
                 captured.append(valuation_evidence_complete)
-                return neutral_outcome("type7"), {
+                return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                    "applicable": False,
                     "history_request_needed": False,
                     "research_request_needed": False,
                     "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
@@ -5370,7 +5601,6 @@ class TestMarketScreen(unittest.TestCase):
                 patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
                 patch.object(bs, "_valid_nonfinancial_dcf_evidence", return_value=expected),
                 patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-                patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
             ):
                 bs.screen_all_types({"1": {}}, quotes)
 
@@ -5392,16 +5622,25 @@ class TestMarketScreen(unittest.TestCase):
         }
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
             ledger = {
+                "applicable": False,
                 "history_request_needed": history_evidence is None,
                 "loaded_marker": history_evidence is history,
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
             }
-            return neutral_outcome("type7"), ledger
+            return bs._not_applicable("type7", "测试桩不评价第七类"), ledger
 
         loader_calls = []
 
@@ -5419,7 +5658,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types({"1": {}}, quotes, quality_history_loader=loader)
 
@@ -5450,10 +5688,19 @@ class TestMarketScreen(unittest.TestCase):
         }
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "history_request_needed": history_evidence is partial,
                 "research_request_needed": False,
                 "loaded_marker": history_evidence is complete,
@@ -5477,7 +5724,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types(
                 {"1": {}},
@@ -5571,34 +5817,37 @@ class TestMarketScreen(unittest.TestCase):
         }
         type7_calls = []
 
-        def fake_type7(metric, _type1, _history, *, valuation_evidence_complete):
+        def fake_type7(
+            metric,
+            _type1,
+            _history,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             loaded = metric.get("type7_patch4_assessment") == assessment
             type7_calls.append(loaded)
-            return neutral_outcome("type7"), {
-                "prerequisites": {
-                    "core_modules_80pct": {"passed": True},
-                    "technology_patch4": {
-                        "applicable": True,
-                        "passed": loaded,
-                        "validation_status": (
-                            "validated_replayable_assessment" if loaded else "missing_validated_patch4_assessment"
-                        ),
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
+                "model_id": bs.PATCH6_TYPE7_MODEL_ID,
+                "classification": {
+                    "class_code": "T",
+                    "route_complete": True,
+                },
+                "decision_gates": {
+                    "route_path": {
+                        "inputs": {
+                            "patch4_complete": loaded,
+                        },
                     },
-                    "three_year_financials": {"passed": True},
-                    "latest_quote_and_valuation": {"passed": True},
                 },
-                "decisive_score_upper_bounds": {
-                    "template1": 90.0,
-                    "template5": 90.0,
-                    "patch5": 90.0,
-                },
-                "safety_veto": False,
-                "decisively_not_triggered": False,
+                "upper_bound": 9.0,
+                "veto": False,
                 "history_request_needed": False,
                 "research_request_needed": False,
                 "loaded_marker": loaded,
-                "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
             }
 
@@ -5628,7 +5877,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types({"1": {}}, quotes, patch4_loader=loader)
 
@@ -5649,11 +5897,20 @@ class TestMarketScreen(unittest.TestCase):
         report = type7_report_evidence()
         calls = []
 
-        def fake_type7(metric, _type1, history_evidence, *, valuation_evidence_complete):
+        def fake_type7(
+            metric,
+            _type1,
+            history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             report_ready = len(metric.get("type7_research_sources", [])) == 3
             calls.append((report_ready, history_evidence is history))
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "research_request_needed": history_evidence is history and not report_ready,
                 "history_request_needed": history_evidence is None,
                 "loaded_marker": report_ready and history_evidence is history,
@@ -5685,7 +5942,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types(
                 {"1": {}},
@@ -5712,11 +5968,20 @@ class TestMarketScreen(unittest.TestCase):
         history = {"available": True, "code": "000001", "as_of": "2026-07-17"}
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
             exact_history_loaded = history_evidence is history
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "research_request_needed": False,
                 "history_request_needed": not exact_history_loaded,
                 "decisively_not_triggered": exact_history_loaded,
@@ -5745,7 +6010,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             bs.screen_all_types(
                 {"1": {}},
@@ -5817,9 +6081,18 @@ class TestMarketScreen(unittest.TestCase):
             loader_calls.append((requests, progress_cb))
             return {"000001": type5_history_evidence()}
 
-        def fake_type7(_metric, _type1, _history, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            _history,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "history_request_needed": False,
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
@@ -5850,7 +6123,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             result = bs.screen_all_types(
                 {"1": {}, "2": {}, "3": {}},
@@ -5884,10 +6156,19 @@ class TestMarketScreen(unittest.TestCase):
 
         type7_calls = []
 
-        def fake_type7(_metric, _type1, history_evidence, *, valuation_evidence_complete):
+        def fake_type7(
+            _metric,
+            _type1,
+            history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
             self.assertIsInstance(valuation_evidence_complete, bool)
             type7_calls.append(history_evidence)
-            return neutral_outcome("type7"), {
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "applicable": False,
                 "history_request_needed": False,
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
@@ -5903,7 +6184,6 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
             patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
             patch.object(bs, "score_type7_quality_equity", side_effect=fake_type7),
-            patch.object(bs, "validate_quality_equity_ledger", return_value=[]),
         ):
             bs.screen_all_types({"1": {}}, quotes)
 

@@ -57,6 +57,7 @@ from engine.quantitative_evidence import (
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
     validate_quantitative_evidence_record,
 )
+from engine.type7_patch6 import MODEL_ID as _PATCH6_TYPE7_MODEL_ID
 from engine.valuation_status import DCF_SKIP_ECONOMIC_NOT_APPLICABLE
 
 
@@ -1124,6 +1125,10 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         or set(decision) != _DECISION_FIELDS
     ):
         return None
+    if type_key == "type7":
+        ledger = payload.get("ledger")
+        if not isinstance(ledger, Mapping) or ledger.get("model_id") != _PATCH6_TYPE7_MODEL_ID:
+            return None
     clean_scores: dict[str, float] = {}
     for dimension in weights:
         score = _finite_numeric(sub_scores.get(dimension))
@@ -1160,18 +1165,42 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         upper_scores[dimension] = 10.0
 
     type7_trigger_possible: bool | None = None
+    type7_new_model = False
     if type_key == "type7" and missing:
         ledger = payload.get("ledger")
-        upper_ledger = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
-        mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
-        if not isinstance(upper_ledger, Mapping) or set(upper_ledger) != set(mapping.values()):
-            return None
-        for dimension in missing:
-            raw_upper = _finite_numeric(upper_ledger.get(mapping[dimension]))
-            if raw_upper is None or not 0.0 <= raw_upper <= 100.0:
+        type7_new_model = isinstance(ledger, Mapping) and ledger.get("model_id") == _PATCH6_TYPE7_MODEL_ID
+        if type7_new_model:
+            sections = ledger.get("dimensions")
+            classification = ledger.get("classification")
+            if not isinstance(sections, Mapping) or not isinstance(classification, Mapping):
                 return None
-            upper_scores[dimension] = raw_upper / 10.0
-        type7_trigger_possible = all(upper_scores[dimension] > 7.0 for dimension in weights)
+            mapping = {"7a": "BM", "7b": "MOAT", "7c": "G"}
+            if classification.get("route_complete") is not True:
+                for dimension in missing:
+                    upper_scores[dimension] = 10.0
+            else:
+                for dimension in missing:
+                    section = sections.get(mapping[dimension])
+                    raw_upper = _finite_numeric(section.get("upper_bound")) if isinstance(section, Mapping) else None
+                    if raw_upper is None or not 0.0 <= raw_upper <= 10.0:
+                        return None
+                    upper_scores[dimension] = raw_upper
+            exact_upper = _finite_numeric(ledger.get("upper_bound"))
+            type7_trigger_possible = exact_upper is not None and exact_upper > 7.0
+        else:
+            upper_ledger = ledger.get("decisive_score_upper_bounds") if isinstance(ledger, Mapping) else None
+            mapping = {"7a": "template1", "7b": "template5", "7c": "patch5"}
+            if not isinstance(upper_ledger, Mapping) or set(upper_ledger) != set(mapping.values()):
+                return None
+            for dimension in missing:
+                raw_upper = _finite_numeric(upper_ledger.get(mapping[dimension]))
+                if raw_upper is None or not 0.0 <= raw_upper <= 100.0:
+                    return None
+                upper_scores[dimension] = raw_upper / 10.0
+            type7_trigger_possible = all(upper_scores[dimension] > 7.0 for dimension in weights)
+    elif type_key == "type7":
+        ledger = payload.get("ledger")
+        type7_new_model = isinstance(ledger, Mapping) and ledger.get("model_id") == _PATCH6_TYPE7_MODEL_ID
 
     lower = round(sum(lower_scores[key] * weight for key, weight in weights.items()), 1)
     upper = round(sum(upper_scores[key] * weight for key, weight in weights.items()), 1)
@@ -1245,6 +1274,14 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         maximum_high = known_high + sum(key in missing_set for key in core)
         bounded_veto = maximum_high < 2
         possible_veto = not bounded_veto and known_high < 2
+    elif type_key == "type7" and type7_new_model:
+        ledger = payload.get("ledger")
+        classification = ledger.get("classification") if isinstance(ledger, Mapping) else None
+        possible_veto = bool(
+            not isinstance(classification, Mapping)
+            or classification.get("route_complete") is not True
+            or (classification.get("class_code") == "C" and missing_set.intersection({"7a", "7b"}))
+        )
     else:
         possible_veto = bool(missing_set.intersection(_DECISION_POTENTIAL_VETO_DIMENSIONS[type_key]))
 
@@ -1276,6 +1313,9 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
             all(known(key) for key in ("6a", "6b", "6c", "6d"))
             and sum(upper_scores[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) < 2
         )
+    elif type_key == "type7" and type7_new_model:
+        ledger = payload.get("ledger")
+        confirmed_hard_veto = bool(isinstance(ledger, Mapping) and ledger.get("veto") is True)
     else:
         ledger = payload.get("ledger")
         patch5 = ledger.get("patch5") if isinstance(ledger, Mapping) else None
@@ -1324,11 +1364,22 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
                     upper_scores["6e"] >= 8.0 and not reasons.get("_condition")
                 )
         elif type_key == "type7":
-            theoretical_possible = (
-                bool(type7_trigger_possible)
-                if type7_trigger_possible is not None
-                else all(upper_scores[dimension] > 7.0 for dimension in weights)
-            )
+            if type7_new_model:
+                ledger = payload.get("ledger")
+                exact_upper = _finite_numeric(ledger.get("upper_bound")) if isinstance(ledger, Mapping) else None
+                condition_failures = ledger.get("condition_failures") if isinstance(ledger, Mapping) else None
+                theoretical_possible = bool(
+                    exact_upper is not None
+                    and exact_upper > 7.0
+                    and isinstance(condition_failures, list)
+                    and not condition_failures
+                )
+            else:
+                theoretical_possible = (
+                    bool(type7_trigger_possible)
+                    if type7_trigger_possible is not None
+                    else all(upper_scores[dimension] > 7.0 for dimension in weights)
+                )
 
         if type6_action_condition:
             expected_complete = not theoretical_possible

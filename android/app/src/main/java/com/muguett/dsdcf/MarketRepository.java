@@ -1483,18 +1483,26 @@ public final class MarketRepository {
     private static Map<String, String> createDimensionNames() {
         Map<String, String> result = new HashMap<>();
         String[][] values = {
-                {"1a", "价格与价值空间"}, {"1b", "保守收益率"}, {"1c", "安全边际"}, {"1d", "下行保护"},
-                {"2a", "行业热度"}, {"2b", "公司热度"}, {"2c", "价格冷却"}, {"2d", "基本面确认"},
-                {"3a", "增长速度"}, {"3b", "增长质量"}, {"3c", "增长持续性"}, {"3d", "估值容错"}, {"3e", "泡沫防范"},
+                {"1a", "买入区深度"}, {"1b", "价值陷阱排查"}, {"1c", "安全边际厚度"}, {"1d", "催化剂/回归动力"},
+                {"2a", "产业周期热度"}, {"2b", "公司周期拐点"}, {"2c", "市场周期冷度"}, {"2d", "估值合理性"},
+                {"3a", "护城河支撑度"}, {"3b", "增长质量"}, {"3c", "资本回报率"}, {"3d", "增长可持续性"}, {"3e", "产业/股价泡沫"},
                 {"4a", "坡的长度"}, {"4b", "雪的厚度"}, {"4c", "护城河耐久度"}, {"4d", "估值合理性"}, {"4e", "产业泡沫防范"}, {"4f", "股价泡沫防范"},
-                {"5a", "周期位置"}, {"5b", "资产底价"}, {"5c", "行业生存力"}, {"5d", "供需反转"}, {"5e", "股东回报"},
-                {"6a", "赔率空间"}, {"6b", "催化剂"}, {"6c", "生存能力"}, {"6d", "反转证据"}, {"6e", "风险控制"},
-                {"7a", "估值买入区"}, {"7b", "强周期底部"}, {"7c", "优质股权质量"}
+                {"5a", "强周期属性"}, {"5b", "底部信号"}, {"5c", "抗周期能力"}, {"5d", "上行弹性"}, {"5e", "正常化盈利估值"},
+                {"6a", "产业爆发"}, {"6b", "技术壁垒"}, {"6c", "模式创新"}, {"6d", "困境反转"}, {"6e", "仓位风控"},
+                {"7a", "本类别的商业模式"}, {"7b", "本类别的护城河"}, {"7c", "本类别的长期成长"}
         };
         for (String[] value : values) {
             result.put(value[0], value[1]);
         }
         return Collections.unmodifiableMap(result);
+    }
+
+    private static String publicScoreText(double value) {
+        String formatted = String.format(Locale.CHINA, "%.3f", value);
+        while (formatted.endsWith("0") && !formatted.endsWith(".0")) {
+            formatted = formatted.substring(0, formatted.length() - 1);
+        }
+        return formatted;
     }
 
     private static DecisionSummary parseDecisionSummary(JSONObject decision, String typeKey) throws IOException {
@@ -2288,7 +2296,7 @@ public final class MarketRepository {
             }
             String scored = score == null || isScorelessTypeStatus(status)
                     ? text
-                    : String.format(Locale.CHINA, "%s，%.1f分", text, score);
+                    : text + "，" + publicScoreText(score) + "分";
             return reason == null || reason.isEmpty() ? scored : scored + "；" + reason;
         }
 
@@ -2312,7 +2320,7 @@ public final class MarketRepository {
                 }
                 return "数据版本过旧，请获取最新数据";
             }
-            String scored = String.format(Locale.CHINA, "%.1f分", value);
+            String scored = publicScoreText(value) + "分";
             String evidence = subScoreReasons.get(dimension);
             return evidence == null || evidence.isEmpty() ? scored : scored + "；" + evidence;
         }

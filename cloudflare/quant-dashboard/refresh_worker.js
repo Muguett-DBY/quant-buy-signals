@@ -12,8 +12,10 @@ const SOURCE_MANIFEST = "https://muguett-dby.github.io/quant-buy-signals/mobile-
 const SOURCE_ASSET_BASE = "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/";
 const HEX64 = /^[0-9a-f]{64}$/;
 const MAX_MANIFEST_BYTES = 1_000_000;
-const MAX_DETAIL_COMPRESSED_TOTAL = 32_000_000;
-const MAX_DETAIL_UNCOMPRESSED_TOTAL = 96_000_000;
+const MAX_COMPRESSED_ASSET_BYTES = 8_000_000;
+const MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000;
+const MAX_DETAIL_COMPRESSED_TOTAL = 48_000_000;
+const MAX_DETAIL_UNCOMPRESSED_TOTAL = 144_000_000;
 const DETAIL_DOWNLOAD_BATCH_SIZE = 4;
 const ASSET_NAMES = {
   catalogue: /^catalog-[0-9a-f]{16}\.json\.gz$/,
@@ -63,7 +65,7 @@ async function readBoundedStream(stream, maxBytes, label) {
 
 async function downloadAsset(name, kind, metadata = {}) {
   if (!ASSET_NAMES[kind]?.test(name)) throw new Error(`invalid ${kind} filename`);
-  if (kind !== "signature" && (!Number.isSafeInteger(metadata.size) || metadata.size <= 0 || metadata.size > 16_000_000)) {
+  if (kind !== "signature" && (!Number.isSafeInteger(metadata.size) || metadata.size <= 0 || metadata.size > MAX_COMPRESSED_ASSET_BYTES)) {
     throw new Error(`invalid ${kind} size`);
   }
   if (kind !== "signature" && !HEX64.test(String(metadata.sha256 || ""))) throw new Error(`invalid ${kind} checksum`);
@@ -169,10 +171,10 @@ function companyDetailAssets(manifest, generationId) {
       || !HEX64.test(String(metadata?.uncompressed_sha256 || ""))
       || !Number.isSafeInteger(metadata?.size)
       || metadata.size < 1
-      || metadata.size > 16_000_000
+      || metadata.size > MAX_COMPRESSED_ASSET_BYTES
       || !Number.isSafeInteger(metadata?.uncompressed_size)
       || metadata.uncompressed_size < 1
-      || metadata.uncompressed_size > 64_000_000
+      || metadata.uncompressed_size > MAX_UNCOMPRESSED_ASSET_BYTES
     ) {
       throw new Error(`invalid company detail shard ${id || index}`);
     }
@@ -341,9 +343,66 @@ async function refresh(env) {
     ]),
     [signatureName, signatureBytes, "application/octet-stream", null, signatureBytes.byteLength, await sha256(signatureBytes)],
   ];
-  const previous = await env.DB.prepare("SELECT generation_id FROM current_generation WHERE singleton = 1").first();
-  if (previous?.generation_id === generationId) {
-    let repaired = false;
+  const summary = manifest.summary || {};
+  const sourceCommit = String(manifest.provenance?.source_commit || "");
+  const incomingMarketAsOf = String(manifest.market_as_of || "");
+  const incomingDataTimestamp = String(manifest.data_timestamp_utc || "");
+  const incomingGeneratedAt = String(manifest.generated_at_utc || "");
+  const expectedGeneration = {
+    generation_id: generationId,
+    market_as_of: incomingMarketAsOf,
+    data_timestamp_utc: incomingDataTimestamp,
+    generated_at_utc: incomingGeneratedAt,
+    manifest_sha256: manifestHash,
+    company_count: Number(summary.company_count || 0),
+    triggered_company_count: Number(summary.triggered_company_count || 0),
+    conditional_company_count: Number(summary.conditional_company_count || 0),
+    pending_company_count: Number(summary.pending_company_count || 0),
+    source_commit: sourceCommit,
+  };
+  const previous = await env.DB.prepare(
+    `SELECT c.generation_id,
+            c.updated_at,
+            CASE WHEN g.generation_id IS NULL THEN 0 ELSE 1 END AS target_exists
+     FROM current_generation AS c
+     LEFT JOIN generations AS g ON g.generation_id = c.generation_id
+     WHERE c.singleton = 1`,
+  ).first();
+  const storedGeneration = await env.DB.prepare(
+    `SELECT generation_id, market_as_of, data_timestamp_utc, generated_at_utc,
+            manifest_sha256, company_count, triggered_company_count,
+            conditional_company_count, pending_company_count, source_commit,
+            created_at, last_checked_at
+     FROM generations
+     WHERE generation_id = ?`,
+  ).bind(generationId).first();
+  const immutableMetadataMatches = !storedGeneration || (
+    String(storedGeneration.generation_id || "") === expectedGeneration.generation_id
+    && String(storedGeneration.market_as_of || "") === expectedGeneration.market_as_of
+    && String(storedGeneration.data_timestamp_utc || "") === expectedGeneration.data_timestamp_utc
+    && String(storedGeneration.generated_at_utc || "") === expectedGeneration.generated_at_utc
+    && String(storedGeneration.manifest_sha256 || "").toLowerCase() === expectedGeneration.manifest_sha256
+    && Number(storedGeneration.company_count) === expectedGeneration.company_count
+    && Number(storedGeneration.triggered_company_count) === expectedGeneration.triggered_company_count
+    && Number(storedGeneration.conditional_company_count) === expectedGeneration.conditional_company_count
+    && Number(storedGeneration.pending_company_count) === expectedGeneration.pending_company_count
+    && String(storedGeneration.source_commit || "") === expectedGeneration.source_commit
+  );
+  if (!immutableMetadataMatches) {
+    throw new Error("stored generation metadata does not match the signed manifest");
+  }
+  const sameGenerationPointer = String(previous?.generation_id || "") === generationId;
+  const auditTimestampsComplete = Boolean(
+    storedGeneration
+    && String(storedGeneration.created_at || "").trim()
+    && String(storedGeneration.last_checked_at || "").trim()
+  );
+  const pointerIsDangling = Boolean(previous?.generation_id) && Number(previous?.target_exists || 0) !== 1;
+  const databaseRepairNeeded = pointerIsDangling
+    || (sameGenerationPointer && (!storedGeneration || !auditTimestampsComplete || !String(previous?.updated_at || "").trim()))
+    || (!previous?.generation_id && Boolean(storedGeneration));
+  let repairedObjects = false;
+  if (sameGenerationPointer || storedGeneration) {
     for (const [name, body, contentType, contentEncoding, expectedSize, expectedHash] of objects) {
       const key = `${prefix}/${name}`;
       const existing = await env.DATA_BUCKET.head(key);
@@ -356,26 +415,22 @@ async function refresh(env) {
           httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
           customMetadata: { sha256: String(expectedHash).toLowerCase() },
         });
-        repaired = true;
+        repairedObjects = true;
       }
     }
-    await env.DB.prepare("UPDATE generations SET last_checked_at = ? WHERE generation_id = ?").bind(now, generationId).run();
-    return { status: repaired ? "repaired" : "unchanged", generation_id: generationId, market_as_of: manifest.market_as_of };
+  } else {
+    for (const [name, body, contentType, contentEncoding, _expectedSize, expectedHash] of objects) {
+      await env.DATA_BUCKET.put(`${prefix}/${name}`, body, {
+        httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
+        customMetadata: { sha256: String(expectedHash).toLowerCase() },
+      });
+    }
   }
-
-  for (const [name, body, contentType, contentEncoding, _expectedSize, expectedHash] of objects) {
-    await env.DATA_BUCKET.put(`${prefix}/${name}`, body, {
-      httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
-      customMetadata: { sha256: String(expectedHash).toLowerCase() },
-    });
-  }
-  const summary = manifest.summary || {};
-  const sourceCommit = String(manifest.provenance?.source_commit || "");
   const generationValues = [
     generationId,
-    String(manifest.market_as_of || ""),
-    String(manifest.data_timestamp_utc || ""),
-    String(manifest.generated_at_utc || ""),
+    incomingMarketAsOf,
+    incomingDataTimestamp,
+    incomingGeneratedAt,
     manifestHash,
     Number(summary.company_count || 0),
     Number(summary.triggered_company_count || 0),
@@ -391,7 +446,9 @@ async function refresh(env) {
        company_count, triggered_company_count, conditional_company_count, pending_company_count,
        source_commit, created_at, last_checked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(generation_id) DO UPDATE SET last_checked_at = excluded.last_checked_at
+     ON CONFLICT(generation_id) DO UPDATE SET
+       created_at = COALESCE(NULLIF(TRIM(generations.created_at), ''), excluded.created_at),
+       last_checked_at = excluded.last_checked_at
      WHERE generations.market_as_of = excluded.market_as_of
        AND generations.data_timestamp_utc = excluded.data_timestamp_utc
        AND generations.generated_at_utc = excluded.generated_at_utc
@@ -412,30 +469,72 @@ async function refresh(env) {
          AND data_timestamp_utc = ?
          AND generated_at_utc = ?
          AND manifest_sha256 = ?
-         AND company_count = ?
-         AND triggered_company_count = ?
-         AND conditional_company_count = ?
-         AND pending_company_count = ?
-         AND source_commit = ?
-     )
-     ON CONFLICT(singleton) DO UPDATE SET
-       generation_id = excluded.generation_id,
-       updated_at = excluded.updated_at`
+          AND company_count = ?
+          AND triggered_company_count = ?
+          AND conditional_company_count = ?
+          AND pending_company_count = ?
+          AND source_commit = ?
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM current_generation AS current_pointer
+        JOIN generations AS served
+          ON served.generation_id = current_pointer.generation_id
+        WHERE current_pointer.singleton = 1
+          AND (
+            served.market_as_of > ?
+            OR (served.market_as_of = ? AND served.data_timestamp_utc > ?)
+            OR (
+              served.market_as_of = ?
+              AND served.data_timestamp_utc = ?
+              AND served.generated_at_utc > ?
+            )
+          )
+      )
+      ON CONFLICT(singleton) DO UPDATE SET
+        generation_id = excluded.generation_id,
+        updated_at = excluded.updated_at`
   ).bind(
     generationId,
     now,
     ...generationValues.slice(0, 10),
+    incomingMarketAsOf,
+    incomingMarketAsOf,
+    incomingDataTimestamp,
+    incomingMarketAsOf,
+    incomingDataTimestamp,
+    incomingGeneratedAt,
   );
   const [generationResult, pointerResult] = await env.DB.batch([generationStatement, pointerStatement]);
   if (
     generationResult?.success !== true
     || pointerResult?.success !== true
     || Number(generationResult?.meta?.changes || 0) !== 1
-    || Number(pointerResult?.meta?.changes || 0) !== 1
   ) {
     throw new Error("generation database transaction did not commit one consistent pointer");
   }
-  return { status: "updated", generation_id: generationId, market_as_of: manifest.market_as_of, company_count: Number(summary.company_count || 0) };
+  if (Number(pointerResult?.meta?.changes || 0) !== 1) {
+    const current = await env.DB.prepare(
+      `SELECT g.generation_id, g.market_as_of, g.data_timestamp_utc, g.generated_at_utc
+       FROM current_generation AS c
+       JOIN generations AS g ON g.generation_id = c.generation_id
+       WHERE c.singleton = 1`,
+    ).first();
+    if (current?.generation_id && current.generation_id !== generationId) {
+      return {
+        status: "superseded",
+        generation_id: generationId,
+        market_as_of: manifest.market_as_of,
+        current_generation_id: current.generation_id,
+        current_market_as_of: current.market_as_of,
+      };
+    }
+    throw new Error("generation database transaction did not commit one consistent pointer");
+  }
+  const status = sameGenerationPointer
+    ? (repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged")
+    : (databaseRepairNeeded ? "repaired" : "updated");
+  return { status, generation_id: generationId, market_as_of: manifest.market_as_of, company_count: Number(summary.company_count || 0) };
 }
 
 export default {

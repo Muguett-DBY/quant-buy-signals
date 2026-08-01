@@ -120,7 +120,7 @@ def test_buy_types_page_shows_provenance_and_keeps_extreme_finite_metrics_by_def
         and "同比覆盖: 利润表 50.0%、现金流量表 50.0%" in element.value
         for element in at.caption
     )
-    assert any("缺少同比中期财报证据" in value and "不进入当前估值和评分代" in value for value in warnings)
+    assert any("缺少同比中期财报证据" in value and "不进入当前估值和评分阶段" in value for value in warnings)
     assert any(
         "近十二个月数据覆盖（沪深非金融）" in element.value
         and "收入 2/2 (100.0%)" in element.value

@@ -38,12 +38,13 @@ from engine.buy_screener import (
     TYPE_NAMES,
     TYPE_WEIGHTS,
     _build_bear_case,
-    score_type7_quality_equity,
     screen_all_types,
 )
 from engine.dcf import ReportingPeriodContract
 from engine.market_coldness import build_market_coldness_evidence
 from engine.pipeline import PipelineIssue, run_market_analysis, validate_market_analysis_quality
+from engine.quality_equity import assess_quality_equity
+from engine.type7_patch6 import assess_patch6_type7
 
 
 def _reporting_period_contract() -> ReportingPeriodContract:
@@ -723,12 +724,14 @@ def _replayable_type7_ledger():
         {"1a": 5.0, "1b": 5.0, "1c": 5.0, "1d": 5.0},
         {"_status": "observe", "_evidence": "complete"},
     )
-    outcome, ledger = score_type7_quality_equity(
+    ledger = assess_quality_equity(
         {"code": "000001", "industry": "SOFTWARE", "source_trade_date": "2026-07-15"},
         type1,
         _replayable_type7_history(),
         valuation_evidence_complete=True,
     )
+    status = "triggered" if ledger["triggered"] else "insufficient_evidence"
+    outcome = (ledger["triggered"], 0.0, {}, {"_status": status})
     return outcome, ledger
 
 
@@ -999,10 +1002,10 @@ def test_independent_type5_audit_does_not_require_automatic_contract_on_other_pa
         lambda valuation: valuation.pop("pb_distribution"),
     ),
 )
-def test_independent_type7_audit_replays_raw_valuation_distributions(mutation):
+def test_independent_type7_audit_rejects_legacy_top_level_ledgers(mutation):
     outcome, ledger = _replayable_type7_ledger()
     status = outcome[3]["_status"]
-    assert _audit_type7_ledger("000001", ledger, status) == []
+    assert any("unsupported Type 7 ledger model" in error for error in _audit_type7_ledger("000001", ledger, status))
     forged = deepcopy(ledger)
     shareholder_input = next(item for item in forged["template1"]["items"] if item["key"] == "t1_19")["inputs"][
         "shareholder_return"
@@ -1011,37 +1014,22 @@ def test_independent_type7_audit_replays_raw_valuation_distributions(mutation):
 
     mutation(valuation)
 
-    assert any("raw market history replay mismatch" in error for error in _audit_type7_ledger("000001", forged, status))
+    assert any("unsupported Type 7 ledger model" in error for error in _audit_type7_ledger("000001", forged, status))
 
 
-def test_independent_audit_binds_type7_valuation_to_the_actual_dcf_partition():
-    quotes, financials = _market()
-    audit = audit_random_sample(
-        quotes,
-        financials,
-        eligible_codes=financials,
-        seed=1,
-        sample_size=5,
-        max_workers=1,
+def test_current_type7_keeps_the_old_dcf_bound_rule_as_non_decisive_legacy_diagnostic():
+    legacy = assess_quality_equity(
+        {"code": "000001", "industry": "SOFTWARE", "source_trade_date": "2026-07-15"},
+        (False, 5.0, {"1a": 5.0, "1b": 5.0, "1c": 5.0, "1d": 5.0}, {"_status": "observe"}),
+        _replayable_type7_history(),
+        valuation_evidence_complete=True,
     )
-    code = next(
-        code
-        for code in sorted(audit.dcf_results)
-        if "template1" in audit.scores.loc[audit.scores["code"] == code].iloc[0]["type7"]["ledger"]
-    )
-    row = audit.scores.loc[audit.scores["code"] == code].iloc[0].to_dict()
+    ledger = assess_patch6_type7({"code": "000001", "industry": "SOFTWARE"}, legacy_diagnostic=legacy)
 
-    errors = _independent_checks(
-        pd.DataFrame([row]),
-        (code,),
-        {},
-        {code: "fixture_removed_dcf"},
-        quotes=quotes,
-        financials=financials,
-        reporting_period_contract=_reporting_period_contract(),
-    )
-
-    assert any("valuation prerequisite is not bound to validated DCF" in error for error in errors)
+    assert ledger["model_id"] == "patch6-type7-classified-equity-v2"
+    assert "template1" not in ledger
+    assert ledger["legacy_diagnostic"]["scores"] == legacy["scores"]
+    assert ledger["legacy_diagnostic"]["decisive"] is False
 
 
 def test_independent_bear_case_rounds_subscores_like_production():
@@ -1051,6 +1039,31 @@ def test_independent_bear_case_rounds_subscores_like_production():
     }
 
     assert _audit_bear_case("type7", payload) == _build_bear_case("type7", payload)
+
+
+def test_independent_audit_preserves_type7_three_decimal_total_precision():
+    quotes, financials = _market()
+    audit = audit_random_sample(quotes, financials, eligible_codes=financials, seed=1, sample_size=5, max_workers=1)
+    original = audit.scores.loc[audit.scores["code"] == "000002"].iloc[0].to_dict()
+    type7 = original["type7"]
+    exact_total = round(
+        sum(type7["sub_scores"][key] * TYPE_WEIGHTS["type7"][key] for key in TYPE_WEIGHTS["type7"]),
+        3,
+    )
+
+    assert type7["total"] == exact_total
+    assert not any(
+        "type7: total differs from fixed weighted score" in error
+        for error in _single_company_independent_errors(original, audit, quotes, financials)
+    )
+
+    rounded = deepcopy(original)
+    rounded["type7"]["total"] = round(exact_total, 1)
+    rounded["type7_score"] = rounded["type7"]["total"]
+    errors = _single_company_independent_errors(rounded, audit, quotes, financials)
+
+    assert rounded["type7"]["total"] != exact_total
+    assert any("type7: total differs from fixed weighted score" in error for error in errors)
 
 
 def test_independent_audit_rejects_both_low_score_false_positive_and_qualifying_false_negative():

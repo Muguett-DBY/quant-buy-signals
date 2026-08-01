@@ -19,6 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from data.public_presentation import public_reason_text
+from engine.type7_patch6 import MODEL_ID as _PATCH6_TYPE7_MODEL_ID
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -77,9 +78,9 @@ TYPE_DIMENSIONS = {
         ("6e", "仓位风控", 0.15),
     ],
     "type7": [
-        ("7a", "长期质量与回报", 1.0 / 3.0),
-        ("7b", "产业质量与估值", 1.0 / 3.0),
-        ("7c", "商业质量与安全边际", 1.0 / 3.0),
+        ("7a", "本类别的商业模式", 1.0 / 3.0),
+        ("7b", "本类别的护城河", 1.0 / 3.0),
+        ("7c", "本类别的长期成长", 1.0 / 3.0),
     ],
 }
 
@@ -298,6 +299,11 @@ _TYPE7_SCORE_DISPLAY_NAMES = {
     "template5": "产业质量与估值评分",
     "patch5": "商业质量与安全边际评分",
 }
+_PATCH6_TYPE7_DIMENSION_DISPLAY_NAMES = {
+    "BM": "本类别的商业模式",
+    "MOAT": "本类别的护城河",
+    "G": "本类别的长期成长",
+}
 _TYPE7_PREREQUISITE_DISPLAY_NAMES = {
     "core_modules_80pct": "全部必需子项完整，且核心质量资料覆盖至少80%",
     "technology_patch4": "技术类公司补充核验",
@@ -305,7 +311,7 @@ _TYPE7_PREREQUISITE_DISPLAY_NAMES = {
     "latest_quote_and_valuation": "最新行情与估值",
     "three_external_reports": "至少三份外部研究资料",
     "external_report_content_verification": "外部资料内容交叉核验",
-    "ten_year_return_and_five_year_valuation": "十年回报与五年估值历史",
+    "ten_year_return_and_five_year_valuation": "十年回报检验与近五年估值分位",
 }
 
 
@@ -423,76 +429,226 @@ def _type7_prerequisite_detail(key: str, record: Mapping[str, Any]) -> str:
 
 def _type7_ledger_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
     """Return the readable subset of a Type-7 audit ledger."""
-    scores = ledger.get("scores")
-    checks = ledger.get("strict_checks")
-    score_rows: list[dict[str, str]] = []
-    for key, label in _TYPE7_SCORE_DISPLAY_NAMES.items():
-        score = _fmt_score(scores.get(key)) if isinstance(scores, Mapping) else None
-        passed = checks.get(key) if isinstance(checks, Mapping) else None
-        if not isinstance(passed, bool) and score is not None:
-            passed = score > 70.0
-        score_rows.append(
-            {
-                "评分体系": label,
-                "百分制得分": "暂无数据" if score is None else f"{score:.2f}",
-                "是否严格高于70分": "是" if passed is True else "否" if passed is False else "暂无数据",
-            }
-        )
-
-    prerequisites = ledger.get("prerequisites")
-    prerequisite_rows: list[dict[str, str]] = []
-    if isinstance(prerequisites, Mapping):
-        for key, label in _TYPE7_PREREQUISITE_DISPLAY_NAMES.items():
-            record = prerequisites.get(key)
-            if not isinstance(record, Mapping):
-                continue
-            prerequisite_rows.append(
+    if ledger.get("model_id") == _PATCH6_TYPE7_MODEL_ID:
+        dimensions = ledger.get("dimensions")
+        score_rows: list[dict[str, str]] = []
+        item_rows: list[dict[str, str]] = []
+        evidence_names = {
+            "primary": "直接资料",
+            "validated_nonfinancial_dcf": "已核验估值资料",
+            "reported_observable": "财报可复算数据",
+            "derived_proxy": "根据财务表现间接判断",
+            "partial": "部分资料",
+            "missing": "资料缺失",
+        }
+        for key, label in _PATCH6_TYPE7_DIMENSION_DISPLAY_NAMES.items():
+            section = dimensions.get(key) if isinstance(dimensions, Mapping) else None
+            score = _fmt_score(section.get("score")) if isinstance(section, Mapping) else None
+            upper = _fmt_score(section.get("upper_bound")) if isinstance(section, Mapping) else None
+            coverage = _fmt_score(section.get("coverage")) if isinstance(section, Mapping) else None
+            complete_section = isinstance(section, Mapping) and section.get("complete") is True
+            score_rows.append(
                 {
-                    "前置核验": label,
-                    "结果": "通过" if record.get("passed") is True else "未通过",
-                    "说明": _type7_prerequisite_detail(key, record),
+                    "本类别三项": label,
+                    "0至10分": (
+                        "暂无数据"
+                        if score is None
+                        else f"{score:.3f}"
+                        if complete_section
+                        else f"{score:.3f}至{upper:.3f}（资料未齐）"
+                        if upper is not None
+                        else "资料未齐"
+                    ),
+                    "证据覆盖": "暂无数据" if coverage is None else f"{coverage * 100:.1f}%",
                 }
             )
+            items = section.get("items") if isinstance(section, Mapping) else None
+            if isinstance(items, list):
+                for item in items:
+                    if not isinstance(item, Mapping):
+                        continue
+                    item_score = _fmt_score(item.get("score"))
+                    item_upper = _fmt_score(item.get("upper_bound"))
+                    item_complete = item.get("complete") is True
+                    missing_inputs = item.get("missing_inputs")
+                    missing_count = len(missing_inputs) if isinstance(missing_inputs, list) else 0
+                    evidence_level = str(item.get("evidence_level") or "missing")
+                    evidence_text = evidence_names.get(evidence_level, "待核验资料")
+                    raw_inputs = item.get("inputs")
+                    if (
+                        ledger.get("classification", {}).get("class_code") == "T"
+                        and item.get("key") == "cashflow_inflection"
+                        and isinstance(raw_inputs, Mapping)
+                        and (penalty := _fmt_score(raw_inputs.get("cycle_overlay_penalty"))) is not None
+                        and penalty > 0
+                    ):
+                        evidence_text += f"，周期叠加扣减{penalty:.2f}分"
+                    if missing_count:
+                        evidence_text += f"，缺{missing_count}项输入"
+                    item_rows.append(
+                        {
+                            "所属维度": label,
+                            "子指标": str(item.get("label") or "未命名子指标"),
+                            "0至10分": (
+                                "暂无数据"
+                                if item_score is None
+                                else f"{item_score:.3f}"
+                                if item_complete
+                                else f"{item_score:.3f}至{item_upper:.3f}（资料未齐）"
+                                if item_upper is not None
+                                else "资料未齐"
+                            ),
+                            "证据状态": evidence_text,
+                        }
+                    )
 
-    safety_veto = ledger.get("safety_veto")
-    patch5 = ledger.get("patch5")
-    safety_score = _fmt_score(patch5.get("safety_margin_score")) if isinstance(patch5, Mapping) else None
-    if isinstance(safety_veto, bool):
-        safety_detail = (
-            f"当前安全边际{safety_score:.2f}/20；低于8分即否决"
-            if safety_score is not None
-            else "安全边际低于8/20时否决"
+        classification = ledger.get("classification")
+        class_label = (
+            str(classification.get("class_label") or "未完成归类")
+            if isinstance(classification, Mapping)
+            else "未完成归类"
         )
-        prerequisite_rows.append(
-            {
-                "前置核验": "安全边际不得触发否决",
-                "结果": "未通过" if safety_veto else "通过",
-                "说明": safety_detail,
-            }
+        secondary_features = (
+            [value for value in classification.get("secondary_features", []) if value in {"弱周期", "强科技", "强周期"}]
+            if isinstance(classification, Mapping) and isinstance(classification.get("secondary_features"), list)
+            else []
         )
+        class_description = class_label + (
+            "（兼具" + "、".join(secondary_features) + "特征）" if secondary_features else ""
+        )
+        classification_complete = isinstance(classification, Mapping) and classification.get("route_complete") is True
+        possible_classes = (
+            [
+                {"W": "弱周期", "T": "强科技", "C": "强周期"}[value]
+                for value in classification.get("possible_classes", [])
+                if value in {"W", "T", "C"}
+            ]
+            if isinstance(classification, Mapping) and isinstance(classification.get("possible_classes"), list)
+            else []
+        )
+        if not classification_complete:
+            class_description = "暂按" + class_description
+            if possible_classes:
+                class_description += "（仍可能归为" + "或".join(possible_classes) + "）"
+        gates = ledger.get("decision_gates")
+        prerequisite_rows: list[dict[str, str]] = []
+        gate_labels = {
+            "future_fcf": "未来自由现金流前提",
+            "route_path": "本类别的买点条件",
+            "price_reasonableness": "第七类自身价格检查",
+        }
+        if isinstance(gates, Mapping):
+            for key, label in gate_labels.items():
+                gate = gates.get(key)
+                if not isinstance(gate, Mapping):
+                    continue
+                complete = gate.get("complete") is True
+                result = (
+                    "待刷新"
+                    if key == "price_reasonableness" and gate.get("required") is False
+                    else "通过"
+                    if complete and gate.get("passed") is True
+                    else "未通过"
+                    if complete
+                    else "待补证据"
+                )
+                if key == "future_fcf":
+                    published_basis = str(gate.get("basis") or "").strip()
+                    years = gate.get("years")
+                    positive_share = _fmt_score(gate.get("positive_share"))
+                    latest_fcf = _fmt_score(gate.get("latest_fcf"))
+                    detail = (
+                        published_basis
+                        if published_basis
+                        else f"连续{len(years)}个年度；自由现金流为正占比{positive_share * 100:.0f}%；"
+                        f"最新年度{'为正' if latest_fcf is not None and latest_fcf > 0 else '未转正'}"
+                        if complete and isinstance(years, list) and positive_share is not None
+                        else "需要截至最新财年的连续3至5年自由现金流数据"
+                    )
+                elif key == "route_path":
+                    detail = {
+                        "W": "采用弱周期公司的自由现金流折现估值路径",
+                        "T": "核对科技股长期激励、综合安全边际和历史估值",
+                        "C": ("第五类必须适用、证据完整、已经触发且总分不低于7分；并核对带息债务减货币资金后的净债"),
+                    }.get(str(classification.get("class_code") or ""), "分类路径资料待核对")
+                elif gate.get("required") is False:
+                    detail = "这代数据曾错误省略第七类自身价格检查，请刷新到最新数据后再判断"
+                else:
+                    detail = {
+                        "W": "第一类买入区深度分需不低于3分",
+                        "T": "近五年市净率分位需不高于20%（程序对历史底部区的量化定义）",
+                        "C": (
+                            "当前市净率需不高于1.20，且近五年市净率分位需不高于20%"
+                            "（1.20和20%是程序对接近净资产和历史底部区的量化定义）"
+                        ),
+                    }.get(str(classification.get("class_code") or ""), "价格资料待核对")
+                prerequisite_rows.append({"前置核验": label, "结果": result, "说明": detail or "暂无说明"})
 
-    if ledger.get("triggered") is True:
-        conclusion = "三项百分制评分均严格高于70分，必需子项与全部前置核验通过，且安全边际未触发否决。"
-    elif safety_veto is True:
-        conclusion = "安全边际低于8/20，已触发否决，本类型不触发。"
-    elif ledger.get("decisively_not_triggered") is True:
-        conclusion = "即使补全当前缺失资料，至少一套评分仍无法严格超过70分。"
-    elif ledger.get("prerequisites_complete") is False:
-        conclusion = "必需子项或其他前置核验仍未通过，本类型暂不触发。"
-    else:
-        conclusion = "当前结果未满足三项百分制评分分别严格超过70分的触发条件。"
+        mean_score = _fmt_score(ledger.get("unrounded_mean"))
+        if ledger.get("triggered") is True:
+            score_text = "暂无数据" if mean_score is None else f"{mean_score:.3f}"
+            conclusion = (
+                f"{class_description}的优质股权质量已达标；商业模式、护城河、长期成长三项算术平均"
+                f"{score_text}，严格大于7.000，当前买点前提也已通过。"
+            )
+        elif ledger.get("veto") is True:
+            conclusion = f"已归为{class_description}；强周期商业模式或护城河低于5分，触发否决。"
+        elif ledger.get("quality_certified") is True:
+            conclusion = f"{class_description}的优质股权质量已达标，但买入前置条件尚未全部通过，当前不构成第七类买点。"
+        elif ledger.get("quality_complete") is not True:
+            conclusion = f"{class_description}仍有必需子指标资料未补齐，当前只能显示分数范围。"
+        else:
+            score_text = "暂无数据" if mean_score is None else f"{mean_score:.3f}"
+            conclusion = (
+                f"{class_description}的商业模式、护城河、长期成长三项算术平均为{score_text}，未同时满足全部触发条件。"
+            )
+        return {
+            "score_rows": score_rows,
+            "item_rows": item_rows,
+            "prerequisite_rows": prerequisite_rows,
+            "conclusion": conclusion,
+        }
+
     return {
-        "score_rows": score_rows,
-        "prerequisite_rows": prerequisite_rows,
-        "conclusion": conclusion,
+        "score_rows": [],
+        "item_rows": [],
+        "prerequisite_rows": [],
+        "conclusion": "这份第七类结果使用的是旧数据格式，已停止参与判断；请刷新到最新市场数据。",
     }
 
 
 def _type_trigger_rule_text(type_key: str) -> str:
+    if type_key == "type3":
+        return (
+            "触发条件：仅适用于非金融公司；须有截至最新完整财年的连续4年营收，长期趋势增速至少10%，"
+            "五项证据完整且加权总分至少7分。可追溯的护城河支撑度（3a）或增长可持续性（3d）不高于3分时否决；"
+            "产业/股价泡沫（3e）证据完整且不高于3分时，总分封顶4.9分。"
+        )
+    if type_key == "type4":
+        return (
+            "触发条件：仅适用于非金融且能够形成长期估值证据的公司；六项证据完整且加权总分至少7分。"
+            "可追溯的护城河耐久度（4c）不高于3分时否决；只有产业泡沫证据与股价隐含增长年数均完整时，"
+            "产业泡沫防范（4e）和股价泡沫防范（4f）同时不高于3分才否决。"
+        )
+    if type_key == "type5":
+        return (
+            "触发条件：先用外部证据，或限定的大宗行业加毛利率与利润周期，确认强周期属性（5a）至少7分；"
+            "底部信号至正常化盈利估值（5b至5e）证据完整后，五项加权总分至少7分即触发。"
+            "抗周期能力（5c）只按20%权重计入总分，不另设5分门槛，也不存在3分否决线。"
+        )
+    if type_key == "type6":
+        return (
+            "触发条件：仅适用于非金融、亏损或净利率不高于5%的公司。高景气技术型要求行业增速至少20%、"
+            "公司趋势增速至少30%、市值不超过300亿元；其余反转型市值不超过100亿元。技术壁垒（6b）和"
+            "模式创新（6c）须有可追溯原始资料，反转证据须完整，前四项至少两项达到5分；反转型的困境反转"
+            "（6d）还须达到5分。加权总分至少7分，且实际单票仓位不超过5%、高风险组合不超过15%后才触发。"
+        )
     if type_key == "type7":
         return (
-            "触发条件：三项百分制评分必须分别严格高于70分，不能用平均分相互补偿；"
-            "全部必需子项和其他前置核验必须通过，且安全边际不得低于8/20。"
+            "触发条件：先归类为弱周期、强科技或强周期，再用该类别的12个子指标计算商业模式、护城河和长期成长；"
+            "三项算术平均必须严格大于7.000。强周期的商业模式或护城河低于5分即否决，"
+            "这是质量认证；形成当前买点还须通过本类别的买点条件与未来自由现金流前提，"
+            "并始终通过第七类自己的分类价格检查；其他买入情况触发也不能免除。"
         )
     return "触发条件：加权总分达到7.0分，并满足该类型全部附加条件且未触发一票否决。"
 
@@ -1109,6 +1265,7 @@ def _build_successful_analysis_state(
         "suspended_or_no_trade": "停牌或当日无成交，仅有昨收参考价",
         "incomplete_financial_evidence": "财报数据集交集未通过完整性边界",
         "stale_or_incomplete_current_financials": "最新应披露财报不完整或已过期",
+        "missing_comparative_interim": "缺少同口径同比中期财报，暂不能可靠计算增长与拐点",
         "invalid_market_cap": "缺少有效总市值，无法可靠计算估值与横截面指标",
         "unsupported_market": "北交所不在本产品可交易分析范围（仅分析沪深）",
         "unclassified_industry": "缺少可信行业分类，禁止套用默认Beta或行业基准",
@@ -1358,11 +1515,25 @@ def _render_global_status(frame: pd.DataFrame) -> None:
             {
                 "买入情况": TYPE_NAMES[type_key],
                 "已触发": statuses["triggered"],
+                "质量已达标": (
+                    sum(
+                        1
+                        for payload in frame[type_key]
+                        if isinstance(payload, Mapping)
+                        and isinstance(payload.get("ledger"), Mapping)
+                        and payload["ledger"].get("quality_certified") is True
+                    )
+                    if type_key == "type7" and type_key in frame
+                    else "—"
+                ),
                 "待仓位/动作确认": statuses["conditional"],
                 "观察": statuses["observe"],
+                "未触发": statuses["not_triggered"],
                 "待补证据": statuses["insufficient_evidence"],
                 "已否决": statuses["vetoed"],
+                "市场阻断": statuses["blocked"],
                 "不适用": statuses["not_applicable"],
+                "异常": statuses["invalid"],
             }
         )
     with st.expander("七类覆盖与待补资料", expanded=False):
@@ -1388,7 +1559,8 @@ def _render_global_status(frame: pd.DataFrame) -> None:
             )
         if not type7.get("已触发") and type7.get("待补证据"):
             explanations.append(
-                "情况七要求三份独立外部研究资料、五年估值历史和三套账本同时达标；任一缺失都会保留为“待补证据”。"
+                "情况七先按周期、科技和需求敏感度归类，再计算该类别的商业模式、护城河和长期成长。"
+                "强周期与强科技还会补取五年PB历史；质量认证和当前买点分开显示，缺分类子项时保留为“待补证据”，不会用行业故事补分。"
             )
         if explanations:
             st.info("\n\n".join(explanations))
@@ -1438,7 +1610,7 @@ def _render_global_status(frame: pd.DataFrame) -> None:
         if isinstance(comparative_missing, (list, tuple, set)) and comparative_missing:
             st.warning(
                 f"{len(comparative_missing)} 只股票缺少同比中期财报证据；"
-                "这些股票不进入当前估值和评分代，补齐同口径证据后才会重新纳入。"
+                "这些股票不进入当前估值和评分阶段，补齐同口径证据后才会重新纳入。"
             )
 
         industry_status = validation.get("industry_status")
@@ -1451,7 +1623,7 @@ def _render_global_status(frame: pd.DataFrame) -> None:
                     payload = market_coverage.get(market)
                     coverage = _fmt_score(payload.get("specific_coverage")) if isinstance(payload, Mapping) else None
                     if coverage is not None:
-                        market_parts.append(f"{market} {coverage * 100:.1f}%")
+                        market_parts.append(f"{'沪市' if market == 'SH' else '深市'} {coverage * 100:.1f}%")
             overall = f"总体 {specific * 100:.1f}%" if specific is not None else "总体未知"
             details = "、".join(market_parts)
             st.warning(
@@ -1810,7 +1982,7 @@ def _render_radar_chart(type_key, row):
             r=[7.0] * len(closed_labels),
             theta=closed_labels,
             line=dict(color="red", dash="dash", width=1),
-            name="每项须严格高于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）",
+            name="三项算术平均严格大于7分" if type_key == "type7" else "7分视觉参考（非子项门槛）",
         )
     )
     fig.update_layout(
@@ -1906,7 +2078,7 @@ def _render_dimension_table(type_key, row):
         else _format_metric(total)
     )
     if type_key == "type7":
-        st.caption(f"三项折算平均分: **{total_text}/10**（仅供汇总，不是触发阈值） | 状态: {status}")
+        st.caption(f"三项算术平均分: **{total_text}/10**（质量认证须严格大于7.000） | 状态: {status}")
     else:
         st.caption(f"总分: **{total_text}/10** | 状态: {status} | 基础分数门槛: ≥7.0")
 
@@ -2085,24 +2257,43 @@ def _render_stock_inline(row):
             risk_notice = _type_risk_notice(t, reasons)
             if risk_notice:
                 st.error(f"仓位与最大损失约束：{risk_notice}")
+            decision = td.get("decision")
+            raw_missing_dimensions = (
+                decision.get("missing_dimensions")
+                if isinstance(decision, Mapping)
+                else reasons.get("_decision_missing_dimensions")
+            )
+            missing_dimensions = (
+                set(raw_missing_dimensions) if isinstance(raw_missing_dimensions, (list, tuple, set)) else set()
+            )
             lines = []
             for key, name, wt in dims:
-                v = subs.get(key, 0)
+                v = _fmt_score(subs.get(key))
                 r = _display_reason(reasons.get(key, ""))
+                dimension_missing = key in missing_dimensions or v is None
                 value_text = (
                     "不适用"
                     if status_code == "not_applicable"
                     else "证据不足"
-                    if status_code == "insufficient_evidence"
+                    if dimension_missing
                     else f"{_format_metric(v, digits=3 if t == 'type7' else 1)}分"
                 )
-                lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")
+                evidence_text = r or ("该子项尚缺可核验资料" if dimension_missing else "—")
+                lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {evidence_text}")
             st.caption("  \n".join(lines))
             if t == "type7" and isinstance(td.get("ledger"), Mapping):
                 st.caption(_type_trigger_rule_text("type7"))
                 summary = _type7_ledger_summary(td["ledger"])
-                st.dataframe(pd.DataFrame(summary["score_rows"]), width="stretch", hide_index=True)
+                if summary["score_rows"]:
+                    st.dataframe(pd.DataFrame(summary["score_rows"]), width="stretch", hide_index=True)
                 st.caption(summary["conclusion"])
+                if summary.get("item_rows"):
+                    with st.expander("查看12个子指标及证据状态", expanded=False):
+                        st.dataframe(
+                            pd.DataFrame(summary["item_rows"]),
+                            width="stretch",
+                            hide_index=True,
+                        )
                 if summary["prerequisite_rows"]:
                     with st.expander("查看前置证据核验", expanded=False):
                         st.dataframe(
@@ -2254,7 +2445,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
 
     score_status = st.status("指标提取与七类型评分中...", expanded=True)
     growth_status = st.status("可持续高增长型所需的分部与并购资料正在预筛选...", expanded=False)
-    history_status = st.status("优质股权型所需的长期资料正在预筛选...", expanded=False)
+    history_status = st.status("优质股权型分类路径所需的长期估值资料正在预筛选...", expanded=False)
 
     def score_cb(done, total):
         if done == total or done % 500 == 0:
@@ -2262,7 +2453,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
 
     def quality_history_cb(done, total):
         if done == total or done % 20 == 0:
-            history_status.update(label=f"优质股权型的十年回报与五年估值资料: {done}/{total}", expanded=True)
+            history_status.update(label=f"优质股权型分类路径的长期估值资料: {done}/{total}", expanded=True)
 
     def type3_growth_cb(done, total):
         if done == total or done % 10 == 0:
@@ -2332,7 +2523,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
         dcf_status.update(label="估值/评分或快照提升失败", state="error")
         score_status.update(label="新结果未替换上一版", state="error")
         growth_status.update(label="可持续高增长型的深层资料未完成", state="error")
-        history_status.update(label="优质股权型的长期资料未完成", state="error")
+        history_status.update(label="优质股权型分类路径的长期估值资料未完成", state="error")
         st.session_state["buy_types_refresh_error"] = "估值或评分未通过完整性校验，新结果未替换上一版。"
         return False
 
@@ -2397,7 +2588,7 @@ def _run_full_analysis(*, force_refresh: bool, user_evidence_payload: object = N
     )
     score_status.update(label=f"指标提取与七类型评分完成: {len(analysis.scores)} 只", state="complete")
     growth_status.update(label="可持续高增长型的深层资料阶段完成（仅核验仍可能达标的公司）", state="complete")
-    history_status.update(label="优质股权型的长期资料阶段完成（仅核验仍可能达标的公司）", state="complete")
+    history_status.update(label="优质股权型分类路径的长期估值资料阶段完成（仅核验仍可能达标的公司）", state="complete")
     st.session_state.pop("buy_types_refresh_error", None)
     st.toast("✅ 分析完成，新一代数据已生效！", icon="🎉")
     return True
@@ -2484,7 +2675,7 @@ def show():
         1. 抓取沪深行情；源响应中如含北交所记录，会在进入分析快照前剔除
         2. 批量获取最新财报数据
         3. 对非金融公司按未来现金流估值；对银行、保险和券商按盈利能力和净资产估值
-        4. 按七种买入情况逐维度评分（0-10分制；优质股权型同时保留三项百分制复算账本）
+        4. 按七种买入情况逐维度评分（0-10分制；优质股权型按归类后的12个子指标复算）
         5. 展示全部子维度得分 + 评分依据
         """)
         return

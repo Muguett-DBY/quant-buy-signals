@@ -30,6 +30,7 @@ from engine.quantitative_evidence import (
     derive_company_evidence,
 )
 from engine.quality_equity import TYPE7_DIRECT_SCORE_KEYS
+from engine.type7_patch6 import MODEL_ID as PATCH6_TYPE7_MODEL_ID, SCHEMA_VERSION as PATCH6_TYPE7_SCHEMA_VERSION
 from tools.run_full_audit import (
     _canonical_market_coldness_json,
     _replay_market_coldness_reference_artifact,
@@ -38,6 +39,7 @@ from tools.verify_release_zip import (
     _REQUIRED_FILES,
     _RULE_FILES as _RELEASE_RULE_FILES,
     _audit_patch4_evidence_valid,
+    _audit_type7_ledger_valid,
     _desktop_launcher_errors,
     _expected_audit_bear_case,
     _git_tree_entries,
@@ -70,6 +72,7 @@ _EXPECTED_RULE_FILES = {
     "engine/quality_equity.py",
     "engine/risk.py",
     "engine/scenarios.py",
+    "engine/type7_patch6.py",
     "engine/valuation_status.py",
     "tools/china_a_share_trading_calendar.json",
 }
@@ -200,7 +203,7 @@ def _market_coldness_audit_fixture(analysis_codes: tuple[str, ...], eligible_cod
         "eligible_unscored_data_gap_count": sum(len(codes) for codes in data_gaps.values()),
         "eligible_unscored_data_gap_codes_by_reason": data_gaps,
     }
-    return artifact, summary, status
+    return artifact, evidence, summary, status
 
 
 _REPORTING_PERIOD_CONTRACT = {
@@ -640,7 +643,11 @@ def _set_fixture_type7_ledger(company, *, valuation_evidence_complete, metric=No
     else:
         outcome, ledger = deepcopy(cached)
         ledger["code"] = code
-        ledger["prerequisites"]["external_report_content_verification"]["code"] = code
+        prerequisites = ledger.get("prerequisites")
+        if isinstance(prerequisites, dict):
+            report_binding = prerequisites.get("external_report_content_verification")
+            if isinstance(report_binding, dict):
+                report_binding["code"] = code
     triggered, total, sub_scores, reasons = outcome
     company["type7_score"] = total
     company["type7"] = {
@@ -774,7 +781,17 @@ def _quantitative_context():
 
 
 def _quantitative_evidence_fixture(code):
-    evidence = derive_company_evidence(_quantitative_metric(code), _quantitative_context())
+    eligible_codes = tuple(_eligible_codes())
+    _artifact, coldness, _summary, _status = _market_coldness_audit_fixture(
+        eligible_codes,
+        eligible_codes,
+    )
+    metric = _quantitative_metric(code)
+    metric["source_trade_date"] = "2026-07-15"
+    coldness_record = deepcopy(coldness[code])
+    metric.update({key: value for key, value in coldness_record.items() if key != "components"})
+    metric["market_coldness_components"] = coldness_record["components"]
+    evidence = derive_company_evidence(metric, _quantitative_context())
     assert all(record["evidence_level"] == "derived_proxy" for record in evidence.values())
     return evidence
 
@@ -941,8 +958,8 @@ def _audit_payload(files):
                 "risk_status": "",
             },
             "ledger": {
-                "schema_version": 7,
-                "model_id": "patch6-type7-quality-equity-v7",
+                "schema_version": PATCH6_TYPE7_SCHEMA_VERSION,
+                "model_id": PATCH6_TYPE7_MODEL_ID,
                 "code": code,
                 "applicable": False,
                 "reason": type7_reason,
@@ -996,7 +1013,7 @@ def _audit_payload(files):
         + [f"{code:06d}" for code in range(600001, 602308)]
     )
     ineligible_codes = sorted(set(analysis_codes) - set(eligible_codes))
-    coldness_artifact, coldness_summary, coldness_status = deepcopy(
+    coldness_artifact, _coldness_evidence, coldness_summary, coldness_status = deepcopy(
         _market_coldness_audit_fixture(tuple(analysis_codes), tuple(eligible_codes))
     )
     excluded_financial_codes = sorted({f"{code:06d}" for code in range(602001, 602031)} | set(sample_codes[1:-1]))
@@ -1071,7 +1088,7 @@ def _audit_payload(files):
         "dcf_valid": 60,
         "eligible_universe_size": len(eligible_codes),
         "provenance": {
-            "audit_schema_version": 4,
+            "audit_schema_version": 5,
             "patch6_source": {
                 "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
                 "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6",
@@ -1092,6 +1109,10 @@ def _audit_payload(files):
                 "patch6": {
                     "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
                     "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6",
+                },
+                "subsequent_addenda": {
+                    "path_at_model_authoring": r"E:\模板汇总MD\后续附加补丁们.md",
+                    "sha256": "0dea9125bbe2039acf741ac997e62b53c49b6e3dc32e7d956ed96f9d7054b64f",
                 },
             },
             "generated_at_utc": "2026-07-15T12:00:00+00:00",
@@ -1389,6 +1410,7 @@ def _write_minimal_release(
         "engine/quality_equity.py": b"# quality equity\n",
         "engine/risk.py": b"# risk\n",
         "engine/scenarios.py": b"# scenarios\n",
+        "engine/type7_patch6.py": b"# classified type7 rules\n",
         "engine/valuation_status.py": b"# valuation status\n",
         "ui/buy_types_page.py": b"# buy page\n",
         "ui/leaders_page.py": b"# leaders page\n",
@@ -2007,7 +2029,7 @@ def test_release_zip_verifier_replays_an_applicable_type7_ledger_and_rejects_nes
 
     def install_and_tamper(payload):
         _install_applicable_type7_ledger(payload)
-        payload["companies"][0]["type7"]["ledger"]["strict_checks"]["template1"] = 1
+        payload["companies"][0]["type7"]["ledger"]["dimensions"]["BM"]["items"][0]["score"] -= 1
 
     _write_minimal_release(
         tampered,
@@ -2020,23 +2042,20 @@ def test_release_zip_verifier_replays_an_applicable_type7_ledger_and_rejects_nes
 @pytest.mark.parametrize(
     "mutation",
     (
-        lambda valuation: valuation.update(pe_observations=799),
-        lambda valuation: valuation.update(median_pb_mrq=7.1),
-        lambda valuation: valuation.update(pe_percentile=0.11),
-        lambda valuation: valuation.pop("pe_distribution"),
-        lambda valuation: valuation.pop("pb_distribution"),
+        lambda ledger: ledger["classification"]["sensitivity_scores"].update(T=9.9),
+        lambda ledger: ledger["classification"].update(class_code="C"),
+        lambda ledger: ledger["dimensions"]["MOAT"].update(score=9.9),
+        lambda ledger: ledger.update(unrounded_mean=9.9),
+        lambda ledger: ledger["legacy_diagnostic"].update(decisive=True),
     ),
 )
-def test_release_zip_verifier_replays_raw_type7_valuation_distributions(tmp_path, mutation):
-    path = tmp_path / "forged-type7-valuation-history.zip"
+def test_release_zip_verifier_replays_classified_type7_atomic_ledger(tmp_path, mutation):
+    path = tmp_path / "forged-type7-classified-ledger.zip"
 
     def install_and_tamper(payload):
         _install_applicable_type7_ledger(payload)
         ledger = payload["companies"][0]["type7"]["ledger"]
-        shareholder_input = next(item for item in ledger["template1"]["items"] if item["key"] == "t1_19")["inputs"][
-            "shareholder_return"
-        ]
-        mutation(shareholder_input["valuation_history_contract"])
+        mutation(ledger)
 
     _write_minimal_release(
         path,
@@ -2281,14 +2300,26 @@ def test_release_zip_verifier_rejects_triggered_type1_after_valuation_skip(tmp_p
 
 
 def test_release_zip_verifier_rejects_previous_type7_ledger_schema(tmp_path):
-    path = tmp_path / "type7-schema-v4.zip"
+    path = tmp_path / "type7-schema-v0.zip"
 
     def downgrade_schema(payload):
-        payload["companies"][0]["type7"]["ledger"]["schema_version"] = 4
+        payload["companies"][0]["type7"]["ledger"]["schema_version"] = 0
 
     _write_minimal_release(path, mutate_payload=downgrade_schema, rerender_companions=True)
 
     assert any("100 complete company rows" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_legacy_type7_as_top_level_ledger():
+    assert not _audit_type7_ledger_valid(
+        "000001",
+        {
+            "schema_version": 7,
+            "model_id": "patch6-type7-quality-equity-v7",
+            "code": "000001",
+        },
+        "insufficient_evidence",
+    )
 
 
 @pytest.mark.parametrize(

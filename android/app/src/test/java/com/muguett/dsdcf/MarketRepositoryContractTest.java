@@ -727,6 +727,25 @@ public final class MarketRepositoryContractTest {
     }
 
     @Test
+    public void typeScorePreservesThreeDecimalThresholdPrecision() {
+        Map<String, Double> subScores = new HashMap<>();
+        subScores.put("7a", 7.001);
+        Map<String, String> reasons = new HashMap<>();
+        reasons.put("7a", "严格高于7分");
+        MarketRepository.TypeScore typeScore = new MarketRepository.TypeScore(
+                "triggered",
+                7.001,
+                "",
+                null,
+                subScores,
+                reasons
+        );
+
+        assertEquals("已触发，7.001分", typeScore.describe());
+        assertEquals("7.001分；严格高于7分", typeScore.describeDimension("7a"));
+    }
+
+    @Test
     public void type6InvestorActionDimensionIsNeverDisplayedAsMissingCompanyData() {
         MarketRepository.DecisionSummary inactiveDecision = new MarketRepository.DecisionSummary(
                 false,
@@ -817,6 +836,11 @@ public final class MarketRepositoryContractTest {
         );
 
         String detail = entry.detailedLabel();
+        assertTrue(detail.contains("1a 买入区深度"));
+        assertTrue(detail.contains("3a 护城河支撑度"));
+        assertTrue(detail.contains("5a 强周期属性"));
+        assertTrue(detail.contains("6b 技术壁垒"));
+        assertFalse(detail.contains("1a 价格与价值空间"));
         assertTrue(detail.contains("可核验的财务与行业数据"));
         assertFalse(detail.contains("model_id"));
         assertFalse(detail.contains("schema_version"));

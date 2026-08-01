@@ -52,6 +52,7 @@ from engine.valuation_status import (
     DCF_SKIP_SOURCE_MISSING,
     normalize_dcf_skip_classification,
 )
+from engine.type7_patch6 import MODEL_ID as PATCH6_TYPE7_MODEL_ID, validate_patch6_type7_ledger
 
 
 def _normalise_code(value: Any) -> str:
@@ -430,6 +431,7 @@ _RULE_FILES = (
     _ROOT / "engine" / "quantitative_evidence.py",
     _ROOT / "engine" / "risk.py",
     _ROOT / "engine" / "scenarios.py",
+    _ROOT / "engine" / "type7_patch6.py",
     _ROOT / "engine" / "valuation_status.py",
     _ROOT / "data" / "capex_evidence.py",
     _ROOT / "data" / "datacenter.py",
@@ -482,6 +484,10 @@ TYPE7_SOURCE_DOCUMENTS = {
     "patch6": {
         "path_at_model_authoring": PATCH6_SOURCE_PATH,
         "sha256": PATCH6_SOURCE_SHA256,
+    },
+    "subsequent_addenda": {
+        "path_at_model_authoring": r"E:\模板汇总MD\后续附加补丁们.md",
+        "sha256": "0dea9125bbe2039acf741ac997e62b53c49b6e3dc32e7d956ed96f9d7054b64f",
     },
 }
 RISK_PARAMETER_SOURCES = {
@@ -605,7 +611,7 @@ def _build_provenance(
 ) -> dict[str, Any]:
     state_hashes = audit_state_hashes()
     provenance = {
-        "audit_schema_version": 4,
+        "audit_schema_version": 5,
         "generated_at_utc": datetime.now(tz=timezone.utc).isoformat(),
         "snapshot_content_sha256": _input_snapshot_hash(quotes, financials),
         "snapshot_artifact_sha256": snapshot_sha256,
@@ -3163,17 +3169,1293 @@ def _audit_type7_ledger_impl(
     return errors
 
 
+_INDEPENDENT_TYPE7_MODEL_ID = "patch6-type7-classified-equity-v2"
+_INDEPENDENT_TYPE7_SOURCE_RULE = (
+    "classify C/T/N; certify quality when arithmetic mean(BM,MOAT,G) strictly > 7; "
+    "apply class-specific route and current-price gates for buy readiness"
+)
+_INDEPENDENT_TYPE7_CLASSIFICATION_RULE = "T>=7 -> T; else C>=7 -> C; else W (N is reported as weak-cycle evidence)"
+_INDEPENDENT_TYPE7_TOP_FIELDS = {
+    "schema_version",
+    "model_id",
+    "code",
+    "as_of",
+    "source_rule",
+    "strict_threshold",
+    "classification",
+    "dimension_weights",
+    "decision_gates",
+    "dimensions",
+    "scores",
+    "unrounded_mean",
+    "score",
+    "upper_bound",
+    "quality_complete",
+    "quality_certified",
+    "complete",
+    "missing_items",
+    "veto",
+    "veto_dimensions",
+    "condition_failures",
+    "triggered",
+    "buy_ready",
+    "legacy_diagnostic",
+    "history_request_needed",
+    "research_request_needed",
+}
+_INDEPENDENT_TYPE7_CLASS_COMPONENTS = {
+    "C": {
+        "c_margin_volatility": 3.0,
+        "c_profit_elasticity": 3.0,
+        "c_capex_intensity": 2.0,
+        "c_commodity_driver": 2.0,
+    },
+    "T": {
+        "t_rd_intensity": 3.0,
+        "t_intangible_patent": 2.0,
+        "t_iteration": 2.0,
+        "t_platform": 3.0,
+    },
+    "N": {
+        "n_repeat": 3.0,
+        "n_macro_beta": 2.0,
+        "n_pricing": 3.0,
+        "n_mindshare": 2.0,
+    },
+}
+_INDEPENDENT_TYPE7_DIRECT_COMMODITY_INDUSTRIES = {
+    "STEEL",
+    "NONFERROUS",
+    "CHEMICAL",
+    "BUILDING_MATERIAL",
+    "OIL_GAS",
+    "COAL",
+}
+_INDEPENDENT_TYPE7_CYCLICAL_INDUSTRIES = _INDEPENDENT_TYPE7_DIRECT_COMMODITY_INDUSTRIES | {
+    "CONST_MACHINERY",
+    "AGRICULTURE",
+    "TRANSPORT",
+}
+_INDEPENDENT_TYPE7_CORE_TECH_INDUSTRIES = {
+    "SOFTWARE",
+    "SEMICONDUCTOR",
+    "BIO_PHARMA",
+    "CHEM_PHARMA",
+    "ELEC_COMPONENT",
+    "TELECOM",
+}
+_INDEPENDENT_TYPE7_TECH_INDUSTRIES = _INDEPENDENT_TYPE7_CORE_TECH_INDUSTRIES | {
+    "MEDICAL_SERVICE",
+    "AUTO_VEHICLE",
+    "AUTO_PARTS",
+    "NEW_ENERGY_VEH",
+    "INDUST_MACHINERY",
+    "ELEC_EQUIP",
+    "MEDIA",
+}
+_INDEPENDENT_TYPE7_ESSENTIAL_INDUSTRIES = {
+    "ALCOHOL",
+    "FOOD_BEV",
+    "HOME_APPLIANCE",
+    "TRAD_CN_MED",
+    "CHEM_PHARMA",
+    "BIO_PHARMA",
+    "MEDICAL_SERVICE",
+    "POWER_UTILITY",
+    "TELECOM",
+}
+_INDEPENDENT_TYPE7_PROXY_COMPONENT_METADATA = {
+    "c_commodity_driver": {
+        "label": "商品价格/产能驱动",
+        "formula": "industry proxy: direct commodity=1;broad cyclical=0.5;other=0 (source item max=2)",
+        "source_rule": "industry proxy capped at half the source maximum; not primary product-price evidence",
+        "input_keys": {"industry"},
+    },
+    "t_intangible_patent": {
+        "label": "专利/无形资产密集",
+        "formula": "industry proxy: core technology=1;technology=0.5;other=0 (source item max=2)",
+        "source_rule": "industry proxy capped at half the source maximum; not patent evidence",
+        "input_keys": {"industry"},
+    },
+    "t_iteration": {
+        "label": "技术/产品迭代周期",
+        "formula": "industry proxy: core technology=1;technology=0.5;other=0 (source item max=2)",
+        "source_rule": "industry-cycle proxy capped at half the source maximum; not primary product-roadmap evidence",
+        "input_keys": {"industry"},
+    },
+    "n_repeat": {
+        "label": "复购/必选",
+        "formula": "industry proxy: essential=2;repeat-consumption=1;other=0 (source item max=3)",
+        "source_rule": "industry demand proxy below the source maximum; not primary purchase-frequency evidence",
+        "input_keys": {"industry"},
+    },
+    "n_macro_beta": {
+        "label": "低宏观敏感度",
+        "formula": "stability proxy=1 if >=8;0.5 if >=5;else 0 (source item max=2)",
+        "source_rule": "profit/growth stability proxy capped at half the source maximum; not measured GDP beta",
+        "input_keys": {"stability_score"},
+    },
+}
+_INDEPENDENT_TYPE7_ITEM_WEIGHTS = {
+    "W": {
+        "BM": {"pricing_power": 0.30, "fcf_conversion": 0.25, "repeat_demand": 0.25, "asset_light": 0.20},
+        "MOAT": {"brand_mindshare": 0.30, "network_switching": 0.25, "license_scarcity": 0.20, "time_thickness": 0.25},
+        "G": {
+            "volume_price_space": 0.35,
+            "category_expansion": 0.30,
+            "inflation_pass_through": 0.20,
+            "certainty": 0.15,
+        },
+    },
+    "T": {
+        "BM": {
+            "rd_conversion": 0.30,
+            "revenue_quality": 0.25,
+            "declining_marginal_cost": 0.20,
+            "cashflow_inflection": 0.25,
+        },
+        "MOAT": {"patent_standard": 0.25, "talent_retention": 0.20, "data_network": 0.25, "platform_lockin": 0.30},
+        "G": {"s_curve_relay": 0.35, "tam_space": 0.30, "nonlinear_option": 0.20, "disruption_resilience": 0.15},
+    },
+    "C": {
+        "BM": {
+            "cost_curve": 0.35,
+            "integration_self_supply": 0.25,
+            "cash_conversion": 0.20,
+            "capacity_discipline": 0.20,
+        },
+        "MOAT": {"resource_scarcity": 0.30, "cost_lead": 0.30, "scale_location": 0.20, "cycle_survival": 0.20},
+        "G": {"low_cost_expansion": 0.35, "integration_gain": 0.30, "commodity_trend": 0.20, "certainty": 0.15},
+    },
+}
+_INDEPENDENT_TYPE7_TYPE5_ROUTE_WEIGHTS = {
+    "5a": 0.35,
+    "5b": 0.25,
+    "5c": 0.20,
+    "5d": 0.10,
+    "5e": 0.10,
+}
+_INDEPENDENT_TYPE7_C_ROUTE_INPUT_FIELDS = {
+    "type5_applicable",
+    "type5_cycle_complete",
+    "type5_cycle_score",
+    "type5_bottom_complete",
+    "type5_bottom_score",
+    "type5_survival_complete",
+    "type5_survival_score",
+    "type5_upside_complete",
+    "type5_upside_score",
+    "type5_valuation_complete",
+    "type5_valuation_score",
+    "type5_evidence_complete",
+    "type5_triggered",
+    "type5_total",
+    "type5_replayed_total",
+    "type5_replayed_triggered",
+    "template25_complete",
+    "template25_buy_zone_score",
+    "monetary_funds",
+    "interest_debt",
+    "net_debt",
+}
+_INDEPENDENT_TYPE7_C_ROUTE_BASIS = "强周期：完整情况五与已扣净债的多情景估值路径"
+_INDEPENDENT_TYPE7_C_ROUTE_RULE = "情况五证据完整且总分>=7，并明确用带息债务减货币资金核对净债"
+
+
+def _independent_type7_proxy_component_value(key: str, inputs: Mapping[str, Any]) -> float | None:
+    """Replay the deliberately low-capped classification proxies."""
+
+    if key == "n_macro_beta":
+        stability = _finite(inputs.get("stability_score"))
+        return None if stability is None else 1.0 if stability >= 8.0 else 0.5 if stability >= 5.0 else 0.0
+
+    industry = str(inputs.get("industry") or "")
+    if not industry:
+        return None
+    if key == "c_commodity_driver":
+        return (
+            1.0
+            if industry in _INDEPENDENT_TYPE7_DIRECT_COMMODITY_INDUSTRIES
+            else 0.5
+            if industry in _INDEPENDENT_TYPE7_CYCLICAL_INDUSTRIES
+            else 0.0
+        )
+    if key in {"t_intangible_patent", "t_iteration"}:
+        return (
+            1.0
+            if industry in _INDEPENDENT_TYPE7_CORE_TECH_INDUSTRIES
+            else 0.5
+            if industry in _INDEPENDENT_TYPE7_TECH_INDUSTRIES
+            else 0.0
+        )
+    if key == "n_repeat":
+        return (
+            2.0
+            if industry in _INDEPENDENT_TYPE7_ESSENTIAL_INDUSTRIES
+            else 1.0
+            if industry
+            in {
+                "RETAIL",
+                "HOME_APPLIANCE",
+            }
+            else 0.0
+        )
+    raise KeyError(f"unsupported independent Type 7 proxy component: {key}")
+
+
+def _independent_type7_decimal_scale(value: Any, digits: int) -> float | None:
+    parsed = _finite(value)
+    if parsed is None or not math.isclose(parsed, round(parsed, digits), abs_tol=1e-9):
+        return None
+    return parsed
+
+
+def _independent_type7_pb_score(percentile: float | None) -> float | None:
+    if percentile is None or not 0.0 <= percentile <= 1.0:
+        return None
+    return (
+        10.0
+        if percentile <= 0.10
+        else 8.0
+        if percentile <= 0.20
+        else 6.0
+        if percentile <= 0.30
+        else 4.0
+        if percentile <= 0.50
+        else 2.0
+    )
+
+
+def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list[str]:
+    """Independently replay Type 7 arithmetic and decision gates.
+
+    This oracle intentionally does not call the production Type 7 validator or
+    any production scoring helper.  Production validation proves the input-to-
+    atom formulas; this second implementation proves that the published atoms,
+    class route and gates lead to exactly the published decision.
+    """
+
+    if not isinstance(ledger, Mapping):
+        return ["independent ledger is not a mapping"]
+    errors: list[str] = []
+    if set(ledger) != _INDEPENDENT_TYPE7_TOP_FIELDS:
+        errors.append("independent top-level structure mismatch")
+    if (
+        ledger.get("schema_version") != 2
+        or ledger.get("model_id") != _INDEPENDENT_TYPE7_MODEL_ID
+        or ledger.get("source_rule") != _INDEPENDENT_TYPE7_SOURCE_RULE
+        or _finite(ledger.get("strict_threshold")) != 7.0
+    ):
+        errors.append("independent model identity mismatch")
+    code = str(ledger.get("code") or "")
+    raw_as_of = str(ledger.get("as_of") or "")
+    try:
+        parsed_as_of = date.fromisoformat(raw_as_of)
+    except ValueError:
+        parsed_as_of = None
+    if (
+        code != expected_code
+        or not re.fullmatch(r"[036][0-9]{5}", code)
+        or parsed_as_of is None
+        or parsed_as_of > date.today()
+    ):
+        errors.append("independent company/date binding mismatch")
+
+    classification = ledger.get("classification")
+    class_fields = {
+        "rule",
+        "class_code",
+        "class_label",
+        "sensitivity_scores",
+        "sensitivity_upper_bounds",
+        "route_complete",
+        "possible_classes",
+        "missing_components",
+        "secondary_features",
+        "possible_secondary_features",
+        "components",
+        "basis",
+    }
+    class_labels = {"W": "弱周期", "T": "强科技", "C": "强周期"}
+    replayed_sensitivity: dict[str, float] = {}
+    replayed_sensitivity_upper: dict[str, float] = {}
+    replayed_class_missing: list[str] = []
+    if not isinstance(classification, Mapping) or set(classification) != class_fields:
+        errors.append("independent classification structure mismatch")
+        return errors
+    components = classification.get("components")
+    if not isinstance(components, Mapping) or set(components) != {"C", "T", "N"}:
+        errors.append("independent classification components mismatch")
+        return errors
+    component_fields = {
+        "key",
+        "label",
+        "max_points",
+        "awarded_points",
+        "diagnostic_points",
+        "complete",
+        "upper_bound",
+        "evidence_level",
+        "formula",
+        "inputs",
+        "evidence_refs",
+        "missing_inputs",
+        "source_rule",
+    }
+    for sensitivity_key, expected_components in _INDEPENDENT_TYPE7_CLASS_COMPONENTS.items():
+        records = components.get(sensitivity_key)
+        if not isinstance(records, list) or len(records) != 4:
+            errors.append(f"independent {sensitivity_key} component count mismatch")
+            continue
+        indexed = {record.get("key"): record for record in records if isinstance(record, Mapping)}
+        if len(indexed) != 4 or set(indexed) != set(expected_components):
+            errors.append(f"independent {sensitivity_key} component keys mismatch")
+            continue
+        total = 0.0
+        upper_total = 0.0
+        for component_key, maximum in expected_components.items():
+            record = indexed[component_key]
+            awarded = _finite(record.get("awarded_points"))
+            diagnostic = _finite(record.get("diagnostic_points"))
+            upper = _finite(record.get("upper_bound"))
+            complete = record.get("complete")
+            missing_inputs = record.get("missing_inputs")
+            if (
+                set(record) != component_fields
+                or _finite(record.get("max_points")) != maximum
+                or awarded is None
+                or diagnostic is None
+                or upper is None
+                or type(complete) is not bool
+                or not isinstance(missing_inputs, list)
+                or not 0.0 <= awarded <= upper <= maximum
+                or not 0.0 <= diagnostic <= maximum
+                or (
+                    complete
+                    and (
+                        missing_inputs
+                        or not math.isclose(awarded, diagnostic, abs_tol=1e-8)
+                        or not math.isclose(upper, awarded, abs_tol=1e-8)
+                    )
+                )
+                or (
+                    not complete
+                    and (not math.isclose(awarded, 0.0, abs_tol=1e-8) or not math.isclose(upper, maximum, abs_tol=1e-8))
+                )
+            ):
+                errors.append(f"independent {sensitivity_key}.{component_key} arithmetic mismatch")
+            proxy_metadata = _INDEPENDENT_TYPE7_PROXY_COMPONENT_METADATA.get(component_key)
+            if proxy_metadata is not None:
+                inputs = record.get("inputs")
+                expected_proxy = (
+                    _independent_type7_proxy_component_value(component_key, inputs)
+                    if isinstance(inputs, Mapping) and set(inputs) == proxy_metadata["input_keys"]
+                    else None
+                )
+                expected_proxy_missing = (
+                    [name for name, value in inputs.items() if value is None] if isinstance(inputs, Mapping) else []
+                )
+                expected_proxy_complete = bool(expected_proxy is not None and not expected_proxy_missing)
+                expected_proxy_awarded = float(expected_proxy) if expected_proxy_complete else 0.0
+                expected_proxy_upper = expected_proxy_awarded if expected_proxy_complete else maximum
+                expected_proxy_level = "derived_proxy" if expected_proxy_complete else "missing"
+                if (
+                    not isinstance(inputs, Mapping)
+                    or set(inputs) != proxy_metadata["input_keys"]
+                    or record.get("key") != component_key
+                    or record.get("label") != proxy_metadata["label"]
+                    or record.get("formula") != proxy_metadata["formula"]
+                    or record.get("source_rule") != proxy_metadata["source_rule"]
+                    or record.get("evidence_refs") != {}
+                    or complete is not expected_proxy_complete
+                    or record.get("evidence_level") != expected_proxy_level
+                    or missing_inputs != expected_proxy_missing
+                    or awarded is None
+                    or diagnostic is None
+                    or upper is None
+                    or not math.isclose(awarded, expected_proxy_awarded, abs_tol=1e-8)
+                    or not math.isclose(diagnostic, expected_proxy_awarded, abs_tol=1e-8)
+                    or not math.isclose(upper, expected_proxy_upper, abs_tol=1e-8)
+                ):
+                    errors.append(f"independent {sensitivity_key}.{component_key} proxy source formula mismatch")
+            total += awarded or 0.0
+            upper_total += upper or 0.0
+            if complete is not True:
+                replayed_class_missing.append(f"{sensitivity_key}.{component_key}")
+        replayed_sensitivity[sensitivity_key] = round(total, 6)
+        replayed_sensitivity_upper[sensitivity_key] = round(upper_total, 6)
+    sensitivity_scores = classification.get("sensitivity_scores")
+    sensitivity_upper = classification.get("sensitivity_upper_bounds")
+    if sensitivity_scores != replayed_sensitivity or sensitivity_upper != replayed_sensitivity_upper:
+        errors.append("independent classification totals mismatch")
+    expected_class = (
+        "T" if replayed_sensitivity.get("T", 0.0) >= 7.0 else "C" if replayed_sensitivity.get("C", 0.0) >= 7.0 else "W"
+    )
+    if replayed_sensitivity.get("T", 0.0) >= 7.0:
+        possible_classes = ["T"]
+    elif replayed_sensitivity_upper.get("T", 10.0) >= 7.0:
+        possible_classes = ["T"]
+        if replayed_sensitivity_upper.get("C", 10.0) >= 7.0:
+            possible_classes.append("C")
+        if replayed_sensitivity.get("C", 0.0) < 7.0:
+            possible_classes.append("W")
+    elif replayed_sensitivity.get("C", 0.0) >= 7.0:
+        possible_classes = ["C"]
+    elif replayed_sensitivity_upper.get("C", 10.0) >= 7.0:
+        possible_classes = ["C", "W"]
+    else:
+        possible_classes = ["W"]
+    expected_secondary = [
+        class_labels[key]
+        for key, score_key in (("T", "T"), ("C", "C"), ("W", "N"))
+        if key != expected_class and replayed_sensitivity.get(score_key, 0.0) >= 7.0
+    ]
+    expected_possible_secondary = [
+        class_labels[key]
+        for key, score_key in (("T", "T"), ("C", "C"), ("W", "N"))
+        if key != expected_class
+        and replayed_sensitivity.get(score_key, 0.0) < 7.0
+        and replayed_sensitivity_upper.get(score_key, 0.0) >= 7.0
+    ]
+    expected_basis = (
+        f"T={replayed_sensitivity.get('T', 0.0):.2f}, C={replayed_sensitivity.get('C', 0.0):.2f}, "
+        f"N={replayed_sensitivity.get('N', 0.0):.2f}; routed to {class_labels[expected_class]}"
+    )
+    if (
+        classification.get("rule") != _INDEPENDENT_TYPE7_CLASSIFICATION_RULE
+        or classification.get("class_code") != expected_class
+        or classification.get("class_label") != class_labels[expected_class]
+        or classification.get("possible_classes") != possible_classes
+        or classification.get("route_complete") is not (len(possible_classes) == 1)
+        or classification.get("missing_components") != replayed_class_missing
+        or classification.get("secondary_features") != expected_secondary
+        or classification.get("possible_secondary_features") != expected_possible_secondary
+        or classification.get("basis") != expected_basis
+    ):
+        errors.append("independent classification decision mismatch")
+
+    dimensions = ledger.get("dimensions")
+    published_scores = ledger.get("scores")
+    if (
+        not isinstance(dimensions, Mapping)
+        or set(dimensions) != {"BM", "MOAT", "G"}
+        or not isinstance(published_scores, Mapping)
+        or set(published_scores) != {"BM", "MOAT", "G"}
+    ):
+        return errors + ["independent dimensions structure mismatch"]
+    replayed_scores: dict[str, float] = {}
+    replayed_upper: dict[str, float] = {}
+    replayed_missing: list[str] = []
+    item_fields = {
+        "key",
+        "label",
+        "weight",
+        "score",
+        "points",
+        "complete",
+        "evidence_level",
+        "proxy_cap",
+        "formula",
+        "inputs",
+        "evidence_refs",
+        "source_rule",
+        "upper_bound",
+        "missing_inputs",
+    }
+    for dimension in ("BM", "MOAT", "G"):
+        section = dimensions[dimension]
+        weights = _INDEPENDENT_TYPE7_ITEM_WEIGHTS[expected_class][dimension]
+        if (
+            not isinstance(section, Mapping)
+            or set(section) != {"score", "upper_bound", "coverage", "complete", "items"}
+            or not isinstance(section.get("items"), list)
+        ):
+            errors.append(f"independent {dimension} structure mismatch")
+            continue
+        indexed = {item.get("key"): item for item in section["items"] if isinstance(item, Mapping)}
+        if len(section["items"]) != 4 or len(indexed) != 4 or set(indexed) != set(weights):
+            errors.append(f"independent {dimension} item keys mismatch")
+            continue
+        total = 0.0
+        upper_total = 0.0
+        coverage = 0.0
+        for item_key, weight in weights.items():
+            item = indexed[item_key]
+            score = _finite(item.get("score"))
+            points = _finite(item.get("points"))
+            upper = _finite(item.get("upper_bound"))
+            complete = item.get("complete")
+            if (
+                set(item) != item_fields
+                or _finite(item.get("weight")) != weight
+                or score is None
+                or points is None
+                or upper is None
+                or type(complete) is not bool
+                or not 0.0 <= score <= upper <= 10.0
+                or not math.isclose(points, score * weight, abs_tol=1e-8)
+                or (complete and not math.isclose(upper, score, abs_tol=1e-8))
+                or (not complete and not math.isclose(score, 0.0, abs_tol=1e-8))
+            ):
+                errors.append(f"independent {dimension}.{item_key} weighted arithmetic mismatch")
+            total += (score or 0.0) * weight
+            upper_total += (upper or 0.0) * weight
+            if complete is True:
+                coverage += weight
+            else:
+                replayed_missing.append(f"{dimension}.{item_key}")
+        replayed_scores[dimension] = total
+        replayed_upper[dimension] = upper_total
+        if (
+            _finite(section.get("score")) is None
+            or not math.isclose(float(section["score"]), total, abs_tol=1e-8)
+            or _finite(section.get("upper_bound")) is None
+            or not math.isclose(float(section["upper_bound"]), upper_total, abs_tol=1e-8)
+            or _finite(section.get("coverage")) is None
+            or not math.isclose(float(section["coverage"]), coverage, abs_tol=1e-8)
+            or section.get("complete") is not math.isclose(coverage, 1.0, abs_tol=1e-12)
+            or _finite(published_scores.get(dimension)) is None
+            or not math.isclose(float(published_scores[dimension]), total, abs_tol=1e-8)
+        ):
+            errors.append(f"independent {dimension} aggregate mismatch")
+    if classification.get("route_complete") is not True:
+        replayed_missing.extend(f"CLASSIFICATION.{key}" for key in replayed_class_missing)
+    quality_missing = list(replayed_missing)
+
+    gates = ledger.get("decision_gates")
+    gate_missing: list[str] = []
+    condition_failures: list[str] = []
+    valuation_complete = False
+    if not isinstance(gates, Mapping) or set(gates) != {"future_fcf", "route_path", "price_reasonableness"}:
+        errors.append("independent decision gates structure mismatch")
+    else:
+        fcf = gates.get("future_fcf")
+        if not isinstance(fcf, Mapping) or set(fcf) != {
+            "class_code",
+            "complete",
+            "passed",
+            "years",
+            "values",
+            "latest_financial_year",
+            "positive_share",
+            "latest_fcf",
+            "recent_three_years",
+            "recent_three_values",
+            "improvement_periods",
+            "improvement_amounts",
+            "median_improvement",
+            "latest_ocf_year",
+            "latest_ocf",
+            "estimated_years_to_positive",
+            "durable_condition_passed",
+            "turnaround_path_complete",
+            "turnaround_path_passed",
+            "matched_mode",
+            "basis",
+            "rule",
+            "scope",
+        }:
+            errors.append("independent FCF gate structure mismatch")
+        else:
+            years = fcf.get("years")
+            values = fcf.get("values")
+            year_types_valid = bool(isinstance(years, list) and all(type(year) is int for year in years))
+            valid_years = bool(
+                year_types_valid and len(years) == len(set(years)) and years == sorted(years) and len(years) <= 5
+            )
+            parsed_values = [_finite(value) for value in values] if isinstance(values, list) else []
+            valid_values = bool(
+                isinstance(values, list)
+                and len(values) == len(years or [])
+                and all(value is not None for value in parsed_values)
+            )
+            consecutive = bool(
+                valid_years
+                and len(years) >= 3
+                and all(current - previous == 1 for previous, current in zip(years, years[1:]))
+            )
+            latest_year = fcf.get("latest_financial_year")
+            expected_complete = bool(
+                valid_values and consecutive and type(latest_year) is int and years and years[-1] == latest_year
+            )
+            expected_share = (
+                sum(float(value) > 0.0 for value in parsed_values) / len(parsed_values)
+                if valid_values and parsed_values
+                else None
+            )
+            expected_latest = float(parsed_values[-1]) if valid_values and parsed_values else None
+            durable_passed = bool(
+                expected_complete
+                and expected_latest is not None
+                and expected_latest > 0.0
+                and expected_share is not None
+                and expected_share >= 0.60
+            )
+            expected_recent_years = list(years[-3:]) if valid_years and len(years) >= 3 else []
+            expected_recent_values = (
+                [float(value) for value in parsed_values[-3:]] if valid_values and len(parsed_values) >= 3 else []
+            )
+            expected_improvements = [
+                current - previous for previous, current in zip(expected_recent_values, expected_recent_values[1:])
+            ]
+            expected_periods = [
+                f"{previous}年至{current}年"
+                for previous, current in zip(expected_recent_years, expected_recent_years[1:])
+            ]
+            expected_median_improvement = (
+                statistics.median(expected_improvements) if len(expected_improvements) == 2 else None
+            )
+            expected_estimated_years = (
+                0.0
+                if expected_latest is not None and expected_latest > 0.0
+                else max(0.0, -expected_latest / expected_median_improvement)
+                if expected_latest is not None
+                and expected_median_improvement is not None
+                and expected_median_improvement > 0.0
+                else None
+            )
+            latest_ocf_year = fcf.get("latest_ocf_year")
+            latest_ocf = _finite(fcf.get("latest_ocf"))
+            ocf_pair_valid = bool(
+                (latest_ocf_year is None and fcf.get("latest_ocf") is None)
+                or (type(latest_ocf_year) is int and latest_ocf is not None)
+            )
+            ocf_current = bool(
+                ocf_pair_valid
+                and latest_ocf_year is not None
+                and type(latest_year) is int
+                and latest_ocf_year == latest_year
+            )
+            turnaround_complete = bool(expected_class == "T" and expected_complete and ocf_current)
+            turnaround_passed = bool(
+                turnaround_complete
+                and len(expected_improvements) == 2
+                and all(amount > 0.0 for amount in expected_improvements)
+                and latest_ocf is not None
+                and latest_ocf > 0.0
+                and expected_estimated_years is not None
+                and expected_estimated_years <= 2.0
+            )
+            if expected_class != "T":
+                expected_gate_complete = expected_complete
+                expected_passed = durable_passed
+            elif durable_passed:
+                expected_gate_complete = True
+                expected_passed = True
+            else:
+                expected_gate_complete = turnaround_complete
+                expected_passed = turnaround_passed
+
+            if durable_passed:
+                expected_mode = "耐久正自由现金流"
+                expected_basis = "命中耐久正自由现金流：最新FCF为正，且当前连续3至5年FCF正值占比不低于60%。"
+            elif turnaround_passed:
+                expected_mode = "强科技清晰转正路径"
+                expected_basis = (
+                    "命中强科技清晰转正路径：最近3年FCF严格逐年改善，最新年度经营现金流为正，"
+                    f"按最近两次改善额中位数线性外推约{expected_estimated_years:.2f}年转正。"
+                )
+            elif not expected_gate_complete:
+                expected_mode = "证据不完整"
+                expected_basis = (
+                    f"证据不完整：耐久正FCF条件未通过，缺少{latest_year}年经营现金流。"
+                    if expected_class == "T" and expected_complete and not ocf_current
+                    else "证据不完整：缺少绑定最新完整财年的连续3至5年FCF。"
+                )
+            else:
+                expected_mode = "未命中"
+                expected_basis = (
+                    "未命中：耐久正FCF条件和两年内清晰转正路径均未通过。"
+                    if expected_class == "T"
+                    else "未命中：最新FCF须为正，且当前连续3至5年FCF正值占比不低于60%。"
+                )
+            expected_rule = (
+                "强科技：满足耐久正FCF，或最近3年FCF严格逐年改善、最新年度经营现金流为正，"
+                "且按最近两次改善额中位数线性外推不超过2年转正"
+                if expected_class == "T"
+                else "最新FCF为正，且绑定最新完整财年的连续3至5年FCF正值占比不低于60%"
+            )
+            reported_recent_values = fcf.get("recent_three_values")
+            parsed_recent_values = (
+                [_finite(value) for value in reported_recent_values] if isinstance(reported_recent_values, list) else []
+            )
+            reported_improvements = fcf.get("improvement_amounts")
+            parsed_improvements = (
+                [_finite(value) for value in reported_improvements] if isinstance(reported_improvements, list) else []
+            )
+            reported_median = _finite(fcf.get("median_improvement"))
+            reported_estimated = _finite(fcf.get("estimated_years_to_positive"))
+            if (
+                fcf.get("class_code") != expected_class
+                or fcf.get("complete") is not expected_gate_complete
+                or fcf.get("passed") is not expected_passed
+                or fcf.get("durable_condition_passed") is not durable_passed
+                or fcf.get("turnaround_path_complete") is not turnaround_complete
+                or fcf.get("turnaround_path_passed") is not turnaround_passed
+                or _finite(fcf.get("positive_share")) != expected_share
+                or _finite(fcf.get("latest_fcf")) != expected_latest
+                or fcf.get("recent_three_years") != expected_recent_years
+                or len(parsed_recent_values) != len(expected_recent_values)
+                or any(value is None for value in parsed_recent_values)
+                or any(
+                    actual is None or not math.isclose(actual, expected, abs_tol=1e-12)
+                    for actual, expected in zip(parsed_recent_values, expected_recent_values)
+                )
+                or fcf.get("improvement_periods") != expected_periods
+                or len(parsed_improvements) != len(expected_improvements)
+                or any(value is None for value in parsed_improvements)
+                or any(
+                    actual is None or not math.isclose(actual, expected, abs_tol=1e-12)
+                    for actual, expected in zip(parsed_improvements, expected_improvements)
+                )
+                or (expected_median_improvement is None) != (reported_median is None)
+                or (
+                    expected_median_improvement is not None
+                    and reported_median is not None
+                    and not math.isclose(reported_median, expected_median_improvement, abs_tol=1e-12)
+                )
+                or not ocf_pair_valid
+                or (expected_estimated_years is None) != (reported_estimated is None)
+                or (
+                    expected_estimated_years is not None
+                    and reported_estimated is not None
+                    and not math.isclose(reported_estimated, expected_estimated_years, abs_tol=1e-12)
+                )
+                or fcf.get("matched_mode") != expected_mode
+                or fcf.get("basis") != expected_basis
+                or fcf.get("rule") != expected_rule
+                or fcf.get("scope") != "补丁7未来自由现金流前置条件；历史事实与线性外推不构成预测保证"
+            ):
+                errors.append("independent FCF gate replay mismatch")
+            if not expected_gate_complete:
+                gate_missing.append("PRECONDITION.future_fcf")
+            elif not expected_passed:
+                condition_failures.append("future_fcf")
+
+        route = gates.get("route_path")
+        price = gates.get("price_reasonableness")
+        if (
+            not isinstance(route, Mapping)
+            or set(route) != {"class_code", "complete", "passed", "basis", "inputs", "rule"}
+            or not isinstance(price, Mapping)
+            or set(price)
+            != {
+                "class_code",
+                "required",
+                "source_evidence_complete",
+                "complete",
+                "passed",
+                "buy_zone_score",
+                "minimum_score",
+                "basis",
+                "inputs",
+                "rule",
+            }
+        ):
+            errors.append("independent route/price gate structure mismatch")
+        else:
+            route_inputs = route.get("inputs")
+            route_complete = False
+            route_passed = False
+            if expected_class == "W" and isinstance(route_inputs, Mapping):
+                valuation_items = route_inputs.get("template5_valuation_items")
+                maxima = {"t5_v1": 9.0, "t5_v2": 12.0, "t5_v3": 9.0}
+                valid_items = isinstance(valuation_items, Mapping) and set(valuation_items) == set(maxima)
+                item_points: list[float] = []
+                if valid_items:
+                    for key, maximum in maxima.items():
+                        item = valuation_items[key]
+                        point = _finite(item.get("points")) if isinstance(item, Mapping) else None
+                        if (
+                            not isinstance(item, Mapping)
+                            or set(item) != {"complete", "points"}
+                            or item.get("complete") is not True
+                            or point is None
+                            or not 0.0 <= point <= maximum
+                        ):
+                            valid_items = False
+                            break
+                        item_points.append(point)
+                expected_valuation_score = math.fsum(item_points) / 3.0 if valid_items else None
+                route_complete = bool(
+                    valid_items
+                    and route_inputs.get("patch5_safety_complete") is True
+                    and _finite(route_inputs.get("patch5_safety_score")) is not None
+                )
+                route_passed = bool(route_complete and float(route_inputs["patch5_safety_score"]) >= 8.0)
+                if _finite(route_inputs.get("template5_valuation_score")) != expected_valuation_score:
+                    errors.append("independent weak-cycle valuation aggregate mismatch")
+            elif expected_class == "T" and isinstance(route_inputs, Mapping):
+                route_complete = bool(
+                    route_inputs.get("patch4_complete") is True
+                    and _finite(route_inputs.get("patch4_score")) is not None
+                    and _finite(route_inputs.get("patch5_coverage")) is not None
+                    and route_inputs.get("patch5_safety_complete") is True
+                    and _finite(route_inputs.get("patch5_safety_score")) is not None
+                )
+                route_passed = bool(
+                    route_complete
+                    and float(route_inputs["patch5_coverage"]) >= 0.80
+                    and float(route_inputs["patch5_safety_score"]) >= 8.0
+                )
+            elif expected_class == "C" and isinstance(route_inputs, Mapping):
+                input_structure_valid = set(route_inputs) == _INDEPENDENT_TYPE7_C_ROUTE_INPUT_FIELDS
+                if not input_structure_valid:
+                    errors.append("independent strong-cycle route input structure mismatch")
+                score_fields = {
+                    "5a": "type5_cycle_score",
+                    "5b": "type5_bottom_score",
+                    "5c": "type5_survival_score",
+                    "5d": "type5_upside_score",
+                    "5e": "type5_valuation_score",
+                }
+                complete_fields = {
+                    "5a": "type5_cycle_complete",
+                    "5b": "type5_bottom_complete",
+                    "5c": "type5_survival_complete",
+                    "5d": "type5_upside_complete",
+                    "5e": "type5_valuation_complete",
+                }
+                type5_scores = {
+                    key: _independent_type7_decimal_scale(route_inputs.get(field), 2)
+                    for key, field in score_fields.items()
+                }
+                scores_valid = all(score is not None and 0.0 <= score <= 10.0 for score in type5_scores.values())
+                replayed_total = (
+                    round(
+                        math.fsum(
+                            float(type5_scores[key]) * weight
+                            for key, weight in _INDEPENDENT_TYPE7_TYPE5_ROUTE_WEIGHTS.items()
+                        ),
+                        1,
+                    )
+                    if scores_valid
+                    else None
+                )
+                all_dimensions_complete = all(route_inputs.get(field) is True for field in complete_fields.values())
+                replayed_triggered = bool(
+                    route_inputs.get("type5_applicable") is True
+                    and route_inputs.get("type5_evidence_complete") is True
+                    and all_dimensions_complete
+                    and type5_scores["5a"] is not None
+                    and type5_scores["5a"] >= 7.0
+                    and replayed_total is not None
+                    and replayed_total >= 7.0
+                )
+                published_total = _independent_type7_decimal_scale(route_inputs.get("type5_total"), 1)
+                published_replayed_total = _independent_type7_decimal_scale(
+                    route_inputs.get("type5_replayed_total"),
+                    1,
+                )
+                monetary_funds = _finite(route_inputs.get("monetary_funds"))
+                interest_debt = _finite(route_inputs.get("interest_debt"))
+                net_debt = _finite(route_inputs.get("net_debt"))
+                net_debt_consistent = bool(
+                    monetary_funds is not None
+                    and monetary_funds >= 0.0
+                    and interest_debt is not None
+                    and interest_debt >= 0.0
+                    and net_debt is not None
+                    and math.isclose(net_debt, interest_debt - monetary_funds, abs_tol=1e-6)
+                )
+                route_complete = bool(
+                    input_structure_valid
+                    and type(route_inputs.get("type5_applicable")) is bool
+                    and all_dimensions_complete
+                    and scores_valid
+                    and route_inputs.get("type5_evidence_complete") is True
+                    and type(route_inputs.get("type5_triggered")) is bool
+                    and published_total is not None
+                    and replayed_total is not None
+                    and math.isclose(published_total, replayed_total, abs_tol=1e-9)
+                    and route_inputs.get("type5_triggered") is replayed_triggered
+                    and published_replayed_total is not None
+                    and math.isclose(published_replayed_total, replayed_total, abs_tol=1e-9)
+                    and type(route_inputs.get("type5_replayed_triggered")) is bool
+                    and route_inputs.get("type5_replayed_triggered") is replayed_triggered
+                    and route_inputs.get("template25_complete") is True
+                    and _finite(route_inputs.get("template25_buy_zone_score")) is not None
+                    and 0.0 <= float(route_inputs["template25_buy_zone_score"]) <= 10.0
+                    and net_debt_consistent
+                )
+                route_passed = bool(route_complete and replayed_triggered)
+                if (
+                    route_inputs.get("type5_replayed_total") != replayed_total
+                    or route_inputs.get("type5_replayed_triggered") is not replayed_triggered
+                    or route.get("basis") != _INDEPENDENT_TYPE7_C_ROUTE_BASIS
+                    or route.get("rule") != _INDEPENDENT_TYPE7_C_ROUTE_RULE
+                ):
+                    errors.append("independent strong-cycle Type 5 replay mismatch")
+            if (
+                route.get("class_code") != expected_class
+                or route.get("complete") is not route_complete
+                or route.get("passed") is not route_passed
+            ):
+                errors.append("independent classified route replay mismatch")
+            if not route_complete:
+                gate_missing.append("ROUTE.class_specific_path")
+            elif not route_passed:
+                condition_failures.append("route_path")
+
+            price_inputs = price.get("inputs")
+            required = price.get("required")
+            source_complete = price.get("source_evidence_complete")
+            expected_price_score = None
+            expected_minimum = {"W": 3.0, "T": 8.0, "C": 8.0}[expected_class]
+            if (
+                expected_class == "W"
+                and isinstance(price_inputs, Mapping)
+                and set(price_inputs) == {"type1_buy_zone_score"}
+            ):
+                expected_price_score = _finite(price_inputs.get("type1_buy_zone_score"))
+            elif (
+                expected_class in {"T", "C"}
+                and isinstance(price_inputs, Mapping)
+                and set(price_inputs) == {"pb_percentile", "current_pb"}
+            ):
+                percentile = _finite(price_inputs.get("pb_percentile"))
+                current_pb = _finite(price_inputs.get("current_pb"))
+                expected_price_score = _independent_type7_pb_score(percentile)
+                if (
+                    expected_class == "C"
+                    and expected_price_score is not None
+                    and current_pb is not None
+                    and current_pb > 0.0
+                ):
+                    absolute = (
+                        10.0
+                        if current_pb <= 1.0
+                        else 8.0
+                        if current_pb <= 1.2
+                        else 6.0
+                        if current_pb <= 1.5
+                        else 4.0
+                        if current_pb <= 2.0
+                        else 2.0
+                    )
+                    expected_price_score = min(expected_price_score, absolute)
+                elif expected_class == "C" and (current_pb is None or current_pb <= 0.0):
+                    expected_price_score = None
+            price_evidence_complete = bool(
+                source_complete is True and expected_price_score is not None and 0.0 <= expected_price_score <= 10.0
+            )
+            valuation_complete = bool(required is False or price_evidence_complete)
+            valuation_passed = bool(
+                required is False or (price_evidence_complete and expected_price_score >= expected_minimum)
+            )
+            if (
+                type(required) is not bool
+                or type(source_complete) is not bool
+                or price.get("class_code") != expected_class
+                or _finite(price.get("minimum_score")) != expected_minimum
+                or _finite(price.get("buy_zone_score")) != expected_price_score
+                or price.get("complete") is not valuation_complete
+                or price.get("passed") is not valuation_passed
+            ):
+                errors.append("independent price gate replay mismatch")
+            if not valuation_complete:
+                gate_missing.append("VALUATION.price_reasonableness")
+            elif not valuation_passed:
+                condition_failures.append("price_reasonableness")
+
+    replayed_missing.extend(gate_missing)
+    mean_score = math.fsum(replayed_scores.values()) / 3.0 if len(replayed_scores) == 3 else -1.0
+    chosen_upper = math.fsum(replayed_upper.values()) / 3.0 if len(replayed_upper) == 3 else -1.0
+    upper_bound = 10.0 if classification.get("route_complete") is not True else chosen_upper
+    quality_complete = not quality_missing
+    complete = not replayed_missing
+    veto_dimensions = [
+        dimension
+        for dimension in ("BM", "MOAT")
+        if expected_class == "C"
+        and (
+            (dimensions[dimension].get("complete") is True and replayed_scores.get(dimension, 10.0) < 5.0)
+            or replayed_upper.get(dimension, 10.0) < 5.0
+        )
+    ]
+    veto = bool(veto_dimensions)
+    quality_certified = bool(quality_complete and mean_score > 7.0 and not veto)
+    if (
+        expected_class == "T"
+        and quality_complete
+        and any(replayed_scores.get(key, -1.0) < 7.0 for key in ("BM", "MOAT", "G"))
+    ):
+        condition_failures.append("technology_dimension_floor")
+    trigger = bool(quality_certified and complete and not condition_failures)
+    weights = ledger.get("dimension_weights")
+    if (
+        not isinstance(weights, Mapping)
+        or set(weights) != {"BM", "MOAT", "G"}
+        or any(
+            _finite(weights.get(key)) is None or not math.isclose(float(weights[key]), 1 / 3, abs_tol=1e-15)
+            for key in weights
+        )
+    ):
+        errors.append("independent dimension weights mismatch")
+    if (
+        _finite(ledger.get("unrounded_mean")) is None
+        or not math.isclose(float(ledger["unrounded_mean"]), mean_score, abs_tol=1e-8)
+        or _finite(ledger.get("score")) is None
+        or not math.isclose(float(ledger["score"]), round(mean_score, 3), abs_tol=1e-9)
+        or _finite(ledger.get("upper_bound")) is None
+        or not math.isclose(float(ledger["upper_bound"]), round(upper_bound, 3), abs_tol=1e-9)
+    ):
+        errors.append("independent mean/upper-bound mismatch")
+    if (
+        ledger.get("quality_complete") is not quality_complete
+        or ledger.get("quality_certified") is not quality_certified
+        or ledger.get("complete") is not complete
+        or ledger.get("missing_items") != replayed_missing
+        or ledger.get("veto") is not veto
+        or ledger.get("veto_dimensions") != veto_dimensions
+        or ledger.get("condition_failures") != condition_failures
+        or ledger.get("triggered") is not trigger
+        or ledger.get("buy_ready") is not trigger
+    ):
+        errors.append("independent Type 7 decision mismatch")
+    expected_history_request = bool(expected_class in {"C", "T"} and not valuation_complete and upper_bound > 7.0)
+    if (
+        ledger.get("history_request_needed") is not expected_history_request
+        or ledger.get("research_request_needed") is not False
+    ):
+        errors.append("independent evidence request mismatch")
+    legacy = ledger.get("legacy_diagnostic")
+    if (
+        not isinstance(legacy, Mapping)
+        or set(legacy)
+        != {"model_id", "source_rule", "scores", "prerequisites_complete", "triggered", "decisive", "note"}
+        or legacy.get("decisive") is not False
+    ):
+        errors.append("independent legacy diagnostic boundary mismatch")
+    return errors
+
+
+_TYPE7_SOURCE_REPLAY_SECTIONS = {
+    "classification": "classification",
+    "dimensions": "atomic dimensions",
+    "decision_gates": "decision gates",
+    "legacy_diagnostic": "legacy diagnostic",
+}
+_TYPE7_SOURCE_REPLAY_DERIVED_FIELDS = (
+    "dimension_weights",
+    "scores",
+    "unrounded_mean",
+    "score",
+    "upper_bound",
+    "quality_complete",
+    "quality_certified",
+    "complete",
+    "missing_items",
+    "veto",
+    "veto_dimensions",
+    "condition_failures",
+    "triggered",
+    "buy_ready",
+    "history_request_needed",
+    "research_request_needed",
+)
+
+
+def _independent_type7_metric_series(source: Mapping[str, Any], value_key: str, year_key: str) -> dict[int, float]:
+    values = source.get(value_key)
+    years = source.get(year_key)
+    if not isinstance(values, (list, tuple)) or not isinstance(years, (list, tuple)) or len(values) != len(years):
+        return {}
+    result: dict[int, float] = {}
+    for raw_year, raw_value in zip(years, values):
+        value = _finite(raw_value)
+        try:
+            year = int(raw_year)
+        except (TypeError, ValueError):
+            continue
+        if value is not None and 1900 <= year <= 2200:
+            result[year] = value
+    return result
+
+
+def _type7_future_fcf_source_binding_errors(
+    code: str,
+    ledger: Mapping[str, Any],
+    *,
+    source_financial: Mapping[str, Any] | None = None,
+    source_metric: Mapping[str, Any] | None = None,
+) -> list[str]:
+    """Bind FCF history and the latest OCF to raw annual source facts."""
+
+    if source_financial is None and source_metric is None:
+        return []
+    gates = ledger.get("decision_gates")
+    fcf_gate = gates.get("future_fcf") if isinstance(gates, Mapping) else None
+    if not isinstance(fcf_gate, Mapping):
+        return [f"{code}:type7:raw future-FCF source binding gate missing"]
+
+    if source_metric is not None:
+        if not isinstance(source_metric, Mapping):
+            return [f"{code}:type7:raw Type 7 metric source is invalid"]
+        fcf_by_year = _independent_type7_metric_series(source_metric, "fcf_history", "fcf_years")
+        ocf_by_year = _independent_type7_metric_series(source_metric, "ocf_history", "ocf_years")
+    else:
+        if not isinstance(source_financial, Mapping):
+            return [f"{code}:type7:raw financial source is invalid"]
+        cashflow = source_financial.get("cashflow", [])
+        operating_by_year = _annual_values(cashflow, ("NETCASH_OPERATE",))
+        capex_by_year = _annual_values(cashflow, ("CONSTRUCT_LONG_ASSET",))
+        fcf_by_year = {
+            year: operating_by_year[year] - abs(capex_by_year[year])
+            for year in set(operating_by_year) & set(capex_by_year)
+        }
+        ocf_by_year = operating_by_year
+
+    expected_years = _audit_consecutive_suffix(sorted(fcf_by_year), maximum=5)
+    expected_values = [fcf_by_year[year] for year in expected_years]
+    published_values = fcf_gate.get("values")
+    parsed_values = [_finite(value) for value in published_values] if isinstance(published_values, list) else []
+    errors: list[str] = []
+    if (
+        fcf_gate.get("years") != expected_years
+        or len(parsed_values) != len(expected_values)
+        or any(value is None for value in parsed_values)
+        or any(
+            actual is None or not math.isclose(actual, expected, abs_tol=1e-8)
+            for actual, expected in zip(parsed_values, expected_values)
+        )
+    ):
+        errors.append(f"{code}:type7:future-FCF history differs from raw annual cash-flow evidence")
+
+    latest_financial_year = fcf_gate.get("latest_financial_year")
+    eligible_ocf_years = (
+        [year for year in ocf_by_year if type(latest_financial_year) is int and year <= latest_financial_year]
+        if ocf_by_year
+        else []
+    )
+    expected_ocf_year = max(eligible_ocf_years) if eligible_ocf_years else None
+    expected_ocf = ocf_by_year.get(expected_ocf_year) if expected_ocf_year is not None else None
+    published_ocf = _finite(fcf_gate.get("latest_ocf"))
+    if (
+        fcf_gate.get("latest_ocf_year") != expected_ocf_year
+        or (expected_ocf is None) != (published_ocf is None)
+        or (
+            expected_ocf is not None
+            and published_ocf is not None
+            and not math.isclose(published_ocf, expected_ocf, abs_tol=1e-8)
+        )
+    ):
+        errors.append(f"{code}:type7:latest OCF differs from raw annual cash-flow evidence")
+    return errors
+
+
+def _type7_source_replay_binding_errors(
+    code: str,
+    ledger: Mapping[str, Any],
+    status: Any,
+    source_row: Mapping[str, Any] | None,
+) -> list[str]:
+    """Bind a published Type 7 ledger to a replay from captured raw inputs.
+
+    This is intentionally a same-production source replay, not the independent
+    formula oracle above.  Its job is to catch coordinated edits where all
+    atoms, totals and decision flags remain internally self-consistent but no
+    longer match the captured company financials and evidence.
+    """
+
+    if source_row is None:
+        return []
+    if not isinstance(source_row, Mapping) or _normalise_code(source_row.get("code")) != code:
+        return [f"{code}:type7:raw-source replay row identity mismatch"]
+    source_payload = source_row.get("type7")
+    if not isinstance(source_payload, Mapping):
+        return [f"{code}:type7:raw-source replay payload missing"]
+    source_ledger = source_payload.get("ledger")
+    if not isinstance(source_ledger, Mapping):
+        return [f"{code}:type7:raw-source replay ledger missing"]
+
+    errors: list[str] = []
+    if source_payload.get("status") != status:
+        errors.append(f"{code}:type7:status differs from raw-source replay")
+    if (
+        source_ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID
+        or source_ledger.get("code") != code
+        or ledger.get("model_id") != source_ledger.get("model_id")
+        or ledger.get("code") != source_ledger.get("code")
+    ):
+        errors.append(f"{code}:type7:raw-source replay ledger identity mismatch")
+        return errors
+
+    if status == "not_applicable" or source_payload.get("status") == "not_applicable":
+        if _canonical_json(ledger) != _canonical_json(source_ledger):
+            errors.append(f"{code}:type7:not-applicable ledger differs from raw-source replay")
+        return errors
+
+    identity_fields = ("schema_version", "model_id", "code", "as_of", "source_rule", "strict_threshold")
+    if any(ledger.get(field) != source_ledger.get(field) for field in identity_fields):
+        errors.append(f"{code}:type7:model/date identity differs from raw-source replay")
+    for field, label in _TYPE7_SOURCE_REPLAY_SECTIONS.items():
+        if _canonical_json(ledger.get(field)) != _canonical_json(source_ledger.get(field)):
+            errors.append(f"{code}:type7:{label} differ from raw-source replay")
+    if any(
+        _canonical_json(ledger.get(field)) != _canonical_json(source_ledger.get(field))
+        for field in _TYPE7_SOURCE_REPLAY_DERIVED_FIELDS
+    ):
+        errors.append(f"{code}:type7:derived decision differs from raw-source replay")
+    return errors
+
+
 def _audit_type7_ledger(
     code: str,
     ledger: Any,
     status: Any,
     *,
     patch4_bindings: Mapping[str, Mapping[str, str]] | None = None,
+    source_row: Mapping[str, Any] | None = None,
+    source_financial: Mapping[str, Any] | None = None,
+    source_metric: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """Fail closed when an exported Type 7 ledger contains hostile values."""
 
     try:
-        return _audit_type7_ledger_impl(code, ledger, status, patch4_bindings)
+        if isinstance(ledger, Mapping) and ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+            source_errors = _type7_source_replay_binding_errors(code, ledger, status, source_row)
+            if status == "not_applicable":
+                if (
+                    set(ledger) != {"schema_version", "model_id", "code", "applicable", "reason"}
+                    or ledger.get("schema_version") != 2
+                    or ledger.get("code") != code
+                    or ledger.get("applicable") is not False
+                    or not str(ledger.get("reason") or "").strip()
+                ):
+                    return [f"{code}:type7:not-applicable ledger invalid", *source_errors]
+                return source_errors
+            errors = [f"{code}:type7:{error}" for error in validate_patch6_type7_ledger(ledger, expected_code=code)]
+            errors.extend(
+                f"{code}:type7:{error}" for error in _independent_type7_ledger_errors(ledger, expected_code=code)
+            )
+            errors.extend(
+                _type7_future_fcf_source_binding_errors(
+                    code,
+                    ledger,
+                    source_financial=source_financial,
+                    source_metric=source_metric,
+                )
+            )
+            classification = ledger.get("classification")
+            gates = ledger.get("decision_gates")
+            route = gates.get("route_path") if isinstance(gates, Mapping) else None
+            route_inputs = route.get("inputs") if isinstance(route, Mapping) else None
+            if (
+                isinstance(classification, Mapping)
+                and classification.get("class_code") == "T"
+                and isinstance(route_inputs, Mapping)
+                and route_inputs.get("patch4_complete") is True
+                and not patch4_bindings
+            ):
+                errors.append(f"{code}:type7:technology route lacks captured Patch 4 document binding")
+            if status == "triggered" and ledger.get("triggered") is not True:
+                errors.append(f"{code}:type7:status differs from classified Patch 6 ledger")
+            if status != "triggered" and ledger.get("triggered") is True:
+                errors.append(f"{code}:type7:status differs from classified Patch 6 ledger")
+            errors.extend(source_errors)
+            return errors
+        return [f"{code}:type7:unsupported Type 7 ledger model; refresh required"]
     except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
         return [f"{code}:type7:ledger contains malformed values"]
 
@@ -4796,39 +6078,138 @@ def _type7_valuation_binding_errors(
         return [f"{code}:type7: non-financial industry cannot be not applicable"]
     if not isinstance(ledger, Mapping):
         return [f"{code}:type7: valuation binding ledger missing"]
+    if ledger.get("model_id") != PATCH6_TYPE7_MODEL_ID:
+        return [f"{code}:type7: unsupported Type 7 ledger model; refresh required"]
 
     validated_nonfinancial_dcf = expected_type1_1a is not None
-    prerequisites = ledger.get("prerequisites")
-    valuation = prerequisites.get("latest_quote_and_valuation") if isinstance(prerequisites, Mapping) else None
-    template1 = ledger.get("template1")
-    items = template1.get("items") if isinstance(template1, Mapping) else None
-    t1_20 = None
-    if isinstance(items, list):
-        matching = [item for item in items if isinstance(item, Mapping) and item.get("key") == "t1_20"]
-        if len(matching) == 1:
-            t1_20 = matching[0]
-    type1 = row.get("type1")
-    type1_scores = type1.get("sub_scores") if isinstance(type1, Mapping) else None
-    type1_1a = _finite(type1_scores.get("1a")) if isinstance(type1_scores, Mapping) else None
-    if not isinstance(valuation, Mapping) or valuation.get("valuation_complete") is not validated_nonfinancial_dcf:
-        errors.append(f"{code}:type7: valuation prerequisite is not bound to validated DCF")
-    if not isinstance(t1_20, Mapping):
-        errors.append(f"{code}:type7: t1_20 valuation item missing")
+    if ledger.get("model_id") == PATCH6_TYPE7_MODEL_ID:
+        classification = ledger.get("classification")
+        gates = ledger.get("decision_gates")
+        route = gates.get("route_path") if isinstance(gates, Mapping) else None
+        valuation = gates.get("price_reasonableness") if isinstance(gates, Mapping) else None
+        class_code = str(classification.get("class_code") or "") if isinstance(classification, Mapping) else ""
+        if (
+            class_code not in {"W", "C", "T"}
+            or not isinstance(route, Mapping)
+            or not isinstance(valuation, Mapping)
+            or route.get("class_code") != class_code
+            or valuation.get("class_code") != class_code
+            or ledger.get("code") != code
+            or ledger.get("as_of") != str(row.get("source_trade_date") or "")
+        ):
+            return [f"{code}:type7: classified valuation identity mismatch"]
+        if class_code != "W":
+            valuation_inputs = valuation.get("inputs")
+            current_pb = _finite(valuation_inputs.get("current_pb")) if isinstance(valuation_inputs, Mapping) else None
+            row_pb = _finite(row.get("pb"))
+            source_complete = valuation.get("source_evidence_complete") is True
+            price_required = valuation.get("required") is True
+            if (
+                not isinstance(valuation_inputs, Mapping)
+                or set(valuation_inputs) != {"pb_percentile", "current_pb"}
+                or type(valuation.get("required")) is not bool
+                or valuation.get("complete") is not (source_complete or not price_required)
+                or (
+                    source_complete
+                    and (
+                        current_pb is None
+                        or row_pb is None
+                        or current_pb <= 0
+                        or row_pb <= 0
+                        or abs(current_pb - row_pb) / max(current_pb, row_pb) > 0.20
+                    )
+                )
+            ):
+                errors.append(f"{code}:type7: PB price gate is not bound to this company quote/history")
+            if class_code == "C":
+                route_inputs = route.get("inputs")
+                type5 = row.get("type5")
+                type5_scores = type5.get("sub_scores") if isinstance(type5, Mapping) else None
+                type5_reasons = type5.get("reasons") if isinstance(type5, Mapping) else None
+                missing = (
+                    type5_reasons.get("_decision_missing_dimensions") if isinstance(type5_reasons, Mapping) else None
+                )
+                missing_set = set(missing) if isinstance(missing, list) else set()
+                type5_status = str(type5.get("status") or "") if isinstance(type5, Mapping) else ""
+                source_scores = {
+                    key: _finite(type5_scores.get(key)) if isinstance(type5_scores, Mapping) else None
+                    for key in _INDEPENDENT_TYPE7_TYPE5_ROUTE_WEIGHTS
+                }
+                source_total = _finite(type5.get("total")) if isinstance(type5, Mapping) else None
+                source_triggered = _strict_bool(type5.get("triggered")) if isinstance(type5, Mapping) else None
+                source_evidence_complete = (
+                    _strict_bool(type5.get("evidence_complete")) if isinstance(type5, Mapping) else None
+                )
+                dimension_fields = {
+                    "5a": ("type5_cycle_complete", "type5_cycle_score"),
+                    "5b": ("type5_bottom_complete", "type5_bottom_score"),
+                    "5c": ("type5_survival_complete", "type5_survival_score"),
+                    "5d": ("type5_upside_complete", "type5_upside_score"),
+                    "5e": ("type5_valuation_complete", "type5_valuation_score"),
+                }
+                expected_type5_binding: dict[str, Any] = {
+                    "type5_applicable": type5_status != "not_applicable",
+                    "type5_evidence_complete": source_evidence_complete is True,
+                    "type5_triggered": source_triggered,
+                    "type5_total": source_total,
+                }
+                for dimension, (complete_field, score_field) in dimension_fields.items():
+                    expected_type5_binding[complete_field] = bool(
+                        type5_status != "not_applicable"
+                        and source_scores[dimension] is not None
+                        and dimension not in missing_set
+                    )
+                    expected_type5_binding[score_field] = source_scores[dimension]
+                replayed_total = (
+                    round(
+                        math.fsum(
+                            float(source_scores[key]) * weight
+                            for key, weight in _INDEPENDENT_TYPE7_TYPE5_ROUTE_WEIGHTS.items()
+                        ),
+                        1,
+                    )
+                    if all(value is not None for value in source_scores.values())
+                    else None
+                )
+                replayed_triggered = bool(
+                    expected_type5_binding["type5_applicable"] is True
+                    and expected_type5_binding["type5_evidence_complete"] is True
+                    and all(expected_type5_binding[field] is True for field, _score in dimension_fields.values())
+                    and source_scores["5a"] is not None
+                    and source_scores["5a"] >= 7.0
+                    and replayed_total is not None
+                    and replayed_total >= 7.0
+                )
+                expected_type5_binding["type5_replayed_total"] = replayed_total
+                expected_type5_binding["type5_replayed_triggered"] = replayed_triggered
+                if not isinstance(route_inputs, Mapping) or any(
+                    _canonical_json(route_inputs.get(key)) != _canonical_json(expected)
+                    for key, expected in expected_type5_binding.items()
+                ):
+                    errors.append(f"{code}:type7: strong-cycle route is not bound to Type 5 evidence")
+            return errors
+
+        type1 = row.get("type1")
+        type1_scores = type1.get("sub_scores") if isinstance(type1, Mapping) else None
+        type1_1a = _finite(type1_scores.get("1a")) if isinstance(type1_scores, Mapping) else None
+        ledger_score = _finite(valuation.get("buy_zone_score")) if isinstance(valuation, Mapping) else None
+        expected_score = expected_type1_1a if expected_type1_1a is not None else type1_1a
+        price_required = valuation.get("required") is True if isinstance(valuation, Mapping) else True
+        if (
+            not isinstance(valuation, Mapping)
+            or valuation.get("source_evidence_complete") is not validated_nonfinancial_dcf
+            or type(valuation.get("required")) is not bool
+            or valuation.get("complete") is not (validated_nonfinancial_dcf or not price_required)
+            or type1_1a is None
+            or ledger_score is None
+            or expected_score is None
+            or not _close(type1_1a, expected_score, rel_tol=0.0)
+            or not _close(ledger_score, expected_score, rel_tol=0.0)
+        ):
+            errors.append(f"{code}:type7: price gate is not bound to validated Type 1 valuation")
         return errors
-    inputs = t1_20.get("inputs")
-    item_score = _finite(t1_20.get("score"))
-    input_score = _finite(inputs.get("type1_1a")) if isinstance(inputs, Mapping) else None
-    if t1_20.get("complete") is not validated_nonfinancial_dcf:
-        errors.append(f"{code}:type7: t1_20 completeness is not bound to validated DCF")
-    expected_level = "validated_nonfinancial_dcf" if validated_nonfinancial_dcf else "partial"
-    if t1_20.get("evidence_level") != expected_level:
-        errors.append(f"{code}:type7: t1_20 evidence level is not bound to validated DCF")
-    expected_score = expected_type1_1a if expected_type1_1a is not None else 0.0
-    if any(
-        value is None or not _close(value, expected_score, rel_tol=0.0) for value in (type1_1a, input_score, item_score)
-    ):
-        errors.append(f"{code}:type7: Type 1 1a and t1_20 differ from independently replayed DCF position")
-    return errors
+
+    raise AssertionError("canonical Type 7 valuation branch must return")
 
 
 def _expected_type1_1a_from_dcf(result: Mapping[str, Any]) -> float | None:
@@ -4862,8 +6243,15 @@ def _independent_checks(
     expected_interim_report_date: str | None = None,
     reporting_period_contract: ReportingPeriodContract | None = None,
     patch4_bindings: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
+    source_replay_scores: pd.DataFrame | None = None,
 ) -> tuple[str, ...]:
-    """Recompute score, trigger and valuation contracts without engine helpers."""
+    """Recompute fixed contracts and bind them to a captured-input replay.
+
+    ``source_replay_scores`` is a same-production source-binding replay.  It is
+    kept separate from the independent arithmetic and decision checks in this
+    function so audit reports do not mislabel implementation replay as an
+    independent scoring oracle.
+    """
     if not _audit_valid_reporting_period_contract(reporting_period_contract):
         return ("independent: valid reporting_period_contract is required",)
     errors: list[str] = []
@@ -4936,6 +6324,20 @@ def _independent_checks(
                 if isinstance(record, Mapping):
                     financial_index[code] = record
 
+    source_replay_index: dict[str, Mapping[str, Any]] = {}
+    if source_replay_scores is not None:
+        if not isinstance(source_replay_scores, pd.DataFrame) or "code" not in source_replay_scores:
+            errors.append("independent: raw-source scoring replay missing code column")
+        else:
+            for record in source_replay_scores.to_dict(orient="records"):
+                code = _normalise_code(record.get("code"))
+                if code in source_replay_index:
+                    errors.append(f"independent: duplicate raw-source replay code {code}")
+                source_replay_index[code] = record
+            missing_replays = sorted(set(sampled) - set(source_replay_index))
+            if missing_replays:
+                errors.append(f"independent: raw-source replay missing sampled companies {missing_replays[:5]}")
+
     for code in sampled:
         financial = financial_index.get(code)
         if financial is not None:
@@ -4980,7 +6382,8 @@ def _independent_checks(
                     errors.append(f"{code}:{type_key}:{key}: reason missing")
                 elif len(str(reason)) > _AUDIT_REASON_MAX_LENGTH:
                     errors.append(f"{code}:{type_key}:{key}: reason too long")
-            raw_total = round(sum(clean[key] * weight for key, weight in weights.items()), 1)
+            total_decimals = 3 if type_key == "type7" else 1
+            raw_total = round(sum(clean[key] * weight for key, weight in weights.items()), total_decimals)
             expected_total = min(raw_total, 4.9) if type_key == "type3" and clean["3e"] <= 3 else raw_total
             actual_total = _finite(payload.get("total"))
             if actual_total is None:
@@ -5019,20 +6422,20 @@ def _independent_checks(
                         payload.get("ledger"),
                         status,
                         patch4_bindings=(patch4_bindings.get(code) if isinstance(patch4_bindings, Mapping) else None),
+                        source_row=(source_replay_index.get(code) if source_replay_scores is not None else None),
+                        source_financial=financial_index.get(code),
                     )
                 )
                 ledger = payload.get("ledger")
                 if status != "not_applicable" and isinstance(ledger, Mapping):
                     source_scores = ledger.get("scores")
                     if isinstance(source_scores, Mapping):
-                        source_values = {
-                            key: _finite(source_scores.get(key)) for key in ("template1", "template5", "patch5")
-                        }
+                        source_values = {key: _finite(source_scores.get(key)) for key in ("BM", "MOAT", "G")}
                         expected_type7_scores = (
                             {
-                                "7a": round(source_values["template1"] / 10.0, 3),
-                                "7b": round(source_values["template5"] / 10.0, 3),
-                                "7c": round(source_values["patch5"] / 10.0, 3),
+                                "7a": round(source_values["BM"], 3),
+                                "7b": round(source_values["MOAT"], 3),
+                                "7c": round(source_values["G"], 3),
                             }
                             if all(value is not None for value in source_values.values())
                             else None
@@ -5502,6 +6905,7 @@ def audit_random_sample(
         expected_interim_report_date=expected_interim_report_date,
         reporting_period_contract=reporting_period_contract,
         patch4_bindings=captured_patch4_bindings,
+        source_replay_scores=replayed_sample,
     )
     analysis_quality = getattr(analysis, "quality", {})
     if not isinstance(analysis_quality, Mapping):

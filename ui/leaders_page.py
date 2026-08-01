@@ -1,5 +1,6 @@
 """行业买入候选与个股查询页面。"""
 
+from collections.abc import Mapping
 import math
 
 import pandas as pd
@@ -24,6 +25,8 @@ from ui.buy_types_page import (
     _type_status,
     _render_type6_global_notice,
     _type_risk_notice,
+    _type7_ledger_summary,
+    _type_trigger_rule_text,
     _with_diagnostic_fields,
 )
 
@@ -48,7 +51,7 @@ def _display_percent(value):
 def _add_business_candidate_columns(frame: pd.DataFrame) -> pd.DataFrame:
     """Add the best eligible non-VC signal without calling idxmax on all-NA rows."""
     result = frame.copy()
-    business_types = ["type1", "type2", "type3", "type4", "type5"]
+    business_types = ["type1", "type2", "type3", "type4", "type5", "type7"]
     eligible_cols = []
 
     def eligible_score(info):
@@ -87,7 +90,8 @@ def show():
         st.info("👈 请先在「七种买入类型」页面点击「开始分析」加载数据")
         return
 
-    # 行业候选只使用真正触发且未被否决的非高风险早期/困境框架。
+    # 行业候选只使用真正触发且未被否决的非高风险早期/困境框架；
+    # 第七类是正式质量与买点框架，不能从候选名单中漏掉。
     base_frame = _with_diagnostic_fields(st.session_state.get("leaders_df", st.session_state["buy_types_df"]))
     df = _add_business_candidate_columns(base_frame)
     _render_global_status(df)
@@ -98,7 +102,9 @@ def show():
     tab1, tab2 = st.tabs(["🏆 行业买入候选", "🔍 个股查询"])
 
     with tab1:
-        st.caption("每个细分行业最多展示2只已触发且未被否决的非高风险早期/困境型买入候选；不构成行业地位或投资结论。")
+        st.caption(
+            "每个细分行业最多展示2只已触发且未被否决的非高风险早期/困境型或优质股权型候选；不构成行业地位或投资结论。"
+        )
 
         from data.industry import _INDUSTRY_RULES
 
@@ -217,19 +223,52 @@ def show():
                         risk_notice = _type_risk_notice(t, reasons)
                         if risk_notice:
                             st.error(f"仓位与最大损失约束：{risk_notice}")
+                        decision = td.get("decision")
+                        raw_missing_dimensions = (
+                            decision.get("missing_dimensions")
+                            if isinstance(decision, Mapping)
+                            else reasons.get("_decision_missing_dimensions")
+                        )
+                        missing_dimensions = (
+                            set(raw_missing_dimensions)
+                            if isinstance(raw_missing_dimensions, (list, tuple, set))
+                            else set()
+                        )
                         dim_lines = []
                         for key, name, wt in dims:
-                            v = subs.get(key, 0)
+                            v = subs.get(key)
                             r = _display_reason(reasons.get(key, ""))
+                            dimension_missing = key in missing_dimensions or v is None
                             value_text = (
                                 "不适用"
                                 if status_code == "not_applicable"
                                 else "证据不足"
-                                if status_code == "insufficient_evidence"
-                                else f"{_format_metric(v)}分"
+                                if dimension_missing
+                                else f"{_format_metric(v, digits=3 if t == 'type7' else 1)}分"
                             )
-                            dim_lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {r}")
+                            evidence_text = r or ("该子项尚缺可核验资料" if dimension_missing else "—")
+                            dim_lines.append(f"  • {name}({key},权{wt * 100:.0f}%)={value_text} — {evidence_text}")
                         st.caption("\n".join(dim_lines))
+                        if t == "type7" and isinstance(td.get("ledger"), Mapping):
+                            st.caption(_type_trigger_rule_text("type7"))
+                            summary = _type7_ledger_summary(td["ledger"])
+                            if summary["score_rows"]:
+                                st.dataframe(pd.DataFrame(summary["score_rows"]), width="stretch", hide_index=True)
+                            st.caption(summary["conclusion"])
+                            if summary["item_rows"]:
+                                with st.expander("查看12个子指标及证据状态", expanded=False):
+                                    st.dataframe(
+                                        pd.DataFrame(summary["item_rows"]),
+                                        width="stretch",
+                                        hide_index=True,
+                                    )
+                            if summary["prerequisite_rows"]:
+                                with st.expander("查看前置证据核验", expanded=False):
+                                    st.dataframe(
+                                        pd.DataFrame(summary["prerequisite_rows"]),
+                                        width="stretch",
+                                        hide_index=True,
+                                    )
             else:
                 st.warning(f"未找到股票 {code_str}，请检查代码")
         else:

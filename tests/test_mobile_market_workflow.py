@@ -121,11 +121,22 @@ def test_mobile_publication_artifacts_survive_failed_job_and_full_workflow_rerun
     assert canonical_upload["with"]["name"] == "mobile-market-data-published-${{ github.run_id }}"
     assert canonical_upload["with"]["overwrite"] is True
     assert canonical_upload["if"] == "steps.release.outputs.published == 'true'"
-    for job_name in ("prepare_pages", "verify_cleanup", "archive_manifest"):
+    for job_name in ("prepare_pages", "mirror_cloudflare", "verify_cleanup", "archive_manifest"):
         download = next(
             step for step in jobs[job_name]["steps"] if str(step.get("name", "")).startswith("Download the")
         )
         assert download["with"]["name"] == canonical_upload["with"]["name"]
+
+
+def test_cloudflare_live_check_uses_the_same_methodology_version_as_the_pages_worker():
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+    pages_worker = (ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js").read_text(encoding="utf-8")
+    version_match = re.search(r'^const METHODOLOGY_VERSION="([^"]+)";', pages_worker)
+
+    assert version_match is not None
+    assert version_match.group(1) in workflow
+    assert "classified-type7-v2" not in workflow
+    assert "classified-type7-v3" not in workflow
 
 
 def test_mobile_publication_removes_only_incomplete_starter_assets_before_retry():
@@ -319,6 +330,7 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
         "publish",
         "prepare_pages",
         "deploy_pages",
+        "mirror_cloudflare",
         "verify_cleanup",
         "archive_manifest",
     }
@@ -326,13 +338,14 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert jobs["build"]["if"] == ("github.ref == 'refs/heads/main' && needs.preflight.outputs.should_run == 'true'")
     for name in ("publish", "deploy_pages", "archive_manifest"):
         assert jobs[name]["if"] == "github.ref == 'refs/heads/main'"
-    for name in ("prepare_pages", "verify_cleanup"):
+    for name in ("prepare_pages", "mirror_cloudflare", "verify_cleanup"):
         assert jobs[name]["if"] == "github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'"
     assert jobs["preflight"]["permissions"] == {"contents": "read"}
     assert jobs["build"]["permissions"] == {"contents": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert jobs["prepare_pages"]["permissions"] == {"contents": "read", "pages": "write"}
     assert jobs["deploy_pages"]["permissions"] == {"pages": "write", "id-token": "write"}
+    assert jobs["mirror_cloudflare"]["permissions"] == {}
     assert jobs["verify_cleanup"]["permissions"] == {"contents": "write"}
     assert jobs["archive_manifest"]["permissions"] == {"contents": "write"}
     assert jobs["archive_manifest"]["needs"] == "verify_cleanup"
@@ -343,6 +356,38 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     }
     assert jobs["build"]["environment"] == "mobile-production"
     assert jobs["deploy_pages"]["environment"]["name"] == "github-pages"
+    assert jobs["mirror_cloudflare"]["needs"] == ["publish", "deploy_pages"]
+    assert jobs["verify_cleanup"]["needs"] == ["publish", "deploy_pages", "mirror_cloudflare"]
+    mirror = jobs["mirror_cloudflare"]
+    assert mirror["env"]["REFRESH_URL"] == "https://quant-market-refresh.1203135430.workers.dev/refresh"
+    assert mirror["env"]["REFRESH_KEY"] == "${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}"
+    mirror_download = mirror["steps"][0]
+    assert mirror_download["with"]["name"] == "mobile-market-data-published-${{ github.run_id }}"
+    mirror_script = mirror["steps"][1]["run"]
+    assert "x-refresh-key: ${REFRESH_KEY}" in mirror_script
+    assert "quant.custard.top/api/meta" in mirror_script
+    assert "expected_generation" in mirror_script
+    assert "expected_market_as_of" in mirror_script
+    assert "expected_manifest_sha256" in mirror_script
+    assert "expected_company_count" in mirror_script
+    assert "expected_source_commit" in mirror_script
+    assert "actual_generation" in mirror_script
+    assert "actual_manifest_sha256" in mirror_script
+    assert 'transport_ok="false"' not in mirror_script
+    assert "transport_ok=false" in mirror_script
+    assert mirror["timeout-minutes"] == 60
+    assert "mirror_attempt_limit=8" in mirror_script
+    assert "mirror_retry_base_delay_seconds=10" in mirror_script
+    assert "for ((attempt=1; attempt<=mirror_attempt_limit; attempt++))" in mirror_script
+    assert "(.current_generation_id // .generation_id)" in mirror_script
+    assert '"${response_generation}" == "${expected_generation}"' in mirror_script
+    assert "generation '${response_generation:-none}' on attempt ${attempt} of ${mirror_attempt_limit}" in mirror_script
+    assert "sleep $((mirror_retry_base_delay_seconds * attempt))" in mirror_script
+    assert "verify_cloudflare_projection() {" in mirror_script
+    assert 'if verify_cloudflare_projection "${attempt}"; then' in mirror_script
+    assert "Cloudflare public projection has not converged on attempt ${attempt} of 6." in mirror_script
+    assert "|| return 1" in mirror_script
+    assert "Cloudflare dashboard did not retain the exact published generation." in mirror_script
     assert "requirements-dev-lock.txt" not in workflow
     assert "timeout-minutes: 90" in workflow
     assert workflow.count("continue-on-error: true") == 4
