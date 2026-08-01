@@ -251,7 +251,39 @@ def _mobile_screening_coverage(scores: object) -> dict[str, object]:
         raise RuntimeError("whole-market screening evidence contract is missing")
     failed = [gate for gate in _MOBILE_STRUCTURAL_EVIDENCE_GATES if readiness.get(gate) is not True]
     if failed:
-        raise RuntimeError("whole-market screening evidence contract failed: " + ",".join(failed))
+        contracts = coverage.get("framework_evidence_contract")
+        details: list[str] = []
+        if isinstance(contracts, Mapping):
+            for type_key, contract in contracts.items():
+                if not isinstance(contract, Mapping):
+                    continue
+                flags = [
+                    f"{field}={contract[field]}"
+                    for field in (
+                        "invalid_payload",
+                        "invalid_applicability",
+                        "incomplete_without_reason",
+                        "invalid_sub_scores",
+                        "invalid_decision",
+                        "decision_hidden",
+                        "recall_unsafe",
+                        "invalid_evidence_complete",
+                    )
+                    if isinstance(contract.get(field), int) and contract[field] > 0
+                ]
+                if flags:
+                    examples = (
+                        contract.get("invalid_decision_examples")
+                        or contract.get("incomplete_without_reason_examples")
+                        or contract.get("invalid_sub_score_examples")
+                        or []
+                    )
+                    details.append(f"{type_key}:{','.join(flags)} examples={list(examples)[:8]}")
+        raise RuntimeError(
+            "whole-market screening evidence contract failed: "
+            + ",".join(failed)
+            + (" [" + "; ".join(details) + "]" if details else "")
+        )
     result = dict(coverage)
     result["publication_readiness"] = {
         "artifact_integrity_ready": True,
