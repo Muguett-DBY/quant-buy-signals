@@ -394,8 +394,16 @@ jobs:
               )
             }
           }
-          if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
-            throw 'The mobile manifest was not generated after 16:15 on its Shanghai market date.'
+          # A fresh post-close refresh must have generated its manifest after
+          # 16:15 on the market date.  A model-only rebuild may reuse a cached
+          # closed snapshot or re-fetch the same closed session hours/days
+          # later, so its data_timestamp is a scoring time, not the capture
+          # time; the session identity is still pinned by the 14-day/future
+          # checks above and by the source-quote timestamp check below.
+          if (-not $rebuildLatestClosed) {
+            if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+              throw 'The mobile manifest was not generated after 16:15 on its Shanghai market date.'
+            }
           }
 
           $validation = $manifest.provenance.snapshot_validation
@@ -415,8 +423,14 @@ jobs:
             (Convert-SourceTimestamp $validation.retrieval_time_oldest 'oldest quote retrieval timestamp'),
             $shanghaiZone
           )
-          if ($retrievedShanghai.Date -ne $marketDate.Date -or $retrievedShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
-            throw 'The quote pages were not retrieved after 16:15 on the published market date.'
+          # Same reasoning as the manifest timestamp check above: the quote
+          # retrieval wall-clock time of a model-only rebuild is the rebuild
+          # time, while the closed session is pinned by the source-quote
+          # timestamp check that follows.
+          if (-not $rebuildLatestClosed) {
+            if ($retrievedShanghai.Date -ne $marketDate.Date -or $retrievedShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+              throw 'The quote pages were not retrieved after 16:15 on the published market date.'
+            }
           }
           $latestQuoteShanghai = [TimeZoneInfo]::ConvertTime(
             (Convert-SourceTimestamp $validation.source_quote_timestamp_latest 'latest source quote timestamp'),
