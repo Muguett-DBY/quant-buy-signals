@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   export:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Restore the market snapshot cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
