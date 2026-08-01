@@ -143,6 +143,45 @@ def test_patch6_type7_routes_weak_cycle_and_replays_all_twelve_atomic_scores():
     assert _independent_type7_ledger_errors(ledger, expected_code="600519") == []
 
 
+def test_patch6_type7_repeat_demand_tie_rounding_matches_replay():
+    # Regression: production previously computed W-class repeat_demand as
+    # _average(n_score / 10.0 * 10.0, business_model_score) while the ledger
+    # replay used the raw N_sensitivity. The /10*10 transform perturbs the
+    # input by ~1e-16; for N_sensitivity=1.602965 and business_model_score=8.0
+    # the 6-decimal rounding lands exactly on the tie boundary, so production
+    # rounded to 4.801483 while the replay rounded to 4.801482 and the
+    # validator rejected the item ("BM.repeat_demand arithmetic invalid").
+    # This failed the whole market rebuild on real data (code 000532).
+    metric = _complete_metric(industry="SOFTWARE")
+    metric.update(
+        {
+            "gross_margin": 0.35,
+            "gross_margin_cv": 0.15,
+            "profit_volatility": 2.0,
+            "growth_consistency": 2.0,
+            "stability_score": 3.0,
+            "moat_score": 8.52965,
+            "business_model_score": 8.0,
+        }
+    )
+    ledger = assess_patch6_type7(
+        metric,
+        valuation_evidence_complete=True,
+        valuation_score=9.0,
+        route_evidence=_weak_route(),
+    )
+
+    assert ledger["classification"]["class_code"] == "W"
+    assert ledger["classification"]["sensitivity_scores"]["N"] == 1.602965
+    repeat = next(item for item in ledger["dimensions"]["BM"]["items"] if item["key"] == "repeat_demand")
+    assert repeat["inputs"]["N_sensitivity"] == 1.602965
+    assert repeat["inputs"]["business_model_score"] == 8.0
+    assert repeat["score"] == 4.801482
+    assert repeat["upper_bound"] == 4.801482
+    assert validate_patch6_type7_ledger(ledger) == []
+    assert _independent_type7_ledger_errors(ledger, expected_code="600519") == []
+
+
 def test_patch6_type7_weak_cycle_requires_template5_valuation_and_patch5_safety_gate():
     weak_route = _weak_route()
     weak_route["patch5_safety_score"] = 7.999

@@ -1395,7 +1395,7 @@ def _build_items(
 
     if class_code == "W":
         pricing = _average(gross, moat)
-        repeat = _average(None if n_score is None else n_score / 10.0 * 10.0, business)
+        repeat = _average(n_score, business)
         license_score = _average(moat, 8.0 if industry in LICENSE_OR_SCARCITY_INDUSTRIES else 3.0)
         items = {
             "BM": [

@@ -6740,7 +6740,7 @@ def score_type7_quality_equity(
         expected_as_of=str(m.get("source_trade_date") or ""),
     )
     if ledger_errors:
-        raise AssertionError("情况七量化账本不变量失败:" + ";".join(ledger_errors[:3]))
+        raise AssertionError(f"情况七量化账本不变量失败(code={m.get('code')}):" + ";".join(ledger_errors))
     source_scores = ledger["scores"]
     scores = {
         "7a": round(float(source_scores["BM"]), 3),

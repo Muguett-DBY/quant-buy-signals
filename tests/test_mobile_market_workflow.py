@@ -867,3 +867,80 @@ def test_runtime_lock_is_a_same_version_subset_of_the_audited_dev_lock():
     development = _locked_versions(ROOT / "requirements-dev-lock.txt")
 
     assert runtime.items() <= development.items()
+
+
+DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy-cloudflare.yml"
+
+
+def test_cloudflare_deploy_waits_for_tests_on_main_and_serializes_production_deploys():
+    parsed = _workflow(DEPLOY_WORKFLOW)
+    trigger = parsed.get("on", parsed.get(True))
+    assert trigger["workflow_run"]["workflows"] == ["tests"]
+    assert trigger["workflow_run"]["types"] == ["completed"]
+    assert trigger["workflow_run"]["branches"] == ["main"]
+    assert "workflow_dispatch" in trigger
+    assert parsed["concurrency"]["group"] == "cloudflare-site-deploy"
+    assert parsed["concurrency"]["cancel-in-progress"] is False
+    jobs = parsed["jobs"]
+    assert set(jobs) == {"deploy"}
+    assert jobs["deploy"]["if"] == (
+        "github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'"
+    )
+
+
+def test_cloudflare_deploy_pins_wrangler_and_never_embeds_or_logs_secrets():
+    workflow = _workflow_text(DEPLOY_WORKFLOW)
+    assert "WRANGLER_VERSION: 4.118.0" in workflow
+    assert workflow.count("wrangler@") == workflow.count("wrangler@${WRANGLER_VERSION}")
+    assert "@latest" not in workflow
+    assert "REFRESH_KEY" not in workflow
+    assert "CLOUDFLARE_MARKET_REFRESH_KEY" not in workflow
+    assert "x-refresh-key" not in workflow
+    parsed = _workflow(DEPLOY_WORKFLOW)
+    env = parsed["jobs"]["deploy"]["env"]
+    assert env["CLOUDFLARE_API_TOKEN"] == "${{ secrets.CLOUDFLARE_API_TOKEN }}"
+    assert env["CLOUDFLARE_ACCOUNT_ID"] == "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+    assert "CLOUDFLARE_MARKET_REFRESH_KEY" not in env
+    assert "GH_TOKEN" not in env
+
+
+def test_cloudflare_deploy_keeps_refresh_bindings_and_stages_only_the_pages_worker():
+    parsed = _workflow(DEPLOY_WORKFLOW)
+    steps = parsed["jobs"]["deploy"]["steps"]
+    refresh = next(step for step in steps if "Deploy the quant-market-refresh worker" in step["name"])
+    assert refresh["working-directory"] == "cloudflare/quant-dashboard"
+    assert "--keep-vars" in refresh["run"]
+    assert "CLOUDFLARE_API_TOKEN" in refresh["run"] and "CLOUDFLARE_ACCOUNT_ID" in refresh["run"]
+    pages = next(step for step in steps if "Deploy the Cloudflare Pages worker" in step["name"])
+    assert 'cp cloudflare/quant-dashboard/pages_worker.js "${pages_dir}/_worker.js"' in pages["run"]
+    assert 'find "${pages_dir}" -type f | wc -l' in pages["run"]
+    assert pages["run"].count("wrangler@") == 1  # pages worker deploy
+
+
+def test_cloudflare_deploy_refuses_stale_main_and_verifies_every_endpoint():
+    parsed = _workflow(DEPLOY_WORKFLOW)
+    steps = parsed["jobs"]["deploy"]["steps"]
+    guard = next(step for step in steps if step["name"] == "Refuse an outdated main revision")
+    assert "gh api \"repos/${{ github.repository }}/commits/main\" --jq '.sha'" in guard["run"]
+    assert "skip=true" in guard["run"]
+    verify = next(step for step in steps if step["name"] == "Verify the deployed site")
+    for endpoint in ("/api/methodology", "/api/health", "/api/meta", "https://quant.custard.top/"):
+        assert endpoint in verify["run"]
+    assert "jq -er '.methodology_version'" in verify["run"]
+    assert "grep -qF" in verify["run"]
+
+
+def test_cloudflare_deploy_bash_blocks_parse_with_bash():
+    blocks = _bash_run_blocks(DEPLOY_WORKFLOW)
+    executable = _bash_executable()
+    if executable is None:
+        pytest.skip("bash is not installed on this test host")
+    for block in blocks:
+        result = subprocess.run(
+            [executable, "--noprofile", "--norc", "-n"],
+            input=block,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"bash syntax failure:\n{block}\n{result.stderr}"
