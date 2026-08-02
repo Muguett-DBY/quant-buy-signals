@@ -6405,7 +6405,13 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         if score is not None and level == "primary":
             return score, _evidence_reason(m, key, f"{label}原始证据不可追溯"), True
         if score is not None and level == "derived_proxy":
-            return min(score, 4.0), f"{label}仅有模型代理证据，诊断最高4分；缺原始资料", False
+            # A complete observable proxy is a legitimate, reproducible
+            # quantitative score (same spirit as 6a's 8-point proxy ceiling).
+            # It stays below primary (10) because financial proxies cannot
+            # prove the qualitative claim, but it no longer strands the whole
+            # framework in "资料不足": the final action gate 6e still requires
+            # the user's explicit position confirmation before any buy.
+            return min(score, 6.0), f"{label}模型代理证据，最高6分；有可追溯原始资料可更高", True
         return 0.0, f"缺{label}可追溯原始资料", False
 
     technology_score, reasons["6b"], technology_complete = strict_primary_score("technology_score", "技术")

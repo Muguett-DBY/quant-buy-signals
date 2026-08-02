@@ -4236,7 +4236,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("_condition", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_CONDITIONAL)
 
-    def test_type6_proxy_technology_and_model_scores_are_diagnostic_only(self):
+    def test_type6_proxy_technology_and_model_scores_cap_at_six_and_can_trigger(self):
         outcome = bs.score_type6_vc(
             base_metrics(
                 market_cap=10e8,
@@ -4252,13 +4252,18 @@ class TestTypeRules(unittest.TestCase):
             benchmarks(median_cagr=0.60, median_cagr_count=20),
         )
 
-        self.assertFalse(outcome[0])
-        self.assertEqual(outcome[2]["6b"], 4.0)
-        self.assertEqual(outcome[2]["6c"], 4.0)
+        # A complete observable proxy is a reproducible quantitative score
+        # (same spirit as 6a's 8-point ceiling): it caps at 6, below primary,
+        # but counts as complete evidence so the framework can actually
+        # trigger.  The explicit position gate (6e) remains a separate
+        # action-confirmation step before any buy.
+        self.assertTrue(outcome[0])
+        self.assertEqual(outcome[2]["6b"], 6.0)
+        self.assertEqual(outcome[2]["6c"], 6.0)
         self.assertIn("模型代理证据", outcome[3]["6b"])
         self.assertIn("模型代理证据", outcome[3]["6c"])
-        self.assertEqual(outcome[3]["_decision_missing_dimensions"], ["6b", "6c"])
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(outcome[3]["_decision_missing_dimensions"], [])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_TRIGGERED)
 
     def test_type6_primary_technology_and_model_scores_remain_formal_scores(self):
         outcome = bs.score_type6_vc(
