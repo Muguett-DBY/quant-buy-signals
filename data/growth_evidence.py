@@ -2835,6 +2835,29 @@ def fetch_growth_evidence_batch(
             file=sys.stderr,
             flush=True,
         )
+    status_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    for code, record in results.items():
+        segment = record.get("segment_growth_sources") if isinstance(record, dict) else None
+        if not isinstance(segment, dict):
+            continue
+        status = str(segment.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status != "complete":
+            reason = str(segment.get("reason") or "no_reason")
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    print(
+        "TYPE3_GROWTH_DIAGNOSTIC requested="
+        + str(len(prepared))
+        + " statuses="
+        + ";".join(f"{key}:{count}" for key, count in sorted(status_counts.items()))
+        + " reasons="
+        + "; ".join(
+            f"{count}x {reason[:110]}" for reason, count in sorted(reason_counts.items(), key=lambda item: -item[1])[:6]
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     return {code: results[code] for code, *_ in prepared}
 
 
