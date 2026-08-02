@@ -53,7 +53,10 @@ MAX_SEGMENT_ROWS = 1_000
 # with no throttling and a 93% segment completion rate).
 MAX_BATCH_COMPANIES = 6_000
 _CASHFLOW_BATCH_COMPANIES = 100
-MAX_WORKERS = 4
+# Verified against Eastmoney at 8 workers with no throttling and a 93%
+# segment completion rate; cache hits make the remaining network work small,
+# so the wider pool shortens each backfill run without risking the source.
+MAX_WORKERS = 8
 MAX_SEGMENT_HISTORY_YEARS = 10
 MIN_SEGMENT_HISTORY_YEARS = 3
 EXTERNAL_HISTORY_YEARS = 5
