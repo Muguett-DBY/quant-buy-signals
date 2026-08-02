@@ -19,7 +19,6 @@ import json
 import math
 from pathlib import Path
 import re
-import sys
 import threading
 import time
 from typing import Any
@@ -2730,7 +2729,6 @@ def fetch_growth_evidence_batch(
                     acquisition_errors[code] = exc
 
     results: dict[str, dict[str, Any]] = {}
-    _diagnostic_failures: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(prepared))) as executor:
         futures = {
             executor.submit(
@@ -2783,7 +2781,6 @@ def fetch_growth_evidence_batch(
                         cache_ttl_seconds=cache_ttl_seconds,
                     )
             except Exception as exc:
-                _diagnostic_failures[code] = str(exc)[:160]
                 segment = {
                     "status": "unavailable",
                     "source": "东方财富主营构成年度数据",
@@ -2823,41 +2820,6 @@ def fetch_growth_evidence_batch(
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
-    if _diagnostic_failures:
-        import collections
-
-        counts = collections.Counter(_diagnostic_failures.values())
-        print(
-            "TYPE3_GROWTH_DIAGNOSTIC failures="
-            + str(len(_diagnostic_failures))
-            + " samples="
-            + "; ".join(f"{count}x {reason[:120]}" for reason, count in list(counts.most_common(6))),
-            file=sys.stderr,
-            flush=True,
-        )
-    status_counts: dict[str, int] = {}
-    reason_counts: dict[str, int] = {}
-    for record in results.values():
-        segment = record.get("segment_growth_sources") if isinstance(record, dict) else None
-        if not isinstance(segment, dict):
-            continue
-        status = str(segment.get("status") or "unknown")
-        status_counts[status] = status_counts.get(status, 0) + 1
-        if status != "complete":
-            reason = str(segment.get("reason") or "no_reason")
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
-    print(
-        "TYPE3_GROWTH_DIAGNOSTIC requested="
-        + str(len(prepared))
-        + " statuses="
-        + ";".join(f"{key}:{count}" for key, count in sorted(status_counts.items()))
-        + " reasons="
-        + "; ".join(
-            f"{count}x {reason[:110]}" for reason, count in sorted(reason_counts.items(), key=lambda item: -item[1])[:6]
-        ),
-        file=sys.stderr,
-        flush=True,
-    )
     return {code: results[code] for code, *_ in prepared}
 
 
