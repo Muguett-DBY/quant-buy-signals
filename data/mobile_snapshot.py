@@ -899,6 +899,7 @@ def _public_type7_method_detail(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     gate_names = {
         "future_fcf": "未来自由现金流前提",
+        "gdN_investability": "gdN 可投滤网",
         "route_path": "按公司类别检查买点条件",
         "price_reasonableness": "第七类自身价格检查",
     }
@@ -938,6 +939,8 @@ def _public_type7_method_detail(payload: Mapping[str, Any]) -> dict[str, Any]:
                         "还要明确带息债务和货币资金，并用两者差额核对净债后再检查多情景估值"
                     ),
                 }.get(class_code, "分类路径资料待核对")
+            elif key == "gdN_investability":
+                detail = str(gate.get("rule") or "gdN 可投滤网：g 增长引擎 × d 分红引擎 × N 时间")
             elif gate.get("required") is not True:
                 detail = "这代数据曾错误省略第七类自身价格检查，请刷新到最新数据后再判断"
             else:
