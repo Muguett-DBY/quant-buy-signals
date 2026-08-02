@@ -819,6 +819,7 @@ def test_company_detail_publishes_only_whitelisted_chinese_type7_method_detail()
     assert sum(len(dimension["items"]) for dimension in method["dimensions"]) == 12
     assert [gate["name"] for gate in method["gates"]] == [
         "未来自由现金流前提",
+        "gdN 可投滤网",
         "按公司类别检查买点条件",
         "第七类自身价格检查",
     ]
