@@ -1,0 +1,54 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - heading "量化买入情况看板" [level=1] [ref=e3]
+    - paragraph [ref=e4]: 沪深市场七类量化买入情况
+  - main [ref=e5]:
+    - generic [ref=e6]: 正在读取数据…
+    - generic [ref=e8]:
+      - heading "七类命中、待确认与资料缺口分布" [level=2] [ref=e9]
+      - paragraph [ref=e10]: “已触发”才是实际信号；“待确认”须满足附加条件；“资料缺口”包含仍有可核验资料缺口的公司，其中“结论待定”和“补齐后仍可能触发”是更小的子集，均不是买入信号。
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - text: 代码/名称
+        - textbox "代码/名称" [ref=e14]:
+          - /placeholder: 例如 600519 或 贵州茅台
+      - generic [ref=e15]:
+        - text: 市场
+        - combobox "市场" [ref=e16]:
+          - option "全部市场" [selected]
+          - option "沪市"
+          - option "深市"
+      - generic [ref=e17]:
+        - text: 买入类型
+        - combobox "买入类型" [ref=e18]:
+          - option "全部七类" [selected]
+      - generic [ref=e19]:
+        - text: 当前类型状态
+        - combobox "当前类型状态" [ref=e20]:
+          - option "实际命中" [selected]
+          - option "全部适用状态"
+      - generic [ref=e22]:
+        - text: 行业
+        - combobox "行业" [ref=e23]:
+          - option "全部行业" [selected]
+      - generic [ref=e24]:
+        - text: 排序
+        - combobox "排序" [ref=e25]:
+          - option "当前类型/诊断分高到低" [selected]
+          - option "名称"
+          - option "代码"
+    - generic [ref=e26]:
+      - table [ref=e28]:
+        - rowgroup [ref=e29]:
+          - row [ref=e30]:
+            - columnheader "代码" [ref=e31]
+            - columnheader "名称" [ref=e32]
+            - columnheader "市场" [ref=e33]
+            - columnheader "行业" [ref=e34]
+            - columnheader "综合诊断分" [ref=e35]
+            - columnheader "主要买入情况" [ref=e36]
+            - columnheader "七类状态" [ref=e37]
+        - rowgroup
+      - generic [ref=e39]:
+        - button "上一页" [ref=e40] [cursor=pointer]
+        - button "下一页" [ref=e41] [cursor=pointer]

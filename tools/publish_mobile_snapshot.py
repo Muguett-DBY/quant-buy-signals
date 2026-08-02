@@ -420,12 +420,20 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         cached_segments = load_growth_evidence_cache_batch_state(prepared)
         cached_external = load_external_growth_evidence_cache_batch_state(prepared)
         fully_cached_codes = set(cached_segments).intersection(cached_external)
+        # A validated segment cache is independently useful: the segment
+        # source (3d) and Type 7 category expansion only need it.  A missing
+        # or retry-pending external (acquisition cash-flow) record must not
+        # keep the whole company out of the batch and waste the segment
+        # evidence, so segment-cached codes are always selected.  The batch
+        # fetcher reuses the cached segment and only refetches the annual
+        # cash-flow rows, which are cheap chunked requests.
+        segment_cached_codes = set(cached_segments)
         retry_state = load_growth_evidence_retry_state_batch(prepared) if remaining else {}
         unseen: list[Mapping[str, object]] = []
         due_retries: list[tuple[str, int, str, Mapping[str, object]]] = []
         for position, request in enumerate(prepared):
             code = str(request.get("code") or "")
-            if code in fully_cached_codes:
+            if code in fully_cached_codes or code in segment_cached_codes:
                 continue
             state = retry_state.get(code)
             if state is None:
@@ -466,6 +474,7 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
             selected_network = unseen[:remaining]
         remaining -= len(selected_network)
         selected_codes = set(fully_cached_codes)
+        selected_codes.update(segment_cached_codes)
         selected_codes.update(str(request.get("code") or "") for request in selected_network)
         selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
         if not selected:

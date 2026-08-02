@@ -420,7 +420,7 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     assert calls == [(first[:3], progress)]
 
 
-def test_type3_growth_loader_does_not_treat_segment_only_cache_as_free(monkeypatch):
+def test_type3_growth_loader_always_selects_segment_cached_codes_without_spending_the_budget(monkeypatch):
     calls = []
 
     monkeypatch.setattr(
@@ -443,8 +443,12 @@ def test_type3_growth_loader_does_not_treat_segment_only_cache_as_free(monkeypat
         {"code": "000001", "as_of": "2026-07-29"},
     ]
 
-    assert set(publisher._bounded_type3_growth_loader(limit=1)(requests)) == {"000002"}
-    assert calls == [["000002"]]
+    # A validated segment cache is independently useful (Type 3 3d and Type 7
+    # category expansion only need it), so 000002 is always selected and does
+    # not consume the network backfill budget; the uncached 000001 still fits
+    # in the limit of one network slot.
+    assert set(publisher._bounded_type3_growth_loader(limit=1)(requests)) == {"000002", "000001"}
+    assert calls == [["000002", "000001"]]
 
 
 def test_type3_growth_loader_retries_due_candidate_while_continuing_new_coverage(monkeypatch):
