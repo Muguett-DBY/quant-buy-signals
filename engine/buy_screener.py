@@ -1858,13 +1858,26 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
     ]
     m["total_assets_history"] = [value for _, value in asset_points]
     m["total_assets_years"] = [year for year, _ in asset_points]
-    goodwill_points = [
-        (year, value)
-        for row in balances
-        if (year := _report_year(row)) is not None
-        and (value := _safe_float(row.get("GOODWILL"))) is not None
-        and value >= 0
-    ]
+    # Eastmoney leaves GOODWILL blank (None) for companies with zero or
+    # negligible goodwill instead of reporting 0.  Treating the blank as
+    # missing made five-year goodwill coverage fail for thousands of companies
+    # and blocked the Type 3 growth-quality proxy.  A blank GOODWILL on an
+    # otherwise complete annual balance sheet is conservatively resolved as 0:
+    # a company that actually disclosed goodwill would have the value filled
+    # in, and under-reporting goodwill can only lower (never raise) the
+    # quality scores that consume it.
+    goodwill_points: list[tuple[int, float]] = []
+    for row in balances:
+        year = _report_year(row)
+        if year is None:
+            continue
+        raw_goodwill = _safe_float(row.get("GOODWILL"))
+        if raw_goodwill is not None:
+            if raw_goodwill < 0:
+                continue
+            goodwill_points.append((year, raw_goodwill))
+        elif _safe_float(row.get("TOTAL_ASSETS")) is not None:
+            goodwill_points.append((year, 0.0))
     m["goodwill_history"] = [value for _, value in goodwill_points]
     m["goodwill_years"] = [year for year, _ in goodwill_points]
     m["goodwill_latest"] = goodwill_points[-1][1] if goodwill_points else None
