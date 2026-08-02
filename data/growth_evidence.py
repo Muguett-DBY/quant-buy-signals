@@ -2729,6 +2729,7 @@ def fetch_growth_evidence_batch(
                     acquisition_errors[code] = exc
 
     results: dict[str, dict[str, Any]] = {}
+    _diagnostic_failures: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(prepared))) as executor:
         futures = {
             executor.submit(
@@ -2781,6 +2782,7 @@ def fetch_growth_evidence_batch(
                         cache_ttl_seconds=cache_ttl_seconds,
                     )
             except Exception as exc:
+                _diagnostic_failures[code] = str(exc)[:160]
                 segment = {
                     "status": "unavailable",
                     "source": "东方财富主营构成年度数据",
@@ -2820,6 +2822,18 @@ def fetch_growth_evidence_batch(
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
+    if _diagnostic_failures:
+        import collections
+
+        counts = collections.Counter(_diagnostic_failures.values())
+        print(
+            "TYPE3_GROWTH_DIAGNOSTIC failures="
+            + str(len(_diagnostic_failures))
+            + " samples="
+            + "; ".join(f"{count}x {reason[:120]}" for reason, count in list(counts.most_common(6))),
+            file=sys.stderr,
+            flush=True,
+        )
     return {code: results[code] for code, *_ in prepared}
 
 
