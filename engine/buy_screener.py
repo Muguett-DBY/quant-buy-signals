@@ -7696,6 +7696,7 @@ def screen_all_types(
     patch4_loader=None,
     patch4_progress_cb=None,
     commodity_cycle_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    dividend_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> pd.DataFrame:
     """对合格沪深股票评分；输出按代码稳定排序，并提供完整七类结构。
 
@@ -7720,6 +7721,10 @@ def screen_all_types(
     unknown_commodity = sorted(set(normalized_commodity) - set(canonical_fin))
     if unknown_commodity:
         raise ValueError(f"商品周期证据包含不在财务全集中的代码:{unknown_commodity[:5]}")
+    normalized_dividend = _canonicalize_mapping(dividend_evidence or {}, "分红送配证据")
+    unknown_dividend = sorted(set(normalized_dividend) - set(canonical_fin))
+    if unknown_dividend:
+        raise ValueError(f"分红送配证据包含不在财务全集中的代码:{unknown_dividend[:5]}")
     raw_dcf_skips = _canonicalize_mapping(dcf_skip_classifications or {}, "DCF跳过分类")
     normalized_dcf_skips: dict[str, dict[str, str]] = {}
     for code, value in raw_dcf_skips.items():
@@ -7808,6 +7813,17 @@ def screen_all_types(
                 metric["type5_cycle_attribute_score_evidence"] = dict(evidence)
                 metric["type5_cycle_attribute_score_evidence_level"] = "primary"
                 metric["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
+            dividend = normalized_dividend.get(code)
+            if dividend is not None:
+                if not isinstance(dividend, Mapping) or "trailing_cash_per_share" not in dividend:
+                    raise ValueError(f"分红送配证据无效:{code}")
+                trailing_cash = _safe_float(dividend.get("trailing_cash_per_share"))
+                if trailing_cash is None or trailing_cash < 0:
+                    raise ValueError(f"分红送配证据无效:{code}")
+                metric["trailing_cash_per_share"] = trailing_cash
+                metric["dividend_evidence"] = (
+                    dividend.get("evidence") if isinstance(dividend.get("evidence"), Mapping) else None
+                )
             coldness = normalized_coldness.get(code)
             if coldness is not None:
                 if not isinstance(coldness, Mapping):

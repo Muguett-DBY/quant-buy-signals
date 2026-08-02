@@ -125,8 +125,13 @@ def _set_classification_component_score(ledger, group, key, score, *, inputs=Non
 
 
 def test_patch6_type7_routes_weak_cycle_and_replays_all_twelve_atomic_scores():
+    metric = _complete_metric()
+    # gdN investability (② g>0 且留存转更高未来 g): the complete metric has no
+    # dividend engine, so a strong R&D intensity keeps the trigger focused on
+    # the weak-cycle route replay.
+    metric["rd_intensity"] = 0.05
     ledger = assess_patch6_type7(
-        _complete_metric(),
+        metric,
         valuation_evidence_complete=True,
         valuation_score=9.0,
         route_evidence=_weak_route(),
@@ -209,7 +214,7 @@ def test_patch6_type7_weak_cycle_requires_template5_valuation_and_patch5_safety_
     assert failed["quality_certified"] is True
     assert failed["decision_gates"]["route_path"]["complete"] is True
     assert failed["decision_gates"]["route_path"]["passed"] is False
-    assert failed["condition_failures"] == ["route_path"]
+    assert failed["condition_failures"] == ["gdN_investability", "route_path"]
     assert failed["buy_ready"] is False
     assert validate_patch6_type7_ledger(failed) == []
     assert missing["decision_gates"]["route_path"]["complete"] is False
@@ -963,8 +968,13 @@ def test_patch6_type7_missing_input_publishes_upper_bound_and_cannot_trigger():
 
 
 def test_patch6_type7_wrapper_uses_classified_mean_and_keeps_old_rule_non_decisive():
+    metric = _complete_metric()
+    # gdN investability: the complete metric has no dividend engine, so give
+    # it a strong R&D intensity (② g>0 且留存转更高未来 g) to keep the
+    # wrapper test focused on the classified mean.
+    metric["rd_intensity"] = 0.05
     outcome, ledger = score_type7_quality_equity(
-        _complete_metric(),
+        metric,
         _type1(),
         _history(),
         valuation_evidence_complete=True,
@@ -1050,7 +1060,7 @@ def test_patch6_type7_negative_free_cash_flow_is_a_known_failed_premise():
 
     assert ledger["decision_gates"]["future_fcf"]["complete"]
     assert not ledger["decision_gates"]["future_fcf"]["passed"]
-    assert ledger["condition_failures"] == ["future_fcf"]
+    assert ledger["condition_failures"] == ["future_fcf", "gdN_investability"]
     assert not ledger["triggered"]
     assert validate_patch6_type7_ledger(ledger) == []
     assert _independent_type7_ledger_errors(ledger, expected_code="600519") == []

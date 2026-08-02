@@ -1837,6 +1837,70 @@ def _build_items(
     return items
 
 
+def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, Any]:
+    """后续附加补丁们 3331：gdN 可投滤网。
+
+    可投须满足 ① g>0 且 d>0；或 ② g>0 且留存转更高未来 g（研发强度足
+    够高）；或 ③ g≈0 但 d 高（烟蒂）。secular 衰退 + 不分红 = 两引擎全
+    灭，坚决不投。强周期谷底的暂时性 g<0 须先做周期归一化，不可误杀：
+    已被商品周期证据确认强周期属性（type5_cycle_attribute_score≥7）的
+    C 类公司在谷底不因 g<0 被滤掉。
+    """
+    g = _bounded(metric.get("trend_growth"), -1.0, 1.0)
+    trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, None)
+    price = _bounded(metric.get("price"), 0.0, None)
+    rd_intensity = _bounded(metric.get("rd_intensity"), 0.0, 1.0)
+    dividend_yield = trailing_cash / price if (trailing_cash is not None and price and price > 0) else 0.0
+    cycle_confirmed = _bounded(metric.get("type5_cycle_attribute_score"), 0.0, 10.0)
+    cycle_confirmed = cycle_confirmed is not None and cycle_confirmed >= 7.0
+
+    inputs = {
+        "g": g,
+        "d": dividend_yield,
+        "rd_intensity": rd_intensity,
+        "trailing_cash_per_share": trailing_cash,
+        "cycle_confirmed": cycle_confirmed,
+    }
+    basis = "gdN 可投滤网：g 增长引擎 × d 分红引擎 × N 时间"
+    if g is None:
+        return {
+            "complete": False,
+            "passed": False,
+            "required": True,
+            "basis": basis,
+            "rule": "缺增长引擎证据（g 无法判定）",
+            "inputs": inputs,
+            "missing_inputs": ["g"],
+        }
+    if g > 0 and dividend_yield > 0:
+        passed = True
+        rule = "① g>0 且 d>0：双引擎正常"
+    elif g > 0 and rd_intensity is not None and rd_intensity >= 0.03:
+        passed = True
+        rule = "② g>0 且留存转更高未来 g（研发强度≥3%）"
+    elif abs(g) <= 0.02 and dividend_yield >= 0.04:
+        passed = True
+        rule = "③ g≈0 但 d 高（烟蒂，股息率≥4%）"
+    elif class_code == "C" and cycle_confirmed:
+        passed = True
+        rule = "强周期谷底周期归一化豁免（商品周期证据确认，g 暂时为负不误杀）"
+    elif g < 0 and dividend_yield <= 0:
+        passed = False
+        rule = "secular 衰退且不分红：g 与 d 两引擎全灭，坚决不投"
+    else:
+        passed = False
+        rule = "gdN 引擎不成立：g≤0 且股息率不足（非烟蒂、非留存转增长）"
+    return {
+        "complete": True,
+        "passed": passed,
+        "required": True,
+        "basis": basis,
+        "rule": rule,
+        "inputs": inputs,
+        "missing_inputs": [],
+    }
+
+
 def _future_fcf_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, Any]:
     """Replayable Patch 7 future-FCF premise with a technology path exception."""
 
@@ -2173,7 +2237,7 @@ def _classified_route_gates(
         price_inputs = {"pb_percentile": pb_percentile, "current_pb": current_pb}
         price_minimum = 8.0
         price_basis = "经来源绑定的五年PB历史分位与当前PB"
-        price_rule = "程序将近破净量化为当前PB<=1.2，并要求五年PB分位不高于20%"
+        price_rule = "主锚破净（PB<1）；近破净量化为 PB≤1.2 且五年分位≤20%"
     else:
         route_inputs = {
             "patch4_complete": raw.get("patch4_complete") if type(raw.get("patch4_complete")) is bool else None,
@@ -2271,6 +2335,7 @@ def assess_patch6_type7(
     quality_missing_items = list(missing_items)
     quality_complete = not quality_missing_items
     fcf_gate = _future_fcf_gate(metric, class_code)
+    gdN_gate = _gdN_filter_gate(metric, class_code)
     route_gate, valuation_gate = _classified_route_gates(
         class_code,
         valuation_evidence_complete=valuation_evidence_complete,
@@ -2280,6 +2345,8 @@ def assess_patch6_type7(
     )
     if fcf_gate["complete"] is not True:
         missing_items.append("PRECONDITION.future_fcf")
+    if gdN_gate["complete"] is not True:
+        missing_items.append("PRECONDITION.gdN_investability")
     if route_gate["complete"] is not True:
         missing_items.append("ROUTE.class_specific_path")
     if valuation_gate["complete"] is not True:
@@ -2306,6 +2373,7 @@ def assess_patch6_type7(
         key
         for key, gate in {
             "future_fcf": fcf_gate,
+            "gdN_investability": gdN_gate,
             "route_path": route_gate,
             "price_reasonableness": valuation_gate,
         }.items()
@@ -2330,6 +2398,7 @@ def assess_patch6_type7(
         "dimension_weights": {"BM": 1.0 / 3.0, "MOAT": 1.0 / 3.0, "G": 1.0 / 3.0},
         "decision_gates": {
             "future_fcf": fcf_gate,
+            "gdN_investability": gdN_gate,
             "route_path": route_gate,
             "price_reasonableness": valuation_gate,
         },
@@ -2618,6 +2687,7 @@ def validate_patch6_type7_ledger(
     replayed_valuation_complete = False
     if not isinstance(decision_gates, Mapping) or set(decision_gates) != {
         "future_fcf",
+        "gdN_investability",
         "route_path",
         "price_reasonableness",
     }:
@@ -2849,6 +2919,48 @@ def validate_patch6_type7_ledger(
                 replay_gate_missing.append("PRECONDITION.future_fcf")
             elif not expected_passed:
                 replay_condition_failures.append("future_fcf")
+
+        gdN_gate = decision_gates.get("gdN_investability")
+        if not isinstance(gdN_gate, Mapping):
+            errors.append("gdN filter gate invalid")
+        else:
+            expected_gdN_fields = {"complete", "passed", "required", "basis", "rule", "inputs", "missing_inputs"}
+            if set(gdN_gate) != expected_gdN_fields or gdN_gate.get("required") is not True:
+                errors.append("gdN filter gate invalid")
+            else:
+                gdN_inputs = gdN_gate.get("inputs")
+                if not isinstance(gdN_inputs, Mapping):
+                    errors.append("gdN filter gate invalid")
+                else:
+                    g = _finite(gdN_inputs.get("g"))
+                    d = _finite(gdN_inputs.get("d"))
+                    rd = _finite(gdN_inputs.get("rd_intensity"))
+                    cycle_confirmed = gdN_inputs.get("cycle_confirmed") is True
+                    if g is None:
+                        expected_complete_gdn = False
+                        expected_passed_gdn = False
+                    else:
+                        expected_complete_gdn = True
+                        if g > 0 and d is not None and d > 0:
+                            expected_passed_gdn = True
+                        elif g > 0 and rd is not None and rd >= 0.03:
+                            expected_passed_gdn = True
+                        elif abs(g) <= 0.02 and d is not None and d >= 0.04:
+                            expected_passed_gdn = True
+                        elif class_code == "C" and cycle_confirmed:
+                            expected_passed_gdn = True
+                        else:
+                            expected_passed_gdn = False
+                    if (
+                        gdN_gate.get("complete") is not expected_complete_gdn
+                        or gdN_gate.get("passed") is not expected_passed_gdn
+                        or gdN_gate.get("missing_inputs") != ([] if expected_complete_gdn else ["g"])
+                    ):
+                        errors.append("gdN filter gate replay mismatch")
+                    if expected_complete_gdn is not True:
+                        replay_gate_missing.append("PRECONDITION.gdN_investability")
+                    elif expected_passed_gdn is not True:
+                        replay_condition_failures.append("gdN_investability")
 
         route_gate = decision_gates.get("route_path")
         valuation_gate = decision_gates.get("price_reasonableness")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping, Sequence
+from typing import Any
 from datetime import datetime, time, timezone
 import hashlib
 import json
@@ -325,6 +326,27 @@ def _prepare_commodity_cycle_evidence(
     return evidence
 
 
+def _prepare_dividend_evidence(
+    eligible_codes: Sequence[str],
+    *,
+    as_of: str,
+) -> dict[str, dict[str, Any]]:
+    """Bind Eastmoney dividend history to the whole universe for the gdN gate.
+
+    Dividend data is an enhancement for the Type 7 gdN investability filter:
+    if the source fails, publication continues and companies simply keep a
+    zero dividend engine (gate evaluates on growth/R&D alone).
+    """
+    from data.dividend_evidence import DividendEvidenceError, load_dividend_evidence
+
+    try:
+        evidence = load_dividend_evidence(eligible_codes, as_of=as_of)
+    except (DividendEvidenceError, TypeError, ValueError, OSError) as exc:
+        print(f"DIVIDEND_DIAGNOSTIC unavailable; gdN filter uses d=0 fallback: {exc!r}", flush=True)
+        return {}
+    return evidence
+
+
 def _prepare_quality_history_evidence(
     eligible_codes: Sequence[str],
     market_as_of: str,
@@ -572,6 +594,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         snapshot.analysis_financials,
         as_of=market_as_of,
     )
+    dividend_evidence = _prepare_dividend_evidence(eligible_codes, as_of=market_as_of)
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -587,6 +610,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         research_report_loader=fetch_research_reports_batch,
         patch4_loader=fetch_patch4_evidence_batch,
         commodity_cycle_evidence=commodity_cycle_evidence,
+        dividend_evidence=dividend_evidence,
     )
     if analysis.issues:
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")

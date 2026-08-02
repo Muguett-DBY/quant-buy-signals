@@ -3726,7 +3726,12 @@ def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list
     gate_missing: list[str] = []
     condition_failures: list[str] = []
     valuation_complete = False
-    if not isinstance(gates, Mapping) or set(gates) != {"future_fcf", "route_path", "price_reasonableness"}:
+    if not isinstance(gates, Mapping) or set(gates) != {
+        "future_fcf",
+        "gdN_investability",
+        "route_path",
+        "price_reasonableness",
+    }:
         errors.append("independent decision gates structure mismatch")
     else:
         fcf = gates.get("future_fcf")
@@ -3931,6 +3936,61 @@ def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list
                 gate_missing.append("PRECONDITION.future_fcf")
             elif not expected_passed:
                 condition_failures.append("future_fcf")
+
+        gdN = gates.get("gdN_investability")
+        classification_map = ledger.get("classification")
+        gdn_class_code = (
+            str(classification_map.get("class_code") or "") if isinstance(classification_map, Mapping) else ""
+        )
+        if (
+            not isinstance(gdN, Mapping)
+            or set(gdN)
+            != {
+                "complete",
+                "passed",
+                "required",
+                "basis",
+                "rule",
+                "inputs",
+                "missing_inputs",
+            }
+            or gdN.get("required") is not True
+        ):
+            errors.append("independent gdN filter gate structure mismatch")
+        else:
+            gdN_inputs = gdN.get("inputs")
+            if not isinstance(gdN_inputs, Mapping):
+                errors.append("independent gdN filter gate structure mismatch")
+            else:
+                g = _finite(gdN_inputs.get("g"))
+                d = _finite(gdN_inputs.get("d"))
+                rd = _finite(gdN_inputs.get("rd_intensity"))
+                cycle_confirmed = gdN_inputs.get("cycle_confirmed") is True
+                if g is None:
+                    expected_complete_gdn = False
+                    expected_passed_gdn = False
+                else:
+                    expected_complete_gdn = True
+                    if g > 0 and d is not None and d > 0:
+                        expected_passed_gdn = True
+                    elif g > 0 and rd is not None and rd >= 0.03:
+                        expected_passed_gdn = True
+                    elif abs(g) <= 0.02 and d is not None and d >= 0.04:
+                        expected_passed_gdn = True
+                    elif gdn_class_code == "C" and cycle_confirmed:
+                        expected_passed_gdn = True
+                    else:
+                        expected_passed_gdn = False
+                if (
+                    gdN.get("complete") is not expected_complete_gdn
+                    or gdN.get("passed") is not expected_passed_gdn
+                    or gdN.get("missing_inputs") != ([] if expected_complete_gdn else ["g"])
+                ):
+                    errors.append("independent gdN filter gate replay mismatch")
+                if expected_complete_gdn is not True:
+                    gate_missing.append("PRECONDITION.gdN_investability")
+                elif expected_passed_gdn is not True:
+                    condition_failures.append("gdN_investability")
 
         route = gates.get("route_path")
         price = gates.get("price_reasonableness")
