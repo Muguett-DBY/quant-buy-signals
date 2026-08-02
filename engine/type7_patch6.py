@@ -1847,8 +1847,8 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
     C 类公司在谷底不因 g<0 被滤掉。
     """
     g = _bounded(metric.get("trend_growth"), -1.0, 1.0)
-    trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, None)
-    price = _bounded(metric.get("price"), 0.0, None)
+    trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, 1e12)
+    price = _bounded(metric.get("price"), 0.0, 1e6)
     rd_intensity = _bounded(metric.get("rd_intensity"), 0.0, 1.0)
     dividend_yield = trailing_cash / price if (trailing_cash is not None and price and price > 0) else 0.0
     cycle_confirmed = _bounded(metric.get("type5_cycle_attribute_score"), 0.0, 10.0)
