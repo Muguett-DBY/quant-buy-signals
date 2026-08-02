@@ -647,6 +647,8 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
     reproduced_count = 0
     growth_contributions: list[float] = []
     reproduced_matched_share = 0.0
+    latest_total_revenue = 0.0
+    latest_total_revenue = 0.0
     for segment in raw_segments:
         share = _finite(segment.get("latest_revenue_share"))
         cagr = _finite(segment.get("cagr"))
@@ -656,9 +658,8 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
         latest_year = segment.get("latest_year")
         if (
             share is None
-            or not 0 <= share <= 1
+            or not -1 <= share <= 1
             or latest_revenue is None
-            or latest_revenue < 0
             or isinstance(latest_year, bool)
             or not isinstance(latest_year, int)
             or latest_year != years[-1]
@@ -666,7 +667,8 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
         ):
             return None
         segment_shares.append(share)
-        if first_year is not None:
+        latest_total_revenue += latest_revenue
+        if first_year is not None and latest_revenue > 0:
             reproduced_matched_share += share
         if cagr is not None and cagr > 0:
             reproduced_count += 1
@@ -680,6 +682,12 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
         if total_contribution > 0
         else 0.0
     )
+    # The live builder measures latest-year coverage against the filed annual
+    # revenue (renames/reorganisations must not count as missing).  Replay the
+    # same rule here; the annual value is embedded in the evidence.
+    annual_latest = _finite(value.get("annual_revenue_latest"))
+    if annual_latest is not None and annual_latest > 0:
+        reproduced_matched_share = latest_total_revenue / annual_latest
     if (
         not math.isclose(sum(segment_shares), 1.0, rel_tol=0.0, abs_tol=1e-8)
         or raw_source_count != reproduced_count
