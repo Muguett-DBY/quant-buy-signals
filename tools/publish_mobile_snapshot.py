@@ -33,6 +33,7 @@ from data.growth_evidence import (
     record_growth_evidence_retry_states,
 )
 from data.patch4_evidence import fetch_patch4_evidence_batch
+from data.commodity_evidence import CommodityCycleError, load_commodity_cycle_evidence
 from data.quality_history import (
     fetch_quality_history_batch,
     load_quality_history_cache_batch_state,
@@ -294,6 +295,36 @@ def _mobile_screening_coverage(scores: object) -> dict[str, object]:
     return result
 
 
+def _prepare_commodity_cycle_evidence(
+    quotes: pd.DataFrame,
+    financials: Mapping[str, Mapping[str, Any]],
+    *,
+    as_of: str,
+) -> dict[str, dict[str, Any]]:
+    """Bind Sina commodity-cycle attributes to direct-cyclical companies.
+
+    The commodity source is an enhancement for the Type 5 strong-cycle gate:
+    if the fetch or cache contract fails, publication continues with those
+    companies keeping their current evidence-insufficient result instead of
+    aborting the whole market refresh.
+    """
+    from data.industry import classify_industries
+
+    quote_lookup = {str(row["code"]).strip(): row for _, row in quotes.iterrows()}
+    industry_inputs = [
+        (str(row["code"]).strip(), str(row.get("name") or ""))
+        for _, row in quotes.iterrows()
+        if str(row["code"]).strip() in financials
+    ]
+    industry_by_code = classify_industries(industry_inputs)
+    try:
+        evidence = load_commodity_cycle_evidence(industry_by_code, as_of=as_of)
+    except (CommodityCycleError, TypeError, ValueError, OSError) as exc:
+        print(f"COMMODITY_CYCLE_DIAGNOSTIC unavailable; Type 5 commodity gate skipped: {exc!r}", flush=True)
+        return {}
+    return evidence
+
+
 def _prepare_quality_history_evidence(
     eligible_codes: Sequence[str],
     market_as_of: str,
@@ -536,6 +567,11 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         market_as_of,
         priority_codes=_quality_history_priority_codes(snapshot.analysis_quotes, eligible_codes),
     )
+    commodity_cycle_evidence = _prepare_commodity_cycle_evidence(
+        snapshot.analysis_quotes,
+        snapshot.analysis_financials,
+        as_of=market_as_of,
+    )
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -550,6 +586,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         type3_growth_loader=_bounded_type3_growth_loader(),
         research_report_loader=fetch_research_reports_batch,
         patch4_loader=fetch_patch4_evidence_batch,
+        commodity_cycle_evidence=commodity_cycle_evidence,
     )
     if analysis.issues:
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")

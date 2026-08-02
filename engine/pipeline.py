@@ -1536,6 +1536,7 @@ def run_market_analysis(
     patch4_evidence: Mapping[str, Mapping[str, Any]] | None = None,
     patch4_loader: Callable[..., Mapping[str, Mapping[str, Any]]] | None = None,
     patch4_progress_cb: Callable[[int, int], None] | None = None,
+    commodity_cycle_evidence: Mapping[str, Mapping[str, Any]] | None = None,
     reporting_period_contract: ReportingPeriodContract | Mapping[str, Any] | None = None,
 ) -> MarketAnalysisOutcome:
     """Run the supported end-to-end analysis outside Streamlit for testing and audits."""
@@ -1685,6 +1686,7 @@ def run_market_analysis(
         score_kwargs["patch4_evidence"] = patch4_evidence
         score_kwargs["patch4_loader"] = captured_patch4_loader
         score_kwargs["patch4_progress_cb"] = patch4_progress_cb
+        score_kwargs["commodity_cycle_evidence"] = commodity_cycle_evidence
     scores = screen_runner(canonical_financials, canonical_quotes, **score_kwargs)
     if not isinstance(scores, pd.DataFrame):
         raise TypeError("screen runner must return a pandas DataFrame")

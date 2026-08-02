@@ -7695,6 +7695,7 @@ def screen_all_types(
     patch4_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
     patch4_loader=None,
     patch4_progress_cb=None,
+    commodity_cycle_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> pd.DataFrame:
     """对合格沪深股票评分；输出按代码稳定排序，并提供完整七类结构。
 
@@ -7715,6 +7716,10 @@ def screen_all_types(
     normalized_type3_growth = _canonicalize_mapping(type3_growth_evidence or {}, "可持续增长证据")
     normalized_research_reports = _canonicalize_mapping(research_report_evidence or {}, "优质股权研报元数据")
     normalized_patch4 = _canonicalize_mapping(patch4_evidence or {}, "科技股股东文化公告证据")
+    normalized_commodity = _canonicalize_mapping(commodity_cycle_evidence or {}, "商品周期证据")
+    unknown_commodity = sorted(set(normalized_commodity) - set(canonical_fin))
+    if unknown_commodity:
+        raise ValueError(f"商品周期证据包含不在财务全集中的代码:{unknown_commodity[:5]}")
     raw_dcf_skips = _canonicalize_mapping(dcf_skip_classifications or {}, "DCF跳过分类")
     normalized_dcf_skips: dict[str, dict[str, str]] = {}
     for code, value in raw_dcf_skips.items():
@@ -7786,6 +7791,23 @@ def screen_all_types(
             industry = industry_by_code[code]
             metric = extract_metrics(canonical_fin[code], quote, industry)
             metric["code"] = code
+            commodity = normalized_commodity.get(code)
+            if commodity is not None:
+                if not isinstance(commodity, Mapping) or "score" not in commodity or "evidence" not in commodity:
+                    raise ValueError(f"商品周期证据无效:{code}")
+                score = _safe_float(commodity.get("score"))
+                evidence = commodity.get("evidence")
+                if (
+                    score is None
+                    or not 0 <= score <= 10
+                    or not isinstance(evidence, Mapping)
+                    or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
+                ):
+                    raise ValueError(f"商品周期证据无效:{code}")
+                metric["type5_cycle_attribute_score"] = score
+                metric["type5_cycle_attribute_score_evidence"] = dict(evidence)
+                metric["type5_cycle_attribute_score_evidence_level"] = "primary"
+                metric["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
             coldness = normalized_coldness.get(code)
             if coldness is not None:
                 if not isinstance(coldness, Mapping):
