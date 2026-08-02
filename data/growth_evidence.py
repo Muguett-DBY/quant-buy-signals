@@ -2798,6 +2798,8 @@ def fetch_growth_evidence_batch(
                     "revenue_hhi": None,
                     "top_segment_share": None,
                     "matched_latest_share": None,
+                    "annual_revenue_latest": None,
+                    "source_row_count": 0,
                     "aggregate_revenue_cagr": None,
                     "segments": [],
                     "records": [],
