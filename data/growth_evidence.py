@@ -655,6 +655,7 @@ def _build_segment_growth_sources(
     selected_type = _DIMENSION_PREFERENCE[0]
     selected_years: list[int] = []
     selected_records: list[dict[str, Any]] = []
+    annual_latest: float | None = None
     reason = "segment_source_returned_no_completed_annual_rows"
     best_count = -1
     for mainop_type in _DIMENSION_PREFERENCE:
