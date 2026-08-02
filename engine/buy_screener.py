@@ -5884,12 +5884,14 @@ def _type3_growth_request_needed(
     # preliminary score can be calculated even when the real source is absent;
     # therefore its status may be triggered/observe rather than
     # ``insufficient_evidence``.  The two partial-evidence guards above are the
-    # authoritative indication that a deep load is still required.  Exclude
-    # only frameworks that are out of scope or already have a confirmed hard
-    # veto/block.
+    # authoritative indication that a deep load is still required.  Only
+    # frameworks that are out of scope (financial/insurance) or market-blocked
+    # are excluded: a Type 3 hard veto is a Type 3 conclusion, not a Type 7
+    # conclusion, and the same segment evidence also unlocks the Type 7
+    # category-expansion dimension, so vetoed companies must still be able to
+    # load it.
     return status in TYPE_STATUSES and status not in {
         STATUS_NOT_APPLICABLE,
-        STATUS_VETOED,
         STATUS_BLOCKED,
     }
 
