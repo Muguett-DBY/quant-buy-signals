@@ -1420,20 +1420,45 @@ def _insufficient_evidence(type_key: str, reason: str):
     return _finish(type_key, scores, reasons, evidence_complete=False)
 
 
+_DCF_SKIP_REASON_LABELS: dict[str, str] = {
+    # 经济不适用：公司真实经营状态导致无法形成可核验的折现估值基准
+    "ttm_fcff_nonpositive": "自由现金流为负，暂无法形成可核验的估值基准",
+    "ttm_fcff_nonpositive_normalised": "自由现金流为负，暂无法形成可核验的估值基准",
+    "nonpositive_pessimistic_equity_value": "悲观情景下公司价值不为正，暂无法形成估值基准",
+    "mixed_profit_cycle_unsupported_by_fcff": "利润周期与自由现金流口径不一致，暂无法形成估值基准",
+    "financial_pb_scenario_invariants_failed": "市净率情景校验未通过，暂无法形成估值基准",
+    "financial_latest_annual_attributable_loss": "最近年度归母亏损，暂无法形成估值基准",
+    "financial_current_attributable_profit_deterioration": "最新利润明显恶化，暂无法形成估值基准",
+    "financial_nonpositive_or_unstable_roe": "净资产收益率不为正或不稳定，暂无法形成估值基准",
+    "financial_missing_attributable_equity_history": "归母净资产历史不足，暂无法形成估值基准",
+    "financial_insufficient_average_roe_history": "平均净资产收益率历史不足，暂无法形成估值基准",
+    "financial_missing_current_comparable_profit": "缺少可比的最新利润数据，暂无法形成估值基准",
+    "ttm_fcff_negative_reconstructed_capex": "资本开支重建口径异常，暂无法形成估值基准",
+    "ttm_invalid_period_contract": "报告期口径不一致，暂无法形成估值基准",
+    "ttm_revenue_missing_component": "收入数据不完整，暂无法形成估值基准",
+    "ttm_revenue_duplicate_period": "收入数据存在重复期间，暂无法形成估值基准",
+    "ttm_revenue_inconsistent_component": "收入口径不一致，暂无法形成估值基准",
+    "ttm_fcff_missing_component": "自由现金流数据不完整，暂无法形成估值基准",
+    "unsupported_financial_valuation_model": "金融机构暂无专属估值模型",
+}
+
+
 def _valuation_skip_outcome(type_key: str, value: Any):
     """Translate a structured valuation skip without collapsing its semantics."""
     classification = normalize_dcf_skip_classification(value)
     if classification is None:
         return None
     category = classification["category"]
+    reason = str(classification.get("reason") or "")
+    detail = _DCF_SKIP_REASON_LABELS.get(reason)
     if category == DCF_SKIP_MODEL_UNSUPPORTED:
-        return _not_applicable(type_key, "估值模型不支持当前标的")
+        return _not_applicable(type_key, detail or "估值模型不支持当前标的")
     if category == DCF_SKIP_ECONOMIC_NOT_APPLICABLE:
-        return _not_applicable(type_key, "当前经济条件不适用估值")
+        return _not_applicable(type_key, detail or "当前经济条件不适用估值")
     if category == DCF_SKIP_SOURCE_MISSING:
-        return _insufficient_evidence(type_key, "估值源数据缺失")
+        return _insufficient_evidence(type_key, detail or "估值源数据缺失")
     if category == DCF_SKIP_INCONSISTENT_SOURCE:
-        return _insufficient_evidence(type_key, "估值来源口径不一致")
+        return _insufficient_evidence(type_key, detail or "估值来源口径不一致")
     if category == DCF_SKIP_INTERNAL_ERROR:
         scores = {key: 0.0 for key in TYPE_WEIGHTS[type_key]}
         reasons = {key: "估值计算异常" for key in TYPE_WEIGHTS[type_key]}
