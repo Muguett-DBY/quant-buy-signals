@@ -159,6 +159,7 @@ _SEGMENT_EVIDENCE_FIELDS = {
     "top_segment_share",
     "matched_latest_share",
     "annual_revenue_latest",
+    "source_row_count",
     "aggregate_revenue_cagr",
     "segments",
     "records",
@@ -650,7 +651,10 @@ def _build_segment_growth_sources(
     as_of: date,
     records: list[dict[str, Any]],
     annual_revenue: dict[int, float] | None = None,
+    source_row_count: int | None = None,
 ) -> dict[str, Any]:
+    if source_row_count is None:
+        source_row_count = len(records)
     latest_year = _latest_completed_annual_year(as_of)
     selected_type = _DIMENSION_PREFERENCE[0]
     selected_years: list[int] = []
@@ -770,7 +774,7 @@ def _build_segment_growth_sources(
             ),
         }
 
-    if not records:
+    if source_row_count == 0:
         status = "unavailable"
     elif len(selected_years) < MIN_SEGMENT_HISTORY_YEARS:
         status = "partial"
@@ -787,6 +791,7 @@ def _build_segment_growth_sources(
         "history_years": selected_years,
         "metrics": metrics,
         "annual_revenue_latest": annual_latest,
+        "source_row_count": source_row_count,
         "segments": segments,
         "records": selected_records,
     }
@@ -808,6 +813,7 @@ def _build_segment_growth_sources(
         "top_segment_share": metrics["top_segment_share"],
         "matched_latest_share": metrics["matched_latest_share"],
         "annual_revenue_latest": annual_latest,
+        "source_row_count": source_row_count,
         "aggregate_revenue_cagr": metrics["aggregate_revenue_cagr"],
         "segments": segments,
         "records": selected_records,
@@ -1625,6 +1631,7 @@ def _fetch_segment_growth_sources(
                 "top_segment_share": None,
                 "matched_latest_share": None,
                 "annual_revenue_latest": None,
+                "source_row_count": 0,
                 "aggregate_revenue_cagr": None,
                 "segments": [],
                 "records": [],
@@ -2116,6 +2123,7 @@ def _validate_unavailable_segment(
         or evidence.get("top_segment_share") is not None
         or evidence.get("matched_latest_share") is not None
         or evidence.get("annual_revenue_latest") is not None
+        or evidence.get("source_row_count") != 0
         or evidence.get("aggregate_revenue_cagr") is not None
         or evidence.get("segments") != []
         or evidence.get("records") != []
@@ -2190,6 +2198,7 @@ def _validate_segment_evidence(
             and evidence["history_years"]
             else None
         ),
+        source_row_count=evidence.get("source_row_count"),
     )
     if not _equivalent_evidence(evidence, rebuilt):
         raise GrowthEvidenceError("segment evidence summary does not reproduce from its records")
