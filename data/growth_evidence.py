@@ -53,7 +53,7 @@ MAX_SEGMENT_ROWS = 1_000
 # with no throttling and a 93% segment completion rate).
 MAX_BATCH_COMPANIES = 6_000
 _CASHFLOW_BATCH_COMPANIES = 100
-MAX_WORKERS = 8
+MAX_WORKERS = 4
 MAX_SEGMENT_HISTORY_YEARS = 10
 MIN_SEGMENT_HISTORY_YEARS = 3
 EXTERNAL_HISTORY_YEARS = 5
@@ -72,9 +72,9 @@ TYPE3_GROWTH_RETRY_MODEL_ID = "type3-growth-retry-v1"
 # flow of never-seen companies cannot indefinitely starve due retries.
 TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO = 0.20
 REQUEST_TIMEOUT = (15, 30)
-REQUEST_ATTEMPTS = 2
+REQUEST_ATTEMPTS = 4
 REQUEST_INTERVAL_SECONDS = 0.25
-RETRY_BACKOFF_SECONDS = 0.5
+RETRY_BACKOFF_SECONDS = 2.0
 # Eastmoney amounts are reported to fen precision.  The investing identity has
 # at most nine component cells, so ten fen is a conservative absolute
 # statement-rounding bound.  A relative tolerance would incorrectly treat
