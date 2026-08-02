@@ -2837,7 +2837,7 @@ def fetch_growth_evidence_batch(
         )
     status_counts: dict[str, int] = {}
     reason_counts: dict[str, int] = {}
-    for code, record in results.items():
+    for record in results.values():
         segment = record.get("segment_growth_sources") if isinstance(record, dict) else None
         if not isinstance(segment, dict):
             continue
