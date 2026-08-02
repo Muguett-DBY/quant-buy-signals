@@ -389,7 +389,10 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "|| return 1" in mirror_script
     assert "Cloudflare dashboard did not retain the exact published generation." in mirror_script
     assert "requirements-dev-lock.txt" not in workflow
-    assert "timeout-minutes: 90" in workflow
+    # The build job needs room for a whole-market Type 3 growth-evidence
+    # backfill (segment + annual cash-flow rows) in addition to the snapshot
+    # fetch and full-market scoring.
+    assert "timeout-minutes: 180" in workflow
     assert workflow.count("continue-on-error: true") == 4
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
