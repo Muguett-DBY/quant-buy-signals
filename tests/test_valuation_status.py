@@ -194,6 +194,8 @@ def test_market_analysis_forwards_structured_skips_to_default_scorer(monkeypatch
         patch4_evidence,
         patch4_loader,
         patch4_progress_cb,
+        commodity_cycle_evidence=None,
+        dividend_evidence=None,
     ):
         captured["dcf_results"] = dcf_results
         captured["dcf_skip_classifications"] = dcf_skip_classifications
