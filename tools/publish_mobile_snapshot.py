@@ -311,7 +311,6 @@ def _prepare_commodity_cycle_evidence(
     """
     from data.industry import classify_industries
 
-    quote_lookup = {str(row["code"]).strip(): row for _, row in quotes.iterrows()}
     industry_inputs = [
         (str(row["code"]).strip(), str(row.get("name") or ""))
         for _, row in quotes.iterrows()
