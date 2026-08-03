@@ -180,18 +180,20 @@ function closeDrawer(){activeDetailRequest++;activeDetailCode="";if(detailAbort)
 function isModelCoverageGap(typeKey,value,method){if(value?.status!=="not_applicable")return false;const explanation=[value?.reason,value?.reasons?._scope,method?.applicability].filter(Boolean).join("；");return typeKey==="type7"&&/金融/.test(explanation)||/(尚未建立|暂无|缺少|未覆盖|未支持).{0,12}(专属)?模型|专属.{0,12}模型.{0,8}(尚未建立|暂无|缺少)/.test(explanation)}
 function renderType7MethodDetail(value){
   const method=value?.method_detail;if(!method)return null;
-  const box=document.createElement("div");box.className="type7-method-detail";
-  const heading=document.createElement("h4");heading.textContent="第七类完整量化明细";box.append(heading);
+  const box=document.createElement("details");box.className="type7-method-detail";
+  const heading=document.createElement("summary");heading.textContent="第七类完整量化明细";box.append(heading);
   if(method.status==="outdated"){
     const warning=document.createElement("p");warning.className="type7-conclusion missing-text";warning.textContent=String(method.conclusion||"数据版本过旧，请刷新。");box.append(warning);return box;
   }
+  let built=false;
   const scoreOrRange=(exact,lower,upper)=>{const score=finiteNumber(exact),low=finiteNumber(lower),high=finiteNumber(upper);if(score!==null)return score.toFixed(3)+"分";if(low!==null&&high!==null)return low.toFixed(3)+"至"+high.toFixed(3)+"分（资料未齐，仅表示范围）";return"资料不足"};
-  const scoreOutOf=(exact,lower,upper,maximum)=>{const score=finiteNumber(exact),low=finiteNumber(lower),high=finiteNumber(upper),max=finiteNumber(maximum);if(score!==null&&max!==null)return score.toFixed(2)+" / "+max.toFixed(2)+"分";if(low!==null&&high!==null&&max!==null)return low.toFixed(2)+"至"+high.toFixed(2)+" / "+max.toFixed(2)+"分（资料未齐）";return"资料不足"};
   const overview=document.createElement("p");overview.className="type7-overview";
   const secondary=Array.isArray(method.secondary_features)?method.secondary_features.map(publicClassName).filter(Boolean):[],possibleSecondary=Array.isArray(method.possible_secondary_features)?method.possible_secondary_features.map(publicClassName).filter(Boolean):[],possibleClasses=Array.isArray(method.possible_classifications)?method.possible_classifications.map(publicClassName).filter(Boolean):[];
   const classText=(method.classification_complete===true?"确定归类：":"暂定归类：")+(publicClassName(method.classification)||"资料不足")+(method.classification_complete!==true&&possibleClasses.length?"；仍可能归为"+possibleClasses.join("或"):"");
   const stateText="质量认证："+(method.quality_certified===true?"已达标":method.quality_complete===true?"未达标":"待补资料")+"；当前买点："+(method.buy_ready===true?"已满足":"未满足");
   overview.textContent=classText+(secondary.length?"；兼具"+secondary.join("、")+"特征":"")+(possibleSecondary.length?"；另有待确认的"+possibleSecondary.join("、")+"特征":"")+"；三项算术平均："+scoreOrRange(method.mean_score,method.mean_lower_bound,method.mean_upper_bound)+"；"+stateText+"。";box.append(overview);
+  const buildContent=()=>{
+  const scoreOutOf=(exact,lower,upper,maximum)=>{const score=finiteNumber(exact),low=finiteNumber(lower),high=finiteNumber(upper),max=finiteNumber(maximum);if(score!==null&&max!==null)return score.toFixed(2)+" / "+max.toFixed(2)+"分";if(low!==null&&high!==null&&max!==null)return low.toFixed(2)+"至"+high.toFixed(2)+" / "+max.toFixed(2)+"分（资料未齐）";return"资料不足"};
   const classificationScores=Array.isArray(method.classification_scores)?method.classification_scores:[];
   if(classificationScores.length){
     const classificationHeading=document.createElement("h5");classificationHeading.textContent="公司类别是怎样算出来的";
@@ -237,7 +239,10 @@ function renderType7MethodDetail(value){
     box.append(group);
   }
   if(Array.isArray(method.failures)&&method.failures.length){const failures=document.createElement("p");failures.className="type7-conclusion missing-text";failures.textContent="未通过项目："+method.failures.map(String).join("；");box.append(failures)}
-  const conclusion=document.createElement("p");conclusion.className="type7-conclusion";conclusion.textContent=String(method.conclusion||"暂无结论说明");box.append(conclusion);return box;
+  const conclusion=document.createElement("p");conclusion.className="type7-conclusion";conclusion.textContent=String(method.conclusion||"暂无结论说明");box.append(conclusion);
+  };
+  box.addEventListener("toggle",()=>{if(box.open&&!built){built=true;buildContent()}});
+  return box;
 }
 function scoreBar(scoreValue,{tone=null,heightClass=""}={}){
   const bar=document.createElement("span");bar.className="score-bar"+(heightClass?" "+heightClass:"");
@@ -361,20 +366,25 @@ function renderDetail(r){
       if(dataMissingScore&&v.status!=="not_applicable")evidence.classList.add("missing-text");
       const dimensionBar=scoreBar((hasScore&&!dataMissingScore&&v.status!=="not_applicable")?subScores[dimension]:null);
       summary.append(name,value,dimensionBar,evidence);
-      const body=document.createElement("div");body.className="dimension-body";const definitions=document.createElement("dl");
-      addDefinition(definitions,"指标含义",dimensionMethod.meaning||"—");
-      addDefinition(definitions,"所需数据",dimensionMethod.data||"—");
-      addDefinition(definitions,"评分方向",dimensionMethod.direction||"—");
-      const currentBasis=currentEvidence||(v.status==="not_applicable"?"模型未进入计分，不需要补资料":dataMissingScore?"待补齐原始资料":"—");
-      addDefinition(definitions,"公司实际输入",currentBasis,dataMissingScore&&v.status!=="not_applicable"?"missing-text":"");
-      const historySummary=(Array.isArray(r.annual_history)?r.annual_history:[]).map(history=>String(history?.name||"年度历史")+"："+String(history?.display||"未公开")).join("；");
-      addDefinition(definitions,"数据批次","行情日期："+String(r.source_trade_date||marketAsOf||"未公开")+(historySummary?"；"+historySummary:"；该公司的连续年度范围未随现有证据提供")+"。各子指标可能只使用其中一部分年度，以该项说明为准。");
-      addDefinition(definitions,"来源追溯",sourceVersion?"公开详情未附该子指标的单独来源链接；可追溯数据版本："+sourceVersion+"。":"公开详情未附该子指标的单独来源链接或版本号。");
-      addDefinition(definitions,"触发阈值",type7MeanMember?"该维度与另外两维取算术平均；平均值必须严格大于7.000。":"该子项按0至10分进入加权总分；类型触发规则："+(method.trigger||"—"));
-      addDefinition(definitions,"计算方式",type7MeanMember?"第七类三项平均中的贡献＝该维度分÷3。":"类型总分中的该项贡献＝子项分数×"+weight.toFixed(weight%1?1:0)+"%。");
-      if(hasScore&&!dataMissingScore&&!positionInstruction&&v.status!=="not_applicable")addDefinition(definitions,type7MeanMember?"均值贡献":"总分贡献",(Number(subScores[dimension])*weight/100).toFixed(type7MeanMember?3:2)+"分（"+Number(subScores[dimension]).toFixed(type7MeanMember?3:1)+" × "+weight.toFixed(weight%1?1:0)+"%）","contribution");
-      else if(hasEstimate&&dataMissingScore)addDefinition(definitions,"参考说明","该值只帮助定位缺口，不参与触发或否决。");
-      body.append(definitions);item.append(summary,body);dimensions.append(item);
+      let bodyBuilt=false;
+      const buildBody=()=>{
+        const body=document.createElement("div");body.className="dimension-body";const definitions=document.createElement("dl");
+        addDefinition(definitions,"指标含义",dimensionMethod.meaning||"—");
+        addDefinition(definitions,"所需数据",dimensionMethod.data||"—");
+        addDefinition(definitions,"评分方向",dimensionMethod.direction||"—");
+        const currentBasis=currentEvidence||(v.status==="not_applicable"?"模型未进入计分，不需要补资料":dataMissingScore?"待补齐原始资料":"—");
+        addDefinition(definitions,"公司实际输入",currentBasis,dataMissingScore&&v.status!=="not_applicable"?"missing-text":"");
+        const historySummary=(Array.isArray(r.annual_history)?r.annual_history:[]).map(history=>String(history?.name||"年度历史")+"："+String(history?.display||"未公开")).join("；");
+        addDefinition(definitions,"数据批次","行情日期："+String(r.source_trade_date||marketAsOf||"未公开")+(historySummary?"；"+historySummary:"；该公司的连续年度范围未随现有证据提供")+"。各子指标可能只使用其中一部分年度，以该项说明为准。");
+        addDefinition(definitions,"来源追溯",sourceVersion?"公开详情未附该子指标的单独来源链接；可追溯数据版本："+sourceVersion+"。":"公开详情未附该子指标的单独来源链接或版本号。");
+        addDefinition(definitions,"触发阈值",type7MeanMember?"该维度与另外两维取算术平均；平均值必须严格大于7.000。":"该子项按0至10分进入加权总分；类型触发规则："+(method.trigger||"—"));
+        addDefinition(definitions,"计算方式",type7MeanMember?"第七类三项平均中的贡献＝该维度分÷3。":"类型总分中的该项贡献＝子项分数×"+weight.toFixed(weight%1?1:0)+"%。");
+        if(hasScore&&!dataMissingScore&&!positionInstruction&&v.status!=="not_applicable")addDefinition(definitions,type7MeanMember?"均值贡献":"总分贡献",(Number(subScores[dimension])*weight/100).toFixed(type7MeanMember?3:2)+"分（"+Number(subScores[dimension]).toFixed(type7MeanMember?3:1)+" × "+weight.toFixed(weight%1?1:0)+"%）","contribution");
+        else if(hasEstimate&&dataMissingScore)addDefinition(definitions,"参考说明","该值只帮助定位缺口，不参与触发或否决。");
+        body.append(definitions);item.append(body);
+      };
+      item.addEventListener("toggle",()=>{if(item.open&&!bodyBuilt){bodyBuilt=true;buildBody()}});
+      item.append(summary);dimensions.append(item);
     }
     article.append(title,right,reason,typeMethod,scope);if(evidenceNotes.childElementCount)article.append(evidenceNotes);const type7MethodDetail=k==="type7"?renderType7MethodDetail(v):null;if(type7MethodDetail)article.append(type7MethodDetail);article.append(dimensions);fragment.append(article);
   }
