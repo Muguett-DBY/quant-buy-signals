@@ -490,6 +490,7 @@ function tradingDataFreshness(marketAsOf,timestamp,nowMs=Date.now()){
 }
 function limitedGzipStream(bytes,label){let total=0;const source=new Response(bytes).body;if(!source)throw new Error(label+"流不可用");return source.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TransformStream({transform(chunk,controller){const length=Number(chunk?.byteLength||0);if(!Number.isSafeInteger(length)||length<0||total+length>MAX_UNCOMPRESSED_ASSET_BYTES)throw new Error(label+"解压后超过安全上限");total+=length;controller.enqueue(chunk)}}))}
 const SHARD_CACHE_LIMIT=4,shardCache=new Map();
+function shardCacheKey(generationId,shardId){return "https://shard-cache.invalid/company-shard-v1/"+generationId+"/"+shardId}
 function cachedShardPayload(generationId,shardId){const key=generationId+"/"+shardId;if(!shardCache.has(key))return null;const entry=shardCache.get(key);shardCache.delete(key);shardCache.set(key,entry);return entry}
 function rememberShardPayload(generationId,shardId,payload){const key=generationId+"/"+shardId;shardCache.set(key,payload);while(shardCache.size>SHARD_CACHE_LIMIT)shardCache.delete(shardCache.keys().next().value)}
 async function verifiedCompressedAsset(env,prefix,metadata,label){if(!metadata.filename||!metadata.sha256||metadata.size===null)throw new Error(label+"清单元数据无效");const object=await env.DATA_BUCKET.get(prefix+metadata.filename);if(!object)throw new Error(label+"对象缺失");if(object.size!==metadata.size)throw new Error(label+"对象大小不一致");const bytes=await object.arrayBuffer();if(bytes.byteLength!==metadata.size||await sha256Hex(bytes)!==metadata.sha256)throw new Error(label+"正文完整性校验失败");return{object,bytes}}
@@ -501,11 +502,17 @@ async function readCompanyDetail(env,prefix,manifest,generationId,code){
   const shardId=await companyDetailShardId(code),metadata=shards.find(entry=>entry.id===shardId);if(!metadata)throw new Error("公司详情分片未声明");
   let payload=cachedShardPayload(generationId,shardId);
   if(payload===null){
+    const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=shardCacheKey(generationId,shardId);
+    if(edgeCache){try{const hit=await edgeCache.match(cacheKey);if(hit)payload=await hit.json()}catch{}}
+  }
+  if(payload===null){
     const asset=await verifiedCompressedAsset(env,prefix,{filename:metadata.filename,sha256:String(metadata.sha256||"").toLowerCase(),size:Number.isSafeInteger(metadata.size)&&metadata.size>0&&metadata.size<=MAX_COMPRESSED_ASSET_BYTES?metadata.size:null,uncompressed_size:Number.isSafeInteger(metadata.uncompressed_size)&&metadata.uncompressed_size>0&&metadata.uncompressed_size<=MAX_UNCOMPRESSED_ASSET_BYTES?metadata.uncompressed_size:null},"公司详情");
     if(String(asset.object.customMetadata?.sha256||"").toLowerCase()!==String(metadata.sha256||"").toLowerCase())throw new Error("公司详情对象校验标记不一致");
     payload=await readVerifiedGzipJson(asset.bytes,{uncompressed_size:metadata.uncompressed_size},"公司详情",String(metadata.uncompressed_sha256||"").toLowerCase());
     if(payload?.schema_version!==2||payload?.record_schema!=="company_detail_v2"||payload?.product!=="DS_DCF"||payload?.shard_id!==shardId||!Array.isArray(payload?.companies)||payload.company_count!==payload.companies.length||payload.company_count!==metadata.company_count)throw new Error("公司详情分片结构无效");
     rememberShardPayload(generationId,shardId,payload);
+    const edgeCache=typeof caches!=="undefined"?caches.default:null;
+    if(edgeCache){try{await edgeCache.put(shardCacheKey(generationId,shardId),new Response(JSON.stringify(payload),{headers:{"content-type":"application/json","cache-control":"public, max-age=3600"}}))}catch{}}
   }
   const company=payload.companies.find(value=>String(value?.code||"")===code);return company||null;
 }
