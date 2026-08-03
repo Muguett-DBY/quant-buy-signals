@@ -5918,7 +5918,16 @@ def _type3_growth_request_needed(
         "growth_sustainability_score": _type3_uncapped_partial_score(m, "growth_sustainability_score"),
     }
     if all(score is None for score in partial_scores.values()):
-        return False
+        # No usable partial diagnostic: the preliminary evidence record was
+        # ``missing`` rather than ``partial`` (segment revenue history is a
+        # core 3d input, so its absence can downgrade the whole record).
+        # Such companies still need the segment capture: already-cached
+        # segment evidence is free to replay, and the same evidence unlocks
+        # the Type 7 category-expansion dimension.  A failed network fetch
+        # simply stays eligible for a later run through the retry state.
+        if not _type3_has_local_growth_history(m):
+            return False
+        return True
     candidate = dict(m)
     quantitative = m.get("quantitative_evidence")
     if not isinstance(quantitative, Mapping):
@@ -5958,6 +5967,29 @@ def _type3_growth_request_needed(
         STATUS_NOT_APPLICABLE,
         STATUS_BLOCKED,
     }
+
+
+def _type3_has_local_growth_history(m: Mapping[str, Any]) -> bool:
+    """True when the company has enough reported annual revenue history.
+
+    Mirrors the growth adapter's own minimum: four consecutive completed
+    annual observations are required before a segment request is useful.
+    """
+
+    revenue_values = m.get("revenue_values")
+    revenue_years = m.get("revenue_years")
+    if (
+        not isinstance(revenue_values, (list, tuple))
+        or not isinstance(revenue_years, (list, tuple))
+        or len(revenue_values) != len(revenue_years)
+        or len(revenue_values) < 4
+    ):
+        return False
+    parsed_years = [int(year) for year in revenue_years if str(year).isdigit()]
+    if len(parsed_years) != len(revenue_values):
+        return False
+    latest = max(parsed_years)
+    return sorted(parsed_years) == list(range(latest - len(parsed_years) + 1, latest + 1))
 
 
 def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:

@@ -1,0 +1,369 @@
+"""CNINFO annual-report acquisition cash-flow evidence.
+
+Eastmoney's annual cash-flow report omits the line item "取得子公司及其他
+营业单位支付的现金净额", so growth-sustainability evidence (Type 3 3d,
+Type 7 7c) is unavailable for most companies.  CNINFO publishes the full
+annual report PDF for every A-share company; this module locates the
+annual report, extracts that single line item from the cash-flow
+statement, and caches the result.
+
+Fail-closed contract: only an explicitly parsed numeric value (including a
+dash meaning "no occurrence this year") is treated as evidence.  A missing
+line, unreadable table layout or download failure yields ``available=False``
+with a reason; values are never guessed.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Any, Mapping
+
+from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
+from data.cache import SafeFileCache
+
+MODEL_ID = "cninfo-annual-acquisition-v1"
+CACHE_SCHEMA_VERSION = 1
+MAX_PDF_BYTES = 60 * 1024 * 1024
+MAX_TEXT_WORDS = 2_000_000
+
+CNINFO_TOP_SEARCH_URL = "http://www.cninfo.com.cn/new/information/topSearch/query"
+CNINFO_ANNOUNCE_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+CNINFO_PDF_PREFIX = "http://static.cninfo.com.cn/"
+CNINFO_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "http://www.cninfo.com.cn/",
+    "X-Requested-With": "XMLHttpRequest",
+}
+CNINFO_CACHE_DIR = CACHE_DIRECTORY / "cninfo_annual"
+
+_A_SHARE_CODE = re.compile(r"^[036][0-9]{5}$")
+_NUMERIC_TOKEN = re.compile(r"^\(?-?[0-9][0-9,]*(\.[0-9]+)?\)?$")
+_ACQUISITION_LABEL = re.compile(r"(?:取得|购买|收购)子公司|acquisition.{0,40}subsidiari|acquisition.{0,40}business")
+_UNIT_PATTERNS = [
+    re.compile(r"单位[：:]?\s*[^。；;]{0,14}?(?:人民币)?(?P<unit>百万元|千元|万元|亿元)"),
+    re.compile(r"金额单位均为(?:人民币)?(?P<unit>百万元|千元|万元|亿元)"),
+    re.compile(r"以(?:人民币)?(?P<unit>百万元|千元|万元|亿元)列示"),
+    re.compile(r"(?:金额)?单位[：:]?\s*(?P<unit>百万元|千元|万元|亿元)"),
+    re.compile(r"in\s+(?:millions\s+of\s+)?RMB|in\s+RMB\s+(?P<unit>thousands)", re.I),
+]
+_ORG_ID_URL_SAFE = re.compile(r"[^0-9A-Za-z]+")
+
+
+@dataclass(frozen=True)
+class AnnualAcquisitionEvidence:
+    code: str
+    year: int
+    available: bool
+    acquisition_cashflow: float | None
+    unit: str
+    source_url: str
+    reason: str
+
+
+class CninfoAnnualError(Exception):
+    """The annual-report capture, cache, or parse contract failed."""
+
+
+def _unit_for_page(page_units: Mapping[int, str], page_index: int) -> str:
+    if page_index in page_units:
+        return page_units[page_index]
+    for previous in range(page_index - 1, max(-1, page_index - 6), -1):
+        if previous in page_units:
+            return page_units[previous]
+    return "元"
+
+
+def _parse_pdf_number(word: str) -> float:
+    value = word.replace(",", "")
+    negative = value.startswith("(") and value.endswith(")")
+    if negative:
+        value = value[1:-1]
+    parsed = float(value)
+    return -parsed if negative else parsed
+
+
+def _request_json(url: str, data: Mapping[str, Any] | None, *, timeout: tuple[int, int] = (15, 30)):
+    import requests
+
+    try:
+        response = requests.post(url, data=data, headers=CNINFO_HEADERS, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        raise CninfoAnnualError(f"CNINFO request failed: {type(exc).__name__}") from exc
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, Mapping) and payload.get("announcements") is not None:
+        return payload
+    raise CninfoAnnualError("CNINFO response is not a JSON list or announcement payload")
+
+
+def _resolve_org_id(code: str) -> str:
+    results = _request_json(CNINFO_TOP_SEARCH_URL, {"keyWord": code, "maxNum": 10})
+    for entry in results:
+        if not isinstance(entry, Mapping):
+            continue
+        if str(entry.get("code") or "") == code:
+            org_id = str(entry.get("orgId") or "")
+            if org_id:
+                return org_id
+    raise CninfoAnnualError(f"CNINFO org id not found for {code}")
+
+
+def _find_annual_report_pdf(code: str, org_id: str, year: int) -> str:
+    """Return the adjunct URL of the annual report whose cover year is ``year``."""
+
+    start = f"{year}-01-01"
+    end = f"{year + 1}-12-31"
+    results = _request_json(
+        CNINFO_ANNOUNCE_URL,
+        {
+            "pageNum": 1,
+            "pageSize": 30,
+            "column": "szse",
+            "tabName": "fulltext",
+            "plate": "",
+            "stock": f"{code},{org_id}",
+            "searchkey": "",
+            "secid": "",
+            "category": "category_ndbg_szsh",
+            "trade": "",
+            "seDate": f"{start}~{end}",
+            "sortName": "",
+            "sortType": "",
+            "isHLtitle": "true",
+        },
+    )
+    announcements = results.get("announcements") or []
+    for announcement in announcements:
+        if not isinstance(announcement, Mapping):
+            continue
+        title = str(announcement.get("announcementTitle") or "")
+        adjunct = str(announcement.get("adjunctUrl") or "")
+        if f"{year}年" in title and "摘要" not in title and adjunct.endswith(".PDF"):
+            return adjunct
+    raise CninfoAnnualError(f"CNINFO annual report {year} not found for {code}")
+
+
+def _download_pdf(adjunct_url: str) -> bytes:
+    import requests
+
+    url = CNINFO_PDF_PREFIX + adjunct_url
+    try:
+        response = requests.get(url, headers=CNINFO_HEADERS, timeout=(30, 120))
+        response.raise_for_status()
+        content = response.content
+    except Exception as exc:  # noqa: BLE001
+        raise CninfoAnnualError(f"CNINFO PDF download failed: {type(exc).__name__}") from exc
+    if not content:
+        raise CninfoAnnualError("CNINFO PDF download returned empty content")
+    if len(content) > MAX_PDF_BYTES:
+        raise CninfoAnnualError("CNINFO PDF exceeds the size limit")
+    return content
+
+
+def _detect_unit(page_text: str) -> str:
+    for pattern in _UNIT_PATTERNS:
+        match = pattern.search(page_text)
+        if match:
+            unit = match.groupdict().get("unit")
+            if unit:
+                return unit
+            # "in millions of RMB" matched without an explicit group.
+            if "millions" in page_text[match.start() : match.end()].lower():
+                return "百万元"
+            return "元"
+    return ""
+
+
+def _import_fitz():
+    try:
+        import fitz  # PyMuPDF
+    except Exception as exc:  # noqa: BLE001
+        raise CninfoAnnualError(f"PyMuPDF is unavailable: {type(exc).__name__}") from exc
+    return fitz
+
+
+def _parse_acquisition_cashflow(pdf_bytes: bytes, code: str, year: int) -> tuple[float | None, str, str | None]:
+    """Extract the acquisition line from the cash-flow statement.
+
+    Returns ``(value, unit, reason)``.  ``unit`` is the reported monetary
+    unit (元/千元/万元/百万元/亿元) or "" when unknown; ``reason`` is None on
+    success and explains unavailable outcomes otherwise.
+    """
+
+    try:
+        fitz = _import_fitz()
+    except CninfoAnnualError as exc:
+        raise exc
+    try:
+        document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise CninfoAnnualError(f"CNINFO PDF cannot be opened: {type(exc).__name__}") from exc
+    try:
+        if document.page_count < 1:
+            raise CninfoAnnualError("CNINFO PDF has no pages")
+        page_units: dict[int, str] = {}
+        for page_index, page in enumerate(document):
+            words = page.get_text("words")
+            if not words:
+                continue
+            page_text = "".join(word[4] for word in words)
+            if page_index not in page_units:
+                detected = _detect_unit(page_text)
+                if detected:
+                    page_units[page_index] = detected
+            # Merge words into lines by y-band.
+            lines: list[tuple[float, float, str]] = []
+            for _x0, y0, _x1, y1, word, *_rest in words:
+                if not word.strip():
+                    continue
+                placed = False
+                for index, (line_y0, line_y1, line_text) in enumerate(lines):
+                    if y0 < line_y1 and y1 > line_y0:
+                        lines[index] = (min(line_y0, y0), max(line_y1, y1), line_text + word)
+                        placed = True
+                        break
+                if not placed:
+                    lines.append((y0, y1, word))
+            for y0, y1, line_text in lines:
+                if not _ACQUISITION_LABEL.search(line_text):
+                    continue
+                if (
+                    "支付" not in line_text
+                    and "净额" not in line_text
+                    and "payment" not in line_text.lower()
+                    and "paid" not in line_text.lower()
+                    and "acquisition" not in line_text.lower()
+                ):
+                    continue
+                # Locate the label token extent, then collect numeric tokens
+                # on the same line band to its right (本期发生额 column).
+                label_end = 0.0
+                for _x0, _wy0, x1, _wy1, word, *_rest in words:
+                    if _wy0 < y1 and _wy1 > y0 and _ACQUISITION_LABEL.search(word):
+                        label_end = max(label_end, x1)
+                if label_end <= 0:
+                    label_end = 0.0
+                candidates: list[float] = []
+                for x0, _wy0, _x1, _wy1, word, *_rest in words:
+                    if _wy0 < y1 and _wy1 > y0 and x0 >= label_end - 2 and _NUMERIC_TOKEN.match(word):
+                        candidates.append(_parse_pdf_number(word))
+                if not candidates:
+                    # Dash or blank means "no occurrence this year".
+                    return 0.0, _unit_for_page(page_units, page_index), None
+                return candidates[0], _unit_for_page(page_units, page_index), None
+        return None, "", "acquisition_line_not_found"
+    finally:
+        document.close()
+
+
+def _cache_contract(code: str, year: int) -> dict[str, Any]:
+    return {
+        "model_id": MODEL_ID,
+        "code": code,
+        "year": year,
+        "source": CNINFO_ANNOUNCE_URL,
+        "schema_version": CACHE_SCHEMA_VERSION,
+    }
+
+
+def _cache_path(code: str, year: int, cache_dir: Path) -> Path:
+    return cache_dir / f"{MODEL_ID}_{code}_{year}.json.gz"
+
+
+def fetch_annual_acquisition(
+    code: str,
+    year: int,
+    *,
+    session: Any = None,
+    cache_dir: str | Path = CNINFO_CACHE_DIR,
+    use_cache: bool = True,
+) -> AnnualAcquisitionEvidence:
+    """Fetch and verify the annual acquisition cash-flow line from CNINFO."""
+
+    if isinstance(code, bool) or not isinstance(code, str) or not _A_SHARE_CODE.fullmatch(code):
+        raise ValueError(f"invalid security code: {code!r}")
+    if isinstance(year, bool) or not isinstance(year, int) or not 2000 <= year <= date.today().year:
+        raise ValueError(f"invalid report year: {year!r}")
+    path = Path(cache_dir)
+    if use_cache:
+        cache = SafeFileCache(
+            _cache_path(code, year, path),
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=1_000_000,
+        )
+        loaded = cache.load(allow_expired=True)
+        if loaded.hit:
+            try:
+                payload = loaded.value
+                if not isinstance(payload, Mapping) or set(payload) != {"contract", "evidence"}:
+                    raise CninfoAnnualError("CNINFO cache payload shape is invalid")
+                if payload.get("contract") != _cache_contract(code, year):
+                    raise CninfoAnnualError("CNINFO cache contract mismatch")
+                return AnnualAcquisitionEvidence(**payload["evidence"])
+            except (CninfoAnnualError, TypeError, ValueError):
+                pass
+    try:
+        org_id = _resolve_org_id(code)
+        adjunct = _find_annual_report_pdf(code, org_id, year)
+        pdf_bytes = _download_pdf(adjunct)
+        value, unit, reason = _parse_acquisition_cashflow(pdf_bytes, code, year)
+    except CninfoAnnualError as exc:
+        evidence = AnnualAcquisitionEvidence(
+            code=code,
+            year=year,
+            available=False,
+            acquisition_cashflow=None,
+            unit="",
+            source_url="",
+            reason=str(exc),
+        )
+    else:
+        evidence = AnnualAcquisitionEvidence(
+            code=code,
+            year=year,
+            available=reason is None,
+            acquisition_cashflow=value,
+            unit=unit,
+            source_url=CNINFO_PDF_PREFIX + adjunct,
+            reason=reason or "",
+        )
+    if use_cache:
+        try:
+            cache = SafeFileCache(
+                _cache_path(code, year, path),
+                schema_version=CACHE_SCHEMA_VERSION,
+                ttl=CACHE_TTL_SECONDS,
+                max_uncompressed_bytes=1_000_000,
+            )
+            cache.save(
+                {
+                    "contract": _cache_contract(code, year),
+                    "evidence": {
+                        "code": evidence.code,
+                        "year": evidence.year,
+                        "available": evidence.available,
+                        "acquisition_cashflow": evidence.acquisition_cashflow,
+                        "unit": evidence.unit,
+                        "source_url": evidence.source_url,
+                        "reason": evidence.reason,
+                    },
+                }
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return evidence
+
+
+__all__ = [
+    "CNINFO_CACHE_DIR",
+    "MODEL_ID",
+    "AnnualAcquisitionEvidence",
+    "CninfoAnnualError",
+    "fetch_annual_acquisition",
+]

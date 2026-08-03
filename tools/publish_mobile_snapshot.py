@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from typing import Any
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 import hashlib
 import json
 import math
@@ -26,12 +26,15 @@ import pandas as pd
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.growth_evidence import (
+    EXTERNAL_HISTORY_YEARS,
     TYPE3_GROWTH_DUE_RETRY_RESERVE_RATIO,
     fetch_growth_evidence_batch,
     load_external_growth_evidence_cache_batch_state,
     load_growth_evidence_cache_batch_state,
     load_growth_evidence_retry_state_batch,
     record_growth_evidence_retry_states,
+    _latest_completed_annual_year,
+    _parse_as_of,
 )
 from data.patch4_evidence import fetch_patch4_evidence_batch
 from data.commodity_evidence import CommodityCycleError, load_commodity_cycle_evidence
@@ -446,6 +449,46 @@ def _bounded_quality_history_loader(limit: int = _QUALITY_HISTORY_DECISION_BACKF
     return load
 
 
+_CNINFO_UNIT_MULTIPLIERS = {"元": 1.0, "千元": 1e3, "万元": 1e4, "百万元": 1e6, "亿元": 1e8}
+
+
+def _load_cninfo_acquisition_batch(
+    codes: Sequence[str],
+    *,
+    as_of: date,
+    max_workers: int = 8,
+) -> dict[str, dict[int, float]]:
+    """Load audited annual-report acquisition cash-flow values in CNY.
+
+    Only companies in the network tranche are loaded; cached CNINFO results
+    (including explicit ``available=False`` outcomes) are free on later runs.
+    Values are multiplied into CNY from the reported unit and kept positive
+    (the annual-report line is a payment outflow).
+    """
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from data.cninfo_annual import fetch_annual_acquisition
+
+    latest = _latest_completed_annual_year(as_of)
+    years = list(range(latest, latest - EXTERNAL_HISTORY_YEARS, -1))
+    tasks = [(code, year) for code in codes for year in years]
+    by_code: dict[str, dict[int, float]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(fetch_annual_acquisition, code, year): (code, year) for code, year in tasks}
+        for future in as_completed(futures):
+            code, year = futures[future]
+            try:
+                evidence = future.result()
+            except Exception:  # noqa: BLE001
+                continue
+            if not evidence.available or evidence.acquisition_cashflow is None:
+                continue
+            multiplier = _CNINFO_UNIT_MULTIPLIERS.get(evidence.unit, 1.0)
+            by_code.setdefault(code, {})[year] = abs(evidence.acquisition_cashflow) * multiplier
+    return by_code
+
+
 def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT):
     """Reuse complete recent evidence and cap source work cumulatively.
 
@@ -531,7 +574,23 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
         if not selected:
             return {}
-        fetched = fetch_growth_evidence_batch(selected, progress_cb=progress_cb)
+        cninfo_by_code: dict[str, dict[int, float]] = {}
+        network_codes = [str(request.get("code") or "") for request in selected_network]
+        if network_codes:
+            as_of_value = next(
+                (str(request.get("as_of") or "") for request in selected_network if request.get("as_of")),
+                "",
+            )
+            if as_of_value:
+                cninfo_by_code = _load_cninfo_acquisition_batch(
+                    network_codes,
+                    as_of=_parse_as_of(as_of_value),
+                )
+        fetched = fetch_growth_evidence_batch(
+            selected,
+            progress_cb=progress_cb,
+            cninfo_acquisition_by_code=cninfo_by_code,
+        )
         if selected_network:
             record_growth_evidence_retry_states(selected_network, fetched)
         return fetched

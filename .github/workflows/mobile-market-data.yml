@@ -124,6 +124,7 @@ jobs:
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
+            data/cache/cninfo_annual
           key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
           restore-keys: |
             mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
@@ -140,6 +141,7 @@ jobs:
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
+            data/cache/cninfo_annual
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             mobile-deep-evidence-v1-${{ runner.os }}-
@@ -148,6 +150,7 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-bootstrap.txt
           python -m pip install --require-hashes -r requirements-lock.txt
+        python -m pip install pymupdf==1.28.0
           python -m pip check
 
       - name: Build validated market data
@@ -685,6 +688,7 @@ jobs:
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
+            data/cache/cninfo_annual
           key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
 
       - name: Save accumulated contract-validated deep evidence
@@ -698,6 +702,7 @@ jobs:
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
+            data/cache/cninfo_annual
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
 
   publish:

@@ -1851,6 +1851,57 @@ def _acquisition_records_by_year(
     return prepared
 
 
+def _overlay_cninfo_acquisition(
+    records: Any,
+    cninfo_acquisition_values: Mapping[int, float],
+    *,
+    code: str,
+) -> list[dict[str, Any]]:
+    """Overlay CNINFO annual-report acquisition values onto cash-flow rows.
+
+    The CNINFO value (already converted to CNY) is the exact line item from
+    the audited annual report cash-flow statement; Eastmoney's F10 cash-flow
+    field is frequently empty.  Only complete records are accepted and the
+    overlay applies per report year; rows without a matching year are kept
+    unchanged.
+    """
+
+    if not isinstance(cninfo_acquisition_values, Mapping) or not cninfo_acquisition_values:
+        if isinstance(records, pd.DataFrame):
+            return records.to_dict(orient="records")
+        return list(records) if isinstance(records, list) else list(records or [])
+    prepared: dict[int, dict[str, Any]] = {}
+    raw_records = records.to_dict(orient="records") if isinstance(records, pd.DataFrame) else (records or [])
+    for record in raw_records:
+        if not isinstance(record, Mapping):
+            raise GrowthEvidenceError("acquisition cash-flow record is invalid")
+        raw_date = str(record.get("REPORT_DATE") or "")[:10]
+        if not raw_date.endswith("-12-31"):
+            raise GrowthEvidenceError("acquisition cash-flow report date is invalid")
+        try:
+            report_year = date.fromisoformat(raw_date).year
+        except ValueError as exc:
+            raise GrowthEvidenceError("acquisition cash-flow report date is invalid") from exc
+        if report_year in prepared:
+            raise GrowthEvidenceError("acquisition cash-flow contains duplicate annual rows")
+        prepared[report_year] = dict(record)
+    for year, value in cninfo_acquisition_values.items():
+        if not isinstance(year, int) or not isinstance(value, (int, float)) or value < 0:
+            raise GrowthEvidenceError("CNINFO acquisition overlay values are invalid")
+        if year in prepared:
+            row = prepared[year]
+            row["OBTAIN_SUBSIDIARY_OTHER"] = value
+            row["SOURCE_REPORT_NAME"] = "CNINFO ANNUAL REPORT"
+        else:
+            prepared[year] = {
+                "SECURITY_CODE": code,
+                "REPORT_DATE": f"{year}-12-31",
+                "OBTAIN_SUBSIDIARY_OTHER": value,
+                "SOURCE_REPORT_NAME": "CNINFO ANNUAL REPORT",
+            }
+    return [prepared[year] for year in sorted(prepared)]
+
+
 def _unavailable_external_evidence(code: str, as_of: date, reason: str) -> dict[str, Any]:
     return {
         "status": "unavailable",
@@ -2376,7 +2427,10 @@ def _normalise_external_record(
         value.get("acquisition_derivation"),
         acquisition_cash=float(acquisition),
     )
-    if (
+    if value.get("source_report") == "CNINFO ANNUAL REPORT":
+        if value.get("source_field") != _ACQUISITION_FIELD:
+            raise GrowthEvidenceError("external growth record source identity is invalid")
+    elif (
         value.get("source_report") != "RPT_F10_FINANCE_GCASHFLOW"
         or value.get("source_field") != _ACQUISITION_FIELD
         or value.get("source_url") != EASTMONEY_DATACENTER_URL
@@ -2585,6 +2639,7 @@ def fetch_growth_evidence(
     revenue_records: Sequence[Mapping[str, Any]],
     goodwill_records: Sequence[Mapping[str, Any]],
     acquisition_cashflow_records: Any = None,
+    cninfo_acquisition_values: Mapping[int, float] | None = None,
     session: Any = requests,
     cache_dir: str | Path = SEGMENT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
@@ -2637,6 +2692,17 @@ def fetch_growth_evidence(
         except DataFetchError as exc:
             acquisition_cashflow_records = []
             acquisition_error = exc
+    if cninfo_acquisition_values:
+        acquisition_cashflow_records = _overlay_cninfo_acquisition(
+            acquisition_cashflow_records,
+            cninfo_acquisition_values,
+            code=normalized_code,
+        )
+        # CNINFO supplies the acquisition line from the audited annual report,
+        # so an Eastmoney detailed cash-flow fetch failure no longer blocks
+        # the external-growth evidence.
+        if acquisition_cashflow_records:
+            acquisition_error = None
     return _assemble_growth_evidence(
         normalized_code,
         cutoff,
@@ -2657,6 +2723,7 @@ def fetch_growth_evidence_batch(
     progress_cb: Any = None,
     cache_dir: str | Path = SEGMENT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+    cninfo_acquisition_by_code: Mapping[str, Mapping[int, float]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for exact Type 3 preflight candidates."""
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
@@ -2766,7 +2833,11 @@ def fetch_growth_evidence_batch(
                     cutoff,
                     revenue_records=revenue_records,
                     goodwill_records=goodwill_records,
-                    acquisition_cashflow_records=acquisition_by_code[code],
+                    acquisition_cashflow_records=_overlay_cninfo_acquisition(
+                        acquisition_by_code[code],
+                        (cninfo_acquisition_by_code or {}).get(code, {}),
+                        code=code,
+                    ),
                     segment_growth_sources=segment,
                     cache_hit=cache_hit,
                     cache_diagnostic=cache_diagnostic,
