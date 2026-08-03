@@ -270,7 +270,7 @@ def test_quality_history_backfill_reuses_all_cache_and_fetches_one_bounded_tranc
     )
     captured = []
 
-    def fetch(requests):
+    def fetch(requests, **kwargs):
         captured.extend(requests)
         return {request["code"]: {"available": True, "code": request["code"]} for request in requests}
 
@@ -296,7 +296,7 @@ def test_quality_history_backfill_prioritises_large_companies_before_code_order(
     monkeypatch.setattr(publisher, "load_quality_history_cache_batch_state", lambda _requests: ({}, ()))
     captured = []
 
-    def fetch(requests):
+    def fetch(requests, **kwargs):
         captured.extend(requests)
         return {}
 
@@ -336,7 +336,7 @@ def test_quality_history_decision_loader_has_one_cumulative_network_budget(monke
     captured = []
     progress = object()
 
-    def fetch(requests, *, progress_cb=None):
+    def fetch(requests, *, progress_cb=None, **kwargs):
         captured.append((list(requests), progress_cb))
         return {request["code"]: {"available": True} for request in requests}
 
@@ -369,7 +369,7 @@ def test_quality_history_backfill_and_decision_budget_only_refresh_due_or_missin
     )
     captured = []
 
-    def fetch(selected, *, progress_cb=None):
+    def fetch(selected, *, progress_cb=None, **kwargs):
         captured.extend(selected)
         return {request["code"]: {"available": True, "code": request["code"]} for request in selected}
 
@@ -402,7 +402,7 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
             if request["code"] == "000002"
         }
 
-    def fetch(requests, *, progress_cb=None):
+    def fetch(requests, *, progress_cb=None, **kwargs):
         calls.append((list(requests), progress_cb))
         return {request["code"]: {"available": True} for request in requests}
 
@@ -432,7 +432,7 @@ def test_type3_growth_loader_always_selects_segment_cached_codes_without_spendin
     monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
     monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
 
-    def fetch(requests, *, progress_cb=None):
+    def fetch(requests, *, progress_cb=None, **kwargs):
         del progress_cb
         calls.append([request["code"] for request in requests])
         return {request["code"]: {"available": True} for request in requests}
@@ -455,7 +455,7 @@ def test_type3_growth_loader_retries_due_candidate_while_continuing_new_coverage
     calls = []
     retry_state = {}
 
-    def fetch(requests, *, progress_cb=None):
+    def fetch(requests, *, progress_cb=None, **kwargs):
         calls.append([request["code"] for request in requests])
         return {request["code"]: {"available": False} for request in requests}
 
@@ -511,7 +511,7 @@ def test_type3_growth_loader_reserves_due_retry_capacity_during_continuous_new_a
         for code in due_codes
     }
 
-    def fetch(selected, *, progress_cb=None):
+    def fetch(selected, *, progress_cb=None, **kwargs):
         calls.append([request["code"] for request in selected])
         return {request["code"]: {"available": False} for request in selected}
 
