@@ -635,6 +635,7 @@ def test_fetch_research_reports_batch_is_sorted_and_worker_failure_isolated(monk
             ]
         )
 
+
 def _save_research_cache(cache_dir, code, as_of, sources, content_verification):
     cache = SafeFileCache(
         rr._cache_path(code, as_of, cache_dir),

@@ -72,3 +72,6 @@ android/local.properties
 android/build/
 android/app/build/
 android/release.properties
+
+# Playwright MCP artifacts (browser snapshots)
+.playwright-mcp/
