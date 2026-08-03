@@ -2473,6 +2473,53 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(missing_reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertNotIn("PE", missing_reasons["2c"])
 
+    def test_type2_deducts_for_fragmented_competition_via_industry_hhi(self):
+        # 补丁7 情况二附加项：竞争格局恶劣扣1-2分。行业营收 HHI<0.20 扣1分，
+        # <0.10 扣2分。
+        bench = benchmarks(median_cagr=0.20, median_cagr_count=50)
+        concentrated = base_metrics(revenue_values=[100.0, 100.0, 100.0, 100.0, 100.0])
+        concentrated["_quantitative_peer_context"] = {
+            "target_excluded": True,
+            "aggregate_revenue_cagr": 0.20,
+            "aggregate_revenue_cagr_count": 50,
+            "aggregate_revenue_coverage": 0.9,
+            "industry_revenue_hhi": 0.55,
+        }
+        fragmented = base_metrics(revenue_values=[100.0, 100.0, 100.0, 100.0, 100.0])
+        fragmented["_quantitative_peer_context"] = {
+            "target_excluded": True,
+            "aggregate_revenue_cagr": 0.20,
+            "aggregate_revenue_cagr_count": 50,
+            "aggregate_revenue_coverage": 0.9,
+            "industry_revenue_hhi": 0.05,
+        }
+        moderate = base_metrics(revenue_values=[100.0, 100.0, 100.0, 100.0, 100.0])
+        moderate["_quantitative_peer_context"] = {
+            "target_excluded": True,
+            "aggregate_revenue_cagr": 0.20,
+            "aggregate_revenue_cagr_count": 50,
+            "aggregate_revenue_coverage": 0.9,
+            "industry_revenue_hhi": 0.12,
+        }
+        high_score = bs.score_type2_two_hot_one_cold(concentrated, bench)[2]["2a"]
+        moderate_score = bs.score_type2_two_hot_one_cold(moderate, bench)[2]["2a"]
+        low_score = bs.score_type2_two_hot_one_cold(fragmented, bench)[2]["2a"]
+        self.assertGreater(high_score, moderate_score)
+        self.assertGreater(moderate_score, low_score)
+        self.assertAlmostEqual(high_score - moderate_score, 1.0, places=9)
+        self.assertAlmostEqual(moderate_score - low_score, 1.0, places=9)
+
+    def test_type1_dividend_catalyst_adds_to_the_financial_proxy(self):
+        # 补丁7 情况一 1d 弱催化剂(回购/分红)：持续分红是价格回归动力。
+        plain = base_metrics()
+        with_dividend = base_metrics(trailing_cash_per_share=2.0)  # 股息率 4%（price=50）
+        _, _, plain_scores, plain_reasons = bs.score_type1_dcf(plain, complete_dcf_evidence(), benchmarks())
+        _, _, dividend_scores, dividend_reasons = bs.score_type1_dcf(
+            with_dividend, complete_dcf_evidence(), benchmarks()
+        )
+        self.assertGreater(dividend_scores["1d"], plain_scores["1d"])
+        self.assertIn("分红率", dividend_reasons["1d"])
+
     def test_type2_rejects_market_coldness_from_a_different_trading_session(self):
         metric = base_metrics(
             source_trade_date="2026-07-15",

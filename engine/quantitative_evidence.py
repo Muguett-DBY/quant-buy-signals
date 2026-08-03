@@ -1277,6 +1277,9 @@ def build_sector_context(
             "aggregate_revenue_cagr": _finite(revenue.get("cagr")),
             "aggregate_revenue_cagr_count": int(revenue.get("cohort_count") or 0),
             "aggregate_revenue_coverage": _finite(revenue.get("coverage")),
+            "industry_revenue_hhi": (
+                math.fsum(share * share for share in revenue_shares) if revenue_shares else None
+            ),
             "aggregate_capex_cagr": _finite(capex.get("cagr")),
             "aggregate_capex_cagr_count": int(capex.get("cohort_count") or 0),
             "aggregate_capex_coverage": _finite(capex.get("coverage")),
@@ -1601,6 +1604,9 @@ def _context_without_target(base: Mapping[str, Any], target: Mapping[str, Any], 
             "aggregate_revenue_cagr": _finite(revenue.get("cagr")) if revenue.get("available") else None,
             "aggregate_revenue_cagr_count": int(revenue.get("cohort_count") or 0),
             "aggregate_revenue_coverage": _finite(revenue.get("coverage")),
+            "industry_revenue_hhi": (
+                math.fsum(share * share for share in revenue_shares) if revenue_shares else None
+            ),
             "aggregate_capex_cagr": _finite(capex.get("cagr")) if capex.get("available") else None,
             "aggregate_capex_cagr_count": int(capex.get("cohort_count") or 0),
             "aggregate_capex_coverage": _finite(capex.get("coverage")),

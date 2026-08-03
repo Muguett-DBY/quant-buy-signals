@@ -3458,6 +3458,18 @@ def score_type1_dcf(
         ):
             catalyst += 2.0
             items.append("净利率连升")
+        # 补丁7 情况一 1d 弱催化剂(回购/分红)：持续分红是价格回归的现实动力。
+        # 分红数据来自东财分红送配明细（gdN 滤网同源）。
+        trailing_cash = _safe_float(m.get("trailing_cash_per_share"))
+        price = _safe_float(m.get("price"))
+        if trailing_cash is not None and trailing_cash > 0 and price is not None and price > 0:
+            dividend_yield = trailing_cash / price
+            if dividend_yield >= 0.03:
+                catalyst += 2.0
+                items.append(f"分红率{dividend_yield:.1%}")
+            elif dividend_yield > 0:
+                catalyst += 1.0
+                items.append("有分红")
         explicit_catalyst = _verified_score(m, "catalyst_score")
         catalyst_evidence_complete = explicit_catalyst is not None
         if explicit_catalyst is not None:
@@ -3465,7 +3477,7 @@ def score_type1_dcf(
             reasons["1d"] = _evidence_reason(m, "catalyst_score", "催化剂证据不可追溯")
         else:
             scores["1d"] = min(6.0, catalyst)
-            reasons["1d"] = f"财务回归弱代理{len(items)}项" if items else "催化事件证据缺失"
+            reasons["1d"] = f"财务回归弱代理：{';'.join(items)}" if items else "催化事件证据缺失"
 
     latest_severity, latest_reason = _latest_period_deterioration(m, include_ocf=not is_financial)
     if latest_severity >= 3:
@@ -3798,10 +3810,24 @@ def score_type2_two_hot_one_cold(
             growth,
             [(-0.10, 0.5), (-0.08, 1.0), (0.0, 2.0), (0.05, 5.0), (0.12, 7.0), (0.25, 8.5), (0.50, 10.0)],
         )
+        # 补丁7 情况二附加项：竞争格局恶劣扣1-2分。行业营收 HHI 越低越分散，
+        # 分散行业价格战激烈、龙头地位不稳固；<0.20 扣1分，<0.10 扣2分。
+        hhi = _safe_float(peer_context.get("industry_revenue_hhi"))
+        competition_deduction = 0.0
+        competition_note = ""
+        if hhi is not None and aggregate_sample is not None and aggregate_sample >= MIN_SECTOR_COMPANIES:
+            if hhi < 0.10:
+                competition_deduction = 2.0
+                competition_note = f"，竞争格局分散(HHI={hhi:.2f})扣2分"
+            elif hhi < 0.20:
+                competition_deduction = 1.0
+                competition_note = f"，竞争格局分散(HHI={hhi:.2f})扣1分"
+        if competition_deduction:
+            scores["2a"] = max(0.0, scores["2a"] - competition_deduction)
         reasons["2a"] = (
-            f"本司外{int(aggregate_sample)}家总营收加权增速{growth:.1%}"
+            f"本司外{int(aggregate_sample)}家总营收加权增速{growth:.1%}{competition_note}"
             if aggregate_ready
-            else f"同行营收增速中位数{growth:.1%}"
+            else f"同行营收增速中位数{growth:.1%}{competition_note}"
         )
 
     revenue = m.get("revenue_values", [])
