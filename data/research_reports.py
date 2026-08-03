@@ -58,6 +58,13 @@ EASTMONEY_REPORT_PAGE = "https://data.eastmoney.com/report/stock.jshtml"
 EASTMONEY_REPORT_DETAIL_PREFIX = "https://data.eastmoney.com/report/info/"
 RESEARCH_REPORT_CACHE_DIR = CACHE_DIRECTORY / "research_reports"
 
+# A report-metadata capture may be reissued under a later evidence cutoff
+# while its capture is still recent: report bodies are immutable once
+# published, and the freshness window is re-evaluated against the current
+# cutoff.  This keeps the daily post-close publication from refetching every
+# company's report list and bodies from Eastmoney.
+RESEARCH_REPORT_CACHE_REUSE_DAYS = 7
+
 PAGE_SIZE = 50
 MAX_PAGES = 3
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -966,6 +973,34 @@ def _cache_path(code: str, as_of: date, cache_dir: Path) -> Path:
     return cache_dir / f"{MODEL_ID}_{code}_{as_of.strftime('%Y%m%d')}.json.gz"
 
 
+def _research_cache_index(cache_dir: Path) -> dict[str, list[tuple[date, Path]]]:
+    """Index canonical research-report captures in one directory pass."""
+
+    pattern = re.compile(rf"^{re.escape(MODEL_ID)}_(?P<code>[036][0-9]{{5}})_(?P<as_of>[0-9]{{8}})\.json\.gz$")
+    indexed: dict[str, list[tuple[date, Path]]] = {}
+    try:
+        paths = list(cache_dir.iterdir())
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return indexed
+    for path in paths:
+        match = pattern.fullmatch(path.name)
+        if match is None:
+            continue
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        try:
+            source_as_of = datetime.strptime(match.group("as_of"), "%Y%m%d").date()
+        except ValueError:
+            continue
+        indexed.setdefault(match.group("code"), []).append((source_as_of, path))
+    for values in indexed.values():
+        values.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+    return indexed
+
+
 def _make_evidence(
     code: str,
     as_of: date,
@@ -1033,6 +1068,61 @@ def _from_cache(payload: Any, code: str, as_of: date) -> ResearchReportEvidence:
     )
 
 
+def _from_reusable_cache(
+    code: str,
+    as_of: date,
+    *,
+    cache_dir: Path,
+    cache_index: Mapping[str, Sequence[tuple[date, Path]]] | None = None,
+) -> ResearchReportEvidence | None:
+    """Reissue a recent source capture under the current evidence cutoff.
+
+    Report bodies are immutable once published.  A capture from an earlier
+    ``as_of`` within the reuse window is revalidated against the current
+    cutoff: the freshness window and content identity are recomputed, while
+    the source rows and verified body summaries are carried over unchanged.
+    Reuse never rewrites the original capture file, so repeated rebasing
+    cannot extend the window beyond the original capture age.
+    """
+
+    indexed = _research_cache_index(cache_dir) if cache_index is None else cache_index
+    for source_as_of, path in indexed.get(code, ()):
+        age_days = (as_of - source_as_of).days
+        if age_days < 0 or age_days > RESEARCH_REPORT_CACHE_REUSE_DAYS:
+            continue
+        cache = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        )
+        loaded = cache.load(allow_expired=True)
+        if not loaded.hit:
+            continue
+        try:
+            payload = loaded.value
+            if not isinstance(payload, Mapping) or set(payload) != {"contract", "sources", "content_verification"}:
+                raise ResearchReportError("research-report cache payload shape is invalid")
+            if payload.get("contract") != _cache_contract(code, source_as_of):
+                raise ResearchReportError("research-report cache contract mismatch")
+            content = payload.get("content_verification")
+            if not isinstance(content, Mapping):
+                raise ResearchReportError("research-report content verification is invalid")
+            rebased_content = dict(content)
+            rebased_content["as_of"] = as_of.isoformat()
+            return _make_evidence(
+                code,
+                as_of,
+                payload.get("sources"),
+                rebased_content,
+                cache_hit=True,
+                cache_diagnostic=f"reused_source_as_of:{source_as_of.isoformat()}",
+            )
+        except (ResearchReportError, TypeError, ValueError):
+            continue
+    return None
+
+
 def fetch_research_reports(
     code: str,
     as_of: date | str,
@@ -1081,6 +1171,16 @@ def fetch_research_reports(
                 diagnostic = f"invalid_hit:{_error_label(exc)}"
         else:
             diagnostic = f"miss:{initial.reason}"
+        try:
+            reused = _from_reusable_cache(
+                normalized_code,
+                cutoff,
+                cache_dir=Path(cache_dir),
+            )
+        except (ResearchReportError, TypeError, ValueError):
+            reused = None
+        if reused is not None:
+            return reused
 
     active_session = requests.Session() if session is requests else session
     owns_session = active_session is not session

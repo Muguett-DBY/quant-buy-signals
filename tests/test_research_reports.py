@@ -634,3 +634,175 @@ def test_fetch_research_reports_batch_is_sorted_and_worker_failure_isolated(monk
                 {"code": "600519", "as_of": "2026-07-17"},
             ]
         )
+
+def _save_research_cache(cache_dir, code, as_of, sources, content_verification):
+    cache = SafeFileCache(
+        rr._cache_path(code, as_of, cache_dir),
+        schema_version=rr.CACHE_SCHEMA_VERSION,
+        ttl=rr.CACHE_TTL_SECONDS,
+        max_uncompressed_bytes=rr.MAX_RESPONSE_BYTES,
+    )
+    cache.save(
+        {
+            "contract": rr._cache_contract(code, as_of),
+            "sources": sources,
+            "content_verification": content_verification,
+        }
+    )
+
+
+def test_fetch_research_reports_reuses_a_recent_capture_under_a_later_cutoff(tmp_path):
+    rows = [
+        _row(1, publisher_id="80000001", publisher="机构一"),
+        _row(2, publisher_id="80000002", publisher="机构二"),
+        _row(3, publisher_id="80000003", publisher="机构三"),
+    ]
+    session = _FakeSession([_FakeResponse(_payload(rows))])
+    captured = rr.fetch_research_reports(
+        "600519",
+        "2026-07-17",
+        session=session,
+        use_cache=False,
+        rate_limiter=_NoWait(),
+    )
+    assert captured.available
+    _save_research_cache(
+        tmp_path,
+        "600519",
+        date(2026, 7, 17),
+        captured.sources,
+        captured.content_verification,
+    )
+
+    later_session = _FakeSession([])
+    reused = rr.fetch_research_reports(
+        "600519",
+        "2026-07-20",
+        session=later_session,
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert reused.cache_hit
+    assert reused.cache_diagnostic == "reused_source_as_of:2026-07-17"
+    assert reused.available
+    assert later_session.calls == [], "reuse must not touch the network"
+    assert reused.as_of == "2026-07-20"
+
+
+def test_fetch_research_reports_exact_hit_takes_priority_over_reuse(tmp_path):
+    rows = [
+        _row(1, publisher_id="80000001", publisher="机构一"),
+        _row(2, publisher_id="80000002", publisher="机构二"),
+        _row(3, publisher_id="80000003", publisher="机构三"),
+    ]
+    session = _FakeSession([_FakeResponse(_payload(rows))])
+    captured = rr.fetch_research_reports(
+        "600519",
+        "2026-07-17",
+        session=session,
+        use_cache=False,
+        rate_limiter=_NoWait(),
+    )
+    _save_research_cache(
+        tmp_path,
+        "600519",
+        date(2026, 7, 17),
+        captured.sources,
+        captured.content_verification,
+    )
+    later = rr.fetch_research_reports(
+        "600519",
+        "2026-07-18",
+        session=_FakeSession([]),
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert later.cache_diagnostic == "reused_source_as_of:2026-07-17"
+    _save_research_cache(
+        tmp_path,
+        "600519",
+        date(2026, 7, 18),
+        later.sources,
+        later.content_verification,
+    )
+    exact = rr.fetch_research_reports(
+        "600519",
+        "2026-07-18",
+        session=_FakeSession([]),
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert exact.cache_hit
+    assert exact.cache_diagnostic == "hit"
+
+
+def test_fetch_research_reports_refetches_when_reuse_window_expired(tmp_path):
+    rows = [
+        _row(1, publisher_id="80000001", publisher="机构一"),
+        _row(2, publisher_id="80000002", publisher="机构二"),
+        _row(3, publisher_id="80000003", publisher="机构三"),
+    ]
+    session = _FakeSession([_FakeResponse(_payload(rows))])
+    captured = rr.fetch_research_reports(
+        "600519",
+        "2026-07-01",
+        session=session,
+        use_cache=False,
+        rate_limiter=_NoWait(),
+    )
+    _save_research_cache(
+        tmp_path,
+        "600519",
+        date(2026, 7, 1),
+        captured.sources,
+        captured.content_verification,
+    )
+
+    fresh_rows = [
+        _row(10, publisher_id="80000001", publisher="机构一"),
+        _row(11, publisher_id="80000002", publisher="机构二"),
+        _row(12, publisher_id="80000003", publisher="机构三"),
+    ]
+    fresh_session = _FakeSession([_FakeResponse(_payload(fresh_rows))])
+    result = rr.fetch_research_reports(
+        "600519",
+        "2026-07-20",
+        session=fresh_session,
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert not result.cache_hit
+    assert fresh_session.calls, "expired captures must refetch from the source"
+    assert result.available
+
+
+def test_fetch_research_reports_ignores_corrupt_reusable_payload_and_refetches(tmp_path):
+    cache = SafeFileCache(
+        rr._cache_path("600519", date(2026, 7, 17), tmp_path),
+        schema_version=rr.CACHE_SCHEMA_VERSION,
+        ttl=rr.CACHE_TTL_SECONDS,
+        max_uncompressed_bytes=rr.MAX_RESPONSE_BYTES,
+    )
+    cache.save(
+        {
+            "contract": rr._cache_contract("600519", date(2026, 7, 17)),
+            "sources": "not-a-list",
+            "content_verification": {},
+        }
+    )
+    rows = [
+        _row(1, publisher_id="80000001", publisher="机构一"),
+        _row(2, publisher_id="80000002", publisher="机构二"),
+        _row(3, publisher_id="80000003", publisher="机构三"),
+    ]
+    fresh_session = _FakeSession([_FakeResponse(_payload(rows))])
+    result = rr.fetch_research_reports(
+        "600519",
+        "2026-07-20",
+        session=fresh_session,
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert not result.cache_hit
+    assert fresh_session.calls
+    assert result.available
