@@ -650,7 +650,7 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
         now_shanghai = _shanghai_now()
         if now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME and market_as_of != _latest_closed_session_date(
             now_shanghai
-        ):
+        ).isoformat():
             raise RuntimeError(
                 "post-close mobile publication is not allowed before 16:15 Asia/Shanghai "
                 "unless it backfills the latest closed session"
