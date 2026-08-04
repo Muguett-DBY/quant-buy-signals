@@ -16,11 +16,11 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import time
 import math
 from pathlib import Path
 import re
 import threading
-import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -2724,6 +2724,7 @@ def fetch_growth_evidence_batch(
     cache_dir: str | Path = SEGMENT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     cninfo_acquisition_by_code: Mapping[str, Mapping[int, float]] | None = None,
+    time_budget_seconds: float | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for exact Type 3 preflight candidates."""
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
@@ -2734,6 +2735,12 @@ def fetch_growth_evidence_batch(
         raise ValueError(f"max_workers must be between 1 and {MAX_WORKERS}")
     if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
         raise ValueError("cache_ttl_seconds must be non-negative")
+    if time_budget_seconds is not None and (
+        isinstance(time_budget_seconds, bool)
+        or not isinstance(time_budget_seconds, (int, float))
+        or time_budget_seconds < 0
+    ):
+        raise ValueError("time_budget_seconds must be a non-negative number or None")
     prepared: list[tuple[str, date, Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]]] = []
     seen: set[str] = set()
     for request in requests_:
@@ -2773,6 +2780,7 @@ def fetch_growth_evidence_batch(
 
     acquisition_by_code: dict[str, list[dict[str, Any]]] = {code: [] for code, *_ in prepared}
     acquisition_errors: dict[str, BaseException] = {}
+    deadline = time.monotonic() + max(0.0, time_budget_seconds) if time_budget_seconds is not None else None
     grouped: dict[tuple[int, ...], list[str]] = {}
     for code, cutoff, *_ in prepared:
         if code in external_cache_state:
@@ -2787,6 +2795,8 @@ def fetch_growth_evidence_batch(
         # capable of triggering the source's rate limits.  Chunk explicitly so
         # the expanded whole-market evidence pass remains bounded and auditable.
         for offset in range(0, len(codes), _CASHFLOW_BATCH_COMPANIES):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             code_chunk = codes[offset : offset + _CASHFLOW_BATCH_COMPANIES]
             try:
                 frame = fetch_detailed_annual_cashflow_history(list(years), codes=code_chunk)
@@ -2799,7 +2809,8 @@ def fetch_growth_evidence_batch(
                     acquisition_errors[code] = exc
 
     results: dict[str, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(prepared))) as executor:
+    executor = ThreadPoolExecutor(max_workers=min(max_workers, len(prepared)))
+    try:
         futures = {
             executor.submit(
                 _fetch_segment_growth_sources,
@@ -2813,6 +2824,8 @@ def fetch_growth_evidence_batch(
         }
         completed = 0
         for future in as_completed(futures):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             code, cutoff, revenue_records, goodwill_records = futures[future]
             try:
                 segment, cache_hit, cache_diagnostic = future.result()
@@ -2894,6 +2907,11 @@ def fetch_growth_evidence_batch(
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
+    finally:
+        # Best-effort by design: stop submitting work at the deadline and do
+        # not block on in-flight requests, which are allowed to finish and
+        # persist their own cache entries for the next run.
+        executor.shutdown(wait=False, cancel_futures=True)
     return {code: results[code] for code, *_ in prepared}
 
 

@@ -70,6 +70,11 @@ _MOBILE_STRUCTURAL_EVIDENCE_GATES = (
 _QUALITY_HISTORY_BACKFILL_LIMIT = 2_000
 _QUALITY_HISTORY_DECISION_BACKFILL_LIMIT = 500
 _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 6_000
+# The daily post-close build must publish on time, so the Type 3 network
+# backfill (segment + annual cash-flow) is best-effort: within this budget it
+# captures whatever Eastmoney's rate limits allow, and anything left over stays
+# eligible for the next run through the retry/cache state (which accumulates).
+_TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS = 900.0
 
 
 def _require_company_detail_manifest(manifest: Mapping[str, object], expected_companies: int) -> None:
@@ -609,6 +614,7 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
             selected,
             progress_cb=progress_cb,
             cninfo_acquisition_by_code=cninfo_by_code,
+            time_budget_seconds=_TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS,
         )
         if selected_network:
             record_growth_evidence_retry_states(selected_network, fetched)
@@ -648,9 +654,10 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     market_as_of = _market_as_of(snapshot)
     if refresh:
         now_shanghai = _shanghai_now()
-        if now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME and market_as_of != _latest_closed_session_date(
-            now_shanghai
-        ).isoformat():
+        if (
+            now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME
+            and market_as_of != _latest_closed_session_date(now_shanghai).isoformat()
+        ):
             raise RuntimeError(
                 "post-close mobile publication is not allowed before 16:15 Asia/Shanghai "
                 "unless it backfills the latest closed session"
