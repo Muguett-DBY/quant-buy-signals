@@ -90,7 +90,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.preflight.outputs.should_run == 'true'
     needs: preflight
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     environment: mobile-production
     permissions:
       contents: read

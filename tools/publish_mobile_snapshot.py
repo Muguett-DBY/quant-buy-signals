@@ -456,7 +456,8 @@ def _load_cninfo_acquisition_batch(
     codes: Sequence[str],
     *,
     as_of: date,
-    max_workers: int = 8,
+    max_workers: int = 16,
+    time_budget_seconds: float = 900.0,
 ) -> dict[str, dict[int, float]]:
     """Load audited annual-report acquisition cash-flow values in CNY.
 
@@ -464,8 +465,15 @@ def _load_cninfo_acquisition_batch(
     (including explicit ``available=False`` outcomes) are free on later runs.
     Values are multiplied into CNY from the reported unit and kept positive
     (the annual-report line is a payment outflow).
+
+    Best-effort by design: the daily post-close build must publish on time,
+    so the batch stops after ``time_budget_seconds`` (default 15 minutes).
+    Anything not captured stays eligible for a later run through the cache,
+    which accumulates across runs (a 15-minute budget at 16 workers covers
+    roughly the whole market on the first run).
     """
 
+    import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from data.cninfo_annual import fetch_annual_acquisition
@@ -474,18 +482,29 @@ def _load_cninfo_acquisition_batch(
     years = list(range(latest, latest - EXTERNAL_HISTORY_YEARS, -1))
     tasks = [(code, year) for code in codes for year in years]
     by_code: dict[str, dict[int, float]] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    deadline = time.monotonic() + max(0.0, time_budget_seconds)
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {pool.submit(fetch_annual_acquisition, code, year): (code, year) for code, year in tasks}
-        for future in as_completed(futures):
-            code, year = futures[future]
-            try:
-                evidence = future.result()
-            except Exception:  # noqa: BLE001
-                continue
-            if not evidence.available or evidence.acquisition_cashflow is None:
-                continue
-            multiplier = _CNINFO_UNIT_MULTIPLIERS.get(evidence.unit, 1.0)
-            by_code.setdefault(code, {})[year] = abs(evidence.acquisition_cashflow) * multiplier
+        remaining = time_budget_seconds
+        try:
+            for future in as_completed(futures, timeout=remaining):
+                code, year = futures[future]
+                try:
+                    evidence = future.result()
+                except Exception:  # noqa: BLE001
+                    continue
+                if not evidence.available or evidence.acquisition_cashflow is None:
+                    continue
+                multiplier = _CNINFO_UNIT_MULTIPLIERS.get(evidence.unit, 1.0)
+                by_code.setdefault(code, {})[year] = abs(evidence.acquisition_cashflow) * multiplier
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+        except TimeoutError:
+            pass
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     return by_code
 
 
