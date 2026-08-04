@@ -71,7 +71,7 @@ def _scores():
     )
 
 
-def _snapshot(source="cache"):
+def _snapshot(source="cache", market_as_of="2026-07-17"):
     return SimpleNamespace(
         source=source,
         eligible_codes=("000001",),
@@ -83,7 +83,7 @@ def _snapshot(source="cache"):
         retrieved_at=1_784_297_210.0,
         baseline_timestamp=1_784_297_000.0,
         baseline_payload_sha256="b" * 64,
-        validation={"trading_source_trade_dates": ["2026-07-17"]},
+        validation={"trading_source_trade_dates": [market_as_of]},
     )
 
 
@@ -707,7 +707,7 @@ def test_mobile_publication_refuses_an_old_trading_session_after_a_fresh_fetch(m
     monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: _snapshot(source="network"))
     monkeypatch.setattr(publisher, "_shanghai_today", lambda: "2026-07-18")
 
-    with pytest.raises(RuntimeError, match="is not today's Shanghai session"):
+    with pytest.raises(RuntimeError, match="is not the latest closed Shanghai session"):
         publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
 
     assert not list(tmp_path.iterdir())
@@ -721,6 +721,10 @@ def test_mobile_publication_requires_one_validated_market_session():
 
 
 def test_mobile_publication_refuses_a_manual_refresh_before_the_safe_close_boundary(monkeypatch, tmp_path):
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: _snapshot(source="network", market_as_of="2026-07-16"))
     monkeypatch.setattr(
         publisher,
         "_shanghai_now",
@@ -734,7 +738,36 @@ def test_mobile_publication_refuses_a_manual_refresh_before_the_safe_close_bound
     assert not list(tmp_path.iterdir())
 
 
-def test_mobile_publication_refuses_intraday_quotes_replayed_after_close(monkeypatch, tmp_path):
+def test_latest_closed_session_date_skips_weekends_and_respects_16_15():
+    afternoon = lambda day: datetime(2026, 7, day, 16, 15, tzinfo=ZoneInfo("Asia/Shanghai"))
+    morning = lambda day: datetime(2026, 7, day, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    # 2026-07-18 is a Saturday; 07-17 a Friday; 07-20 a Monday.
+    assert publisher._latest_closed_session_date(afternoon(20)).isoformat() == "2026-07-20"
+    assert publisher._latest_closed_session_date(morning(20)).isoformat() == "2026-07-17"
+    assert publisher._latest_closed_session_date(morning(18)).isoformat() == "2026-07-17"
+    assert publisher._latest_closed_session_date(afternoon(17)).isoformat() == "2026-07-17"
+
+
+def test_mobile_publication_backfills_the_latest_closed_session_before_16_15(monkeypatch, tmp_path):
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        publisher,
+        "get_market_snapshot",
+        lambda *_args, **_kwargs: _snapshot(source="network", market_as_of="2026-07-17"),
+    )
+    monkeypatch.setattr(
+        publisher,
+        "_shanghai_now",
+        lambda: datetime(2026, 7, 20, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        raising=False,
+    )
+    # The 16:15 gate and the latest-closed-session gate must not reject a
+    # backfill of the latest closed session (07-17 is the previous Friday);
+    # execution should proceed past them and fail later with a mock artifact.
+    with pytest.raises(RuntimeError):
+        publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
     _after_close(monkeypatch)
     snapshot = _snapshot(source="network")
     snapshot.analysis_quotes = pd.DataFrame(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from typing import Any
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 import hashlib
 import json
 import math
@@ -617,10 +617,23 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
     return load
 
 
+def _latest_closed_session_date(now_shanghai: datetime) -> date:
+    """The most recently closed Shanghai trading session.
+
+    Today after 16:15 (the post-close ready time), otherwise the previous
+    weekday, skipping weekends.
+    """
+
+    session = now_shanghai.date()
+    if now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME:
+        session -= timedelta(days=1)
+        while session.weekday() >= 5:
+            session -= timedelta(days=1)
+    return session
+
+
 def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
-    if refresh and _shanghai_now().time() < MARKET_COLDNESS_DECISION_READY_TIME:
-        raise RuntimeError("post-close mobile publication is not allowed before 16:15 Asia/Shanghai")
     source_commit = _source_commit()
     starting_state = audit_state_hashes()
     cache = SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
@@ -633,9 +646,18 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
     if not _refresh_completed(refresh, getattr(snapshot, "source", None)):
         raise RuntimeError("fresh market refresh did not complete; retaining the published mobile snapshot")
     market_as_of = _market_as_of(snapshot)
-    if refresh and market_as_of != _shanghai_today():
+    if refresh:
+        now_shanghai = _shanghai_now()
+        if now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME and market_as_of != _latest_closed_session_date(
+            now_shanghai
+        ):
+            raise RuntimeError(
+                "post-close mobile publication is not allowed before 16:15 Asia/Shanghai "
+                "unless it backfills the latest closed session"
+            )
+    if refresh and market_as_of != _latest_closed_session_date(_shanghai_now()).isoformat():
         raise RuntimeError(
-            f"fresh snapshot session {market_as_of} is not today's Shanghai session; retaining published mobile data"
+            f"fresh snapshot session {market_as_of} is not the latest closed Shanghai session; retaining published mobile data"
         )
     post_close_quote_coverage = _require_post_close_quotes(snapshot, market_as_of) if refresh else None
     reporting_period_contract = _snapshot_reporting_period_contract(snapshot)
