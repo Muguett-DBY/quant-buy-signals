@@ -1,0 +1,9 @@
+name = "ds-dcf-dispatch"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# 08:15 UTC = 16:15 Asia/Shanghai on weekdays.  Cloudflare Cron Triggers
+# run in UTC.  The workflow guard treats a dispatch at/after 16:15 as a
+# forced post-close refresh, so the manifest contract still holds.
+[triggers]
+crons = ["15 8 * * 1-5"]
