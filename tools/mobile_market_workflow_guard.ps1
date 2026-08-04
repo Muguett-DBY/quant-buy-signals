@@ -847,6 +847,19 @@ function Assert-ArchivedGeneration([string]$Working, [string]$ManifestPath, [str
   }
 }
 
+function Get-LatestClosedSessionDate([DateTimeOffset]$ShanghaiNow) {
+  # The most recently closed Shanghai trading session: today after 16:15,
+  # otherwise the previous weekday (skipping weekends).
+  $sessionDate = $ShanghaiNow.Date
+  if ($ShanghaiNow.TimeOfDay -lt $script:PostCloseReadyTime) {
+    $sessionDate = $sessionDate.AddDays(-1)
+    while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
+      $sessionDate = $sessionDate.AddDays(-1)
+    }
+  }
+  return $sessionDate
+}
+
 function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
   $working = Join-Path ([IO.Path]::GetTempPath()) ("ds-dcf-mobile-guard-" + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $working | Out-Null
@@ -863,9 +876,10 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
       ) $script:MaximumManifestBytes
     }
     $manifest = Read-StrictJsonFile $localManifest $script:MaximumManifestBytes 'Published manifest'
-    $today = $ShanghaiNow.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
-    if ([string]$manifest.market_as_of -cne $today -or $manifest.analysis_quality.ok -ne $true) {
-      throw 'Published manifest is not a passing generation for today.'
+    $sessionDate = Get-LatestClosedSessionDate $ShanghaiNow
+    $expectedDate = $sessionDate.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    if ([string]$manifest.market_as_of -cne $expectedDate -or $manifest.analysis_quality.ok -ne $true) {
+      throw 'Published manifest is not a passing generation for the latest closed session.'
     }
     $dataTimestamp = [DateTimeOffset]::Parse(
       [string]$manifest.data_timestamp_utc,
@@ -873,8 +887,8 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
       [Globalization.DateTimeStyles]::RoundtripKind
     )
     $dataShanghai = [TimeZoneInfo]::ConvertTime($dataTimestamp, $script:ShanghaiZone)
-    if ($dataShanghai.Date -ne $ShanghaiNow.Date -or $dataShanghai.TimeOfDay -lt $script:PostCloseReadyTime) {
-      throw 'Published manifest is not a same-day post-close generation.'
+    if ($dataShanghai.Date -ne $sessionDate -or $dataShanghai.TimeOfDay -lt $script:PostCloseReadyTime) {
+      throw 'Published manifest is not a post-close generation for the latest closed session.'
     }
 
     $catalogueName = [string]$manifest.catalogue.filename
@@ -982,6 +996,14 @@ if ($calendarDecision.closed) {
 }
 if ($EventName -ceq 'workflow_dispatch') {
   if ($shanghaiNow.TimeOfDay -lt $script:PostCloseReadyTime) {
+    # Before the post-close window a manual dispatch normally has nothing
+    # new to publish.  Allow a backfill when the latest closed session has
+    # not been published yet (for example the scheduled refresh failed or
+    # timed out earlier), so a morning dispatch can still recover it.
+    if (-not (Test-PublishedGeneration $shanghaiNow)) {
+      Write-WorkflowDecision $true 'manual_dispatch_backfill_latest_closed'
+      return
+    }
     Write-WorkflowDecision $false 'manual_dispatch_before_post_close_window'
     return
   }

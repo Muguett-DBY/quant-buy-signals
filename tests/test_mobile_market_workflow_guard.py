@@ -454,7 +454,27 @@ def test_manual_dispatch_forces_post_close_refresh_without_reading_network(tmp_p
     assert decision == {"should_run": "true", "reason": "manual_dispatch_forced"}
 
 
-def test_manual_dispatch_before_close_is_a_successful_noop(tmp_path):
+def test_manual_dispatch_before_close_with_published_session_is_a_successful_noop(tmp_path):
+    manifest, release, archive, android_source = _signed_generation(tmp_path, market_date="2026-07-21")
+    result, decision = _run_guard(
+        tmp_path,
+        event="workflow_dispatch",
+        now_utc="2026-07-22T08:14:59.0000000+00:00",
+        manifest=manifest,
+        release=release,
+        archive=archive,
+        android_source=android_source,
+        expected_source_commit=SOURCE_COMMIT,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert decision == {
+        "should_run": "false",
+        "reason": "manual_dispatch_before_post_close_window",
+    }
+
+
+def test_manual_dispatch_before_close_backfills_an_unpublished_latest_session(tmp_path):
     result, decision = _run_guard(
         tmp_path,
         event="workflow_dispatch",
@@ -463,8 +483,8 @@ def test_manual_dispatch_before_close_is_a_successful_noop(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert decision == {
-        "should_run": "false",
-        "reason": "manual_dispatch_before_post_close_window",
+        "should_run": "true",
+        "reason": "manual_dispatch_backfill_latest_closed",
     }
 
 
