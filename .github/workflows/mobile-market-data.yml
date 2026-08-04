@@ -417,7 +417,15 @@ jobs:
           # time; the session identity is still pinned by the 14-day/future
           # checks above and by the source-quote timestamp check below.
           if (-not $rebuildLatestClosed) {
-            if ($dataTimestampShanghai.Date -ne $marketDate.Date -or $dataTimestampShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+            # Generated after 16:15 on the market date.  A backfill that
+            # finishes after midnight Shanghai time is still valid: its
+            # data_timestamp is later on the timeline than 16:15 of the
+            # market date, just not on the same calendar day.
+            $marketDateReady = [DateTimeOffset]::new(
+              $marketDate.Date.Add([TimeSpan]::FromMinutes(975)),
+              [TimeSpan]::FromHours(8)
+            )
+            if ($dataTimestampShanghai -lt $marketDateReady) {
               throw 'The mobile manifest was not generated after 16:15 on its Shanghai market date.'
             }
           }
