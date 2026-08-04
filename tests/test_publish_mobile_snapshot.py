@@ -739,8 +739,11 @@ def test_mobile_publication_refuses_a_manual_refresh_before_the_safe_close_bound
 
 
 def test_latest_closed_session_date_skips_weekends_and_respects_16_15():
-    afternoon = lambda day: datetime(2026, 7, day, 16, 15, tzinfo=ZoneInfo("Asia/Shanghai"))
-    morning = lambda day: datetime(2026, 7, day, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    def afternoon(day):
+        return datetime(2026, 7, day, 16, 15, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    def morning(day):
+        return datetime(2026, 7, day, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
     # 2026-07-18 is a Saturday; 07-17 a Friday; 07-20 a Monday.
     assert publisher._latest_closed_session_date(afternoon(20)).isoformat() == "2026-07-20"
     assert publisher._latest_closed_session_date(morning(20)).isoformat() == "2026-07-17"
