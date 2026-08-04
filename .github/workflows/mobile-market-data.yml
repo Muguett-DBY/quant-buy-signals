@@ -373,8 +373,21 @@ jobs:
             'yyyy-MM-dd',
             [Globalization.CultureInfo]::InvariantCulture
           )
-          if (-not $rebuildLatestClosed -and $marketDate.Date -ne $nowShanghai.Date) {
-            throw "The mobile manifest market date $($manifest.market_as_of) is not today's Shanghai session."
+          if (-not $rebuildLatestClosed) {
+            # The post-close refresh is verified against the most recently
+            # closed Shanghai trading session.  A slow build may legitimately
+            # finish after midnight Shanghai time; the session date then is
+            # the previous weekday, not the calendar date.
+            $sessionDate = $nowShanghai.Date
+            if ($nowShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
+              $sessionDate = $sessionDate.AddDays(-1)
+              while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
+                $sessionDate = $sessionDate.AddDays(-1)
+              }
+            }
+            if ($marketDate.Date -ne $sessionDate) {
+              throw "The mobile manifest market date $($manifest.market_as_of) is not the latest closed Shanghai session ($($sessionDate.ToString('yyyy-MM-dd')))."
+            }
           }
           $dataTimestamp = [DateTimeOffset]::Parse(
             [string]$manifest.data_timestamp_utc,
