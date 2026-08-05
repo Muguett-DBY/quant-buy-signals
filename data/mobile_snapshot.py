@@ -50,7 +50,11 @@ SNAPSHOT_SCHEMA_VERSION = 1
 COMPANY_DETAIL_SCHEMA_VERSION = 2
 COMPANY_DETAIL_SHARD_COUNT = 16
 MAX_COMPRESSED_ASSET_BYTES = 8_000_000
-MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000
+# The catalogue grew past 24 MB once annual-report acquisition evidence
+# (CNINFO) was added to the external growth records; the limit is a memory
+# guard for small Android clients, so it is raised to 32 MB with headroom.
+# Android clients must ship the matching limit (MarketRepository.java).
+MAX_UNCOMPRESSED_ASSET_BYTES = 32_000_000
 MAX_DETAIL_COMPRESSED_TOTAL = 48_000_000
 MAX_DETAIL_UNCOMPRESSED_TOTAL = 144_000_000
 MAX_PUBLIC_REASON_UTF16_UNITS = 200

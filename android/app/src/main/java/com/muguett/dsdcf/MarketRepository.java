@@ -63,7 +63,7 @@ public final class MarketRepository {
     private static final int MAX_MANIFEST_BYTES = 1_000_000;
     private static final int MAX_MANIFEST_SIGNATURE_BYTES = 1_024;
     private static final int MAX_COMPRESSED_ASSET_BYTES = 8_000_000;
-    private static final int MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000;
+    private static final int MAX_UNCOMPRESSED_ASSET_BYTES = 32_000_000;
     private static final int MAX_UPDATE_MANIFEST_BYTES = 1_000_000;
     private static final int MAX_PUBLIC_REASON_LENGTH = 200;
     private static final int DECISION_SCHEMA_VERSION = 1;
