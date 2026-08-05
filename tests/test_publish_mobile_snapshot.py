@@ -724,7 +724,11 @@ def test_mobile_publication_refuses_a_manual_refresh_before_the_safe_close_bound
     monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
     monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
-    monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: _snapshot(source="network", market_as_of="2026-07-16"))
+    monkeypatch.setattr(
+        publisher,
+        "get_market_snapshot",
+        lambda *_args, **_kwargs: _snapshot(source="network", market_as_of="2026-07-16"),
+    )
     monkeypatch.setattr(
         publisher,
         "_shanghai_now",
@@ -744,6 +748,7 @@ def test_latest_closed_session_date_skips_weekends_and_respects_16_15():
 
     def morning(day):
         return datetime(2026, 7, day, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
     # 2026-07-18 is a Saturday; 07-17 a Friday; 07-20 a Monday.
     assert publisher._latest_closed_session_date(afternoon(20)).isoformat() == "2026-07-20"
     assert publisher._latest_closed_session_date(morning(20)).isoformat() == "2026-07-17"
