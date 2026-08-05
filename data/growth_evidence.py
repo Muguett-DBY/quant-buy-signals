@@ -2716,6 +2716,40 @@ def fetch_growth_evidence(
     )
 
 
+def _segment_unavailable_record(
+    code: str,
+    cutoff: date,
+    *,
+    reason: str,
+    evidence_id: str,
+) -> dict[str, Any]:
+    """A deterministic unavailable segment record for a skipped/failed fetch."""
+    return {
+        "status": "unavailable",
+        "source": "东方财富主营构成年度数据",
+        "source_url": EASTMONEY_BUSINESS_ENDPOINT,
+        "evidence_id": evidence_id,
+        "as_of": cutoff.isoformat(),
+        "security_code": code,
+        "model_id": SEGMENT_MODEL_ID,
+        "contract_scope": "annual_segment_revenue_history",
+        "dimension": None,
+        "history_years": [],
+        "growth_source_count": 0,
+        "effective_growth_source_count": 0.0,
+        "positive_growth_share": None,
+        "revenue_hhi": None,
+        "top_segment_share": None,
+        "matched_latest_share": None,
+        "annual_revenue_latest": None,
+        "source_row_count": 0,
+        "aggregate_revenue_cagr": None,
+        "segments": [],
+        "records": [],
+        "reason": reason,
+    }
+
+
 def fetch_growth_evidence_batch(
     requests_: Sequence[Mapping[str, Any]],
     *,
@@ -2868,30 +2902,12 @@ def fetch_growth_evidence_batch(
                         cache_ttl_seconds=cache_ttl_seconds,
                     )
             except Exception as exc:
-                segment = {
-                    "status": "unavailable",
-                    "source": "东方财富主营构成年度数据",
-                    "source_url": EASTMONEY_BUSINESS_ENDPOINT,
-                    "evidence_id": f"eastmoney-segments:{code}:worker-failure",
-                    "as_of": cutoff.isoformat(),
-                    "security_code": code,
-                    "model_id": SEGMENT_MODEL_ID,
-                    "contract_scope": "annual_segment_revenue_history",
-                    "dimension": None,
-                    "history_years": [],
-                    "growth_source_count": 0,
-                    "effective_growth_source_count": 0.0,
-                    "positive_growth_share": None,
-                    "revenue_hhi": None,
-                    "top_segment_share": None,
-                    "matched_latest_share": None,
-                    "annual_revenue_latest": None,
-                    "source_row_count": 0,
-                    "aggregate_revenue_cagr": None,
-                    "segments": [],
-                    "records": [],
-                    "reason": f"worker_failure:{_error_label(exc)}",
-                }
+                segment = _segment_unavailable_record(
+                    code,
+                    cutoff,
+                    reason=f"worker_failure:{_error_label(exc)}",
+                    evidence_id=f"eastmoney-segments:{code}:worker-failure",
+                )
                 result = _assemble_growth_evidence(
                     code,
                     cutoff,
@@ -2912,6 +2928,31 @@ def fetch_growth_evidence_batch(
         # not block on in-flight requests, which are allowed to finish and
         # persist their own cache entries for the next run.
         executor.shutdown(wait=False, cancel_futures=True)
+    for code, cutoff, revenue_records, goodwill_records in prepared:
+        if code in results:
+            continue
+        # Requests that never completed within the time budget still need a
+        # deterministic record so the batch result stays complete.  The
+        # explicit unavailable outcome keeps the company eligible for a later
+        # run through the retry state (progressive gap closure).
+        segment = _segment_unavailable_record(
+            code,
+            cutoff,
+            reason="time_budget_exceeded",
+            evidence_id=f"eastmoney-segments:{code}:time-budget",
+        )
+        result = _assemble_growth_evidence(
+            code,
+            cutoff,
+            revenue_records=revenue_records,
+            goodwill_records=goodwill_records,
+            acquisition_cashflow_records=[],
+            segment_growth_sources=segment,
+            cache_hit=False,
+            cache_diagnostic="",
+            acquisition_error=None,
+        )
+        results[code] = result.to_dict()
     return {code: results[code] for code, *_ in prepared}
 
 

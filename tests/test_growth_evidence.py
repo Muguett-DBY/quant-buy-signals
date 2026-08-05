@@ -1215,3 +1215,42 @@ def test_growth_date_parser_rejects_future_as_of():
                 }
             ]
         )
+
+
+def test_batch_time_budget_backfills_unavailable_records_without_key_error(monkeypatch, tmp_path):
+    import time
+
+    def fake_cashflow(years, *, codes):
+        return pd.DataFrame([_acquisition_row(year, code=code) for code in codes for year in range(2021, 2026)])
+
+    def slow_segment(code, cutoff, **_kwargs):
+        time.sleep(0.5)
+        payload = ge._validate_business_payload(
+            _segment_payload(code=code),
+            code=code,
+            as_of=cutoff,
+        )
+        return ge._build_segment_growth_sources(code, cutoff, payload), False, "disabled"
+
+    monkeypatch.setattr(ge, "fetch_detailed_annual_cashflow_history", fake_cashflow)
+    monkeypatch.setattr(ge, "_fetch_segment_growth_sources", slow_segment)
+    revenues, goodwill, _ = _complete_inputs()
+    request = {
+        "code": "600519",
+        "as_of": "2026-07-17",
+        "revenue_records": revenues,
+        "goodwill_records": goodwill,
+    }
+    # The tiny budget forces the deadline to fire before the worker finishes;
+    # the batch must still return a complete result with an explicit
+    # time-budget record instead of raising KeyError.
+    result = ge.fetch_growth_evidence_batch(
+        [request],
+        max_workers=1,
+        cache_dir=tmp_path,
+        time_budget_seconds=0.1,
+    )
+    assert list(result) == ["600519"]
+    record = result["600519"]
+    assert record["available"] is False
+    assert record["segment_growth_sources"]["reason"] == "time_budget_exceeded"
