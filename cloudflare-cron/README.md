@@ -15,17 +15,25 @@ fallback for days when this worker is unavailable.
 ## Secrets
 
 `GITHUB_TOKEN` must be a GitHub token with `workflow` scope for the
-`Muguett-DBY/quant-buy-signals` repo.  To (re)set it:
+`Muguett-DBY/quant-buy-signals` repo.  Use `wrangler secret bulk` with a
+JSON file — `wrangler secret put` has been observed to silently store an
+empty value when fed through a PowerShell pipeline, which makes the
+worker's dispatch fail with `401 Bad credentials` while the cron itself
+still fires:
 
 ```powershell
 $env:CLOUDFLARE_API_TOKEN = "<your Cloudflare API token>"
-(gh auth token) | npx wrangler secret put GITHUB_TOKEN
+$tok = gh auth token
+'{"GITHUB_TOKEN":"' + $tok + '"}' | Set-Content "$env:TEMP\secrets-bulk.json"
+npx wrangler secret bulk "$env:TEMP\secrets-bulk.json" --name ds-dcf-dispatch
+# verify: Invoke-WebRequest -Method Post https://ds-dcf-dispatch.1203135430.workers.dev/dispatch
+# (a temporary POST /dispatch endpoint was used for verification and then removed)
 ```
 
 Note: the repo's `GITHUB_PAT` in the local TOKEN.txt was 401 (invalid) as
 of 2026-08-05; the worker currently uses the `gh` CLI OAuth token, which
 has the `workflow` scope.  If `gh` is re-authenticated, re-run the secret
-put above.
+bulk above.
 
 ## Deploy
 
