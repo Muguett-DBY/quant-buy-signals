@@ -1129,19 +1129,22 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         ledger = payload.get("ledger")
         if not isinstance(ledger, Mapping) or ledger.get("model_id") != _PATCH6_TYPE7_MODEL_ID:
             return None
-    clean_scores: dict[str, float] = {}
-    for dimension in weights:
-        score = _finite_numeric(sub_scores.get(dimension))
-        if score is None or not 0.0 <= score <= 10.0:
-            return None
-        clean_scores[dimension] = score
-
     raw_missing = reasons.get("_decision_missing_dimensions")
     if not isinstance(raw_missing, (list, tuple)) or any(not isinstance(value, str) for value in raw_missing):
         return None
     if len(raw_missing) != len(set(raw_missing)) or set(raw_missing) - set(weights):
         return None
     missing = [dimension for dimension in weights if dimension in raw_missing]
+    clean_scores: dict[str, float] = {}
+    for dimension in weights:
+        score = _finite_numeric(sub_scores.get(dimension))
+        if score is None or not 0.0 <= score <= 10.0:
+            # An evidence-missing dimension legitimately has no scored value;
+            # its bounds are derived from the missing list instead.
+            if dimension in missing:
+                continue
+            return None
+        clean_scores[dimension] = score
     status = reasons.get("_status")
     applicable_marker = reasons.get("_applicable")
     evidence_marker = reasons.get("_evidence")
