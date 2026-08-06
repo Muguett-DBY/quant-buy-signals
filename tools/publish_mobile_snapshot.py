@@ -74,7 +74,11 @@ _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 6_000
 # backfill (segment + annual cash-flow) is best-effort: within this budget it
 # captures whatever Eastmoney's rate limits allow, and anything left over stays
 # eligible for the next run through the retry/cache state (which accumulates).
-_TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS = 900.0
+# 15 minutes left the whole-market gap (type3/type7 segment evidence) largely
+# unfilled on the first budgeted runs; 45 minutes covers the full market at
+# Eastmoney's throttled rate, and later runs are cheap because the cache
+# accumulates.
+_TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS = 2700.0
 
 
 def _require_company_detail_manifest(manifest: Mapping[str, object], expected_companies: int) -> None:
