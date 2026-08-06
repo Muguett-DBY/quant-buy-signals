@@ -157,6 +157,24 @@ jobs:
           restore-keys: |
             mobile-deep-evidence-v1-${{ runner.os }}-
 
+      - name: Pre-warm the segment evidence cache from the local backfill archive
+        shell: pwsh
+        run: |
+          # The GitHub runner IPs are rate-limited hard by Eastmoney, so the
+          # daily budgeted build captures almost no segment evidence.  A local
+          # backfill on a residential IP (uploaded as a release asset) carries
+          # the whole-market segment cache; pre-warm the cache directory from
+          # it so the build's network budget only tops up what is missing.
+          $archive = Join-Path $env:RUNNER_TEMP 'segment-cache-latest.zip'
+          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/segment-cache-latest.zip"
+          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 1MB) {
+            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
+            $count = (Get-ChildItem -LiteralPath 'data/cache/growth_evidence' -File -ErrorAction SilentlyContinue | Measure-Object).Count
+            Write-Host "Pre-warmed segment cache: $count entries."
+          } else {
+            Write-Host 'No segment cache archive available; continuing with the runner cache.'
+          }
+
       - name: Install locked production dependencies
         run: |
           python -m pip install --require-hashes -r requirements-bootstrap.txt
