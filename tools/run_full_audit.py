@@ -1230,6 +1230,28 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         or published_veto != bool(reasons.get("_veto"))
         or triggered != (status == "triggered")
     ):
+        import os
+
+        if os.environ.get("DS_DCF_DEBUG_REPLAY") and payload.get("code") in {
+            "300760",
+            "600285",
+        }:
+            print(
+                "DEBUG_REPLAY",
+                payload.get("code"),
+                {
+                    "published_applicable": published_applicable,
+                    "published_evidence_complete": published_evidence_complete,
+                    "triggered": triggered,
+                    "published_veto": published_veto,
+                    "published_status": published_status,
+                    "reasons_status": status,
+                    "reasons_veto": reasons.get("_veto"),
+                    "reasons_keys": sorted(reasons.keys()),
+                    "payload_keys": sorted(payload.keys()),
+                },
+                flush=True,
+            )
         return None
 
     market_context = payload.get("decision_market_context")
@@ -1533,6 +1555,30 @@ def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
                         invalid_sub_scores.append(code)
                 replayed_decision = _independent_decision_replay(type_key, payload)
                 if replayed_decision is None:
+                    import os
+
+                    if os.environ.get("DS_DCF_DEBUG_REPLAY") and code in {"300760", "600285"}:
+                        print(
+                            "DEBUG_REPLAY",
+                            code,
+                            type_key,
+                            json.dumps(
+                                {
+                                    "payload_keys": sorted(payload.keys()),
+                                    "reasons_keys": sorted((payload.get("reasons") or {}).keys()),
+                                    "reasons": payload.get("reasons"),
+                                    "applicable": payload.get("applicable"),
+                                    "evidence_complete": payload.get("evidence_complete"),
+                                    "triggered": payload.get("triggered"),
+                                    "veto": payload.get("veto"),
+                                    "status": payload.get("status"),
+                                    "sub_scores_keys": sorted((payload.get("sub_scores") or {}).keys()),
+                                },
+                                ensure_ascii=False,
+                                default=str,
+                            ),
+                            flush=True,
+                        )
                     contract["invalid_decision"] += 1
                     if len(invalid_decisions) < 10:
                         invalid_decisions.append(code)
