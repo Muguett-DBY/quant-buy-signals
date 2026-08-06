@@ -81,3 +81,6 @@ _local_segment_backfill.py
 _codes.json
 segment-cache-latest.zip
 data/.growth_evidence_cache/
+
+_local_publish_to_cf.py
+
