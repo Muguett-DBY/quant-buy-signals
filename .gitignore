@@ -75,3 +75,9 @@ android/release.properties
 
 # Playwright MCP artifacts (browser snapshots)
 .playwright-mcp/
+
+# Local-only tooling and caches (never pushed)
+_local_segment_backfill.py
+_codes.json
+segment-cache-latest.zip
+data/.growth_evidence_cache/
