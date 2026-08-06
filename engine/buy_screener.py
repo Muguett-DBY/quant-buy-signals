@@ -7540,6 +7540,15 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
                         expected_decision["decision_basis"] == "full_evidence"
                         and expected_decision["potentially_triggerable"]
                     )
+                    if expected_trigger and type_key == "type3":
+                        # Type 3 additionally requires the high-growth core
+                        # condition (trend growth >= 10%); when it is unmet the
+                        # scorer stores it in reasons._condition, and the replay
+                        # (which has no revenue history) must not demand a
+                        # trigger the scorer legitimately withheld.
+                        condition = payload.get("reasons", {}).get("_condition")
+                        if isinstance(condition, str) and "低于10%高增长门槛" in condition:
+                            expected_trigger = False
                     if bool(payload.get("triggered")) is not expected_trigger:
                         errors.append(f"{row_index}:{type_key}模型触发重放错误")
             try:
