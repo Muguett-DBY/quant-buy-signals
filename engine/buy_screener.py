@@ -7320,6 +7320,11 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
                 )
             )
         )
+        type3_condition_failed = bool(
+            type_key == "type3"
+            and isinstance(reasons.get("_condition"), str)
+            and "低于10%高增长门槛" in reasons["_condition"]
+        )
         theoretically_triggerable = _decision_theoretically_triggerable(
             type_key,
             upper=upper,
@@ -7329,7 +7334,7 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
             ledger=ledger if isinstance(ledger, Mapping) else None,
         )
 
-        if action_condition or type7_action_condition:
+        if action_condition or type7_action_condition or type3_condition_failed:
             if theoretically_triggerable:
                 complete = False
                 basis = "action_condition"

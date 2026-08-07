@@ -1158,6 +1158,11 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
     # nevertheless an unresolved decision dimension until the user confirms
     # the actual single-name and portfolio exposure.
     type6_action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
+    type3_condition_failed = bool(
+        type_key == "type3"
+        and isinstance(reasons.get("_condition"), str)
+        and "低于10%高增长门槛" in reasons["_condition"]
+    )
     if type6_action_condition and "6e" not in missing:
         missing.append("6e")
 
@@ -1421,7 +1426,7 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
                 )
             )
         )
-        if type6_action_condition or type7_action_condition:
+        if type6_action_condition or type7_action_condition or type3_condition_failed:
             expected_complete = not theoretical_possible
             expected_basis = "action_condition" if theoretical_possible else "conservative_upper_bound"
             expected_potential = theoretical_possible
