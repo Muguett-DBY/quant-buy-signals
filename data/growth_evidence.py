@@ -9,6 +9,7 @@ coerces an unresolved blank cash-flow cell to zero.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -2803,6 +2804,16 @@ def fetch_growth_evidence_batch(
         cutoff = _parse_as_of(request.get("as_of"))
         if code in seen:
             raise ValueError(f"growth-evidence batch contains duplicate code: {code}")
+        if code == "000538" and os.environ.get("DS_DCF_DEBUG_000538"):
+            rev_years = sorted(
+                int(record.get("year"))
+                for record in request.get("revenue_records") or []
+                if isinstance(record, Mapping) and record.get("year") is not None
+            )
+            print(
+                f"[DEBUG-000538] request revenue_records years={rev_years} as_of={cutoff}",
+                flush=True,
+            )
         revenue_records = request.get("revenue_records")
         goodwill_records = request.get("goodwill_records")
         _prepare_financial_records(

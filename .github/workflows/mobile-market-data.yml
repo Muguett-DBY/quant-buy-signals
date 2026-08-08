@@ -201,6 +201,8 @@ jobs:
 
       - name: Build validated market data
         shell: pwsh
+        env:
+          DS_DCF_DEBUG_000538: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
