@@ -498,7 +498,7 @@ jobs:
           # time, while the closed session is pinned by the source-quote
           # timestamp check that follows.
           if (-not $rebuildLatestClosed) {
-            if ($retrievedShanghai.Date -ne $marketDate.Date -or $retrievedShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
+            if ($retrievedShanghai -lt $marketDateReady) {
               throw 'The quote pages were not retrieved after 16:15 on the published market date.'
             }
           }
