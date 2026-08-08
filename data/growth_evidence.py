@@ -1590,9 +1590,13 @@ def _fetch_segment_growth_sources(
                 # runner IP would only replace useful records with an
                 # unavailable state.  Short-window partial captures stay
                 # eligible for refresh (a re-fetch may complete them).
-                if recent_cache_state is None or evidence.get("status") == "complete" or (
-                    evidence.get("status") == "partial"
-                    and len(evidence.get("history_years") or []) >= MIN_SEGMENT_HISTORY_YEARS
+                if (
+                    recent_cache_state is None
+                    or evidence.get("status") == "complete"
+                    or (
+                        evidence.get("status") == "partial"
+                        and len(evidence.get("history_years") or []) >= MIN_SEGMENT_HISTORY_YEARS
+                    )
                 ):
                     return evidence, True, "hit"
                 diagnostic = "incomplete_hit_requires_refresh"
