@@ -2895,6 +2895,12 @@ def fetch_growth_evidence_batch(
             code, cutoff, revenue_records, goodwill_records = futures[future]
             try:
                 segment, cache_hit, cache_diagnostic = future.result()
+                if code == "000538" and os.environ.get("DS_DCF_DEBUG_000538"):
+                    print(
+                        f"[DEBUG-000538-batch] status={segment.get('status')} reason={segment.get('reason')} "
+                        f"hit={cache_hit} diag={cache_diagnostic} records={len(segment.get('records') or [])}",
+                        flush=True,
+                    )
                 external_state = external_cache_state.get(code)
                 preloaded_external: Mapping[str, Any] | None = None
                 if external_state is not None:
