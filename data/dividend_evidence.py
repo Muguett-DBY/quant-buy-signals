@@ -138,12 +138,65 @@ def _save_cached_rows(code: str, rows: list[dict[str, Any]], cache: SafeFileCach
     )
 
 
+def _bind_dividend_evidence(
+    code: str,
+    rows: list[dict[str, Any]],
+    cutoff: date,
+    evidence_by_code: dict[str, dict[str, Any]],
+) -> None:
+    if not rows:
+        return
+    cash_rows = [row for row in rows if row.get("cash_per_ten_share") is not None]
+    if not cash_rows:
+        return
+    trailing_cash = 0.0
+    for row in cash_rows:
+        ex_date = _parse_iso_date(row.get("ex_dividend_date"))
+        if ex_date is None:
+            continue
+        if cutoff - ex_date <= timedelta(days=365):
+            trailing_cash += float(row["cash_per_ten_share"]) / 10.0
+    if trailing_cash <= 0.0:
+        trailing_cash = float(cash_rows[-1]["cash_per_ten_share"]) / 10.0
+    latest_payout = None
+    for row in reversed(cash_rows):
+        if row.get("payout_ratio") is not None:
+            latest_payout = float(row["payout_ratio"])
+            break
+    evidence_id = f"{DIVIDEND_CACHE_MODEL_ID}:{code}:{cutoff.strftime('%Y%m%d')}"
+    evidence_by_code[code] = {
+        "trailing_cash_per_share": trailing_cash,
+        "payout_ratio": latest_payout,
+        "evidence": {
+            "source": "东方财富分红送配明细",
+            "evidence_id": evidence_id,
+            "as_of": cutoff.isoformat(),
+            "summary": (
+                f"近12个月每股派现{trailing_cash:.3f}元"
+                + (f"，分红率{latest_payout:.0%}" if latest_payout is not None else "")
+                + f";model={DIVIDEND_CACHE_MODEL_ID}"
+            ),
+        },
+    }
+
+
+def _fetch_and_cache_dividend_rows(
+    code: str,
+    cache: SafeFileCache,
+    session: Any,
+) -> list[dict[str, Any]]:
+    rows = _fetch_dividend_rows(code, session=session)
+    _save_cached_rows(code, rows, cache)
+    return rows
+
+
 def load_dividend_evidence(
     codes: Sequence[str],
     *,
     as_of: str,
     cache_dir: str | Path = DIVIDEND_CACHE_DIR,
     session: Any = requests,
+    max_workers: int = 8,
 ) -> dict[str, dict[str, Any]]:
     """Return dated, code-bound dividend evidence for each requested company.
 
@@ -152,55 +205,49 @@ def load_dividend_evidence(
     back to the latest single cash dividend when no ex-date is available),
     ``payout_ratio`` is the latest reported payout ratio, and the evidence
     record binds the code and the cutoff date.
+
+    Cache hits are read serially from the local cache; only companies whose
+    cache generation is missing are fetched over the network, concurrently
+    with up to ``max_workers`` threads.
     """
     cutoff = date.fromisoformat(as_of)
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
     evidence_by_code: dict[str, dict[str, Any]] = {}
-    for code in sorted(set(codes)):
+    ordered = sorted(set(codes))
+    cache_by_code: dict[str, SafeFileCache] = {}
+    pending: list[str] = []
+    for code in ordered:
         cache = SafeFileCache(
             directory / f"{code}.json.gz",
             schema_version=DIVIDEND_CACHE_SCHEMA_VERSION,
             ttl=DIVIDEND_CACHE_TTL_SECONDS,
         )
+        cache_by_code[code] = cache
         rows = _load_cached_rows(code, cache)
-        if rows is None:
-            rows = _fetch_dividend_rows(code, session=session)
-            _save_cached_rows(code, rows, cache)
-        if not rows:
-            continue
-        cash_rows = [row for row in rows if row.get("cash_per_ten_share") is not None]
-        if not cash_rows:
-            continue
-        trailing_cash = 0.0
-        for row in cash_rows:
-            ex_date = _parse_iso_date(row.get("ex_dividend_date"))
-            if ex_date is None:
-                continue
-            if cutoff - ex_date <= timedelta(days=365):
-                trailing_cash += float(row["cash_per_ten_share"]) / 10.0
-        if trailing_cash <= 0.0:
-            trailing_cash = float(cash_rows[-1]["cash_per_ten_share"]) / 10.0
-        latest_payout = None
-        for row in reversed(cash_rows):
-            if row.get("payout_ratio") is not None:
-                latest_payout = float(row["payout_ratio"])
-                break
-        evidence_id = f"{DIVIDEND_CACHE_MODEL_ID}:{code}:{cutoff.strftime('%Y%m%d')}"
-        evidence_by_code[code] = {
-            "trailing_cash_per_share": trailing_cash,
-            "payout_ratio": latest_payout,
-            "evidence": {
-                "source": "东方财富分红送配明细",
-                "evidence_id": evidence_id,
-                "as_of": cutoff.isoformat(),
-                "summary": (
-                    f"近12个月每股派现{trailing_cash:.3f}元"
-                    + (f"，分红率{latest_payout:.0%}" if latest_payout is not None else "")
-                    + f";model={DIVIDEND_CACHE_MODEL_ID}"
-                ),
-            },
-        }
+        if rows is not None:
+            _bind_dividend_evidence(code, rows, cutoff, evidence_by_code)
+        else:
+            pending.append(code)
+
+    if pending:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        workers = max(1, min(max_workers, len(pending)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    _fetch_and_cache_dividend_rows, code, cache_by_code[code], session
+                ): code
+                for code in pending
+            }
+            for future in as_completed(futures):
+                code = futures[future]
+                try:
+                    rows = future.result()
+                except DividendEvidenceError:
+                    rows = []
+                _bind_dividend_evidence(code, rows, cutoff, evidence_by_code)
     return evidence_by_code
 
 
