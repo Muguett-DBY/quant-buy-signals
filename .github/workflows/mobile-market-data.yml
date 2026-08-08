@@ -427,9 +427,9 @@ jobs:
             $sessionDate = $nowShanghai.Date
             if ($nowShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
               $sessionDate = $sessionDate.AddDays(-1)
-              while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
-                $sessionDate = $sessionDate.AddDays(-1)
-              }
+            }
+            while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
+              $sessionDate = $sessionDate.AddDays(-1)
             }
             if ($marketDate.Date -ne $sessionDate) {
               throw "The mobile manifest market date $($manifest.market_as_of) is not the latest closed Shanghai session ($($sessionDate.ToString('yyyy-MM-dd')))."
