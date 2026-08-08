@@ -2690,6 +2690,13 @@ def fetch_growth_evidence(
             _prepare_financial_records(revenue_records, label="revenue_records", nonnegative=True, as_of=cutoff)
         ),
     )
+    if normalized_code == "000538" and os.environ.get("DS_DCF_DEBUG_000538"):
+        print(
+            f"[DEBUG-000538-result] status={segment.get('status')} reason={segment.get('reason')} "
+            f"hit={cache_hit} diag={cache_diagnostic} records={len(segment.get('records') or [])} "
+            f"years={sorted({str(r.get('report_date'))[:4] for r in segment.get('records') or []})}",
+            flush=True,
+        )
     acquisition_error: BaseException | None = None
     if acquisition_cashflow_records is None:
         years = list(
