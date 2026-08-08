@@ -236,9 +236,7 @@ def load_dividend_evidence(
         workers = max(1, min(max_workers, len(pending)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(
-                    _fetch_and_cache_dividend_rows, code, cache_by_code[code], session
-                ): code
+                pool.submit(_fetch_and_cache_dividend_rows, code, cache_by_code[code], session): code
                 for code in pending
             }
             for future in as_completed(futures):
