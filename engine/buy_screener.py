@@ -7937,6 +7937,16 @@ def screen_all_types(
                 metric["external_growth_evidence"] = external
                 metric["segment_growth_sources"] = segments
                 metric["_type3_growth_validation_token"] = TYPE3_GROWTH_VALIDATION_TOKEN
+                if code == "000538" and os.environ.get("DS_DCF_DEBUG_000538"):
+                    from engine.quantitative_evidence import _segment_growth_proxy_inputs as _sgpi
+
+                    seg_status = (segments or {}).get("status") if isinstance(segments, Mapping) else None
+                    print(
+                        f"[DEBUG-000538-metric] segments_status={seg_status} "
+                        f"proxy_inputs={'OK' if _sgpi(segments) is not None else 'None'} "
+                        f"external_proxy={'OK' if external is not None else 'None'}",
+                        flush=True,
+                    )
             patch4_record = normalized_patch4.get(code)
             if patch4_record is not None:
                 as_of = str(metric.get("source_trade_date") or "")
