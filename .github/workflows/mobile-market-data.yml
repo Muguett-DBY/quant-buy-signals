@@ -175,6 +175,23 @@ jobs:
             Write-Host 'No segment cache archive available; continuing with the runner cache.'
           }
 
+      - name: Pre-warm the quality-history cache from the local backfill archive
+        shell: pwsh
+        run: |
+          # The type2/type7 five-year valuation and weekly history are also
+          # rate-limited hard on GitHub runner IPs.  A local backfill archive
+          # (uploaded as a release asset) carries the missing companies' cache
+          # generations; pre-warm the cache directory so the build reuses them.
+          $archive = Join-Path $env:RUNNER_TEMP 'quality-history-cache-latest.zip'
+          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/quality-history-cache-latest.zip"
+          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 1MB) {
+            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
+            $count = (Get-ChildItem -LiteralPath 'data/cache/quality_history' -File -Filter '*.json.gz' -ErrorAction SilentlyContinue | Measure-Object).Count
+            Write-Host "Pre-warmed quality-history cache: $count entries."
+          } else {
+            Write-Host 'No quality-history cache archive available; continuing with the runner cache.'
+          }
+
       - name: Install locked production dependencies
         run: |
           python -m pip install --require-hashes -r requirements-bootstrap.txt
