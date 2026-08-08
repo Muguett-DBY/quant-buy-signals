@@ -853,9 +853,9 @@ function Get-LatestClosedSessionDate([DateTimeOffset]$ShanghaiNow) {
   $sessionDate = $ShanghaiNow.Date
   if ($ShanghaiNow.TimeOfDay -lt $script:PostCloseReadyTime) {
     $sessionDate = $sessionDate.AddDays(-1)
-    while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
-      $sessionDate = $sessionDate.AddDays(-1)
-    }
+  }
+  while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {
+    $sessionDate = $sessionDate.AddDays(-1)
   }
   return $sessionDate
 }

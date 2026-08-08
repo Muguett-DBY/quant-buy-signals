@@ -637,8 +637,8 @@ def _latest_closed_session_date(now_shanghai: datetime) -> date:
     session = now_shanghai.date()
     if now_shanghai.time() < MARKET_COLDNESS_DECISION_READY_TIME:
         session -= timedelta(days=1)
-        while session.weekday() >= 5:
-            session -= timedelta(days=1)
+    while session.weekday() >= 5:
+        session -= timedelta(days=1)
     return session
 
 
