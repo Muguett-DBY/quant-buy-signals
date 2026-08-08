@@ -289,7 +289,8 @@ def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file
 
     assert "retrieval_time_oldest" in workflow
     assert "source_quote_timestamp_latest" in workflow
-    assert workflow.count("[TimeSpan]::FromMinutes(975)") >= 2
+    assert workflow.count("[TimeSpan]::FromMinutes(975)") >= 1
+    assert workflow.count("$retrievedShanghai -lt $marketDateReady") == 1
     assert "[TimeSpan]::FromHours(15)" in workflow
     assert workflow.count("Compare-Object $actual $expected") >= 2
     assert "does not match the signed manifest" in workflow
