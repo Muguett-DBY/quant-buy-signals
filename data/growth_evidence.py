@@ -1583,7 +1583,17 @@ def _fetch_segment_growth_sources(
                     raise GrowthEvidenceError("segment cache contract mismatch")
                 records = _validate_cached_segment_records(payload.get("records"), code=code, as_of=as_of)
                 evidence = _build_segment_growth_sources(code, as_of, records, annual_revenue=annual_revenue)
-                if recent_cache_state is None or evidence.get("status") == "complete":
+                # A cached capture with a full multi-year record window must be
+                # returned even when its local build is partial: the batch
+                # caller supplies the annual-revenue cross-check (which can
+                # promote it to complete), and re-fetching on a rate-limited
+                # runner IP would only replace useful records with an
+                # unavailable state.  Short-window partial captures stay
+                # eligible for refresh (a re-fetch may complete them).
+                if recent_cache_state is None or evidence.get("status") == "complete" or (
+                    evidence.get("status") == "partial"
+                    and len(evidence.get("history_years") or []) >= MIN_SEGMENT_HISTORY_YEARS
+                ):
                     return evidence, True, "hit"
                 diagnostic = "incomplete_hit_requires_refresh"
             except GrowthEvidenceError as exc:
