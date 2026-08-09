@@ -8088,6 +8088,17 @@ def screen_all_types(
             metric["external_growth_evidence"] = external
             metric["segment_growth_sources"] = segments
             metric["_type3_growth_validation_token"] = TYPE3_GROWTH_VALIDATION_TOKEN
+            if code == "000538" and os.environ.get("DS_DCF_DEBUG_000538"):
+                from engine.quantitative_evidence import _segment_growth_proxy_inputs as _sgpi
+
+                seg_status = segments.get("status") if isinstance(segments, Mapping) else None
+                print(
+                    f"[DEBUG-000538-assemble] seg_status={seg_status} "
+                    f"matched={(segments or {}).get('matched_latest_share')} "
+                    f"annual={(segments or {}).get('annual_revenue_latest')} "
+                    f"proxy={'OK' if _sgpi(segments) is not None else 'None'}",
+                    flush=True,
+                )
             normalized_type3_growth[code] = evidence
             context = metric.get("_quantitative_peer_context")
             if not isinstance(context, Mapping):
