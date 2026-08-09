@@ -512,14 +512,14 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     for path in (
         "data/cache/market_coldness",
         "data/cache/market_history",
-        "data/cache/research_reports",
         "data/cache/patch4_evidence",
     ):
         assert workflow.count(path) == 4
-    # The pre-warm steps add fifth mentions for the growth_evidence and
-    # quality_history cache paths.
+    # The pre-warm steps add fifth mentions for the growth_evidence,
+    # quality_history and research_reports cache paths.
     assert workflow.count("data/cache/growth_evidence") == 5
     assert workflow.count("data/cache/quality_history") == 5
+    assert workflow.count("data/cache/research_reports") == 5
     for contract in (
         "data/growth_evidence.py",
         "data/quality_history.py",
