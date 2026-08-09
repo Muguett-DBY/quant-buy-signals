@@ -77,9 +77,7 @@ class Patch7TotalGateTest(unittest.TestCase):
     def test_type1_alone_with_declining_industry_red_line_is_suppressed(self):
         outcomes = _base({"type1": True})
         benchmarks = {"医药": {"median_cagr": -0.05}, "ALL": {}}
-        gated = _apply_patch7_total_gate(
-            outcomes, {"price": 10.0, "industry": "医药"}, {"zone": "买入区"}, benchmarks
-        )
+        gated = _apply_patch7_total_gate(outcomes, {"price": 10.0, "industry": "医药"}, {"zone": "买入区"}, benchmarks)
         self.assertFalse(gated["type1"][0])
         self.assertIn("衰落产业", str(gated["type1"][3].get("_veto")))
 
