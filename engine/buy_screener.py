@@ -7469,6 +7469,13 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
             basis = "unresolved_missing_evidence"
             potentially_triggerable = True
 
+    # Patch 7 (2026-08-04) cross-type gates are model post-gates; a veto
+    # written by _apply_patch7_total_gate suppresses the trigger and is itself
+    # the replay's model basis.
+    if str(reasons.get("_veto") or "").startswith("补丁7"):
+        potentially_triggerable = False
+        complete = True
+
     return {
         "schema_version": DECISION_SCHEMA_VERSION,
         "model_id": DECISION_MODEL_ID,
@@ -7495,6 +7502,10 @@ def _decision_source_hard_veto(type_key: str, payload: Mapping[str, Any]) -> boo
         raise ValueError(f"{type_key} decision source markers are invalid")
     if applicable_marker == "no":
         return False
+    # Patch 7 (2026-08-04) cross-type gates are model post-gates written by
+    # _apply_patch7_total_gate; their veto text is the replay's model basis.
+    if str(reasons.get("_veto") or "").startswith("补丁7"):
+        return True
     missing = _decision_missing_dimensions(
         type_key,
         reasons,
