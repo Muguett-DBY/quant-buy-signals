@@ -268,6 +268,49 @@ def test_report_identity_is_normalised_before_duplicate_detection():
         )
 
 
+def test_complete_report_cache_preserves_eastmoney_a_prefixed_rows_until_local_scope_filter():
+    frame = dc._validated_complete_report_frame(
+        [
+            {
+                "SECURITY_CODE": "1",
+                "SECUCODE": "000001.SZ",
+                "REPORT_DATE": "2025-12-31 00:00:00",
+            },
+            {
+                "SECURITY_CODE": "A04021",
+                "SECUCODE": "A04021.SZ",
+                "REPORT_DATE": "2025-12-31 00:00:00",
+            },
+        ],
+        report_name=dc.RPT_MAIN_FINANCIAL_INDICATORS,
+        columns="SECURITY_CODE,SECUCODE,REPORT_DATE",
+        extra_filter="(REPORT_DATE='2025-12-31')",
+        expected_count=2,
+    )
+
+    assert frame["SECURITY_CODE"].tolist() == ["000001", "A04021"]
+    filtered = dc._combine_period_frames(
+        [frame],
+        ["2025"],
+        codes=("000001",),
+        requested_columns="SECURITY_CODE,SECUCODE,REPORT_DATE",
+        remote_filtered=False,
+    )
+    assert filtered["SECURITY_CODE"].tolist() == ["000001"]
+
+
+@pytest.mark.parametrize("security_code", ["B04021", "A4021", "A04021X", "A04-21"])
+def test_complete_report_cache_rejects_unknown_alphanumeric_security_codes(security_code):
+    with pytest.raises(dc.DataFetchError, match="invalid SECURITY_CODE"):
+        dc._validated_complete_report_frame(
+            [{"SECURITY_CODE": security_code, "REPORT_DATE": "2025-12-31"}],
+            report_name=dc.RPT_MAIN_FINANCIAL_INDICATORS,
+            columns="SECURITY_CODE,REPORT_DATE",
+            extra_filter="(REPORT_DATE='2025-12-31')",
+            expected_count=1,
+        )
+
+
 def test_fetch_all_pages_recovers_only_failed_transient_page_and_keeps_page_order(monkeypatch):
     calls = []
 

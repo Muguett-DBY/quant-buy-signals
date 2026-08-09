@@ -621,9 +621,18 @@ def _validated_complete_report_frame(
             text = str(int(value))
         else:
             text = str(value).strip()
-        if re.fullmatch(r"\d{1,6}", text) is None:
+        if re.fullmatch(r"\d{1,6}", text) is not None:
+            canonical_codes.append(text.zfill(6))
+            continue
+        # Eastmoney's A-share security-type bucket also contains a small
+        # number of OTC/legacy identities such as ``A04021.SZ``.  They are
+        # legitimate rows in the complete provider query and are filtered out
+        # later when the requested six-digit exchange universe is applied.
+        # Preserve only this exact provider form so the complete-query cache
+        # remains replayable without accepting arbitrary alphanumeric codes.
+        if re.fullmatch(r"A\d{5}", text) is None:
             raise DataFetchError(f"{report_name} response contains an invalid SECURITY_CODE")
-        canonical_codes.append(text.zfill(6))
+        canonical_codes.append(text)
     frame["SECURITY_CODE"] = canonical_codes
     if "REPORT_DATE" in frame.columns:
         canonical_dates: list[str] = []
