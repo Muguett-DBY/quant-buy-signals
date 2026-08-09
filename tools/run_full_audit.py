@@ -1443,6 +1443,16 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
             expected_basis = "unresolved_missing_evidence"
             expected_potential = True
 
+    # Patch 7 (2026-08-04) cross-type gates are model post-gates; a veto
+    # written by _apply_patch7_total_gate suppresses the trigger and is itself
+    # the replay's model basis (a confirmed post-gate veto).
+    if str(reasons.get("_veto") or "").startswith("补丁7"):
+        expected_potential = False
+        expected_complete = True
+        expected_basis = "confirmed_veto"
+        veto_state = "confirmed"
+        confirmed_hard_veto = True
+
     expected = {
         "schema_version": _DECISION_SCHEMA_VERSION,
         "model_id": _DECISION_MODEL_ID,

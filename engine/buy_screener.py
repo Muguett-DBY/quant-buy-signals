@@ -7471,10 +7471,12 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
 
     # Patch 7 (2026-08-04) cross-type gates are model post-gates; a veto
     # written by _apply_patch7_total_gate suppresses the trigger and is itself
-    # the replay's model basis.
+    # the replay's model basis (a confirmed post-gate veto).
     if str(reasons.get("_veto") or "").startswith("补丁7"):
         potentially_triggerable = False
         complete = True
+        basis = "confirmed_veto"
+        veto_state = "confirmed"
 
     return {
         "schema_version": DECISION_SCHEMA_VERSION,
