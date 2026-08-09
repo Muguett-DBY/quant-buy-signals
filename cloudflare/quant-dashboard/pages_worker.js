@@ -1,5 +1,5 @@
 const METHODOLOGY_VERSION="patch6-seven-types-2026-08-01-classified-type7-v4";
-const METHODOLOGY_LABEL="七类量化买入方法（2026年8月）";
+const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）";
 const CATALOGUE_INDEX_CONTRACT_VERSION=2;
 const METHODOLOGY={
   type1:{

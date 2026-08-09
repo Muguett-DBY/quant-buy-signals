@@ -594,7 +594,7 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
 def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail_facts():
     source = DASHBOARD.read_text(encoding="utf-8")
 
-    assert 'const METHODOLOGY_LABEL="七类量化买入方法（2026年8月）"' in source
+    assert 'const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）"' in source
     assert 'const METHODOLOGY_VERSION="patch6-seven-types-2026-08-01-classified-type7-v4"' in source
     assert '" · 量化口径："+METHODOLOGY_LABEL' in source
     assert '" · 量化口径："+METHODOLOGY_VERSION' not in source

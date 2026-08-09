@@ -5993,6 +5993,115 @@ def _type3_has_local_growth_history(m: Mapping[str, Any]) -> bool:
     return sorted(parsed_years) == list(range(latest - len(parsed_years) + 1, latest + 1))
 
 
+PATCH7_GATE_VERSION = "2026-08-04"
+
+
+def _patch7_declining_industry(
+    metric: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    """Patch 7 red line 1: a declining industry (median industry CAGR < 0).
+
+    Missing industry data never triggers the red line (evidence gaps do not
+    veto), matching the project's missing-value policy.
+    """
+    industry = str(metric.get("industry") or "DEFAULT")
+    median_cagr = _get_bench(benchmarks, industry, "median_cagr")
+    if median_cagr is None:
+        return False
+    value = _safe_float(median_cagr)
+    return value is not None and value < 0
+
+
+def _patch7_long_term_decline(metric: Mapping[str, Any]) -> bool:
+    """Patch 7 red line 2: long-term operating decline.
+
+    The most recent three annual revenue comparisons must all be negative
+    (four consecutive annual points with every year-over-year change < 0).
+    """
+    values = metric.get("revenue_values", [])
+    years = metric.get("revenue_years", [])
+    if not isinstance(values, (list, tuple)) or not isinstance(years, (list, tuple)):
+        return False
+    if len(values) < 4 or len(years) < 4:
+        return False
+    pairs = sorted((int(year), _safe_float(value)) for year, value in zip(years, values) if value is not None)
+    if len(pairs) < 4:
+        return False
+    tail = pairs[-4:]
+    return all(tail[i][1] < tail[i - 1][1] for i in range(1, 4))
+
+
+def _apply_patch7_total_gate(
+    outcomes: Mapping[str, tuple],
+    metric: Mapping[str, Any],
+    dcf_result: Any,
+    benchmarks: Mapping[str, Mapping[str, Any]],
+) -> dict[str, tuple]:
+    """Patch 7 (2026-08-04) cross-type trigger constraints.
+
+    No single-dimension trigger is a complete buy point:
+
+    (1) type1 alone requires no value-trap veto and neither red line;
+    (2) type2/type3/type4 (or their combination, or with type7) requires the
+        price to stay below the bubble line (optimistic value x 120%);
+    (3) type7 alone requires the price to be reasonable or undervalued.
+
+    type5/type6 and combinations that include type1 are intentionally outside
+    these gates per the template text.
+    """
+    qualifiers = [key for key in TYPE_PRIORITY if outcomes[key][0]]
+    if not qualifiers:
+        return dict(outcomes)
+    price = _safe_float(metric.get("price"))
+    dcf = dcf_result if isinstance(dcf_result, Mapping) else {}
+    dcf_points = dcf.get("dcf_points") if isinstance(dcf.get("dcf_points"), Mapping) else {}
+    optimistic = dcf_points.get("optimistic") if isinstance(dcf_points.get("optimistic"), Mapping) else {}
+    optimistic_upper = _safe_float(optimistic.get("upper"))
+    zone = str(dcf.get("zone") or "")
+    bubble = bool(dcf.get("bubble_warning"))
+
+    def _suppress(key: str, veto_text: str) -> None:
+        triggered, total, sub_scores, reasons = outcomes[key]
+        updated = dict(reasons)
+        updated["_veto"] = veto_text
+        updated["_status"] = STATUS_VETOED
+        gated[key] = (False, total, sub_scores, updated)
+
+    gated = dict(outcomes)
+    only_type1 = qualifiers == ["type1"]
+    only_type7 = qualifiers == ["type7"]
+    type2347 = bool(qualifiers) and all(key in ("type2", "type3", "type4", "type7") for key in qualifiers)
+
+    if only_type1:
+        trap_veto = "价值陷阱" in str(outcomes["type1"][3].get("_veto") or "")
+        red1 = _patch7_declining_industry(metric, benchmarks)
+        red2 = _patch7_long_term_decline(metric)
+        blocks = [
+            name
+            for name, hit in (
+                ("价值陷阱", trap_veto),
+                ("衰落产业", red1),
+                ("长期经营走下坡路", red2),
+            )
+            if hit
+        ]
+        if blocks:
+            _suppress("type1", "补丁7红线否决：" + "/".join(blocks))
+    elif type2347 and not only_type7:
+        in_bubble = bubble or (price is not None and optimistic_upper is not None and price >= optimistic_upper * 1.2)
+        if in_bubble:
+            for key in qualifiers:
+                _suppress(key, "补丁7泡沫线否决：价格高于乐观值120%")
+    elif only_type7:
+        overvalued = zone == "卖出区" or (
+            price is not None and optimistic_upper is not None and price > optimistic_upper
+        )
+        if overvalued:
+            _suppress("type7", "补丁7价格闸门：股价未合理或低估")
+    return gated
+
+
 def _type3_growth_request(m: Mapping[str, Any]) -> dict[str, Any] | None:
     """Build the exact local-history input required by the growth adapter."""
 
@@ -8314,6 +8423,7 @@ def screen_all_types(
             reasons.setdefault("_evidence", "complete")
             normalized_outcomes[key] = (triggered, total, sub_scores, reasons)
         outcomes = normalized_outcomes
+        outcomes = _apply_patch7_total_gate(outcomes, m, normalized_dcf.get(code), company_benchmarks)
         qualifiers = [key for key in TYPE_PRIORITY if outcomes[key][0]]
         totals = {key: outcome[1] for key, outcome in outcomes.items()}
         diagnostic_keys = [
