@@ -211,12 +211,9 @@ def test_true_empty_is_distinct_from_schema_drift_and_missing_items(tmp_path):
 
     assert client.fetch_one("600519", "lrb", contract={**CONTRACT, "cache_key": "empty"}).status == "true_empty"
     assert (
-        client.fetch_one("600519", "lrb", contract={**CONTRACT, "cache_key": "missing"}).status
-        == "missing_component"
+        client.fetch_one("600519", "lrb", contract={**CONTRACT, "cache_key": "missing"}).status == "missing_component"
     )
-    assert (
-        client.fetch_one("600519", "lrb", contract={**CONTRACT, "cache_key": "schema"}).status == "schema_drift"
-    )
+    assert client.fetch_one("600519", "lrb", contract={**CONTRACT, "cache_key": "schema"}).status == "schema_drift"
 
 
 @pytest.mark.parametrize(
@@ -447,10 +444,7 @@ def test_gap_fallback_has_a_deterministic_total_request_budget():
     class Client:
         def fetch_many(self, requests_, **_kwargs):
             self.requests = tuple(requests_)
-            return {
-                identity: sf.SinaStatementResult(identity[0], identity[1], "true_empty")
-                for identity in requests_
-            }
+            return {identity: sf.SinaStatementResult(identity[0], identity[1], "true_empty") for identity in requests_}
 
     client = Client()
     outcome = sf.backfill_strict_ttm_gaps(

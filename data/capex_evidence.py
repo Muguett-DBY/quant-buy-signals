@@ -492,10 +492,7 @@ def validate_capex_provenance(
             value <= 0
             or not isinstance(code, str)
             or re.fullmatch(r"(?:[036]\d{5})", code) is None
-            or (
-                expected_security_code is not None
-                and code != expected_security_code
-            )
+            or (expected_security_code is not None and code != expected_security_code)
             or source_report != SINA_CASHFLOW_REPORT
             or provenance.get("source_field") != SINA_CAPEX_FIELD
             or provenance.get("canonical_field") != CAPEX_FIELD

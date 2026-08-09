@@ -230,6 +230,7 @@ def test_independent_audit_replays_code_bound_sina_reported_capex():
         == "invalid_capex_provenance"
     )
 
+
 def _market(count: int = 5):
     quotes = []
     financials = {}

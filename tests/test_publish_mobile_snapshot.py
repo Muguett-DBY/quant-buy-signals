@@ -25,9 +25,7 @@ _prepare_quality_history_evidence = publisher._prepare_quality_history_evidence
 
 def test_financial_fallback_cache_bypass_is_separate_from_full_market_refresh():
     regular = publisher._parser().parse_args(["--output-dir", "out", "--refresh"])
-    forced = publisher._parser().parse_args(
-        ["--output-dir", "out", "--refresh", "--force-financial-fallback-refresh"]
-    )
+    forced = publisher._parser().parse_args(["--output-dir", "out", "--refresh", "--force-financial-fallback-refresh"])
 
     assert regular.refresh is True
     assert regular.force_financial_fallback_refresh is False

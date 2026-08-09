@@ -563,9 +563,7 @@ class SinaFinancialClient:
                 "retrieved_at": time.time(),
             },
             ttl=(
-                SINA_FINANCIAL_CACHE_TTL_SECONDS
-                if result.status == "ok"
-                else SINA_FINANCIAL_NEGATIVE_CACHE_TTL_SECONDS
+                SINA_FINANCIAL_CACHE_TTL_SECONDS if result.status == "ok" else SINA_FINANCIAL_NEGATIVE_CACHE_TTL_SECONDS
             ),
         )
 
@@ -818,11 +816,7 @@ def backfill_strict_ttm_gaps(
     """Overlay only absent strict-TTM fields; preserve every finite primary fact."""
 
     started = time.monotonic()
-    if (
-        isinstance(max_target_requests, bool)
-        or not isinstance(max_target_requests, int)
-        or max_target_requests < 1
-    ):
+    if isinstance(max_target_requests, bool) or not isinstance(max_target_requests, int) or max_target_requests < 1:
         raise ValueError("max_target_requests must be a positive integer")
     normalized_contract = _normalized_contract(contract)
     candidate_requests, target_codes_by_metric, before_gaps = _gap_plan(financials, normalized_contract, codes)
