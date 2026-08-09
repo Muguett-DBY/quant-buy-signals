@@ -635,7 +635,7 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
         or revenue_hhi is None
         or not 0 <= revenue_hhi <= 1
         or matched_latest_share is None
-        or not 0.95 <= matched_latest_share <= 1
+        or not 0.95 <= matched_latest_share <= 1 + 1e-9
         or not isinstance(raw_segments, Sequence)
         or isinstance(raw_segments, (str, bytes))
         or not raw_segments
