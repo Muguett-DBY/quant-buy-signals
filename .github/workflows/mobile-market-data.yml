@@ -192,6 +192,22 @@ jobs:
             Write-Host 'No quality-history cache archive available; continuing with the runner cache.'
           }
 
+      - name: Pre-warm the research-report cache from the local backfill archive
+        shell: pwsh
+        run: |
+          # Type 7's category/moat evidence needs research-report bodies that
+          # the rate-limited runner IP cannot fetch; a local backfill archive
+          # carries them so the build reuses them.
+          $archive = Join-Path $env:RUNNER_TEMP 'research-reports-cache-latest.zip'
+          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/research-reports-cache-latest.zip"
+          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 10KB) {
+            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
+            $count = (Get-ChildItem -LiteralPath 'data/cache/research_reports' -File -Filter '*.json.gz' -ErrorAction SilentlyContinue | Measure-Object).Count
+            Write-Host "Pre-warmed research-report cache: $count entries."
+          } else {
+            Write-Host 'No research-report cache archive available; continuing with the runner cache.'
+          }
+
       - name: Install locked production dependencies
         run: |
           python -m pip install --require-hashes -r requirements-bootstrap.txt
