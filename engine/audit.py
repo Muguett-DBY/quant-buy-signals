@@ -447,6 +447,7 @@ _RULE_FILES = (
     _ROOT / "data" / "patch4_evidence.py",
     _ROOT / "data" / "quality_history.py",
     _ROOT / "data" / "research_reports.py",
+    _ROOT / "data" / "sina_financial.py",
     _ROOT / "data" / "trading_calendar.py",
     _ROOT / "tools" / "china_a_share_trading_calendar.json",
 )
@@ -4940,6 +4941,11 @@ _AUDIT_DETAILED_CASHFLOW_REPORT = "RPT_F10_FINANCE_GCASHFLOW"
 _AUDIT_OFFICIAL_QUARTERLY_REPORT = "CNINFO_EXCHANGE_FILED_QUARTERLY_REPORT"
 _AUDIT_OFFICIAL_ANNUAL_REPORT = "CNINFO_EXCHANGE_FILED_ANNUAL_REPORT"
 _AUDIT_EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+_AUDIT_SINA_FINANCIAL_URL = (
+    "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
+)
+_AUDIT_SINA_CASHFLOW_REPORT = "SINA_COMPANY_FINANCE_2022_LLB"
+_AUDIT_SINA_CAPEX_FIELD = "ACQUASSETCASH"
 _AUDIT_NON_CAPEX_OUTFLOW_FIELDS = (
     "INVEST_PAY_CASH",
     "PLEDGE_LOAN_ADD",
@@ -5113,6 +5119,7 @@ def _audit_validate_capex_provenance(
     *,
     expected_value: float,
     expected_report_date: str,
+    expected_security_code: str | None = None,
 ) -> str:
     """Independently replay the schema-1 capex evidence contract."""
     if not isinstance(provenance, Mapping):
@@ -5163,6 +5170,55 @@ def _audit_validate_capex_provenance(
         ):
             if provenance.get(field) != committed.get(field):
                 return "invalid_capex_provenance"
+        return "complete"
+
+    if label == "fact_secondary_source_reported":
+        code = provenance.get("security_code")
+        source_hash = provenance.get("source_raw_sha256")
+        query = provenance.get("source_query")
+        metadata = provenance.get("source_metadata")
+        if (
+            expected_value <= 0
+            or not isinstance(code, str)
+            or re.fullmatch(r"[036]\d{5}", code) is None
+            or (expected_security_code is not None and code != expected_security_code)
+            or source_report != _AUDIT_SINA_CASHFLOW_REPORT
+            or provenance.get("source_field") != _AUDIT_SINA_CAPEX_FIELD
+            or provenance.get("canonical_field") != _AUDIT_CAPEX_FIELD
+            or provenance.get("formula") != "source_reported"
+            or provenance.get("derivation_method") is not None
+            or provenance.get("source_url") != _AUDIT_SINA_FINANCIAL_URL
+            or not isinstance(source_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", source_hash) is None
+            or len(set(source_hash)) < 8
+            or not isinstance(query, Mapping)
+            or not isinstance(metadata, Mapping)
+            or not isinstance(components, Mapping)
+        ):
+            return "invalid_capex_provenance"
+        prefix = "sh" if code.startswith("6") else "sz"
+        request_num = query.get("num")
+        if (
+            query
+            != {
+                "paperCode": f"{prefix}{code}",
+                "source": "llb",
+                "type": "0",
+                "page": "1",
+                "num": request_num,
+            }
+            or not isinstance(request_num, str)
+            or re.fullmatch(r"(?:[1-9]|1\d|20)", request_num) is None
+            or metadata.get("report_type") != "合并期末"
+            or metadata.get("currency") != "CNY"
+            or not isinstance(metadata.get("publish_date"), str)
+            or re.fullmatch(r"\d{8}", metadata["publish_date"]) is None
+            or isinstance(metadata.get("update_time"), bool)
+            or not isinstance(metadata.get("update_time"), int)
+            or metadata["update_time"] <= 0
+            or not _close(components.get("reported_value"), expected_value, abs_tol=0.01)
+        ):
+            return "invalid_capex_provenance"
         return "complete"
 
     if provenance.get("source_url") != _AUDIT_EASTMONEY_DATACENTER_URL:
@@ -5230,6 +5286,7 @@ def _audit_reconstruct_ttm(
     annual_records: Any,
     interim_records: Any,
     contract: ReportingPeriodContract,
+    expected_security_code: str | None = None,
 ) -> dict[str, Any]:
     """Independently reconstruct the exact FY + YTD - prior-YTD payload."""
     result = _audit_ttm_shell(metric, contract)
@@ -5304,6 +5361,7 @@ def _audit_reconstruct_ttm(
             row.get("CAPEX_PROVENANCE"),
             expected_value=raw_capex,
             expected_report_date=str(row.get("REPORT_DATE") or ""),
+            expected_security_code=expected_security_code,
         )
         components[label]["capex_provenance_status"] = provenance_status
         if provenance_status != "complete":
@@ -5805,6 +5863,7 @@ def _valuation_contract_errors(
                     financial.get("cashflow", []),
                     financial.get("cashflow_interim", []),
                     reporting_period_contract,
+                    expected_security_code=code,
                 )
                 expected_ttm_revenue = _audit_reconstruct_ttm(
                     "revenue",

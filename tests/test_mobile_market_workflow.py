@@ -128,6 +128,25 @@ def test_mobile_publication_artifacts_survive_failed_job_and_full_workflow_rerun
         assert download["with"]["name"] == canonical_upload["with"]["name"]
 
 
+def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contracts():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    steps = parsed["jobs"]["build"]["steps"]
+    restore = next(step for step in steps if step.get("name") == "Restore accumulated contract-validated deep evidence")
+    save = next(step for step in steps if step.get("name") == "Save accumulated contract-validated deep evidence")
+    for step in (restore, save):
+        paths = step["with"]["path"].splitlines()
+        assert "data/cache/datacenter_reports" in paths
+        assert "data/cache/sina_financial" in paths
+
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+    assert workflow.count("data/cache/datacenter_reports") == 2
+    assert workflow.count("data/cache/sina_financial") == 2
+    assert workflow.count("data/sina_financial.py") >= 2
+    build = next(step for step in steps if step.get("name") == "Build validated market data")["run"]
+    assert "$forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'" in build
+    assert "$publisherArguments += '--force-financial-fallback-refresh'" in build
+
+
 def test_cloudflare_live_check_uses_the_same_methodology_version_as_the_pages_worker():
     workflow = _workflow_text(MOBILE_WORKFLOW)
     pages_worker = (ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js").read_text(encoding="utf-8")

@@ -9,6 +9,7 @@ derivations and never turns an unresolved blank into zero.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -20,6 +21,9 @@ CAPEX_PROVENANCE_SCHEMA_VERSION = 1
 STANDARD_CASHFLOW_REPORT = "RPT_DMSK_FN_CASHFLOW"
 DETAILED_CASHFLOW_REPORT = "RPT_F10_FINANCE_GCASHFLOW"
 EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+SINA_FINANCIAL_URL = "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
+SINA_CASHFLOW_REPORT = "SINA_COMPANY_FINANCE_2022_LLB"
+SINA_CAPEX_FIELD = "ACQUASSETCASH"
 OFFICIAL_QUARTERLY_REPORT = "CNINFO_EXCHANGE_FILED_QUARTERLY_REPORT"
 OFFICIAL_ANNUAL_REPORT = "CNINFO_EXCHANGE_FILED_ANNUAL_REPORT"
 
@@ -210,6 +214,79 @@ def _official_zero_provenance(
     }
 
 
+def sina_reported_capex_provenance(
+    value: Any,
+    *,
+    report_date: str,
+    security_code: str,
+    source_raw_sha256: str,
+    publish_date: str,
+    update_time: int,
+    report_type: str,
+    currency: str,
+    request_num: int,
+) -> dict[str, Any]:
+    """Bind one positive Sina cash-flow line item to the canonical capex fact.
+
+    Explicit zero remains subject to the exchange-filed evidence policy.  This
+    secondary-source contract therefore accepts only a positive reported cash
+    outflow and records enough request/response identity for later audit.
+    """
+
+    parsed = _finite_float(value)
+    if parsed is None or parsed <= 0:
+        raise ValueError("Sina reported capex must be a positive finite value")
+    if not isinstance(security_code, str) or re.fullmatch(r"(?:[036]\d{5})", security_code) is None:
+        raise ValueError("Sina capex security_code must be a canonical SH/SZ code")
+    if not isinstance(report_date, str) or re.fullmatch(r"\d{4}-(?:03-31|06-30|09-30|12-31)", report_date) is None:
+        raise ValueError("Sina capex report_date is invalid")
+    if (
+        not isinstance(source_raw_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", source_raw_sha256) is None
+        or len(set(source_raw_sha256)) < 8
+    ):
+        raise ValueError("Sina capex source_raw_sha256 is invalid")
+    if not isinstance(publish_date, str) or re.fullmatch(r"\d{8}", publish_date) is None:
+        raise ValueError("Sina capex publish_date is invalid")
+    if isinstance(update_time, bool) or not isinstance(update_time, int) or update_time <= 0:
+        raise ValueError("Sina capex update_time is invalid")
+    if report_type != "合并期末" or currency != "CNY":
+        raise ValueError("Sina capex statement basis is unsupported")
+    if isinstance(request_num, bool) or not isinstance(request_num, int) or not 1 <= request_num <= 20:
+        raise ValueError("Sina capex request_num is invalid")
+    prefix = "sh" if security_code.startswith("6") else "sz"
+    return {
+        "schema_version": CAPEX_PROVENANCE_SCHEMA_VERSION,
+        "status": "complete",
+        "evidence_label": "fact_secondary_source_reported",
+        "value": parsed,
+        "security_code": security_code,
+        "source_report": SINA_CASHFLOW_REPORT,
+        "source_field": SINA_CAPEX_FIELD,
+        "canonical_field": CAPEX_FIELD,
+        "report_date": report_date,
+        "formula": "source_reported",
+        "derivation_method": None,
+        "components": {"reported_value": parsed},
+        "source_null_fields": [],
+        "source_url": SINA_FINANCIAL_URL,
+        "source_query": {
+            "paperCode": f"{prefix}{security_code}",
+            "source": "llb",
+            "type": "0",
+            "page": "1",
+            "num": str(request_num),
+        },
+        "source_raw_sha256": source_raw_sha256,
+        "source_metadata": {
+            "publish_date": publish_date,
+            "update_time": update_time,
+            "report_type": report_type,
+            "currency": currency,
+        },
+    }
+
+
 def resolve_capex_evidence(
     standard_value: Any,
     detailed_row: Mapping[str, Any] | None,
@@ -353,6 +430,7 @@ def validate_capex_provenance(
     *,
     expected_value: Any,
     expected_report_date: str,
+    expected_security_code: str | None = None,
 ) -> str:
     """Return ``complete`` only for internally reproducible capex evidence."""
     if not isinstance(provenance, Mapping):
@@ -401,6 +479,61 @@ def validate_capex_provenance(
                 return "invalid_capex_provenance"
         components = provenance.get("components")
         if not isinstance(components, Mapping) or _finite_float(components.get("reported_value")) != 0.0:
+            return "invalid_capex_provenance"
+        return "complete"
+
+    if label == "fact_secondary_source_reported":
+        code = provenance.get("security_code")
+        source_hash = provenance.get("source_raw_sha256")
+        query = provenance.get("source_query")
+        metadata = provenance.get("source_metadata")
+        components = provenance.get("components")
+        if (
+            value <= 0
+            or not isinstance(code, str)
+            or re.fullmatch(r"(?:[036]\d{5})", code) is None
+            or (
+                expected_security_code is not None
+                and code != expected_security_code
+            )
+            or source_report != SINA_CASHFLOW_REPORT
+            or provenance.get("source_field") != SINA_CAPEX_FIELD
+            or provenance.get("canonical_field") != CAPEX_FIELD
+            or provenance.get("formula") != "source_reported"
+            or provenance.get("derivation_method") is not None
+            or provenance.get("source_url") != SINA_FINANCIAL_URL
+            or not isinstance(source_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", source_hash) is None
+            or len(set(source_hash)) < 8
+            or not isinstance(query, Mapping)
+            or not isinstance(metadata, Mapping)
+            or not isinstance(components, Mapping)
+        ):
+            return "invalid_capex_provenance"
+        prefix = "sh" if code.startswith("6") else "sz"
+        if query != {
+            "paperCode": f"{prefix}{code}",
+            "source": "llb",
+            "type": "0",
+            "page": "1",
+            "num": query.get("num"),
+        }:
+            return "invalid_capex_provenance"
+        request_num = query.get("num")
+        if not isinstance(request_num, str) or re.fullmatch(r"(?:[1-9]|1\d|20)", request_num) is None:
+            return "invalid_capex_provenance"
+        if (
+            metadata.get("report_type") != "合并期末"
+            or metadata.get("currency") != "CNY"
+            or not isinstance(metadata.get("publish_date"), str)
+            or re.fullmatch(r"\d{8}", metadata["publish_date"]) is None
+            or isinstance(metadata.get("update_time"), bool)
+            or not isinstance(metadata.get("update_time"), int)
+            or metadata["update_time"] <= 0
+        ):
+            return "invalid_capex_provenance"
+        reported = _finite_float(components.get("reported_value"))
+        if reported is None or not math.isclose(reported, value, rel_tol=1e-10, abs_tol=0.01):
             return "invalid_capex_provenance"
         return "complete"
 

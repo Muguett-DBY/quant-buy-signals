@@ -649,6 +649,60 @@ def test_network_refresh_requests_financials_for_shanghai_shenzhen_only(tmp_path
     assert outcome.eligible_codes == ("600519",)
 
 
+def test_network_refresh_runs_optional_gap_backfill_before_validation_and_publishes_diagnostics(tmp_path):
+    quotes = _quotes().iloc[[0]].copy()
+    quotes.loc[:, ["code", "name", "market"]] = ["600519", "sample", "SH"]
+    financials = _financials_for_codes(["600519"])
+
+    class GapAwareFetcher:
+        requested_contract = None
+
+        def get_stock_list(self, *, include_hk):
+            assert include_hk is False
+            return quotes
+
+        def get_financials(self, *, codes):
+            assert codes == ["600519"]
+            return financials
+
+        def backfill_financial_gaps(self, value, *, contract, codes):
+            assert value is financials
+            assert codes == ["600519"]
+            self.requested_contract = dict(contract)
+            return value
+
+        def financial_publication_provenance(self):
+            return {
+                "primary_source": "eastmoney_datacenter_bulk",
+                "sina_fallback": {"target_requests": 0, "filled_fields": 0},
+            }
+
+    fetcher = GapAwareFetcher()
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=3600)
+    outcome = get_market_snapshot(
+        fetcher,
+        cache,
+        force_refresh=True,
+        persist_network=True,
+        min_quotes=1,
+        min_financial_coverage=1.0,
+        clock=lambda: NOW,
+    )
+
+    assert fetcher.requested_contract == outcome.validation["reporting_period_contract"]
+    assert outcome.validation["financial_fetch"]["sina_fallback"]["target_requests"] == 0
+    cached = get_market_snapshot(
+        object(),
+        cache,
+        force_refresh=False,
+        min_quotes=1,
+        min_financial_coverage=1.0,
+        clock=lambda: NOW,
+    )
+    assert cached.source == "cache"
+    assert cached.validation["financial_fetch"] == outcome.validation["financial_fetch"]
+
+
 def test_snapshot_rejects_legacy_quotes_without_trade_provenance():
     legacy = _quotes().drop(columns=["quote_status", "price_source", "retrieved_at"])
 

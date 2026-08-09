@@ -136,9 +136,9 @@ jobs:
             data/cache/research_reports
             data/cache/patch4_evidence
             data/cache/cninfo_annual
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
           restore-keys: |
-            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
+            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
             mobile-market-v1-${{ runner.os }}-
 
       - name: Restore accumulated contract-validated deep evidence
@@ -153,6 +153,8 @@ jobs:
             data/cache/research_reports
             data/cache/patch4_evidence
             data/cache/cninfo_annual
+            data/cache/datacenter_reports
+            data/cache/sina_financial
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             mobile-deep-evidence-v1-${{ runner.os }}-
@@ -223,6 +225,7 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $false
           }
           $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'
           if (
             $rebuildLatestClosed -and
             -not (Test-Path -LiteralPath 'data/cache/market_snapshot.json.gz' -PathType Leaf)
@@ -240,6 +243,9 @@ jobs:
             $publisherArguments = @('-m', 'tools.publish_mobile_snapshot', '--output-dir', $output)
             if (-not $rebuildLatestClosed) {
               $publisherArguments += '--refresh'
+            }
+            if ($forceGapRefresh) {
+              $publisherArguments += '--force-financial-fallback-refresh'
             }
             & python @publisherArguments
             $refreshExitCode = $LASTEXITCODE
@@ -772,7 +778,7 @@ jobs:
             data/cache/research_reports
             data/cache/patch4_evidence
             data/cache/cninfo_annual
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
 
       - name: Save accumulated contract-validated deep evidence
         continue-on-error: true
@@ -786,6 +792,8 @@ jobs:
             data/cache/research_reports
             data/cache/patch4_evidence
             data/cache/cninfo_annual
+            data/cache/datacenter_reports
+            data/cache/sina_financial
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
 
   publish:

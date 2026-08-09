@@ -121,6 +121,7 @@ _REQUIRED_FILES = {
     "data/quality_history.py",
     "data/research_reports.py",
     "data/snapshot.py",
+    "data/sina_financial.py",
     "data/trading_calendar.py",
     "engine/audit.py",
     "engine/buy_screener.py",
@@ -630,6 +631,9 @@ _CAPEX_PROVENANCE_SCHEMA_VERSION = 1
 _STANDARD_CASHFLOW_REPORT = "RPT_DMSK_FN_CASHFLOW"
 _DETAILED_CASHFLOW_REPORT = "RPT_F10_FINANCE_GCASHFLOW"
 _EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+_SINA_FINANCIAL_URL = "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
+_SINA_CASHFLOW_REPORT = "SINA_COMPANY_FINANCE_2022_LLB"
+_SINA_CAPEX_FIELD = "ACQUASSETCASH"
 _NON_CAPEX_OUTFLOW_FIELDS = {
     "INVEST_PAY_CASH",
     "PLEDGE_LOAN_ADD",
@@ -668,6 +672,7 @@ _RULE_FILES = {
     "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
+    "data/sina_financial.py",
     "data/trading_calendar.py",
     "tools/china_a_share_trading_calendar.json",
     "engine/buy_screener.py",
@@ -4746,6 +4751,7 @@ def _valid_capex_provenance(
     *,
     expected_value: float,
     expected_report_date: str,
+    expected_security_code: str | None = None,
 ) -> bool:
     if not isinstance(provenance, Mapping):
         return False
@@ -4753,11 +4759,58 @@ def _valid_capex_provenance(
         provenance.get("schema_version") != _CAPEX_PROVENANCE_SCHEMA_VERSION
         or provenance.get("status") != "complete"
         or provenance.get("report_date") != expected_report_date
-        or provenance.get("source_url") != _EASTMONEY_DATACENTER_URL
         or not _close_number(provenance.get("value"), expected_value, abs_tol=0.01)
     ):
         return False
     components = provenance.get("components")
+    if provenance.get("evidence_label") == "fact_secondary_source_reported":
+        code = provenance.get("security_code")
+        source_hash = provenance.get("source_raw_sha256")
+        query = provenance.get("source_query")
+        metadata = provenance.get("source_metadata")
+        if (
+            expected_value <= 0
+            or not isinstance(code, str)
+            or re.fullmatch(r"[036]\d{5}", code) is None
+            or (expected_security_code is not None and code != expected_security_code)
+            or provenance.get("source_report") != _SINA_CASHFLOW_REPORT
+            or provenance.get("source_field") != _SINA_CAPEX_FIELD
+            or provenance.get("canonical_field") != "CONSTRUCT_LONG_ASSET"
+            or provenance.get("formula") != "source_reported"
+            or provenance.get("derivation_method") is not None
+            or provenance.get("source_url") != _SINA_FINANCIAL_URL
+            or not isinstance(source_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", source_hash) is None
+            or len(set(source_hash)) < 8
+            or not isinstance(query, Mapping)
+            or not isinstance(metadata, Mapping)
+            or not isinstance(components, Mapping)
+        ):
+            return False
+        prefix = "sh" if code.startswith("6") else "sz"
+        request_num = query.get("num")
+        return bool(
+            query
+            == {
+                "paperCode": f"{prefix}{code}",
+                "source": "llb",
+                "type": "0",
+                "page": "1",
+                "num": request_num,
+            }
+            and isinstance(request_num, str)
+            and re.fullmatch(r"(?:[1-9]|1\d|20)", request_num) is not None
+            and metadata.get("report_type") == "合并期末"
+            and metadata.get("currency") == "CNY"
+            and isinstance(metadata.get("publish_date"), str)
+            and re.fullmatch(r"\d{8}", metadata["publish_date"]) is not None
+            and not isinstance(metadata.get("update_time"), bool)
+            and isinstance(metadata.get("update_time"), int)
+            and metadata["update_time"] > 0
+            and _close_number(components.get("reported_value"), expected_value, abs_tol=0.01)
+        )
+    if provenance.get("source_url") != _EASTMONEY_DATACENTER_URL:
+        return False
     if provenance.get("evidence_label") == "fact_source_reported":
         return bool(
             provenance.get("source_report") in {_STANDARD_CASHFLOW_REPORT, _DETAILED_CASHFLOW_REPORT}
@@ -4813,6 +4866,7 @@ def _strict_ttm_evidence_value(
     *,
     metric: str,
     contract: Mapping[str, str],
+    expected_security_code: str | None = None,
 ) -> float | None:
     """Recompute a complete FY + current-YTD - prior-YTD evidence payload."""
     if not isinstance(evidence, Mapping):
@@ -4924,6 +4978,7 @@ def _strict_ttm_evidence_value(
                     component.get("capex_provenance"),
                     expected_value=capex_raw,
                     expected_report_date=dates[label],
+                    expected_security_code=expected_security_code,
                 )
             ):
                 return None
@@ -4955,7 +5010,15 @@ def _valid_strict_ttm_valuation(
         or result.get("fcf_normalisation_period_basis") != "two_annual_plus_strict_ttm"
     ):
         return False
-    ttm_fcff = _strict_ttm_evidence_value(result.get("ttm_fcff_evidence"), metric="fcff", contract=contract)
+    security_code = result.get("code")
+    if not isinstance(security_code, str) or re.fullmatch(r"[036]\d{5}", security_code) is None:
+        return False
+    ttm_fcff = _strict_ttm_evidence_value(
+        result.get("ttm_fcff_evidence"),
+        metric="fcff",
+        contract=contract,
+        expected_security_code=security_code,
+    )
     ttm_revenue = _strict_ttm_evidence_value(
         result.get("ttm_revenue_evidence"),
         metric="revenue",

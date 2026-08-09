@@ -287,6 +287,7 @@ def run_template25(
             interim_cashflow,
             period_contract=reporting_period_contract,
             require_capex_provenance=True,
+            expected_security_code=code,
         )
         ttm_revenue_evidence = reconstruct_ttm_revenue(
             revenue_history,

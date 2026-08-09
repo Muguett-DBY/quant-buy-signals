@@ -6,15 +6,18 @@ raises :class:`DataFetchError` instead of returning a plausible partial frame.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
 import threading
 import time
-from collections.abc import Collection
+from collections import Counter
+from collections.abc import Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -27,6 +30,7 @@ from data.capex_evidence import (
     EASTMONEY_DATACENTER_URL,
     NON_CAPEX_OUTFLOW_FIELDS,
 )
+from data.cache import SafeFileCache
 
 
 DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -61,6 +65,15 @@ _RETRYABLE_DATACENTER_HTTP_STATUSES = frozenset({408, 425, 429})
 ANNUAL_HISTORY_YEARS = 10
 DETAILED_ANNUAL_HISTORY_YEARS = 5
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+DATACENTER_REPORT_CACHE_ADAPTER_VERSION = 1
+DATACENTER_REPORT_CACHE_SCHEMA_VERSION = 1
+DATACENTER_REPORT_CACHE_DIR = Path(__file__).resolve().parent / "cache" / "datacenter_reports"
+_DATACENTER_RECENT_REPORT_TTL_SECONDS = 12 * 60 * 60
+_DATACENTER_HISTORICAL_REPORT_TTL_SECONDS = 7 * 24 * 60 * 60
+_DATACENTER_CACHE_MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+_DATACENTER_CACHE_STATS_LOCK = threading.Lock()
+_DATACENTER_CACHE_STATS: Counter[str] = Counter()
+_DATACENTER_CACHE_MISS_REASONS: Counter[str] = Counter()
 
 RPT_INCOME = "RPT_DMSK_FN_INCOME"
 RPT_CASHFLOW = "RPT_DMSK_FN_CASHFLOW"
@@ -497,6 +510,217 @@ def _validate_requested_columns(
         raise DataFetchError(f"{report_name} response omitted requested columns: {sorted(missing)}")
 
 
+def reset_datacenter_fetch_diagnostics() -> None:
+    """Reset process-local counters for one complete financial refresh."""
+
+    with _DATACENTER_CACHE_STATS_LOCK:
+        _DATACENTER_CACHE_STATS.clear()
+        _DATACENTER_CACHE_MISS_REASONS.clear()
+
+
+def get_datacenter_fetch_diagnostics() -> dict[str, Any]:
+    with _DATACENTER_CACHE_STATS_LOCK:
+        values = {
+            key: int(_DATACENTER_CACHE_STATS.get(key, 0))
+            for key in (
+                "cache_hits",
+                "cache_misses",
+                "cache_invalid",
+                "cache_write_errors",
+                "network_queries",
+                "rows_from_cache",
+                "rows_from_network",
+            )
+        }
+        values["miss_reasons"] = dict(sorted(_DATACENTER_CACHE_MISS_REASONS.items()))
+        oldest = _DATACENTER_CACHE_STATS.get("oldest_cache_age_ms")
+        values["oldest_cache_age_seconds"] = round(float(oldest) / 1000.0, 3) if oldest is not None else None
+        return values
+
+
+def _record_datacenter_stat(key: str, amount: int = 1) -> None:
+    with _DATACENTER_CACHE_STATS_LOCK:
+        _DATACENTER_CACHE_STATS[key] += int(amount)
+
+
+def _datacenter_cache_contract(
+    report_name: str,
+    columns: str,
+    extra_filter: str,
+    page_size: int,
+) -> dict[str, Any]:
+    return {
+        "adapter_version": DATACENTER_REPORT_CACHE_ADAPTER_VERSION,
+        "endpoint": DC_URL,
+        "report_name": str(report_name),
+        "columns": str(columns),
+        "filter": str(extra_filter),
+        "page_size": int(page_size),
+        "sort_column": "SECURITY_CODE",
+        "sort_order": 1,
+        "source": "WEB",
+        "client": "PC",
+    }
+
+
+def _datacenter_report_cache_ttl(extra_filter: str, *, today: date | None = None) -> int:
+    reference = today or _shanghai_today()
+    match = re.search(r"REPORT_DATE\s*=\s*['\"](\d{4})-(\d{2})-(\d{2})['\"]", str(extra_filter))
+    if match and int(match.group(1)) <= reference.year - 2:
+        return _DATACENTER_HISTORICAL_REPORT_TTL_SECONDS
+    return _DATACENTER_RECENT_REPORT_TTL_SECONDS
+
+
+def _datacenter_report_cache(contract: Mapping[str, Any]) -> SafeFileCache:
+    canonical = json.dumps(
+        dict(contract),
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    identity = hashlib.sha256(canonical).hexdigest()
+    return SafeFileCache(
+        DATACENTER_REPORT_CACHE_DIR / f"{identity}.json.gz",
+        schema_version=DATACENTER_REPORT_CACHE_SCHEMA_VERSION,
+        ttl=_datacenter_report_cache_ttl(str(contract.get("filter") or "")),
+        max_uncompressed_bytes=_DATACENTER_CACHE_MAX_UNCOMPRESSED_BYTES,
+    )
+
+
+def _validated_complete_report_frame(
+    rows: Any,
+    *,
+    report_name: str,
+    columns: str,
+    extra_filter: str,
+    expected_count: int,
+) -> pd.DataFrame:
+    if (
+        not isinstance(rows, list)
+        or any(not isinstance(row, dict) for row in rows)
+        or isinstance(expected_count, bool)
+        or not isinstance(expected_count, int)
+        or expected_count < 0
+        or expected_count > _MAX_DATACENTER_ROWS
+        or len(rows) != expected_count
+    ):
+        raise DataFetchError(f"{report_name} cached/assembled rows do not match the complete query count")
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    if "SECURITY_CODE" not in frame.columns:
+        raise DataFetchError(f"{report_name} response omitted SECURITY_CODE")
+    canonical_codes: list[str] = []
+    for value in frame["SECURITY_CODE"].tolist():
+        if isinstance(value, bool):
+            raise DataFetchError(f"{report_name} response contains an invalid SECURITY_CODE")
+        if isinstance(value, float):
+            if not math.isfinite(value) or not value.is_integer():
+                raise DataFetchError(f"{report_name} response contains an invalid SECURITY_CODE")
+            text = str(int(value))
+        else:
+            text = str(value).strip()
+        if re.fullmatch(r"\d{1,6}", text) is None:
+            raise DataFetchError(f"{report_name} response contains an invalid SECURITY_CODE")
+        canonical_codes.append(text.zfill(6))
+    frame["SECURITY_CODE"] = canonical_codes
+    if "REPORT_DATE" in frame.columns:
+        canonical_dates: list[str] = []
+        for value in frame["REPORT_DATE"].tolist():
+            text = str(value).strip()[:10]
+            try:
+                parsed = datetime.strptime(text, "%Y-%m-%d")
+            except ValueError as exc:
+                raise DataFetchError(f"{report_name} response contains an invalid REPORT_DATE") from exc
+            if parsed.strftime("%Y-%m-%d") != text:
+                raise DataFetchError(f"{report_name} response contains an invalid REPORT_DATE")
+            canonical_dates.append(text)
+        frame["REPORT_DATE"] = canonical_dates
+    _validate_requested_columns(frame, columns, report_name=report_name)
+    _validate_filtered_report_date(frame, extra_filter)
+    identity_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame]
+    if len(identity_columns) == 2 and frame.duplicated(identity_columns, keep=False).any():
+        examples = (
+            frame.loc[frame.duplicated(identity_columns, keep=False), identity_columns]
+            .drop_duplicates()
+            .head(5)
+            .to_dict(orient="records")
+        )
+        raise DataFetchError(f"duplicate report identities across pages: {examples}")
+    sort_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame.columns]
+    if sort_columns:
+        frame = frame.sort_values(sort_columns, kind="stable").reset_index(drop=True)
+    return frame
+
+
+def _load_datacenter_report_cache(
+    contract: Mapping[str, Any],
+    *,
+    report_name: str,
+    columns: str,
+    extra_filter: str,
+) -> pd.DataFrame | None:
+    loaded = _datacenter_report_cache(contract).load()
+    if not loaded.hit:
+        _record_datacenter_stat("cache_misses")
+        with _DATACENTER_CACHE_STATS_LOCK:
+            _DATACENTER_CACHE_MISS_REASONS[str(loaded.reason or "unknown")] += 1
+        return None
+    try:
+        value = loaded.value
+        if (
+            not isinstance(value, Mapping)
+            or value.get("adapter_version") != DATACENTER_REPORT_CACHE_ADAPTER_VERSION
+            or value.get("contract") != dict(contract)
+            or isinstance(value.get("retrieved_at"), bool)
+            or not isinstance(value.get("retrieved_at"), (int, float))
+            or not math.isfinite(float(value["retrieved_at"]))
+            or float(value["retrieved_at"]) <= 0
+        ):
+            raise DataFetchError("datacenter report cache contract is invalid")
+        frame = _validated_complete_report_frame(
+            value.get("rows"),
+            report_name=report_name,
+            columns=columns,
+            extra_filter=extra_filter,
+            expected_count=value.get("row_count"),
+        )
+    except (DataFetchError, KeyError, TypeError, ValueError, OverflowError):
+        _record_datacenter_stat("cache_invalid")
+        return None
+    age_ms = max(0, int((time.time() - float(value["retrieved_at"])) * 1000.0))
+    with _DATACENTER_CACHE_STATS_LOCK:
+        _DATACENTER_CACHE_STATS["cache_hits"] += 1
+        _DATACENTER_CACHE_STATS["rows_from_cache"] += len(frame)
+        _DATACENTER_CACHE_STATS["oldest_cache_age_ms"] = max(
+            _DATACENTER_CACHE_STATS.get("oldest_cache_age_ms", 0), age_ms
+        )
+    return frame
+
+
+def _save_datacenter_report_cache(
+    contract: Mapping[str, Any],
+    frame: pd.DataFrame,
+) -> None:
+    try:
+        rows = frame.to_dict(orient="records")
+        _datacenter_report_cache(contract).save(
+            {
+                "adapter_version": DATACENTER_REPORT_CACHE_ADAPTER_VERSION,
+                "contract": dict(contract),
+                "retrieved_at": time.time(),
+                "row_count": len(rows),
+                "rows": rows,
+            },
+            ttl=_datacenter_report_cache_ttl(str(contract.get("filter") or "")),
+        )
+    except Exception:
+        # A cache is an optimization only; a fully validated network frame must
+        # remain usable if the runner's cache volume is unavailable.
+        _record_datacenter_stat("cache_write_errors")
+
+
 def _fetch_all_pages(
     report_name: str,
     columns: str,
@@ -514,6 +738,15 @@ def _fetch_all_pages(
         or max_workers < 1
     ):
         raise ValueError("page_size and max_workers must be positive integers")
+    contract = _datacenter_cache_contract(report_name, columns, extra_filter, page_size)
+    cached = _load_datacenter_report_cache(
+        contract,
+        report_name=report_name,
+        columns=columns,
+        extra_filter=extra_filter,
+    )
+    if cached is not None:
+        return cached
     try:
         first = _request_page(
             report_name,
@@ -547,7 +780,18 @@ def _fetch_all_pages(
     if first.pages == 0:
         if first.data or first.count != 0:
             raise DataFetchError(f"{report_name} returned inconsistent zero-page metadata")
-        return pd.DataFrame()
+        frame = _validated_complete_report_frame(
+            [],
+            report_name=report_name,
+            columns=columns,
+            extra_filter=extra_filter,
+            expected_count=0,
+        )
+        _record_datacenter_stat("network_queries")
+        # A transient provider/finality window can appear as a zero-row
+        # full-market response.  Returning it preserves existing semantics,
+        # but not caching it lets the bounded workflow retry recover.
+        return frame
     if not first.data:
         raise DataFetchError(f"{report_name} page 1/{first.pages} is empty")
 
@@ -636,23 +880,16 @@ def _fetch_all_pages(
     ordered_rows = [row for page in range(1, first.pages + 1) for row in pages[page]]
     if len(ordered_rows) != first.count:
         raise DataFetchError(f"{report_name} expected {first.count} rows but received {len(ordered_rows)}")
-    frame = pd.DataFrame(ordered_rows)
-    if "SECURITY_CODE" not in frame.columns:
-        raise DataFetchError(f"{report_name} response omitted SECURITY_CODE")
-    _validate_requested_columns(frame, columns, report_name=report_name)
-    _validate_filtered_report_date(frame, extra_filter)
-    identity_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame]
-    if len(identity_columns) == 2 and frame.duplicated(identity_columns, keep=False).any():
-        examples = (
-            frame.loc[frame.duplicated(identity_columns, keep=False), identity_columns]
-            .drop_duplicates()
-            .head(5)
-            .to_dict(orient="records")
-        )
-        raise DataFetchError(f"duplicate report identities across pages: {examples}")
-    sort_columns = [column for column in ("SECURITY_CODE", "REPORT_DATE") if column in frame.columns]
-    if sort_columns:
-        frame = frame.sort_values(sort_columns, kind="stable").reset_index(drop=True)
+    frame = _validated_complete_report_frame(
+        ordered_rows,
+        report_name=report_name,
+        columns=columns,
+        extra_filter=extra_filter,
+        expected_count=first.count,
+    )
+    _record_datacenter_stat("network_queries")
+    _record_datacenter_stat("rows_from_network", len(frame))
+    _save_datacenter_report_cache(contract, frame)
     return frame
 
 

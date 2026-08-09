@@ -2474,6 +2474,7 @@ def _valid_fcf_normalisation_evidence(m: Mapping[str, Any], result: Mapping[str,
         interim_cashflow,
         period_contract=period_contract,
         require_capex_provenance=True,
+        expected_security_code=_normalize_code(m.get("code")),
     )
     expected_revenue = reconstruct_ttm_revenue(
         annual_revenue,

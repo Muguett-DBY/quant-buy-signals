@@ -2031,3 +2031,66 @@ def test_listing_date_reverse_coverage_excludes_explicit_future_listings():
 
     assert len(result) == 99
     assert result["listing_date_status"].eq("reported").all()
+
+
+def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_provenance(monkeypatch):
+    observed = {}
+    source = {"600519": {"cashflow": []}}
+    diagnostic = {
+        "adapter_version": 2,
+        "strategy": "eastmoney_bulk_primary_sina_gap_only_secondary",
+        "candidate_requests": 2,
+        "target_requests": 2,
+        "skipped_requests": 0,
+        "budget_exhausted": False,
+        "request_budget": 128,
+        "target_codes": 1,
+        "gap_identities_before": 6,
+        "gap_identities_after": 5,
+        "filled_fields": 1,
+        "status_counts": {"ok": 2},
+        "duration_ms": 999.0,
+        "client": {"network_requests": 2, "cache_hits": 0},
+    }
+
+    def fake_backfill(financials, contract, *, codes, force_refresh):
+        observed.update(financials=financials, contract=contract, codes=codes, force_refresh=force_refresh)
+        return SimpleNamespace(financials=source, diagnostic=diagnostic)
+
+    monkeypatch.setattr(fetcher, "backfill_strict_ttm_gaps", fake_backfill)
+    monkeypatch.setattr(fetcher, "get_datacenter_fetch_diagnostics", lambda: {"cache_hits": 7})
+    instance = fetcher.DataFetcher(force_financial_fallback_refresh=True)
+    instance._requested_financial_codes = ("600519",)
+    instance._primary_financial_companies = 1
+
+    assert instance.backfill_financial_gaps(source, contract={"period": "test"}) is source
+    assert observed == {
+        "financials": source,
+        "contract": {"period": "test"},
+        "codes": ("600519",),
+        "force_refresh": True,
+    }
+    runtime = instance.financial_fetch_diagnostic()
+    public = instance.financial_publication_provenance()
+    assert runtime["eastmoney_report_cache"] == {"cache_hits": 7}
+    assert runtime["sina_fallback"]["duration_ms"] == 999.0
+    assert "duration_ms" not in public["sina_fallback"]
+    assert "client" not in public["sina_fallback"]
+    assert public["sina_fallback"]["filled_fields"] == 1
+
+
+def test_financial_fetch_options_are_boolean_and_empty_scope_resets_prior_diagnostics():
+    with pytest.raises(ValueError, match="refresh options must be boolean"):
+        fetcher.DataFetcher(force_financial_fallback_refresh=1)
+
+    instance = fetcher.DataFetcher()
+    instance._requested_financial_codes = ("600519",)
+    instance._primary_financial_duration_ms = 123.0
+    instance._primary_financial_companies = 1
+    instance._financial_fallback_diagnostic = {"status": "complete"}
+
+    assert instance.get_financials(codes=["920002"]) == {}
+    diagnostic = instance.financial_fetch_diagnostic()
+    assert diagnostic["primary_companies"] == 0
+    assert diagnostic["primary_duration_ms"] == 0.0
+    assert diagnostic["sina_fallback"]["status"] == "not_run"

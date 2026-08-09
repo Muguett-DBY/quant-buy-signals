@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import BoundedSemaphore, Event, Lock
@@ -9,6 +10,12 @@ import pytest
 import requests
 
 import data.datacenter as dc
+
+
+@pytest.fixture(autouse=True)
+def _isolated_datacenter_report_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(dc, "DATACENTER_REPORT_CACHE_DIR", tmp_path / "datacenter_reports")
+    dc.reset_datacenter_fetch_diagnostics()
 
 
 def _indicator_row(year: int, *, code: str = "000001") -> dict:
@@ -128,6 +135,137 @@ def test_fetch_all_pages_requests_page_one_once_and_returns_page_order(monkeypat
     )
     assert calls.count(1) == 1
     assert frame["SECURITY_CODE"].tolist() == ["000001", "000002", "000003"]
+
+
+def test_complete_report_query_cache_reuses_validated_rows_without_network(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        return dc._PageResult(
+            page,
+            1,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2023-12-31", "TOTAL_OPERATE_INCOME": 1.0}],
+            1,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+    args = (
+        dc.RPT_INCOME,
+        "SECURITY_CODE,REPORT_DATE,TOTAL_OPERATE_INCOME",
+        "(REPORT_DATE='2023-12-31')",
+    )
+
+    first = dc._fetch_all_pages(*args)
+    second = dc._fetch_all_pages(*args)
+
+    assert first.to_dict(orient="records") == second.to_dict(orient="records")
+    assert calls == [1]
+    diagnostic = dc.get_datacenter_fetch_diagnostics()
+    assert diagnostic["network_queries"] == 1
+    assert diagnostic["cache_hits"] == 1
+    assert diagnostic["rows_from_cache"] == 1
+
+
+def test_report_query_cache_contract_prevents_cross_query_reuse(monkeypatch):
+    calls = Counter()
+
+    def fake_request(report, _columns, page, *_args, **_kwargs):
+        calls[report] += 1
+        return dc._PageResult(
+            page,
+            1,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2023-12-31"}],
+            1,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+    for report in (dc.RPT_INCOME, dc.RPT_CASHFLOW):
+        dc._fetch_all_pages(
+            report,
+            "SECURITY_CODE,REPORT_DATE",
+            "(REPORT_DATE='2023-12-31')",
+        )
+
+    assert calls == Counter({dc.RPT_INCOME: 1, dc.RPT_CASHFLOW: 1})
+
+
+def test_semantically_invalid_report_cache_is_a_miss_and_is_replaced(monkeypatch):
+    contract = dc._datacenter_cache_contract(
+        dc.RPT_INCOME,
+        "SECURITY_CODE,REPORT_DATE,TOTAL_OPERATE_INCOME",
+        "(REPORT_DATE='2023-12-31')",
+        500,
+    )
+    cache = dc._datacenter_report_cache(contract)
+    cache.save(
+        {
+            "adapter_version": dc.DATACENTER_REPORT_CACHE_ADAPTER_VERSION,
+            "contract": contract,
+            "retrieved_at": 1.0,
+            "row_count": 1,
+            "rows": [{"SECURITY_CODE": "000001", "REPORT_DATE": "2024-12-31"}],
+        }
+    )
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        return dc._PageResult(
+            page,
+            1,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2023-12-31", "TOTAL_OPERATE_INCOME": 1.0}],
+            1,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+    frame = dc._fetch_all_pages(
+        dc.RPT_INCOME,
+        "SECURITY_CODE,REPORT_DATE,TOTAL_OPERATE_INCOME",
+        "(REPORT_DATE='2023-12-31')",
+    )
+
+    assert calls == [1]
+    assert frame.loc[0, "REPORT_DATE"] == "2023-12-31"
+    assert dc.get_datacenter_fetch_diagnostics()["cache_invalid"] == 1
+
+
+def test_zero_row_report_is_not_cached_and_a_retry_can_recover(monkeypatch):
+    calls = []
+
+    def fake_request(_report, _columns, page, *_args, **_kwargs):
+        calls.append(page)
+        if len(calls) == 1:
+            return dc._PageResult(page, 0, [], 0)
+        return dc._PageResult(
+            page,
+            1,
+            [{"SECURITY_CODE": "000001", "REPORT_DATE": "2023-12-31"}],
+            1,
+        )
+
+    monkeypatch.setattr(dc, "_request_page", fake_request)
+    args = (dc.RPT_INCOME, "SECURITY_CODE,REPORT_DATE", "(REPORT_DATE='2023-12-31')")
+
+    assert dc._fetch_all_pages(*args).empty
+    recovered = dc._fetch_all_pages(*args)
+
+    assert recovered["SECURITY_CODE"].tolist() == ["000001"]
+    assert calls == [1, 1]
+
+
+def test_report_identity_is_normalised_before_duplicate_detection():
+    with pytest.raises(dc.DataFetchError, match="duplicate report identities"):
+        dc._validated_complete_report_frame(
+            [
+                {"SECURITY_CODE": 1, "REPORT_DATE": "2023-12-31"},
+                {"SECURITY_CODE": "000001", "REPORT_DATE": "2023-12-31 00:00:00"},
+            ],
+            report_name=dc.RPT_INCOME,
+            columns="SECURITY_CODE,REPORT_DATE",
+            extra_filter="(REPORT_DATE='2023-12-31')",
+            expected_count=2,
+        )
 
 
 def test_fetch_all_pages_recovers_only_failed_transient_page_and_keeps_page_order(monkeypatch):

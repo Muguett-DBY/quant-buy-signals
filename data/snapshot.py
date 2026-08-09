@@ -841,6 +841,7 @@ def _strict_ttm_metric_status(
     company: Mapping[str, Any],
     contract: Mapping[str, str],
     *,
+    security_code: str,
     metric: str,
     market_cap: float | None,
 ) -> str:
@@ -901,6 +902,7 @@ def _strict_ttm_metric_status(
                     row.get("CAPEX_PROVENANCE"),
                     expected_value=value,
                     expected_report_date=report_date,
+                    expected_security_code=security_code,
                 )
                 if status != "complete":
                     return status
@@ -937,6 +939,7 @@ def _strict_ttm_source_coverage(
                 status = _strict_ttm_metric_status(
                     company,
                     contract,
+                    security_code=code,
                     metric=metric,
                     market_cap=_finite_number(market_cap_by_code.get(code)),
                 )
@@ -1879,6 +1882,7 @@ def save_market_snapshot(
     now: float | None = None,
     retrieved_at: float | None = None,
     analysis_quality: Mapping[str, Any] | None = None,
+    financial_fetch_provenance: Mapping[str, Any] | None = None,
     expected_previous_timestamp: float | None | object = _EXPECTED_UNSET,
     expected_previous_payload_sha256: str | None | object = _EXPECTED_UNSET,
 ) -> Mapping[str, Any]:
@@ -1906,6 +1910,8 @@ def save_market_snapshot(
     ):
         raise ValueError("retrieved_at must equal the oldest validated quote retrieval timestamp")
     retrieved = quote_retrieved
+    if financial_fetch_provenance is not None and not isinstance(financial_fetch_provenance, Mapping):
+        raise ValueError("financial_fetch_provenance must be a mapping")
     payload = {
         "quotes": quotes,
         "financials": dict(financials),
@@ -1913,6 +1919,7 @@ def save_market_snapshot(
         "retrieved_at": retrieved,
         "validation": dict(validation),
         "analysis_quality": dict(analysis_quality or {}),
+        "financial_fetch_provenance": dict(financial_fetch_provenance or {}),
     }
     candidate_payload_sha256 = _payload_sha256(payload)
 
@@ -2038,6 +2045,12 @@ def _cached_outcome(
             # fail merely because wall-clock time has advanced.
             retrieval_reference_timestamp=timestamp,
         )
+        financial_fetch_provenance = loaded.value.get("financial_fetch_provenance", {})
+        if not isinstance(financial_fetch_provenance, Mapping):
+            raise ValueError("cached financial_fetch_provenance is not a mapping")
+        if financial_fetch_provenance:
+            validation = dict(validation)
+            validation["financial_fetch"] = dict(financial_fetch_provenance)
         retrieved = _quote_retrieved_at(quotes)
         if retrieved is None:
             raise ValueError("cached quotes lack a defensible retrieval timestamp")
@@ -2237,14 +2250,33 @@ def get_market_snapshot(
             enforce_stale_limit=False,
             max_stale_age=max_stale_age,
         )
-        validation = validate_market_snapshot(
-            quotes,
-            financials,
-            min_quotes=min_quotes,
-            min_financial_coverage=min_financial_coverage,
-            as_of_timestamp=timestamp,
-            retrieval_reference_timestamp=timestamp,
+        expected_annual_year, current_interim_date, prior_interim_date, _reference = _expected_report_periods(timestamp)
+        refresh_contract = _reporting_period_contract(
+            expected_annual_year,
+            current_interim_date,
+            prior_interim_date,
         )
+        backfill = getattr(fetcher, "backfill_financial_gaps", None)
+        if callable(backfill) and refresh_contract is not None:
+            financials = backfill(financials, contract=refresh_contract, codes=codes)
+            if not isinstance(financials, Mapping):
+                raise ValueError("financial gap fallback must return a mapping")
+        validation = dict(
+            validate_market_snapshot(
+                quotes,
+                financials,
+                min_quotes=min_quotes,
+                min_financial_coverage=min_financial_coverage,
+                as_of_timestamp=timestamp,
+                retrieval_reference_timestamp=timestamp,
+            )
+        )
+        publication_provenance = getattr(fetcher, "financial_publication_provenance", None)
+        if callable(publication_provenance):
+            provenance = publication_provenance()
+            if not isinstance(provenance, Mapping):
+                raise ValueError("financial publication provenance must be a mapping")
+            validation["financial_fetch"] = dict(provenance)
         retrieved = _quote_retrieved_at(quotes)
         if (
             retrieved is not None
@@ -2265,6 +2297,11 @@ def get_market_snapshot(
                 min_financial_coverage=min_financial_coverage,
                 now=timestamp,
                 retrieved_at=retrieved,
+                financial_fetch_provenance=(
+                    validation.get("financial_fetch")
+                    if isinstance(validation.get("financial_fetch"), Mapping)
+                    else None
+                ),
                 expected_previous_timestamp=(previous_timestamp if active_exists else _EXPECTED_UNSET),
                 expected_previous_payload_sha256=(previous_payload_sha256 if active_exists else _EXPECTED_UNSET),
             )
