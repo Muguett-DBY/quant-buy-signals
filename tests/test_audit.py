@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 import pytest
 
-from data.capex_evidence import resolve_capex_evidence
+from data.capex_evidence import resolve_capex_evidence, sina_reported_capex_provenance
 from data.financial_source_evidence import zero_capex_evidence
 from data.market_coldness import (
     EASTMONEY_CLIST_ENDPOINT,
@@ -184,7 +184,6 @@ def test_independent_audit_accepts_committed_exchange_filed_zero_capex_evidence(
         security_code=code,
         official_evidence=official_evidence,
     )
-
     assert value == 0.0
     assert (
         _audit_validate_capex_provenance(
@@ -193,6 +192,42 @@ def test_independent_audit_accepts_committed_exchange_filed_zero_capex_evidence(
             expected_report_date=report_date,
         )
         == "complete"
+    )
+
+
+def test_independent_audit_replays_code_bound_sina_reported_capex():
+    provenance = sina_reported_capex_provenance(
+        123.45,
+        report_date="2026-03-31",
+        security_code="600519",
+        source_raw_sha256="0123456789abcdef" * 4,
+        publish_date="20260425",
+        update_time=1777029605,
+        report_type="合并期末",
+        currency="CNY",
+        request_num=8,
+    )
+
+    assert (
+        _audit_validate_capex_provenance(
+            provenance,
+            expected_value=123.45,
+            expected_report_date="2026-03-31",
+            expected_security_code="600519",
+        )
+        == "complete"
+    )
+    tampered = deepcopy(provenance)
+    tampered["security_code"] = "600518"
+    tampered["source_query"]["paperCode"] = "sh600518"
+    assert (
+        _audit_validate_capex_provenance(
+            tampered,
+            expected_value=123.45,
+            expected_report_date="2026-03-31",
+            expected_security_code="600519",
+        )
+        == "invalid_capex_provenance"
     )
 
 

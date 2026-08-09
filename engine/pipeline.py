@@ -824,6 +824,7 @@ def _valuation_source_error(
             company.get("cashflow_interim", []),
             period_contract=reporting_period_contract,
             require_capex_provenance=True,
+            expected_security_code=expected_code,
         )
         expected_ttm_revenue = reconstruct_ttm_revenue(
             company.get("revenue_history", []),
@@ -1076,6 +1077,7 @@ def _infer_valuation_rejection_reason(
             company.get("cashflow_interim", []),
             period_contract=reporting_period_contract,
             require_capex_provenance=True,
+            expected_security_code=code,
         )
         fcff_status = str(ttm_fcff.get("status") or "unknown")
         if fcff_status != "complete":

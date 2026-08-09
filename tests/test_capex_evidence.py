@@ -2,7 +2,11 @@ from copy import deepcopy
 
 import pytest
 
-from data.capex_evidence import resolve_capex_evidence, validate_capex_provenance
+from data.capex_evidence import (
+    resolve_capex_evidence,
+    sina_reported_capex_provenance,
+    validate_capex_provenance,
+)
 from data.financial_source_evidence import zero_capex_evidence
 
 
@@ -231,6 +235,59 @@ def test_tampered_official_document_provenance_is_rejected():
             tampered,
             expected_value=value,
             expected_report_date="2026-03-31",
+        )
+        == "invalid_capex_provenance"
+    )
+
+
+def test_sina_reported_capex_provenance_is_provider_bound_and_tamper_evident():
+    provenance = sina_reported_capex_provenance(
+        604_791_583.89,
+        report_date="2026-03-31",
+        security_code="600519",
+        source_raw_sha256="0123456789abcdef" * 4,
+        publish_date="20260425",
+        update_time=1777029605,
+        report_type="合并期末",
+        currency="CNY",
+        request_num=8,
+    )
+
+    assert (
+        validate_capex_provenance(
+            provenance,
+            expected_value=604_791_583.89,
+            expected_report_date="2026-03-31",
+            expected_security_code="600519",
+        )
+        == "complete"
+    )
+    for field, value in (
+        ("source_url", "https://quotes.sina.cn/other"),
+        ("source_field", "WRONG"),
+        ("security_code", "600518"),
+        ("source_raw_sha256", "0" * 64),
+    ):
+        tampered = deepcopy(provenance)
+        tampered[field] = value
+        assert (
+            validate_capex_provenance(
+                tampered,
+                expected_value=604_791_583.89,
+                expected_report_date="2026-03-31",
+            )
+            == "invalid_capex_provenance"
+        )
+
+    cross_company = deepcopy(provenance)
+    cross_company["security_code"] = "600518"
+    cross_company["source_query"]["paperCode"] = "sh600518"
+    assert (
+        validate_capex_provenance(
+            cross_company,
+            expected_value=604_791_583.89,
+            expected_report_date="2026-03-31",
+            expected_security_code="600519",
         )
         == "invalid_capex_provenance"
     )

@@ -8,6 +8,7 @@ import re
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -34,7 +35,10 @@ from data.datacenter import (
     MAIN_FINANCIAL_INDICATOR_METRICS,
     fetch_all_financials_parallel,
     fetch_interim_financials_parallel,
+    get_datacenter_fetch_diagnostics,
+    reset_datacenter_fetch_diagnostics,
 )
+from data.sina_financial import backfill_strict_ttm_gaps
 
 
 SINA_URL = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
@@ -1588,11 +1592,23 @@ class DataFetcher:
         *,
         enrich_listing_dates: bool = False,
         force_reference_refresh: bool = False,
+        force_financial_fallback_refresh: bool = False,
     ) -> None:
-        if not isinstance(enrich_listing_dates, bool) or not isinstance(force_reference_refresh, bool):
-            raise ValueError("listing-date fetch options must be boolean")
+        if not all(
+            isinstance(value, bool)
+            for value in (enrich_listing_dates, force_reference_refresh, force_financial_fallback_refresh)
+        ):
+            raise ValueError("data fetch refresh options must be boolean")
         self.enrich_listing_dates = enrich_listing_dates
         self.force_reference_refresh = force_reference_refresh
+        self.force_financial_fallback_refresh = force_financial_fallback_refresh
+        self._requested_financial_codes: tuple[str, ...] = ()
+        self._primary_financial_duration_ms = 0.0
+        self._primary_financial_companies = 0
+        self._financial_fallback_diagnostic: Mapping[str, Any] = {
+            "strategy": "eastmoney_bulk_primary_sina_gap_only_secondary",
+            "status": "not_run",
+        }
 
     def get_stock_list(self, include_hk: bool = False) -> pd.DataFrame:
         """Return SH/SZ quotes and, only when requested, quote-only HK rows.
@@ -1647,12 +1663,22 @@ class DataFetcher:
         """Fetch annual reports plus the latest interim and prior-year comparable."""
         print("[Fetcher] Loading financials from Eastmoney Datacenter...")
         started = time.time()
+        reset_datacenter_fetch_diagnostics()
+        self._requested_financial_codes = ()
+        self._primary_financial_duration_ms = 0.0
+        self._primary_financial_companies = 0
+        self._financial_fallback_diagnostic = {
+            "strategy": "eastmoney_bulk_primary_sina_gap_only_secondary",
+            "status": "not_run",
+        }
         requested_codes = None
         if codes is not None:
             requested_codes = {_code(code) for code in codes if _is_analysis_financial_code(code)}
             if not requested_codes:
+                self._requested_financial_codes = ()
                 print("[Fetcher] Financials done: 0 stocks (no SH/SZ codes requested)")
                 return {}
+        self._requested_financial_codes = tuple(sorted(requested_codes)) if requested_codes is not None else ()
 
         # Annual history and current/prior interim statements are independent
         # all-or-error generations.  Fetch them together; the datacenter layer
@@ -1700,5 +1726,73 @@ class DataFetcher:
             indicators,
             detailed_cashflow_interim,
         )
-        print(f"[Fetcher] Financials done: {len(result)} stocks in {time.time() - started:.1f}s")
+        elapsed = time.time() - started
+        self._primary_financial_duration_ms = round(elapsed * 1000.0, 3)
+        self._primary_financial_companies = len(result)
+        print(f"[Fetcher] Financials done: {len(result)} stocks in {elapsed:.1f}s")
+        print(f"[Fetcher] Eastmoney report cache: {get_datacenter_fetch_diagnostics()}")
         return result
+
+    def backfill_financial_gaps(
+        self,
+        financials: Mapping[str, Mapping[str, Any]],
+        *,
+        contract: Mapping[str, Any],
+        codes: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Use Sina only for exact strict-TTM gaps left by the bulk primary."""
+
+        requested = tuple(codes) if codes is not None else self._requested_financial_codes
+        outcome = backfill_strict_ttm_gaps(
+            financials,
+            contract,
+            codes=requested or None,
+            force_refresh=self.force_financial_fallback_refresh,
+        )
+        self._financial_fallback_diagnostic = dict(outcome.diagnostic)
+        print(
+            "[Fetcher] Sina gap fallback: "
+            f"{outcome.diagnostic.get('target_requests', 0)} requests, "
+            f"{outcome.diagnostic.get('filled_fields', 0)} fields, "
+            f"{outcome.diagnostic.get('conflicts', 0)} conflicts"
+        )
+        return outcome.financials
+
+    def financial_fetch_diagnostic(self) -> dict[str, Any]:
+        return {
+            "primary_source": "eastmoney_datacenter_bulk",
+            "primary_companies": self._primary_financial_companies,
+            "primary_duration_ms": self._primary_financial_duration_ms,
+            "eastmoney_report_cache": get_datacenter_fetch_diagnostics(),
+            "sina_fallback": dict(self._financial_fallback_diagnostic),
+        }
+
+    def financial_publication_provenance(self) -> dict[str, Any]:
+        """Return stable acquisition facts suitable for content-addressed output."""
+
+        fallback = self._financial_fallback_diagnostic
+        stable_keys = (
+            "adapter_version",
+            "strategy",
+            "candidate_requests",
+            "target_requests",
+            "skipped_requests",
+            "budget_exhausted",
+            "request_budget",
+            "target_codes",
+            "target_codes_by_metric",
+            "gap_identities_before",
+            "gap_identities_after",
+            "filled_fields",
+            "filled_provenance",
+            "filled_codes",
+            "conflicts",
+            "conflict_codes",
+            "unverified_zero",
+            "status_counts",
+        )
+        return {
+            "primary_source": "eastmoney_datacenter_bulk",
+            "primary_companies": self._primary_financial_companies,
+            "sina_fallback": {key: deepcopy(fallback[key]) for key in stable_keys if key in fallback},
+        }

@@ -174,6 +174,7 @@ def reconstruct_ttm_fcff(
     *,
     period_contract: ReportingPeriodContract,
     require_capex_provenance: bool = False,
+    expected_security_code: str | None = None,
 ) -> dict[str, object]:
     """Reconstruct strict trailing-twelve-month FCFF from cumulative statements.
 
@@ -237,6 +238,7 @@ def reconstruct_ttm_fcff(
                 provenance,
                 expected_value=raw_capex,
                 expected_report_date=_canonical_report_date(row),
+                expected_security_code=expected_security_code,
             )
             period_component["capex_provenance_status"] = provenance_status
             if provenance_status != "complete":

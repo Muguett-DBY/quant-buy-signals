@@ -15,6 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import pytest
 
+from data.capex_evidence import sina_reported_capex_provenance
 from engine.audit import _RULE_FILES as _AUDIT_RULE_FILES
 from engine.buy_screener import (
     STATUS_INSUFFICIENT_EVIDENCE,
@@ -44,6 +45,7 @@ from tools.verify_release_zip import (
     _expected_audit_bear_case,
     _git_tree_entries,
     _normalised_file_names,
+    _valid_capex_provenance,
     verify_release_zip,
 )
 
@@ -64,6 +66,7 @@ _EXPECTED_RULE_FILES = {
     "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
+    "data/sina_financial.py",
     "data/trading_calendar.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
@@ -1387,6 +1390,7 @@ def _write_minimal_release(
         "data/patch4_evidence.py": b"# Patch 4 announcement evidence\n",
         "data/quality_history.py": b"# quality history\n",
         "data/research_reports.py": b"# Type 7 research report evidence\n",
+        "data/sina_financial.py": b"# Sina gap-only financial fallback\n",
         "data/snapshot.py": b"# snapshot\n",
         "data/trading_calendar.py": b"# pinned trading calendar\n",
         "desktop/__init__.py": b"\n",
@@ -2633,6 +2637,7 @@ def test_audit_and_release_rule_hash_contracts_are_identical_and_required():
         "data/growth_evidence.py",
         "data/patch4_evidence.py",
         "data/research_reports.py",
+        "data/sina_financial.py",
         "engine/market_coldness.py",
     ),
 )
@@ -2656,6 +2661,7 @@ def test_release_zip_verifier_requires_all_new_quantitative_rule_modules(tmp_pat
         "data/market_history.py",
         "data/patch4_evidence.py",
         "data/research_reports.py",
+        "data/sina_financial.py",
         "engine/market_coldness.py",
         "engine/quantitative_evidence.py",
         "engine/risk.py",
@@ -2665,6 +2671,36 @@ def test_release_zip_verifier_requires_all_new_quantitative_rule_modules(tmp_pat
 
     errors = _verify(path)
     assert any("required release files are missing" in error for error in errors)
+
+
+def test_release_replay_accepts_only_code_bound_sina_reported_capex():
+    provenance = sina_reported_capex_provenance(
+        123.45,
+        report_date="2026-03-31",
+        security_code="600519",
+        source_raw_sha256="0123456789abcdef" * 4,
+        publish_date="20260425",
+        update_time=1777029605,
+        report_type="合并期末",
+        currency="CNY",
+        request_num=8,
+    )
+
+    assert _valid_capex_provenance(
+        provenance,
+        expected_value=123.45,
+        expected_report_date="2026-03-31",
+        expected_security_code="600519",
+    )
+    tampered = deepcopy(provenance)
+    tampered["security_code"] = "600518"
+    tampered["source_query"]["paperCode"] = "sh600518"
+    assert not _valid_capex_provenance(
+        tampered,
+        expected_value=123.45,
+        expected_report_date="2026-03-31",
+        expected_security_code="600519",
+    )
 
 
 @pytest.mark.parametrize(

@@ -136,6 +136,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--refresh", action="store_true", help="require a fresh validated market snapshot")
+    parser.add_argument(
+        "--force-financial-fallback-refresh",
+        action="store_true",
+        help="bypass only the bounded secondary financial-source cache",
+    )
     return parser
 
 
@@ -642,13 +647,22 @@ def _latest_closed_session_date(now_shanghai: datetime) -> date:
     return session
 
 
-def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[str, object]:
+def publish_mobile_snapshot(
+    *,
+    output_dir: str | Path,
+    refresh: bool,
+    force_financial_fallback_refresh: bool = False,
+) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     source_commit = _source_commit()
     starting_state = audit_state_hashes()
     cache = SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
     snapshot = get_market_snapshot(
-        DataFetcher(enrich_listing_dates=True, force_reference_refresh=refresh),
+        DataFetcher(
+            enrich_listing_dates=True,
+            force_reference_refresh=refresh,
+            force_financial_fallback_refresh=force_financial_fallback_refresh,
+        ),
         cache,
         force_refresh=refresh,
         persist_network=False,
@@ -737,6 +751,11 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
             data_timestamp=snapshot.data_timestamp,
             retrieved_at=snapshot.retrieved_at,
             analysis_quality=analysis.quality,
+            financial_fetch_provenance=(
+                snapshot.validation.get("financial_fetch")
+                if isinstance(snapshot.validation.get("financial_fetch"), Mapping)
+                else None
+            ),
             expected_previous_timestamp=snapshot.baseline_timestamp,
             expected_previous_payload_sha256=snapshot.baseline_payload_sha256,
         )
@@ -775,7 +794,11 @@ def publish_mobile_snapshot(*, output_dir: str | Path, refresh: bool) -> dict[st
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    manifest = publish_mobile_snapshot(output_dir=args.output_dir, refresh=bool(args.refresh))
+    manifest = publish_mobile_snapshot(
+        output_dir=args.output_dir,
+        refresh=bool(args.refresh),
+        force_financial_fallback_refresh=bool(args.force_financial_fallback_refresh),
+    )
     # GitHub's Windows runner may expose a cp1252 stdout even though the files
     # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful
     # publication cannot be turned into a failed job by Chinese display text.
