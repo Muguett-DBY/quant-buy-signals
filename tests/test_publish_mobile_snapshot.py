@@ -420,6 +420,9 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
     monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
     monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    # The Tongdaxin TCP fallback is network I/O; pin it to no-op so this test
+    # measures only the Eastmoney-cache/budget behaviour.
+    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", lambda _requests: {})
     loader = publisher._bounded_type3_growth_loader(limit=2)
     first = [{"code": code, "as_of": "2026-07-29"} for code in ("000003", "000001", "000002", "000004")]
     second = [{"code": "000005", "as_of": "2026-07-29"}]

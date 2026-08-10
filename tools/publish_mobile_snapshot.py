@@ -632,6 +632,29 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         )
         if selected_network:
             record_growth_evidence_retry_states(selected_network, fetched)
+        # Tongdaxin (mootdx) TCP fallback: GitHub runner IPs are rate-limited
+        # hard by Eastmoney, so many companies never get a segment record from
+        # the primary source.  The TCP channel serves the same per-company
+        # business-composition history and is not IP-rate-limited.  Fill only
+        # codes that came back without a usable segment source.
+        missing_segment = [
+            request
+            for request in prepared
+            if str(request.get("code") or "") not in fetched
+            or (fetched.get(str(request.get("code") or "")).get("segment_growth_sources") or {}).get("status")
+            in {"unavailable", None}
+        ]
+        if missing_segment:
+            from data import tdx_segment as _tdx_segment
+
+            tdx_filled = _tdx_segment.backfill_tdx_segments(missing_segment)
+            for code, record in tdx_filled.items():
+                if str(code) not in fetched:
+                    fetched[str(code)] = record
+                else:
+                    existing = fetched[str(code)]
+                    if (existing.get("segment_growth_sources") or {}).get("status") in {"unavailable", None}:
+                        fetched[str(code)] = record
         return fetched
 
     return load
