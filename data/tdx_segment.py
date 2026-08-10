@@ -249,10 +249,9 @@ def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
             # The capture may be older (reuse within 21 days) or newer (the
             # local backfill ran after the closed session the build re-scores);
             # either is fine as long as the fiscal year is unchanged.
-            if (
-                age_days > SEGMENT_CACHE_REUSE_DAYS
-                or _latest_completed_annual_year(source_as_of) != _latest_completed_annual_year(as_of)
-            ):
+            if age_days > SEGMENT_CACHE_REUSE_DAYS or _latest_completed_annual_year(
+                source_as_of
+            ) != _latest_completed_annual_year(as_of):
                 continue
             cache = SafeFileCache(
                 path,
