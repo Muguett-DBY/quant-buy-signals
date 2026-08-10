@@ -4,6 +4,15 @@ DS_DCF 是面向 A 股的多情景估值与七类型量化诊断工具。它把�
 
 > 本项目只提供研究筛选与模型复算，不构成投资建议。外部行情、财报和行业映射可能延迟、缺失或修订；任何输出都需要结合公告原文、组合约束和人工复核。
 
+## 网站（主攻方向）
+
+- **线上站点**：https://quant.custard.top
+- **架构**：GitHub Actions 每个交易日收盘后生成签名 catalogue → Cloudflare R2 存储 → Pages worker 只读 API（GET-only）→ 网站按需拉取
+- **代码**：`cloudflare/quant-dashboard/`（worker + schema）、`cloudflare-cron/`（恢复镜像）、发布流水线 `tools/publish_mobile_snapshot.py`
+- **量化口径**：见 `docs/MODEL.md`；**架构总览**：见 `docs/ARCHITECTURE.md`
+
+手机 app（`android/`）与桌面版（`desktop/` + `app.py`）已搁置，代码保留但不迭代。
+
 ## 环境
 
 - Python 3.11–3.14
