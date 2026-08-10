@@ -432,6 +432,115 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     assert calls == [(first[:3], progress)]
 
 
+def test_type3_growth_loader_merges_tdx_segment_keeping_external_evidence(monkeypatch):
+    """The Tongdaxin fallback must replace only the unavailable segment
+    component, preserving a fetched record's valid external evidence."""
+    progress = object()
+
+    def fetch(requests, *, progress_cb=None, **kwargs):
+        return {
+            request["code"]: {
+                "available": False,
+                "code": request["code"],
+                "as_of": request["as_of"],
+                "model_id": "type3-growth-evidence-v1",
+                "external_growth_evidence": {"status": "complete", "evidence_id": "cninfo-ok"},
+                "segment_growth_sources": {"status": "unavailable", "reason": "eastmoney_rate_limited"},
+                "cache_hit": False,
+                "cache_diagnostic": "network",
+                "reason": "segment:unavailable",
+            }
+            for request in requests
+        }
+
+    def tdx_fill(requests):
+        return {
+            request["code"]: {
+                "available": False,
+                "code": request["code"],
+                "as_of": request["as_of"],
+                "model_id": "type3-growth-evidence-v1",
+                "external_growth_evidence": {"status": "unavailable", "reason": "tdx_no_external"},
+                "segment_growth_sources": {"status": "partial", "growth_source_count": 2, "reason": "two_years"},
+                "cache_hit": True,
+                "cache_diagnostic": "tdx_f10_backfill",
+                "reason": "segment:partial",
+            }
+            for request in requests
+        }
+
+    monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", tdx_fill)
+    loader = publisher._bounded_type3_growth_loader(limit=10)
+    requests = [{"code": "000020", "as_of": "2026-08-07", "revenue_records": [], "goodwill_records": []}]
+    loaded = loader(requests, progress_cb=progress)
+    record = loaded["000020"]
+    # Segment replaced by Tongdaxin partial; external evidence preserved.
+    assert record["segment_growth_sources"]["status"] == "partial"
+    assert record["external_growth_evidence"]["status"] == "complete"
+    assert record["external_growth_evidence"]["evidence_id"] == "cninfo-ok"
+    assert record["cache_diagnostic"] == "tdx_segment_merged_over_unavailable"
+    assert record["available"] is False
+    assert "external:complete" not in record["reason"]  # only unresolved children listed
+
+
+def test_type3_growth_loader_merge_reason_matches_external_reason_field(monkeypatch):
+    """When the fetched external is itself unavailable, the merged reason must
+    use the external's reason field so validate_growth_evidence_record passes."""
+    progress = object()
+
+    def fetch(requests, *, progress_cb=None, **kwargs):
+        return {
+            request["code"]: {
+                "available": False,
+                "code": request["code"],
+                "as_of": request["as_of"],
+                "model_id": "type3-growth-evidence-v1",
+                "external_growth_evidence": {
+                    "status": "unavailable",
+                    "reason": "no external growth evidence",
+                    "evidence_id": "eastmoney-external-growth:000020:unavailable",
+                },
+                "segment_growth_sources": {"status": "unavailable", "reason": "eastmoney_rate_limited"},
+                "cache_hit": False,
+                "cache_diagnostic": "network",
+                "reason": "segment:unavailable;external:no external growth evidence",
+            }
+            for request in requests
+        }
+
+    def tdx_fill(requests):
+        return {
+            request["code"]: {
+                "available": False,
+                "code": request["code"],
+                "as_of": request["as_of"],
+                "model_id": "type3-growth-evidence-v1",
+                "external_growth_evidence": {"status": "unavailable", "reason": "no external growth evidence"},
+                "segment_growth_sources": {"status": "partial", "growth_source_count": 2, "reason": "two_years"},
+                "cache_hit": True,
+                "cache_diagnostic": "tdx_f10_backfill",
+                "reason": "segment:two_years",
+            }
+            for request in requests
+        }
+
+    monkeypatch.setattr(publisher, "load_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_external_growth_evidence_cache_batch_state", lambda _requests: {})
+    monkeypatch.setattr(publisher, "load_growth_evidence_retry_state_batch", lambda _requests: {})
+    monkeypatch.setattr(publisher, "record_growth_evidence_retry_states", lambda _requests, _results: {})
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
+    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", tdx_fill)
+    loader = publisher._bounded_type3_growth_loader(limit=10)
+    requests = [{"code": "000020", "as_of": "2026-08-07", "revenue_records": [], "goodwill_records": []}]
+    record = loader(requests, progress_cb=progress)["000020"]
+    assert record["reason"] == "segment:two_years;external:no external growth evidence"
+
+
 def test_type3_growth_loader_always_selects_segment_cached_codes_without_spending_the_budget(monkeypatch):
     calls = []
 

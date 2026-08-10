@@ -611,7 +611,15 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         selected_codes.update(str(request.get("code") or "") for request in selected_network)
         selected = [request for request in prepared if str(request.get("code") or "") in selected_codes]
         if not selected:
-            return {}
+            # Every requested code was skipped (cache miss + retry not yet due,
+            # which happens when the Eastmoney source kept failing on a
+            # rate-limited runner IP).  These are exactly the codes the
+            # Tongdaxin TCP fallback exists for, so fill them from the TCP
+            # cache/channel instead of returning an empty result that keeps
+            # their Type 3 3d evidence missing.
+            from data import tdx_segment as _tdx_segment
+
+            return _tdx_segment.backfill_tdx_segments(prepared)
         cninfo_by_code: dict[str, dict[int, float]] = {}
         network_codes = [str(request.get("code") or "") for request in selected_network]
         if network_codes:
@@ -653,8 +661,37 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
                     fetched[str(code)] = record
                 else:
                     existing = fetched[str(code)]
-                    if (existing.get("segment_growth_sources") or {}).get("status") in {"unavailable", None}:
-                        fetched[str(code)] = record
+                    existing_segment = existing.get("segment_growth_sources")
+                    existing_segment_status = (
+                        existing_segment.get("status") if isinstance(existing_segment, Mapping) else None
+                    )
+                    if existing_segment_status in {"unavailable", None}:
+                        # Merge only the segment component.  The Tongdaxin
+                        # record carries a hardcoded unavailable external
+                        # (acquisition/goodwill) component, so replacing the
+                        # whole record would silently drop a fetched record's
+                        # valid external evidence (cninfo acquisition data).
+                        merged = dict(existing)
+                        merged["segment_growth_sources"] = record["segment_growth_sources"]
+                        merged["available"] = bool(
+                            merged["segment_growth_sources"].get("status") == "complete"
+                            and isinstance(merged.get("external_growth_evidence"), Mapping)
+                            and merged["external_growth_evidence"].get("status") == "complete"
+                        )
+                        reasons: list[str] = []
+                        if merged["segment_growth_sources"].get("status") != "complete":
+                            reasons.append(f"segment:{merged['segment_growth_sources'].get('reason') or 'partial'}")
+                        external = merged.get("external_growth_evidence")
+                        external_status = external.get("status") if isinstance(external, Mapping) else "unavailable"
+                        if external_status != "complete":
+                            # Mirror _evidence_record: the shared validator
+                            # recomputes reason from each child's `reason`
+                            # field, not its status, so both must agree.
+                            external_reason = external.get("reason") if isinstance(external, Mapping) else "unavailable"
+                            reasons.append(f"external:{external_reason or 'unavailable'}")
+                        merged["reason"] = ";".join(reasons)
+                        merged["cache_diagnostic"] = "tdx_segment_merged_over_unavailable"
+                        fetched[str(code)] = merged
         return fetched
 
     return load

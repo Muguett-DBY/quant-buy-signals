@@ -589,7 +589,7 @@ def _external_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
 def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
     """Return a strict, dated segment-growth summary suitable for Type 3."""
 
-    if not isinstance(value, Mapping) or value.get("status") != "complete":
+    if not isinstance(value, Mapping) or value.get("status") not in {"complete", "partial"}:
         return None
     raw_years = value.get("history_years")
     if not isinstance(raw_years, Sequence) or isinstance(raw_years, (str, bytes)):
@@ -611,7 +611,7 @@ def _segment_growth_proxy_inputs(value: Any) -> dict[str, float] | None:
     except ValueError:
         as_of = None
     if (
-        len(years) < 3
+        len(years) < 2
         or years != sorted(set(years))
         or any(current - previous != 1 for previous, current in zip(years, years[1:]))
         or as_of is None

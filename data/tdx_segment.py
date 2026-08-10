@@ -244,7 +244,20 @@ def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
 
     try:
         indexed = _segment_cache_index(SEGMENT_CACHE_DIR)
-        for source_as_of, path in indexed.get(code, ()):
+        entries = list(indexed.get(code, ()))
+        # Prefer the newest capture at-or-before the requested as_of (a
+        # same-fiscal-year restatement after a later capture must not win);
+        # fall back to newer captures only when no at-or-before capture is
+        # usable (pass 1 returned nothing because it was empty or every
+        # at-or-before entry failed the reuse window / fiscal-year gate).
+        candidates = sorted(entries, key=lambda item: item[0], reverse=True)
+        at_or_before = sorted([item for item in candidates if item[0] <= as_of], key=lambda item: item[0], reverse=True)
+        ordered = at_or_before + [item for item in candidates if item[0] > as_of]
+        seen_paths: set[str] = set()
+        for source_as_of, path in ordered:
+            if str(path) in seen_paths:
+                continue
+            seen_paths.add(str(path))
             age_days = (as_of - source_as_of).days
             # The capture may be older (reuse within 21 days) or newer (the
             # local backfill ran after the closed session the build re-scores);
