@@ -219,6 +219,56 @@ def _write_tdx_cache(code: str, as_of: date, records: list[dict[str, Any]]) -> N
         return
 
 
+def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
+    """Return a cached Tongdaxin segment evidence record, partial or complete."""
+    from data.cache import SafeFileCache
+    from data.growth_evidence import (
+        CACHE_SCHEMA_VERSION,
+        CACHE_TTL_SECONDS,
+        MAX_RESPONSE_BYTES,
+        SEGMENT_CACHE_DIR,
+        _build_segment_growth_sources,
+        _segment_cache_contract,
+        _segment_cache_path,
+        _validate_cached_segment_records,
+        _validate_segment_evidence,
+    )
+
+    try:
+        path = _segment_cache_path(code, as_of, SEGMENT_CACHE_DIR)
+        if not path.is_file():
+            return None
+        cache = SafeFileCache(
+            path,
+            schema_version=CACHE_SCHEMA_VERSION,
+            ttl=CACHE_TTL_SECONDS,
+            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+        )
+        loaded = cache.load(allow_expired=True)
+        if not loaded.hit:
+            return None
+        payload = loaded.value
+        if (
+            not isinstance(payload, Mapping)
+            or set(payload) != {"contract", "records"}
+            or payload.get("contract") != _segment_cache_contract(code, as_of)
+        ):
+            return None
+        records = _validate_cached_segment_records(payload.get("records"), code=code, as_of=as_of)
+        if not records:
+            return None
+        segment = _validate_segment_evidence(
+            _build_segment_growth_sources(code, as_of, records),
+            code=code,
+            as_of=as_of,
+        )
+        if segment.get("status") not in {"complete", "partial"}:
+            return None
+        return _evidence_record(code, as_of, segment)
+    except Exception:
+        return None
+
+
 def backfill_tdx_segments(
     requests_: Sequence[Mapping[str, Any]],
     *,
@@ -248,6 +298,12 @@ def backfill_tdx_segments(
         as_of = _parse_as_of(request.get("as_of"))
         if not code or as_of is None:
             return code, None
+        # Cache-first: the Tongdaxin fallback persists partial captures too,
+        # and a partial 2-year row is strictly better than the unavailable
+        # state a rate-limited CI runner would re-fetch.
+        cached = _load_tdx_cache(code, as_of)
+        if cached is not None:
+            return code, cached
         try:
             from mootdx.quotes import Quotes  # type: ignore[import-not-found]
 
