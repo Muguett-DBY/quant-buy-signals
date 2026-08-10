@@ -108,9 +108,15 @@ class StubClient:
 
 def _lrb_records() -> list[dict]:
     return [
-        _record("lrb", "2022-12-31", {"TOTAL_OPERATE_INCOME": 4.0e9, "PARENT_NETPROFIT": 3.0e8, "OPERATE_PROFIT": 4.0e8}),
-        _record("lrb", "2023-12-31", {"TOTAL_OPERATE_INCOME": 4.5e9, "PARENT_NETPROFIT": 3.5e8, "OPERATE_PROFIT": 4.6e8}),
-        _record("lrb", "2024-12-31", {"TOTAL_OPERATE_INCOME": 5.0e9, "PARENT_NETPROFIT": 4.0e8, "OPERATE_PROFIT": 5.2e8}),
+        _record(
+            "lrb", "2022-12-31", {"TOTAL_OPERATE_INCOME": 4.0e9, "PARENT_NETPROFIT": 3.0e8, "OPERATE_PROFIT": 4.0e8}
+        ),
+        _record(
+            "lrb", "2023-12-31", {"TOTAL_OPERATE_INCOME": 4.5e9, "PARENT_NETPROFIT": 3.5e8, "OPERATE_PROFIT": 4.6e8}
+        ),
+        _record(
+            "lrb", "2024-12-31", {"TOTAL_OPERATE_INCOME": 5.0e9, "PARENT_NETPROFIT": 4.0e8, "OPERATE_PROFIT": 5.2e8}
+        ),
         _record("lrb", "2025-06-30", {"TOTAL_OPERATE_INCOME": 2.6e9, "PARENT_NETPROFIT": 2.2e8}),
     ]
 
@@ -128,17 +134,35 @@ def _fzb_records() -> list[dict]:
         _record(
             "fzb",
             "2022-12-31",
-            {"TOTAL_ASSETS": 8.0e9, "TOTAL_LIABILITIES": 4.0e9, "TOTAL_EQUITY": 4.0e9, "TOTAL_PARENT_EQUITY": 3.8e9, "MINORITY_EQUITY": 2.0e8},
+            {
+                "TOTAL_ASSETS": 8.0e9,
+                "TOTAL_LIABILITIES": 4.0e9,
+                "TOTAL_EQUITY": 4.0e9,
+                "TOTAL_PARENT_EQUITY": 3.8e9,
+                "MINORITY_EQUITY": 2.0e8,
+            },
         ),
         _record(
             "fzb",
             "2023-12-31",
-            {"TOTAL_ASSETS": 8.5e9, "TOTAL_LIABILITIES": 4.2e9, "TOTAL_EQUITY": 4.3e9, "TOTAL_PARENT_EQUITY": 4.1e9, "MINORITY_EQUITY": 2.0e8},
+            {
+                "TOTAL_ASSETS": 8.5e9,
+                "TOTAL_LIABILITIES": 4.2e9,
+                "TOTAL_EQUITY": 4.3e9,
+                "TOTAL_PARENT_EQUITY": 4.1e9,
+                "MINORITY_EQUITY": 2.0e8,
+            },
         ),
         _record(
             "fzb",
             "2024-12-31",
-            {"TOTAL_ASSETS": 9.0e9, "TOTAL_LIABILITIES": 4.4e9, "TOTAL_EQUITY": 4.6e9, "TOTAL_PARENT_EQUITY": 4.4e9, "MINORITY_EQUITY": 2.0e8},
+            {
+                "TOTAL_ASSETS": 9.0e9,
+                "TOTAL_LIABILITIES": 4.4e9,
+                "TOTAL_EQUITY": 4.6e9,
+                "TOTAL_PARENT_EQUITY": 4.4e9,
+                "MINORITY_EQUITY": 2.0e8,
+            },
         ),
     ]
 
@@ -156,7 +180,9 @@ def test_annual_records_filters_quarter_endings():
 def test_history_gap_plan_selects_short_series_only():
     financials = {
         "600000": {
-            "revenue_history": [{"REPORT_DATE": f"{year}-12-31", "TOTAL_OPERATE_INCOME": 1.0} for year in range(2021, 2025)],
+            "revenue_history": [
+                {"REPORT_DATE": f"{year}-12-31", "TOTAL_OPERATE_INCOME": 1.0} for year in range(2021, 2025)
+            ],
             "cashflow": [{"REPORT_DATE": f"{year}-12-31"} for year in range(2021, 2025)],
             "balance": [{"REPORT_DATE": f"{year}-12-31"} for year in range(2021, 2025)],
         },
@@ -296,7 +322,9 @@ def test_backfill_history_respects_code_budget(tmp_path):
         "000003": {"revenue_history": [], "cashflow": [], "balance": []},
     }
     client = StubClient({})
-    outcome = backfill_history_gaps(financials, CONTRACT, codes=["000001", "000002", "000003"], client=client, max_target_codes=2)
+    outcome = backfill_history_gaps(
+        financials, CONTRACT, codes=["000001", "000002", "000003"], client=client, max_target_codes=2
+    )
     diagnostic = outcome.diagnostic
     assert diagnostic["target_codes"] == 2
     assert diagnostic["skipped_codes"] == 1
@@ -319,4 +347,3 @@ def test_backfill_history_skips_missing_codes_and_non_ok_results(tmp_path):
     assert company.get("cashflow") == []  # failed statement contributes nothing
     assert len(company.get("balance", [])) == 3
     assert outcome.diagnostic["status_counts"] == {"ok": 2, "source_unavailable": 1}
-
