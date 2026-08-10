@@ -85,3 +85,9 @@ data/.growth_evidence_cache/
 
 _local_publish_to_cf.py
 
+
+# Cloudflare local caches
+.wrangler/
+cloudflare/**/.wrangler/
+cloudflare-cron/.wrangler/
+
