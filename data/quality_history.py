@@ -536,12 +536,28 @@ def _calculate_evidence(
             # record as limited history and keep it usable: the consumers
             # replay the actual window and the UI shows a "listed < X years"
             # note instead of dropping the dimension.
-            if sufficient_series and (pe_percentile is not None or pb_percentile is not None):
+            #
+            # The Eastmoney valuation fetch always starts at the 5y target, so
+            # a row set that begins later than the tolerance is a company
+            # listed within the window (recent listing) — its span is short.
+            # A company whose early history is missing would show a full span
+            # with a late start; that is not a recent listing and must stay
+            # insufficient instead of being mislabelled "上市不足5年".
+            if (
+                span_days < FIVE_YEAR_TARGET_DAYS - FIVE_YEAR_START_TOLERANCE_DAYS - LATEST_MAX_AGE_DAYS
+                and sufficient_series
+                and (pe_percentile is not None or pb_percentile is not None)
+            ) or (
+                not 0 <= start_delay <= FIVE_YEAR_START_TOLERANCE_DAYS
+                and sufficient_series
+                and (pe_percentile is not None or pb_percentile is not None)
+                and span_days < FIVE_YEAR_TARGET_DAYS + FIVE_YEAR_START_TOLERANCE_DAYS
+            ):
                 actual_span = (latest_date - first_date).days
                 valuation.update(
                     {
                         "available": True,
-                        "window_years": max(0.5, round(actual_span / 365.2425, 2)),
+                        "window_years": max(1.0, round(actual_span / 365.2425, 2)),
                         "target_start_date": first_date.isoformat(),
                         "span_days": actual_span,
                         "start_delay_days": 0,

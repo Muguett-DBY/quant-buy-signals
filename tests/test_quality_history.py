@@ -224,9 +224,10 @@ def test_quality_history_two_year_listing_is_limited_history_but_usable():
     """A company listed for only two years gets a limited-history valuation
     replay instead of a missing dimension."""
     payload = _valuation_payload()
-    # Keep only the last ~2 years of rows.
+    # Keep the last ~2.5 years of rows: enough trading days to clear the
+    # 500-observation gate with margin across different holiday calendars.
     as_of = date(2026, 7, 17)
-    keep_from = as_of.replace(year=as_of.year - 2)
+    keep_from = as_of.replace(year=as_of.year - 2, month=1, day=1)
     rows = [row for row in payload["result"]["data"] if row["TRADE_DATE"][:10] >= keep_from.isoformat()]
     payload["result"]["data"] = rows
     payload["result"]["count"] = len(rows)
@@ -242,9 +243,9 @@ def test_quality_history_two_year_listing_is_limited_history_but_usable():
     valuation = result.valuation_history
     assert valuation["available"] is True
     assert valuation["limited_history"] is True
-    assert 1.0 < valuation["window_years"] < 3.0
-    assert valuation["pe_observations"] >= 400
-    assert valuation["pb_observations"] >= 400
+    assert 2.0 < valuation["window_years"] < 3.5
+    assert valuation["pe_observations"] >= 500
+    assert valuation["pb_observations"] >= 500
     assert valuation["reason"] == ""
     assert valuation["start_delay_days"] == 0
 
