@@ -2064,6 +2064,9 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
     monkeypatch.setattr(fetcher, "backfill_strict_ttm_gaps", fake_backfill)
     monkeypatch.setattr(fetcher, "backfill_history_gaps", fake_history_backfill)
     monkeypatch.setattr(fetcher, "get_datacenter_fetch_diagnostics", lambda: {"cache_hits": 7})
+    # The history overlay targets the last build's gap-code list; pin it so
+    # the assertion is independent of any cache restored by CI.
+    monkeypatch.setattr(fetcher.DataFetcher, "_history_target_codes", lambda self, requested: ["600519"])
     instance = fetcher.DataFetcher(force_financial_fallback_refresh=True)
     instance._requested_financial_codes = ("600519",)
     instance._primary_financial_companies = 1
@@ -2074,10 +2077,9 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
         "contract": {"period": "test"},
         "codes": ("600519",),
         "force_refresh": True,
-        # 600519 is not in the last build's gap-code lists, so the history
-        # overlay receives no explicit target list and scans the run's
-        # financials for codes still short of annual trend series.
-        "history_codes": None,
+        # 600519 is in the pinned gap-code list (see below), so the history
+        # overlay targets exactly it.
+        "history_codes": ["600519"],
     }
     runtime = instance.financial_fetch_diagnostic()
     public = instance.financial_publication_provenance()
