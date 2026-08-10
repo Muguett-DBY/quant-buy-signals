@@ -220,51 +220,71 @@ def _write_tdx_cache(code: str, as_of: date, records: list[dict[str, Any]]) -> N
 
 
 def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
-    """Return a cached Tongdaxin segment evidence record, partial or complete."""
+    """Return a cached Tongdaxin segment evidence record, partial or complete.
+
+    The cache is keyed by its capture ``as_of``; the build requests the closed
+    market session (e.g. 2026-08-07) while the local backfill may have captured
+    on a later day (e.g. 2026-08-10).  Scan the same 21-day reuse window the
+    Eastmoney path uses so a same-fiscal-year capture is reused.
+    """
     from data.cache import SafeFileCache
     from data.growth_evidence import (
         CACHE_SCHEMA_VERSION,
         CACHE_TTL_SECONDS,
         MAX_RESPONSE_BYTES,
         SEGMENT_CACHE_DIR,
+        SEGMENT_CACHE_REUSE_DAYS,
         _build_segment_growth_sources,
+        _latest_completed_annual_year,
         _segment_cache_contract,
-        _segment_cache_path,
+        _segment_cache_index,
         _validate_cached_segment_records,
         _validate_segment_evidence,
     )
 
     try:
-        path = _segment_cache_path(code, as_of, SEGMENT_CACHE_DIR)
-        if not path.is_file():
-            return None
-        cache = SafeFileCache(
-            path,
-            schema_version=CACHE_SCHEMA_VERSION,
-            ttl=CACHE_TTL_SECONDS,
-            max_uncompressed_bytes=MAX_RESPONSE_BYTES,
-        )
-        loaded = cache.load(allow_expired=True)
-        if not loaded.hit:
-            return None
-        payload = loaded.value
-        if (
-            not isinstance(payload, Mapping)
-            or set(payload) != {"contract", "records"}
-            or payload.get("contract") != _segment_cache_contract(code, as_of)
-        ):
-            return None
-        records = _validate_cached_segment_records(payload.get("records"), code=code, as_of=as_of)
-        if not records:
-            return None
-        segment = _validate_segment_evidence(
-            _build_segment_growth_sources(code, as_of, records),
-            code=code,
-            as_of=as_of,
-        )
-        if segment.get("status") not in {"complete", "partial"}:
-            return None
-        return _evidence_record(code, as_of, segment)
+        indexed = _segment_cache_index(SEGMENT_CACHE_DIR)
+        for source_as_of, path in indexed.get(code, ()):
+            age_days = (as_of - source_as_of).days
+            # The capture may be older (reuse within 21 days) or newer (the
+            # local backfill ran after the closed session the build re-scores);
+            # either is fine as long as the fiscal year is unchanged.
+            if (
+                age_days > SEGMENT_CACHE_REUSE_DAYS
+                or _latest_completed_annual_year(source_as_of) != _latest_completed_annual_year(as_of)
+            ):
+                continue
+            cache = SafeFileCache(
+                path,
+                schema_version=CACHE_SCHEMA_VERSION,
+                ttl=CACHE_TTL_SECONDS,
+                max_uncompressed_bytes=MAX_RESPONSE_BYTES,
+            )
+            loaded = cache.load(allow_expired=True)
+            if not loaded.hit:
+                continue
+            payload = loaded.value
+            if (
+                not isinstance(payload, Mapping)
+                or set(payload) != {"contract", "records"}
+                or payload.get("contract") != _segment_cache_contract(code, source_as_of)
+            ):
+                continue
+            records = _validate_cached_segment_records(payload.get("records"), code=code, as_of=source_as_of)
+            if not records:
+                continue
+            records = _validate_cached_segment_records(records, code=code, as_of=as_of)
+            if not records:
+                continue
+            segment = _validate_segment_evidence(
+                _build_segment_growth_sources(code, as_of, records),
+                code=code,
+                as_of=as_of,
+            )
+            if segment.get("status") not in {"complete", "partial"}:
+                continue
+            return _evidence_record(code, as_of, segment)
+        return None
     except Exception:
         return None
 
