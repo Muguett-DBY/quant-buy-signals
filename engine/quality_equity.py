@@ -1283,6 +1283,18 @@ def _years_before(value: date, years: int) -> date:
         return value.replace(year=value.year - years, day=28)
 
 
+def _limited_history_minimum_span(window_years: float | None) -> int:
+    """Lower consistency bound for a recently-listed limited-history company.
+
+    ``window_years`` is derived as ``round(span_days / 365.2425, 2)`` upstream,
+    so a genuine record's span matches its declared window within rounding
+    error; require 90% to reject forged window/span mismatches.
+    """
+    if window_years is None or not 1.0 <= window_years <= 5.0:
+        return 0
+    return max(1, int(round(window_years * 365.2425 * 0.90)))
+
+
 def _history_integer(value: Any, *, minimum: int = 0) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         return None
@@ -1385,20 +1397,29 @@ def _valid_valuation_history(value: Any, as_of: date) -> bool:
     span_days = _history_integer(value.get("span_days"), minimum=1)
     start_delay = _history_integer(value.get("start_delay_days"), minimum=0)
     row_count = _history_integer(value.get("row_count"), minimum=1)
+    window_years = _finite(value.get("window_years"))
+    limited = bool(value.get("limited_history"))
     expected_target = _years_before(as_of, 5)
+    minimum_span = (
+        _limited_history_minimum_span(window_years)
+        if limited and window_years is not None
+        else FIVE_YEAR_TARGET_DAYS - FIVE_YEAR_START_TOLERANCE_DAYS - HISTORY_LATEST_MAX_AGE_DAYS
+    )
     if (
-        value.get("window_years") != 5
+        window_years is None
+        or not 1.0 <= window_years <= 5.0
         or value.get("formula") != VALUATION_PERCENTILE_FORMULA
         or start is None
         or end is None
-        or target_start != expected_target
+        or (not limited and target_start != expected_target)
         or span_days is None
         or start_delay is None
         or row_count is None
         or span_days != (end - start).days
-        or start_delay != (start - expected_target).days
-        or span_days < FIVE_YEAR_TARGET_DAYS - FIVE_YEAR_START_TOLERANCE_DAYS - HISTORY_LATEST_MAX_AGE_DAYS
-        or not 0 <= start_delay <= FIVE_YEAR_START_TOLERANCE_DAYS
+        or (not limited and start_delay != (start - expected_target).days)
+        or (limited and start_delay != 0)
+        or span_days < minimum_span
+        or (not limited and not 0 <= start_delay <= FIVE_YEAR_START_TOLERANCE_DAYS)
         or not 0 <= (as_of - end).days <= HISTORY_LATEST_MAX_AGE_DAYS
     ):
         return False

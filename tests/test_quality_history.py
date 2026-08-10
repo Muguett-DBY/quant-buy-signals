@@ -209,9 +209,44 @@ def test_quality_history_does_not_label_a_four_point_six_year_window_as_five_yea
         use_cache=False,
     )
 
-    assert not result.available
-    assert result.valuation_history["reason"] == "insufficient_five_year_span"
-    assert result.valuation_history["start_delay_days"] > 62
+    # A company listed for less than five years is replayed as limited
+    # history: usable for the actual window, never mislabelled as a full
+    # five-year window.
+    assert result.available
+    assert result.valuation_history["available"] is True
+    assert result.valuation_history["limited_history"] is True
+    assert result.valuation_history["window_years"] < 5.0
+    assert result.valuation_history["window_years"] > 4.0
+    assert result.valuation_history["target_start_date"] != (date(2026, 7, 17) - timedelta(days=1826)).isoformat()
+
+
+def test_quality_history_two_year_listing_is_limited_history_but_usable():
+    """A company listed for only two years gets a limited-history valuation
+    replay instead of a missing dimension."""
+    payload = _valuation_payload()
+    # Keep only the last ~2 years of rows.
+    as_of = date(2026, 7, 17)
+    keep_from = as_of.replace(year=as_of.year - 2)
+    rows = [row for row in payload["result"]["data"] if row["TRADE_DATE"][:10] >= keep_from.isoformat()]
+    payload["result"]["data"] = rows
+    payload["result"]["count"] = len(rows)
+
+    result = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(payload)),
+        use_cache=False,
+    )
+
+    valuation = result.valuation_history
+    assert valuation["available"] is True
+    assert valuation["limited_history"] is True
+    assert 1.0 < valuation["window_years"] < 3.0
+    assert valuation["pe_observations"] >= 400
+    assert valuation["pb_observations"] >= 400
+    assert valuation["reason"] == ""
+    assert valuation["start_delay_days"] == 0
 
 
 def test_tencent_adapter_can_request_hfq_without_changing_beta_default_contract():

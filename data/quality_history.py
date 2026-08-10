@@ -483,6 +483,7 @@ def _calculate_evidence(
         "pe_distribution": {"values": [], "counts": []},
         "pb_distribution": {"values": [], "counts": []},
         "reason": "",
+        "limited_history": False,
     }
     if latest is None:
         valuation["reason"] = "missing_valuation_history"
@@ -529,7 +530,27 @@ def _calculate_evidence(
             not 0 <= start_delay <= FIVE_YEAR_START_TOLERANCE_DAYS
             or span_days < FIVE_YEAR_TARGET_DAYS - FIVE_YEAR_START_TOLERANCE_DAYS - LATEST_MAX_AGE_DAYS
         ):
-            valuation["reason"] = "insufficient_five_year_span"
+            # Companies listed for less than five years cannot provide a full
+            # five-year window.  When the available history still has enough
+            # observations to estimate a meaningful percentile, mark the
+            # record as limited history and keep it usable: the consumers
+            # replay the actual window and the UI shows a "listed < X years"
+            # note instead of dropping the dimension.
+            if sufficient_series and (pe_percentile is not None or pb_percentile is not None):
+                actual_span = (latest_date - first_date).days
+                valuation.update(
+                    {
+                        "available": True,
+                        "window_years": max(0.5, round(actual_span / 365.2425, 2)),
+                        "target_start_date": first_date.isoformat(),
+                        "span_days": actual_span,
+                        "start_delay_days": 0,
+                        "limited_history": True,
+                        "reason": "",
+                    }
+                )
+            else:
+                valuation["reason"] = "insufficient_five_year_span"
         elif not sufficient_series or (pe_percentile is None and pb_percentile is None):
             valuation["reason"] = "insufficient_positive_valuation_observations"
         else:

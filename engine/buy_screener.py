@@ -242,6 +242,21 @@ TYPE5_PB_MIN_OBSERVATIONS = 500
 TYPE5_HISTORY_MIN_SPAN_DAYS = 1_743
 TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
 TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
+
+
+def _type5_limited_history_minimum_span(window_years: float) -> int:
+    """Consistency bounds for a limited-history (recently listed) company.
+
+    ``window_years`` is derived as ``round(span_days / 365.2425, 2)`` by the
+    data layer, so a genuine record has a span within rounding error of
+    ``window_years * 365.2425``.  Require the replay span to match the declared
+    window within 10% to reject hand-forged window/span mismatches while still
+    accepting the generated records.
+    """
+    expected = window_years * 365.2425
+    return max(1, int(round(expected * 0.90)))
+
+
 TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION = 1
 TYPE5_BOTTOM_EVIDENCE_MODEL_ID = "type5-bottom-observables-v1"
 # 第19模板明确区分两类VC标的：高景气赛道不超过300亿元、平稳
@@ -5192,8 +5207,12 @@ def _type5_pb_bottom_score(pb_percentile: Any, current_pb: Any) -> Optional[floa
 def _type2_valuation_history_inputs(
     m: Mapping[str, Any],
     history_evidence: Optional[Mapping[str, Any]],
-) -> Optional[dict[str, float]]:
-    """Replay company-specific five-year PE/PB percentiles for Type 2."""
+) -> Optional[dict[str, Any]]:
+    """Replay company-specific five-year PE/PB percentiles for Type 2.
+
+    Returns ``{"percentiles": {...}, "window_years": float, "limited": bool}``
+    so callers can label a recently-listed company's shorter window.
+    """
 
     if not isinstance(history_evidence, Mapping):
         return None
@@ -5208,18 +5227,24 @@ def _type2_valuation_history_inputs(
     ):
         return None
     valuation = history_evidence.get("valuation_history")
+    window_years = _type5_contract_number(valuation.get("window_years")) if isinstance(valuation, Mapping) else None
+    limited = bool(valuation.get("limited_history")) if isinstance(valuation, Mapping) else False
     if (
         not isinstance(valuation, Mapping)
         or valuation.get("available") is not True
-        or valuation.get("window_years") != 5
+        or window_years is None
+        or not 1.0 <= window_years <= 5.0
     ):
         return None
     span_days = _type5_contract_number(valuation.get("span_days"))
     start_delay = _type5_contract_number(valuation.get("start_delay_days"))
     end_date = _evidence_reference_date(valuation.get("end_date"))
+    minimum_span = _type5_limited_history_minimum_span(window_years) if limited else TYPE5_HISTORY_MIN_SPAN_DAYS
+    maximum_span = int(round(window_years * 365.2425 * 1.10)) if limited else None
     if (
         span_days is None
-        or span_days < TYPE5_HISTORY_MIN_SPAN_DAYS
+        or span_days < minimum_span
+        or (limited and maximum_span is not None and span_days > maximum_span)
         or start_delay is None
         or not 0 <= start_delay <= TYPE5_HISTORY_MAX_START_DELAY_DAYS
         or end_date is None
@@ -5245,10 +5270,19 @@ def _type2_valuation_history_inputs(
         ):
             continue
         result[prefix] = float(declared)
-    return result or None
+    if not result:
+        return None
+    return {
+        "percentiles": result,
+        "window_years": float(window_years),
+        "limited": limited,
+    }
 
 
-def _type2_history_score(percentiles: Mapping[str, float]) -> tuple[float, str]:
+def _type2_history_score(valuation_history: Mapping[str, Any]) -> tuple[float, str]:
+    percentiles = valuation_history.get("percentiles")
+    if not isinstance(percentiles, Mapping):
+        percentiles = valuation_history
     values = [float(value) for value in percentiles.values() if 0.0 <= float(value) <= 1.0]
     if not values:
         return 2.0, "缺公司自身五年估值分位"
@@ -5258,6 +5292,9 @@ def _type2_history_score(percentiles: Mapping[str, float]) -> tuple[float, str]:
         [(0.05, 10.0), (0.10, 9.5), (0.20, 8.5), (0.30, 7.5), (0.50, 6.0), (0.70, 4.0), (0.90, 2.0), (1.00, 1.0)],
     )
     labels = "/".join(key.upper() for key in sorted(percentiles))
+    window_years = valuation_history.get("window_years")
+    if valuation_history.get("limited") is True and isinstance(window_years, (int, float)):
+        return score, f"上市不足5年，用全部{window_years:g}年历史，自身{labels}分位{percentile:.0%}"
     return score, f"自身五年{labels}分位{percentile:.0%}"
 
 
@@ -5282,20 +5319,26 @@ def _type5_pb_history_inputs(
     if not isinstance(valuation, Mapping) or valuation.get("available") is not True:
         return None
     observations = valuation.get("pb_observations")
+    window_years = _type5_contract_number(valuation.get("window_years"))
+    limited = bool(valuation.get("limited_history"))
     if (
         isinstance(observations, (bool, np.bool_))
         or not isinstance(observations, (int, np.integer))
         or int(observations) < TYPE5_PB_MIN_OBSERVATIONS
-        or valuation.get("window_years") != 5
+        or window_years is None
+        or not 1.0 <= window_years <= 5.0
     ):
         return None
     span_days = _type5_contract_number(valuation.get("span_days"))
     start_delay = _type5_contract_number(valuation.get("start_delay_days"))
     end_date = _evidence_reference_date(valuation.get("end_date"))
     formula = valuation.get("formula")
+    minimum_span = _type5_limited_history_minimum_span(window_years) if limited else TYPE5_HISTORY_MIN_SPAN_DAYS
+    maximum_span = int(round(window_years * 365.2425 * 1.10)) if limited else None
     if (
         span_days is None
-        or span_days < TYPE5_HISTORY_MIN_SPAN_DAYS
+        or span_days < minimum_span
+        or (limited and maximum_span is not None and span_days > maximum_span)
         or start_delay is None
         or not 0 <= start_delay <= TYPE5_HISTORY_MAX_START_DELAY_DAYS
         or end_date is None

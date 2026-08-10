@@ -427,6 +427,18 @@ def type5_history_evidence(
     }
 
 
+def limited_type2_history_evidence(*, code="000001", as_of="2026-07-17"):
+    """Two-year (limited-history) valuation evidence for a recently listed firm."""
+    evidence = type5_history_evidence(code=code, as_of=as_of)
+    evidence["valuation_history"]["limited_history"] = True
+    evidence["valuation_history"]["window_years"] = 2.4
+    evidence["valuation_history"]["span_days"] = 876
+    evidence["valuation_history"]["start_delay_days"] = 0
+    evidence["valuation_history"]["start_date"] = (date.fromisoformat(as_of) - timedelta(days=876)).isoformat()
+    evidence["valuation_history"]["target_start_date"] = evidence["valuation_history"]["start_date"]
+    return evidence
+
+
 def type7_report_evidence(*, code="000001", as_of="2026-07-17"):
     sources = [
         {
@@ -2638,6 +2650,45 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(outcome[3]["_evidence"], "incomplete")
         self.assertIn("估值", outcome[3]["_missing"])
         self.assertIn("仅供诊断", outcome[3]["_score_quality"])
+
+    def test_type2_limited_history_recent_listing_is_scored_and_labelled(self):
+        metric = base_metrics(
+            code="301218",
+            listing_date="2024-01-10",
+            source_trade_date="2026-07-22",
+            market_coldness_score=10.0,
+        )
+        metric["_type2_history_evidence"] = limited_type2_history_evidence(
+            code=metric["code"],
+            as_of=metric["source_trade_date"],
+        )
+        outcome = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+        # The 2.4-year window is accepted and the reason labels the shorter
+        # history instead of calling it a full five-year percentile.
+        self.assertGreaterEqual(outcome[2]["2d"], 5.0)
+        self.assertIn("上市不足5年", outcome[3]["2d"])
+        self.assertIn("用全部2.4年历史", outcome[3]["2d"])
+        self.assertIn("分位", outcome[3]["2d"])
+
+    def test_type2_limited_history_reason_never_mislabels_five_years(self):
+        metric = base_metrics(
+            code="301219",
+            listing_date="2024-01-10",
+            source_trade_date="2026-07-22",
+            market_coldness_score=10.0,
+        )
+        metric["_type2_history_evidence"] = limited_type2_history_evidence(
+            code=metric["code"],
+            as_of=metric["source_trade_date"],
+        )
+        outcome = bs.score_type2_two_hot_one_cold(
+            metric,
+            benchmarks(median_cagr=0.50, median_cagr_count=50),
+        )
+        self.assertNotIn("自身五年", outcome[3]["2d"])
 
     def test_current_industry_contraction_is_not_replaced_by_long_term_story_growth(self):
         bench = benchmarks(
