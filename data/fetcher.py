@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import json as _json
 import math
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import datetime
@@ -38,7 +39,7 @@ from data.datacenter import (
     get_datacenter_fetch_diagnostics,
     reset_datacenter_fetch_diagnostics,
 )
-from data.sina_financial import backfill_strict_ttm_gaps
+from data.sina_financial import backfill_history_gaps, backfill_strict_ttm_gaps
 
 
 SINA_URL = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
@@ -1609,6 +1610,10 @@ class DataFetcher:
             "strategy": "eastmoney_bulk_primary_sina_gap_only_secondary",
             "status": "not_run",
         }
+        self._history_fallback_diagnostic: Mapping[str, Any] = {
+            "strategy": "eastmoney_primary_sina_annual_history_secondary",
+            "status": "not_run",
+        }
 
     def get_stock_list(self, include_hk: bool = False) -> pd.DataFrame:
         """Return SH/SZ quotes and, only when requested, quote-only HK rows.
@@ -1756,7 +1761,48 @@ class DataFetcher:
             f"{outcome.diagnostic.get('filled_fields', 0)} fields, "
             f"{outcome.diagnostic.get('conflicts', 0)} conflicts"
         )
-        return outcome.financials
+        # Annual-history overlay: fill the multi-year trend series that Type
+        # 1/3/7 scoring consumes, prioritising codes the last build already
+        # flagged as evidence gaps (gap-code lists under data/cache/).  The
+        # per-run code budget keeps the secondary source bounded; unserved
+        # codes roll into the next daily build.
+        history_codes = self._history_target_codes(requested)
+        history_outcome = backfill_history_gaps(
+            outcome.financials,
+            contract,
+            codes=history_codes or None,
+            force_refresh=self.force_financial_fallback_refresh,
+        )
+        self._history_fallback_diagnostic = dict(history_outcome.diagnostic)
+        print(
+            "[Fetcher] Sina history overlay: "
+            f"{history_outcome.diagnostic.get('target_codes', 0)} codes, "
+            f"{history_outcome.diagnostic.get('filled_fields', 0)} fields, "
+            f"{history_outcome.diagnostic.get('budget_exhausted', False)}"
+        )
+        return history_outcome.financials
+
+    def _history_target_codes(self, requested: Collection[str]) -> list[str]:
+        """Gap codes the last build already flagged, intersected with the run.
+
+        Falls back to the full requested population when the gap lists have
+        not been produced yet (first build after this feature ships).
+        """
+        try:
+            gap_codes: list[str] = []
+            for filename in ("type3_gap_codes.json", "type7_gap_codes.json"):
+                path = Path(__file__).resolve().parent / "cache" / filename
+                if not path.is_file():
+                    continue
+                loaded = _json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    gap_codes.extend(str(value) for value in loaded)
+        except (OSError, ValueError):
+            return sorted(set(requested))
+        if not gap_codes:
+            return sorted(set(requested))
+        requested_set = set(requested)
+        return sorted({code for code in gap_codes if code in requested_set})
 
     def financial_fetch_diagnostic(self) -> dict[str, Any]:
         return {
@@ -1795,4 +1841,5 @@ class DataFetcher:
             "primary_source": "eastmoney_datacenter_bulk",
             "primary_companies": self._primary_financial_companies,
             "sina_fallback": {key: deepcopy(fallback[key]) for key in stable_keys if key in fallback},
+            "sina_history_overlay": dict(self._history_fallback_diagnostic),
         }

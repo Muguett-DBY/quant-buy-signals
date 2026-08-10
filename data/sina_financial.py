@@ -15,7 +15,7 @@ import re
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -45,14 +45,14 @@ SINA_FINANCIAL_HEADERS = {
     "Accept": "application/json",
 }
 SINA_FINANCIAL_TIMEOUT = max(10, int(REQUEST_TIMEOUT))
-SINA_FINANCIAL_NUM_PERIODS = 8
+SINA_FINANCIAL_NUM_PERIODS = 40
 SINA_FINANCIAL_ADAPTER_VERSION = 2
-SINA_FINANCIAL_CACHE_SCHEMA_VERSION = 1
+SINA_FINANCIAL_CACHE_SCHEMA_VERSION = 2
 SINA_FINANCIAL_CACHE_TTL_SECONDS = 24 * 60 * 60
 SINA_FINANCIAL_NEGATIVE_CACHE_TTL_SECONDS = 15 * 60
 SINA_RESPONSE_CHUNK_BYTES = 64 * 1024
 MAX_SINA_FINANCIAL_RESPONSE_BYTES = 4 * 1024 * 1024
-MAX_SINA_FINANCIAL_PERIODS = 20
+MAX_SINA_FINANCIAL_PERIODS = 48
 MAX_SINA_FINANCIAL_ITEMS_PER_PERIOD = 512
 MAX_ABS_FINANCIAL_VALUE = Decimal("10000000000000000")
 DEFAULT_SINA_FINANCIAL_CACHE_DIR = Path(__file__).resolve().parent / "cache" / "sina_financial"
@@ -63,7 +63,7 @@ _RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
 _SINA_HOST = "quotes.sina.cn"
 _SINA_PATH = "/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
-_STATEMENTS = frozenset({"lrb", "llb"})
+_STATEMENTS = frozenset({"lrb", "llb", "fzb"})
 _CODE = re.compile(r"(?:[036]\d{5})")
 _PERIOD = re.compile(r"\d{8}")
 _REPORT_DATE = re.compile(r"\d{4}-(?:03-31|06-30|09-30|12-31)")
@@ -79,10 +79,20 @@ _ITEM_FIELDS: dict[str, dict[str, tuple[str, str]]] = {
     "lrb": {
         "BIZTOTINCO": ("TOTAL_OPERATE_INCOME", "营业总收入"),
         "BIZINCO": ("OPERATE_INCOME", "营业收入"),
+        "PARENETP": ("PARENT_NETPROFIT", "归属于母公司所有者的净利润"),
+        "NETPROFIT": ("NETPROFIT", "净利润"),
+        "PERPROFIT": ("OPERATE_PROFIT", "营业利润"),
     },
     "llb": {
         "MANANETR": ("NETCASH_OPERATE", "经营活动产生的现金流量净额"),
         "ACQUASSETCASH": (CAPEX_FIELD, "购建固定资产、无形资产和其他长期资产所支付的现金"),
+    },
+    "fzb": {
+        "TOTASSET": ("TOTAL_ASSETS", "资产总计"),
+        "TOTLIAB": ("TOTAL_LIABILITIES", "负债合计"),
+        "PARESHARRIGH": ("TOTAL_PARENT_EQUITY", "归属于母公司股东权益合计"),
+        "MINYSHARRIGH": ("MINORITY_EQUITY", "少数股东权益"),
+        "RIGHAGGR": ("TOTAL_EQUITY", "所有者权益(或股东权益)合计"),
     },
 }
 _REVENUE_FIELDS = ("TOTAL_OPERATE_INCOME", "OPERATE_INCOME")
@@ -916,6 +926,260 @@ def backfill_strict_ttm_gaps(
         "target_codes_by_metric": target_codes_by_metric,
         "gap_identities_before": before_gaps,
         "gap_identities_after": remaining_gaps,
+        "filled_fields": counters["filled_fields"],
+        "filled_provenance": counters["filled_provenance"],
+        "filled_codes": sorted(filled_codes),
+        "conflicts": counters["conflicts"],
+        "conflict_codes": sorted(conflict_codes),
+        "unverified_zero": counters["unverified_zero"],
+        "status_counts": dict(sorted(status_counts.items())),
+        "client": client_diagnostic,
+        "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+    }
+    return FinancialFallbackOutcome(output, diagnostic)
+
+
+# --- Annual-history overlay (Patch 2026-08-10) ---------------------------------
+#
+# Eastmoney is still the primary.  The TTM overlay above fills exact-strict-TTM
+# identities; this second overlay fills the ANNUAL trend series that Type 1/3/7
+# scoring consumes (revenue_history, income_history, cashflow, balance) from the
+# same Sina getFinanceReport2022 source (num=40 -> ~10 annual points).  It only
+# writes fields that remain absent, never overwrites a finite primary value,
+# never converts a missing CAPEX to zero, and carries the same provenance
+# contract (data.capex_evidence) as the TTM overlay.
+
+SINA_HISTORY_MAX_TARGET_CODES = 300
+_MIN_ANNUAL_REVENUE_POINTS = 4
+_MIN_ANNUAL_CASHFLOW_POINTS = 3
+_MIN_ANNUAL_BALANCE_POINTS = 3
+_HISTORY_STATEMENTS = ("lrb", "llb", "fzb")
+_INCOME_HISTORY_FIELDS = ("PARENT_NETPROFIT", "NETPROFIT", "OPERATE_PROFIT")
+_CASHFLOW_HISTORY_FIELDS = ("NETCASH_OPERATE", CAPEX_FIELD)
+_BALANCE_HISTORY_FIELDS = (
+    "TOTAL_ASSETS",
+    "TOTAL_LIABILITIES",
+    "TOTAL_EQUITY",
+    "TOTAL_PARENT_EQUITY",
+    "MINORITY_EQUITY",
+)
+
+
+def _annual_records(records: Collection[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only 12-31 annual observations, sorted ascending by report date."""
+    return sorted(
+        (dict(record) for record in records if str(record.get("REPORT_DATE") or "").endswith("-12-31")),
+        key=lambda record: str(record.get("REPORT_DATE") or ""),
+    )
+
+
+def _history_gap_plan(
+    financials: Mapping[str, Mapping[str, Any]],
+    codes: Collection[str],
+) -> list[str]:
+    """Codes whose annual trend series are still too short to score Type 1/3/7.
+
+    A code qualifies when any of its three annual series is below its minimum:
+    revenue < 4 annual points (Type 3 CAGR / Type 1 structural decline),
+    cashflow < 3 (Type 1 FCF / OCF history), balance < 3 (Type 7 ROE replay).
+    """
+    needs: list[str] = []
+    for code in sorted(codes):
+        company = financials.get(code)
+        if not isinstance(company, Mapping):
+            needs.append(code)
+            continue
+        if (
+            len(_annual_records(company.get("revenue_history") or ())) < _MIN_ANNUAL_REVENUE_POINTS
+            or len(_annual_records(company.get("cashflow") or ())) < _MIN_ANNUAL_CASHFLOW_POINTS
+            or len(_annual_records(company.get("balance") or ())) < _MIN_ANNUAL_BALANCE_POINTS
+        ):
+            needs.append(code)
+    return needs
+
+
+def _overlay_history_fields(
+    output: dict[str, dict[str, Any]],
+    code: str,
+    dataset: str,
+    report_date: str,
+    record: Mapping[str, Any],
+    candidate_fields: Sequence[str],
+    counters: Counter[str],
+    conflict_codes: set[str],
+    filled_codes: set[str],
+    *,
+    allow_unverified_zero: bool = False,
+) -> None:
+    """Overlay one record's fields onto one annual period, primary-first.
+
+    A field that already carries a finite primary value is preserved; a
+    disagreeing secondary value counts as a conflict and is dropped.  Zero
+    revenue / zero CAPEX are not auto-confirmed (they may hide a missing
+    value).  Written values carry provenance bound to the raw response.
+    """
+    company = output.setdefault(code, {})
+    for canonical_field in candidate_fields:
+        source_value = _finite(record.get(canonical_field))
+        if source_value is None:
+            continue
+        existing_matches = _rows(company, dataset, report_date)
+        existing_row = existing_matches[0] if len(existing_matches) == 1 else None
+        existing_value = _finite(existing_row.get(canonical_field)) if existing_row is not None else None
+        if existing_value is not None:
+            if not math.isclose(existing_value, source_value, rel_tol=1e-10, abs_tol=0.02):
+                counters["conflicts"] += 1
+                conflict_codes.add(code)
+                continue
+            if canonical_field == CAPEX_FIELD and (
+                validate_capex_provenance(
+                    existing_row.get("CAPEX_PROVENANCE"),
+                    expected_value=existing_value,
+                    expected_report_date=report_date,
+                    expected_security_code=code,
+                )
+                != "complete"
+            ):
+                existing_row["CAPEX_PROVENANCE"] = deepcopy(record.get("CAPEX_PROVENANCE") or {})
+                counters["filled_provenance"] += 1
+                filled_codes.add(code)
+            continue
+        if source_value == 0.0 and not allow_unverified_zero:
+            counters["unverified_zero"] += 1
+            continue
+        target = _mutable_period_row(company, dataset, report_date)
+        if target is None:
+            counters["conflicts"] += 1
+            conflict_codes.add(code)
+            continue
+        target[canonical_field] = source_value
+        if canonical_field == CAPEX_FIELD:
+            target["CAPEX_PROVENANCE"] = deepcopy(record.get("CAPEX_PROVENANCE") or {})
+        else:
+            target[f"{canonical_field}_PROVENANCE"] = _field_provenance(record, canonical_field)
+        counters["filled_fields"] += 1
+        filled_codes.add(code)
+
+
+def backfill_history_gaps(
+    financials: Mapping[str, Mapping[str, Any]],
+    contract: Mapping[str, Any],
+    *,
+    codes: Collection[str] | None = None,
+    client: Any | None = None,
+    force_refresh: bool = False,
+    max_target_codes: int = SINA_HISTORY_MAX_TARGET_CODES,
+) -> FinancialFallbackOutcome:
+    """Overlay missing annual trend series from Sina multi-period statements.
+
+    ``codes`` restricts the candidate pool (gap-code lists); when omitted every
+    code already present in ``financials`` is considered.  A per-run code
+    budget keeps the secondary source load bounded; the rest are skipped and
+    reported so the daily workflow rolls through them over successive builds.
+    """
+
+    started = time.monotonic()
+    if isinstance(max_target_codes, bool) or not isinstance(max_target_codes, int) or max_target_codes < 1:
+        raise ValueError("max_target_codes must be a positive integer")
+    normalized_contract = _normalized_contract(contract)
+    population = sorted(codes) if codes is not None else sorted(financials.keys())
+    candidate_codes = _history_gap_plan(financials, population)
+    target_codes = candidate_codes[:max_target_codes]
+    skipped_codes = candidate_codes[max_target_codes:]
+    requests_: list[tuple[str, str]] = [(code, statement) for code in target_codes for statement in _HISTORY_STATEMENTS]
+    active_client = client or SinaFinancialClient()
+    results = (
+        active_client.fetch_many(requests_, contract=normalized_contract, force_refresh=force_refresh)
+        if requests_
+        else {}
+    )
+    output: dict[str, dict[str, Any]] = dict(financials)
+    counters: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    conflict_codes: set[str] = set()
+    filled_codes: set[str] = set()
+    for code in target_codes:
+        for statement in _HISTORY_STATEMENTS:
+            result = results.get((code, statement))
+            if result is None:
+                continue
+            status_counts[result.status] += 1
+            if result.status != "ok":
+                continue
+            for record in _annual_records(result.records):
+                report_date = record["REPORT_DATE"]
+                if statement == "lrb":
+                    _overlay_history_fields(
+                        output,
+                        code,
+                        "revenue_history",
+                        report_date,
+                        record,
+                        _REVENUE_FIELDS,
+                        counters,
+                        conflict_codes,
+                        filled_codes,
+                    )
+                    _overlay_history_fields(
+                        output,
+                        code,
+                        "income_history",
+                        report_date,
+                        record,
+                        _INCOME_HISTORY_FIELDS,
+                        counters,
+                        conflict_codes,
+                        filled_codes,
+                    )
+                elif statement == "llb":
+                    _overlay_history_fields(
+                        output,
+                        code,
+                        "cashflow",
+                        report_date,
+                        record,
+                        _CASHFLOW_HISTORY_FIELDS,
+                        counters,
+                        conflict_codes,
+                        filled_codes,
+                    )
+                else:  # fzb
+                    _overlay_history_fields(
+                        output,
+                        code,
+                        "balance",
+                        report_date,
+                        record,
+                        _BALANCE_HISTORY_FIELDS,
+                        counters,
+                        conflict_codes,
+                        filled_codes,
+                    )
+                    parent = record.get("TOTAL_PARENT_EQUITY")
+                    if parent is not None:
+                        aliased = dict(record)
+                        aliased["PARENT_EQUITY"] = parent
+                        _overlay_history_fields(
+                            output,
+                            code,
+                            "balance",
+                            report_date,
+                            aliased,
+                            ("PARENT_EQUITY",),
+                            counters,
+                            conflict_codes,
+                            filled_codes,
+                        )
+    client_diagnostic = active_client.diagnostic() if callable(getattr(active_client, "diagnostic", None)) else {}
+    diagnostic: dict[str, Any] = {
+        "adapter_version": SINA_FINANCIAL_ADAPTER_VERSION,
+        "strategy": "eastmoney_primary_sina_annual_history_secondary",
+        "candidate_codes": len(candidate_codes),
+        "target_codes": len(target_codes),
+        "skipped_codes": len(skipped_codes),
+        "budget_exhausted": bool(skipped_codes),
+        "code_budget": max_target_codes,
+        "requests": len(requests_),
         "filled_fields": counters["filled_fields"],
         "filled_provenance": counters["filled_provenance"],
         "filled_codes": sorted(filled_codes),

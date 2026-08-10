@@ -252,7 +252,7 @@ def sina_reported_capex_provenance(
         raise ValueError("Sina capex update_time is invalid")
     if report_type != "合并期末" or currency != "CNY":
         raise ValueError("Sina capex statement basis is unsupported")
-    if isinstance(request_num, bool) or not isinstance(request_num, int) or not 1 <= request_num <= 20:
+    if isinstance(request_num, bool) or not isinstance(request_num, int) or not 1 <= request_num <= 48:
         raise ValueError("Sina capex request_num is invalid")
     prefix = "sh" if security_code.startswith("6") else "sz"
     return {
@@ -517,7 +517,7 @@ def validate_capex_provenance(
         }:
             return "invalid_capex_provenance"
         request_num = query.get("num")
-        if not isinstance(request_num, str) or re.fullmatch(r"(?:[1-9]|1\d|20)", request_num) is None:
+        if not isinstance(request_num, str) or re.fullmatch(r"(?:[1-9]|[1-3]\d|4[0-8])", request_num) is None:
             return "invalid_capex_provenance"
         if (
             metadata.get("report_type") != "合并期末"

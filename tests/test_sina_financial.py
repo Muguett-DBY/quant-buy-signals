@@ -55,7 +55,7 @@ def _payload(statement: str, periods: dict[str, list[tuple[str, str, object]]]) 
     }
 
 
-def _response_url(code: str, statement: str, *, num: int = 8) -> str:
+def _response_url(code: str, statement: str, *, num: int = sf.SINA_FINANCIAL_NUM_PERIODS) -> str:
     params = {
         "paperCode": ("sh" if code.startswith("6") else "sz") + code,
         "source": statement,
@@ -158,7 +158,7 @@ def test_client_uses_exact_contract_and_maps_stable_item_fields(tmp_path):
                 "source": "lrb",
                 "type": "0",
                 "page": "1",
-                "num": "8",
+                "num": str(sf.SINA_FINANCIAL_NUM_PERIODS),
             },
             sf.SINA_FINANCIAL_HEADERS,
             sf.SINA_FINANCIAL_TIMEOUT,
@@ -198,7 +198,7 @@ def test_client_maps_cashflow_and_builds_valid_capex_provenance(tmp_path):
 
 def test_true_empty_is_distinct_from_schema_drift_and_missing_items(tmp_path):
     empty = {"result": {"status": {"code": 0}, "data": {"report_count": 0, "report_date": [], "report_list": {}}}}
-    missing_items = _payload("lrb", {"20260331": [("PARENETP", "归属于母公司所有者的净利润", "1")]})
+    missing_items = _payload("lrb", {"20260331": [("NOTHING", "无关字段", "1")]})
     old_broken_shape = {"result": {"status": {"code": 0}, "data": {"lrb": []}}}
     session = FakeSession(
         [
