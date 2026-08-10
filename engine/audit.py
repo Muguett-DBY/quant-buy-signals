@@ -979,6 +979,22 @@ def _audit_type7_history_integer(value: Any, *, minimum: int = 0) -> int | None:
     return value
 
 
+def _audit_type7_finite(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _audit_type7_limited_history_minimum_span(window_years: float | None) -> int:
+    """Lower consistency bound for a recently-listed limited-history company."""
+    if window_years is None or not 1.0 <= window_years <= 5.0:
+        return 0
+    return max(1, int(round(window_years * 365.2425 * 0.90)))
+
+
 def _audit_type7_years_before(value: date, years: int) -> date:
     try:
         return value.replace(year=value.year - years)
@@ -1111,24 +1127,32 @@ def _audit_type7_valuation_history_replay(
     span_days = _audit_type7_history_integer(value.get("span_days"), minimum=1)
     start_delay = _audit_type7_history_integer(value.get("start_delay_days"), minimum=0)
     row_count = _audit_type7_history_integer(value.get("row_count"), minimum=1)
+    window_years = _audit_type7_finite(value.get("window_years"))
+    limited = bool(value.get("limited_history"))
     expected_target = _audit_type7_years_before(as_of, 5)
+    minimum_span = (
+        _audit_type7_limited_history_minimum_span(window_years)
+        if limited and window_years is not None
+        else _AUDIT_TYPE7_FIVE_YEAR_TARGET_DAYS
+        - _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS
+        - _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
+    )
     if (
-        value.get("window_years") != 5
+        window_years is None
+        or not 1.0 <= window_years <= 5.0
         or value.get("formula") != _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA
         or start is None
         or end is None
-        or target_start != expected_target
+        or (not limited and target_start != expected_target)
         or span_days is None
         or start_delay is None
         or row_count is None
         or row_count > _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
         or span_days != (end - start).days
-        or start_delay != (start - expected_target).days
-        or span_days
-        < _AUDIT_TYPE7_FIVE_YEAR_TARGET_DAYS
-        - _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS
-        - _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
-        or not 0 <= start_delay <= _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS
+        or (not limited and start_delay != (start - expected_target).days)
+        or (limited and start_delay != 0)
+        or span_days < minimum_span
+        or (not limited and not 0 <= start_delay <= _AUDIT_TYPE7_FIVE_YEAR_START_TOLERANCE_DAYS)
         or not 0 <= (as_of - end).days <= _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
     ):
         return None
@@ -1219,16 +1243,25 @@ def _audit_type5_valuation_replay(value: Any, as_of: date) -> tuple[float, float
     current_pb = _finite(value.get("current_pb_mrq"))
     declared_median = _finite(value.get("median_pb_mrq"))
     declared_percentile = _finite(value.get("pb_percentile"))
+    window_years = _audit_type7_finite(value.get("window_years"))
+    limited = bool(value.get("limited_history"))
     replay = _audit_type7_replay_valuation_distribution(value.get("pb_distribution"), current_pb)
+    minimum_span = (
+        _audit_type7_limited_history_minimum_span(window_years)
+        if limited and window_years is not None
+        else _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS
+    )
     if (
-        value.get("window_years") != 5
+        window_years is None
+        or not 1.0 <= window_years <= 5.0
         or value.get("formula") != _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA
         or observations is None
         or not _AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS <= observations <= _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
         or span_days is None
-        or span_days < _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS
+        or span_days < minimum_span
         or start_delay is None
-        or start_delay > _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS
+        or (not limited and start_delay > _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS)
+        or (limited and start_delay != 0)
         or end is None
         or not 0 <= (as_of - end).days <= _AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
         or current_pb is None

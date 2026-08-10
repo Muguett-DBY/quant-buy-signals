@@ -1176,16 +1176,25 @@ def _audit_type5_valuation_replay(value: Any, as_of: date) -> tuple[float, float
     current_pb = _finite_number(value.get("current_pb_mrq"))
     declared_median = _finite_number(value.get("median_pb_mrq"))
     declared_percentile = _finite_number(value.get("pb_percentile"))
+    window_years = _audit_type7_finite(value.get("window_years"))
+    limited = bool(value.get("limited_history"))
     replay = _audit_type7_replay_valuation_distribution(value.get("pb_distribution"), current_pb)
+    minimum_span = (
+        _audit_type7_limited_history_minimum_span(window_years)
+        if limited and window_years is not None
+        else _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS
+    )
     if (
-        value.get("window_years") != 5
+        window_years is None
+        or not 1.0 <= window_years <= 5.0
         or value.get("formula") != _AUDIT_TYPE7_VALUATION_PERCENTILE_FORMULA
         or observations is None
         or not _AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS <= observations <= _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS
         or span_days is None
-        or span_days < _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS
+        or span_days < minimum_span
         or start_delay is None
-        or start_delay > _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS
+        or (not limited and start_delay > _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS)
+        or (limited and start_delay != 0)
         or end is None
         or not 0 <= (as_of - end).days <= _AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS
         or current_pb is None

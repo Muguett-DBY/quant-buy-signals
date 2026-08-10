@@ -998,6 +998,40 @@ def test_independent_type5_audit_replays_automatic_bottom_raw_contract(mutation)
     assert _audit_type5_bottom_evidence_errors("000001", row, payload)
 
 
+def test_independent_type5_audit_accepts_limited_history_recent_listing():
+    """A recently-listed company's shorter valuation window must replay in the
+    automatic bottom contract instead of being rejected by the audit."""
+    row = {"source_trade_date": "2026-07-15", "pb": 0.95}
+    payload = _replayable_type5_payload()
+    valuation = payload["bottom_evidence_contract"]["valuation_history"]
+    valuation["window_years"] = 2.4
+    valuation["span_days"] = 876
+    valuation["start_delay_days"] = 0
+    valuation["limited_history"] = True
+    valuation["end_date"] = "2026-07-15"
+    valuation["start_date"] = "2024-03-22"
+    valuation["target_start_date"] = "2024-03-22"
+
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload) == []
+
+
+def test_independent_type5_audit_rejects_limited_history_with_nonzero_start_delay():
+    """A limited-history record must have start_delay == 0 (its window starts
+    at its own first observation, not at the five-year target)."""
+    row = {"source_trade_date": "2026-07-15", "pb": 0.95}
+    payload = _replayable_type5_payload()
+    valuation = payload["bottom_evidence_contract"]["valuation_history"]
+    valuation["window_years"] = 2.4
+    valuation["span_days"] = 876
+    valuation["start_delay_days"] = 30  # forged: limited records must start at 0
+    valuation["limited_history"] = True
+    valuation["end_date"] = "2026-07-15"
+    valuation["start_date"] = "2024-03-22"
+    valuation["target_start_date"] = "2024-03-22"
+
+    assert _audit_type5_bottom_evidence_errors("000001", row, payload)
+
+
 @pytest.mark.parametrize("mode", ("trusted_external", "incomplete", "not_applicable"))
 def test_independent_type5_audit_forbids_contracts_outside_automatic_path(mode):
     row = {"source_trade_date": "2026-07-15", "pb": 0.95}
