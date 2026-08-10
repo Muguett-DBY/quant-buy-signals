@@ -224,7 +224,7 @@ jobs:
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $rebuildLatestClosed = ('${{ inputs.rebuild_latest_closed }}' -eq 'true') -or ('${{ inputs.force_gap_refresh }}' -eq 'true')
           $forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'
           if (
             $rebuildLatestClosed -and
@@ -435,7 +435,7 @@ jobs:
           }
           $shanghaiZone = [TimeZoneInfo]::FindSystemTimeZoneById('China Standard Time')
           $nowShanghai = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $shanghaiZone)
-          $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $rebuildLatestClosed = ('${{ inputs.rebuild_latest_closed }}' -eq 'true') -or ('${{ inputs.force_gap_refresh }}' -eq 'true')
           $marketDate = [DateTime]::ParseExact(
             [string]$manifest.market_as_of,
             'yyyy-MM-dd',
