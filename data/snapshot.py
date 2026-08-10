@@ -2163,6 +2163,7 @@ def get_market_snapshot(
     cache: SafeFileCache | None = None,
     *,
     force_refresh: bool = False,
+    refresh_financials_only: bool = False,
     allow_expired_cache: bool = False,
     persist_network: bool = True,
     min_quotes: int = MIN_MARKET_QUOTES,
@@ -2175,9 +2176,14 @@ def get_market_snapshot(
     UI callers use ``persist_network=False`` and promote only after the complete
     valuation/scoring pipeline succeeds. Command-line callers may keep the
     default immediate promotion when validation is their terminal gate.
+
+    ``refresh_financials_only`` reuses the cached closed-session quotes (so an
+    intraday run never publishes today's live prices) while re-fetching the
+    financial statements and running the gap overlays, then re-scores.  This is
+    the manual ``force_gap_refresh`` path: same session, more complete evidence.
     """
     active_cache = cache or SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
-    if not isinstance(force_refresh, bool) or not isinstance(allow_expired_cache, bool):
+    if not isinstance(force_refresh, bool) or not isinstance(refresh_financials_only, bool):
         raise TypeError("snapshot refresh and cache replay options must be boolean")
     now = float(clock())
     if not force_refresh:
@@ -2196,16 +2202,25 @@ def get_market_snapshot(
             min_financial_coverage=min_financial_coverage,
         )
         if cached is not None:
-            return cached
-        migrated = _migrate_schema4_snapshot(
-            active_cache,
-            now=now,
-            max_stale_age=max_stale_age,
-            min_quotes=min_quotes,
-            min_financial_coverage=min_financial_coverage,
-        )
-        if migrated is not None:
-            return migrated
+            if not refresh_financials_only:
+                return cached
+            # Manual force_gap_refresh: reuse the cached closed-session quotes
+            # (never today's intraday prices) but re-fetch financials below and
+            # run the gap overlays against them before re-scoring.
+            reuse_quotes = cached.quotes
+            cache_diagnostic = {}
+            migrated = None
+        else:
+            reuse_quotes = None
+            migrated = _migrate_schema4_snapshot(
+                active_cache,
+                now=now,
+                max_stale_age=max_stale_age,
+                min_quotes=min_quotes,
+                min_financial_coverage=min_financial_coverage,
+            )
+            if migrated is not None:
+                return migrated
     else:
         cache_diagnostic = {}
 
@@ -2233,7 +2248,10 @@ def get_market_snapshot(
     if not cache_diagnostic:
         cache_diagnostic = baseline_diagnostic
     try:
-        quotes = fetcher.get_stock_list(include_hk=False)
+        if refresh_financials_only and reuse_quotes is not None:
+            quotes = reuse_quotes
+        else:
+            quotes = fetcher.get_stock_list(include_hk=False)
         if not isinstance(quotes, pd.DataFrame) or not {"code", "market"}.issubset(quotes.columns):
             raise ValueError("quote source must provide code and market columns")
         analysis_mask = quotes["market"].map(

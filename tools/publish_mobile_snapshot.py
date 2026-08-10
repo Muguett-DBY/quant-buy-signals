@@ -141,6 +141,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="bypass only the bounded secondary financial-source cache",
     )
+    parser.add_argument(
+        "--refresh-financials-only",
+        action="store_true",
+        help="reuse the cached closed-session quotes but re-fetch financials and re-score",
+    )
     return parser
 
 
@@ -652,6 +657,7 @@ def publish_mobile_snapshot(
     output_dir: str | Path,
     refresh: bool,
     force_financial_fallback_refresh: bool = False,
+    refresh_financials_only: bool = False,
 ) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     source_commit = _source_commit()
@@ -665,6 +671,7 @@ def publish_mobile_snapshot(
         ),
         cache,
         force_refresh=refresh,
+        refresh_financials_only=refresh_financials_only,
         persist_network=False,
     )
     if not _refresh_completed(refresh, getattr(snapshot, "source", None)):
@@ -798,6 +805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         refresh=bool(args.refresh),
         force_financial_fallback_refresh=bool(args.force_financial_fallback_refresh),
+        refresh_financials_only=bool(args.refresh_financials_only),
     )
     # GitHub's Windows runner may expose a cp1252 stdout even though the files
     # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful

@@ -703,6 +703,65 @@ def test_network_refresh_runs_optional_gap_backfill_before_validation_and_publis
     assert cached.validation["financial_fetch"] == outcome.validation["financial_fetch"]
 
 
+def test_refresh_financials_only_reuses_cached_quotes_but_refetches_financials(tmp_path):
+    quotes = _quotes().iloc[[0]].copy()
+    quotes.loc[:, ["code", "name", "market"]] = ["600519", "sample", "SH"]
+    financials = _financials_for_codes(["600519"])
+
+    class CapturingFetcher:
+        stock_list_calls = 0
+        financial_calls = 0
+
+        def get_stock_list(self, *, include_hk):
+            self.stock_list_calls += 1
+            return quotes
+
+        def get_financials(self, *, codes):
+            self.financial_calls += 1
+            return financials
+
+        def backfill_financial_gaps(self, value, *, contract, codes):
+            return value
+
+        def financial_publication_provenance(self):
+            return {
+                "primary_source": "eastmoney_datacenter_bulk",
+                "sina_fallback": {"target_requests": 0, "filled_fields": 0},
+                "sina_history_overlay": {"target_codes": 1, "filled_fields": 5},
+            }
+
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=3600)
+    # 1) seed the cache with a normal refresh
+    fetcher = CapturingFetcher()
+    first = get_market_snapshot(
+        fetcher,
+        cache,
+        force_refresh=True,
+        persist_network=True,
+        min_quotes=1,
+        min_financial_coverage=1.0,
+        clock=lambda: NOW,
+    )
+    assert first.source == "network"
+
+    # 2) refresh_financials_only reuses cached quotes, never re-fetches stock list
+    fetcher2 = CapturingFetcher()
+    second = get_market_snapshot(
+        fetcher2,
+        cache,
+        force_refresh=False,
+        refresh_financials_only=True,
+        persist_network=False,
+        min_quotes=1,
+        min_financial_coverage=1.0,
+        clock=lambda: NOW,
+    )
+    assert fetcher2.stock_list_calls == 0
+    assert fetcher2.financial_calls == 1
+    assert second.validation["financial_fetch"]["sina_history_overlay"]["filled_fields"] == 5
+    assert second.source != "cache"  # re-scored, not the cached outcome
+
+
 def test_snapshot_rejects_legacy_quotes_without_trade_provenance():
     legacy = _quotes().drop(columns=["quote_status", "price_source", "retrieved_at"])
 

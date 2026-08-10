@@ -246,6 +246,7 @@ jobs:
             }
             if ($forceGapRefresh) {
               $publisherArguments += '--force-financial-fallback-refresh'
+              $publisherArguments += '--refresh-financials-only'
             }
             & python @publisherArguments
             $refreshExitCode = $LASTEXITCODE
