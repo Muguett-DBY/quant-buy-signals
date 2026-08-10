@@ -4,6 +4,7 @@ Run on a residential IP where the Tongdaxin TCP channel is reachable, then
 upload data/cache/growth_evidence/type3-segment-growth-v1_*.json.gz for the
 new codes as segment-cache-latest.zip so CI pre-warms them.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,7 @@ def main() -> None:
         total_filled += len(filled)
         total_missing += len(batch_codes) - len(filled)
         print(
-            f"[tdx-backfill] batch {start//BATCH+1}: {len(filled)}/{len(batch_codes)} filled "
+            f"[tdx-backfill] batch {start // BATCH + 1}: {len(filled)}/{len(batch_codes)} filled "
             f"in {elapsed:.1f}s (cumulative filled={total_filled} missing={total_missing})",
             flush=True,
         )
