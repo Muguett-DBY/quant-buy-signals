@@ -749,7 +749,8 @@ def publish_mobile_snapshot(
         refresh_financials_only=refresh_financials_only,
         persist_network=False,
     )
-    if not _refresh_completed(refresh, getattr(snapshot, "source", None)):
+    requires_network_candidate = refresh or refresh_financials_only
+    if not _refresh_completed(requires_network_candidate, getattr(snapshot, "source", None)):
         raise RuntimeError(_refresh_failure_message(snapshot))
     market_as_of = _market_as_of(snapshot)
     if refresh:

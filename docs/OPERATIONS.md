@@ -134,7 +134,7 @@ $bundleName = .venv\Scripts\python.exe -m tools.evidence_bundle resolve `
 1. 等待同一 SHA 的 `tests`、两个网站门禁和聚合 gate 全部成功；
 2. 等待自动 Cloudflare 部署成功，确认不是 stale no-op；
 3. 激活并公开复核本地证据包；
-4. 手动运行网站市场数据工作流，`rebuild_latest_closed=true`、`force_gap_refresh=false`；
+4. 激活新证据包后手动运行网站市场数据工作流，`force_fresh_refresh=true`，另外两个模式为 `false`；这会显式重抓最新闭市日并建立新的验证快照。仅重算模型时使用 `rebuild_latest_closed=true`，它没有已验证快照就会拒绝运行，不会偷偷退化成现场抓取；
 5. 确认 `/api/meta` 的 `source_commit` 等于最终 SHA，`/api/health?deep=1` 为 `integrity_ok=true`、`stale=false`；
 6. 验证 catalogue index、至少一家公司详情、搜索/筛选/详情抽屉和移动视口；
 7. 最后删除已无引用的旧 mutable cache ZIP。

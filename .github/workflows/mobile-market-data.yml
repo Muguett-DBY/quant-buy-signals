@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      force_fresh_refresh:
+        description: Re-fetch the complete latest closed session even when that session is already published
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -84,16 +89,29 @@ jobs:
             'reason=stale_main_workflow_run' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             return
           }
-          if ('${{ inputs.rebuild_latest_closed }}' -eq 'true') {
+          $rebuildLatestClosed = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'
+          $forceFreshRefresh = '${{ inputs.force_fresh_refresh }}' -eq 'true'
+          $selectedManualModes = [int]$rebuildLatestClosed + [int]$forceGapRefresh + [int]$forceFreshRefresh
+          if ($selectedManualModes -gt 1) {
+            throw 'Select only one manual market-data refresh mode.'
+          }
+          if ($rebuildLatestClosed) {
             Write-Host 'Manual model-only rebuild will reuse the latest validated closed-market snapshot.'
             'should_run=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             'reason=manual_rebuild_latest_closed' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             return
           }
-          if ('${{ inputs.force_gap_refresh }}' -eq 'true') {
+          if ($forceGapRefresh) {
             Write-Host 'Manual forced gap-refresh will re-fetch evidence for the latest closed session.'
             'should_run=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             'reason=manual_forced_gap_refresh' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
+          if ($forceFreshRefresh) {
+            Write-Host 'Manual forced fresh refresh will rebuild the complete latest closed session.'
+            'should_run=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            'reason=manual_forced_fresh_refresh' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             return
           }
           & .\tools\mobile_market_workflow_guard.ps1 -EventName '${{ github.event_name }}'
@@ -242,6 +260,7 @@ jobs:
           }
           $rebuildLatestClosed = ('${{ inputs.rebuild_latest_closed }}' -eq 'true') -or ('${{ inputs.force_gap_refresh }}' -eq 'true')
           $forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'
+          $forceFreshRefresh = '${{ inputs.force_fresh_refresh }}' -eq 'true'
           if (
             $rebuildLatestClosed -and
             -not (Test-Path -LiteralPath 'data/cache/market_snapshot.json.gz' -PathType Leaf)
@@ -249,7 +268,13 @@ jobs:
             throw 'The latest closed-session model rebuild has no validated cached market snapshot; refusing a live-data fallback.'
           }
           $attemptLimit = if ($rebuildLatestClosed) { 1 } else { 2 }
-          $modeLabel = if ($rebuildLatestClosed) { 'latest closed-session model rebuild' } else { 'fresh post-close refresh' }
+          $modeLabel = if ($rebuildLatestClosed) {
+            'latest closed-session model rebuild'
+          } elseif ($forceFreshRefresh) {
+            'forced fresh latest closed-session refresh'
+          } else {
+            'fresh post-close refresh'
+          }
           $releaseOutput = Join-Path $env:RUNNER_TEMP 'ds-dcf-mobile-market-data-release'
           $successfulOutput = $null
           for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
@@ -464,7 +489,7 @@ jobs:
             # finish after midnight Shanghai time; the session date then is
             # the previous weekday, not the calendar date.
             $sessionDate = $nowShanghai.Date
-            if ($nowShanghai.TimeOfDay -lt [TimeSpan]::FromHours(16)) {
+            if ($nowShanghai.TimeOfDay -lt [TimeSpan]::FromMinutes(975)) {
               $sessionDate = $sessionDate.AddDays(-1)
             }
             while ($sessionDate.DayOfWeek -eq [DayOfWeek]::Saturday -or $sessionDate.DayOfWeek -eq [DayOfWeek]::Sunday) {

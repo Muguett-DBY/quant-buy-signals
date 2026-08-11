@@ -844,6 +844,30 @@ def test_stale_refresh_reports_the_provider_failure_in_the_workflow_log(monkeypa
     assert not list(tmp_path.iterdir())
 
 
+def test_financial_only_refresh_refuses_a_stale_cache_fallback(monkeypatch, tmp_path):
+    _after_close(monkeypatch)
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        publisher,
+        "get_market_snapshot",
+        lambda *_args, **_kwargs: _snapshot(
+            source="stale_cache",
+            warning="financial refresh failed: HTTPError: 429 Too Many Requests",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="429 Too Many Requests"):
+        publisher.publish_mobile_snapshot(
+            output_dir=tmp_path,
+            refresh=False,
+            refresh_financials_only=True,
+        )
+
+    assert not list(tmp_path.iterdir())
+
+
 def test_mobile_publication_refuses_an_old_trading_session_after_a_fresh_fetch(monkeypatch, tmp_path):
     _after_close(monkeypatch)
     monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})

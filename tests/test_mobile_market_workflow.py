@@ -144,6 +144,7 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
     assert workflow.count("data/sina_financial.py") >= 2
     build = next(step for step in steps if step.get("name") == "Build validated market data")["run"]
     assert "$forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'" in build
+    assert "$forceFreshRefresh = '${{ inputs.force_fresh_refresh }}' -eq 'true'" in build
     assert "$publisherArguments += '--force-financial-fallback-refresh'" in build
 
 
@@ -309,7 +310,8 @@ def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file
 
     assert "retrieval_time_oldest" in workflow
     assert "source_quote_timestamp_latest" in workflow
-    assert workflow.count("[TimeSpan]::FromMinutes(975)") >= 1
+    assert workflow.count("[TimeSpan]::FromMinutes(975)") >= 2
+    assert "[TimeSpan]::FromHours(16)" not in workflow
     assert workflow.count("$retrievedShanghai -lt $marketDateReady") == 1
     assert "[TimeSpan]::FromHours(15)" in workflow
     assert workflow.count("Compare-Object $actual $expected") >= 2
@@ -615,12 +617,21 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "default": False,
         "type": "boolean",
     }
+    assert triggers["workflow_dispatch"]["inputs"]["force_fresh_refresh"] == {
+        "description": "Re-fetch the complete latest closed session even when that session is already published",
+        "required": False,
+        "default": False,
+        "type": "boolean",
+    }
     preflight = parsed["jobs"]["preflight"]
     guard = next(step for step in preflight["steps"] if step.get("id") == "guard")
     assert "mobile_market_workflow_guard.ps1" in guard["run"]
     assert "${{ github.event_name }}" in guard["run"]
     assert "'${{ inputs.rebuild_latest_closed }}' -eq 'true'" in guard["run"]
     assert "reason=manual_rebuild_latest_closed" in guard["run"]
+    assert "'${{ inputs.force_fresh_refresh }}' -eq 'true'" in guard["run"]
+    assert "reason=manual_forced_fresh_refresh" in guard["run"]
+    assert "Select only one manual market-data refresh mode." in guard["run"]
     guard_invocation = guard["run"].index("mobile_market_workflow_guard.ps1")
     assert "$LASTEXITCODE" not in guard["run"][guard_invocation:]
     assert preflight["outputs"] == {
@@ -688,6 +699,22 @@ def test_manual_model_rebuild_reuses_only_the_latest_validated_closed_session():
     assert "$publishedManifest.market_as_of" in verify
     assert "is not the latest published closed session" in verify
     assert "older than 14 days" in verify
+
+
+def test_manual_fresh_refresh_is_explicit_and_does_not_require_the_cached_snapshot():
+    parsed = _workflow(MOBILE_WORKFLOW)
+    build = next(
+        step for step in parsed["jobs"]["build"]["steps"] if step.get("name") == "Build validated market data"
+    )["run"]
+
+    assert "$forceFreshRefresh = '${{ inputs.force_fresh_refresh }}' -eq 'true'" in build
+    assert "elseif ($forceFreshRefresh)" in build
+    assert "forced fresh latest closed-session refresh" in build
+    assert (
+        "$rebuildLatestClosed = ('${{ inputs.rebuild_latest_closed }}' -eq 'true') -or ('${{ inputs.force_gap_refresh }}' -eq 'true')"
+        in build
+    )
+    assert "$publisherArguments += '--refresh'" in build
 
 
 def test_production_workflows_use_only_the_validated_python_lanes():
