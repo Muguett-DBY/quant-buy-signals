@@ -5408,8 +5408,12 @@ def _audit_reconstruct_ttm(
         result["status"] = "nonfinite_component"
         return result
     if reconstructed_capex < 0:
-        result["status"] = "negative_reconstructed_capex"
-        return result
+        # Mirror of engine/dcf.py: negative TTM capex is a seasonal-mismatch
+        # artefact, clipped to zero (raw value preserved for audit).
+        components["reconstructed_capex_raw"] = reconstructed_capex
+        components["reconstructed_capex_clipped"] = True
+        components["reconstructed_capex"] = 0.0
+        reconstructed_capex = 0.0
     reconstructed_fcff = reconstructed_cfo - reconstructed_capex
     if not math.isfinite(reconstructed_fcff):
         result["status"] = "nonfinite_component"

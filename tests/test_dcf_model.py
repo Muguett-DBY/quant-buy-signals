@@ -250,7 +250,7 @@ def test_ttm_revenue_distinguishes_missing_field_from_nonfinite_field(ttm_period
     assert nonfinite_outcome["components"]["current_interim"]["revenue"] is None
 
 
-def test_ttm_fcff_fails_closed_when_absolute_capex_reconstruction_is_negative(ttm_period_contract):
+def test_ttm_fcff_clips_negative_capex_reconstruction_instead_of_failing_closed(ttm_period_contract):
     annual = [{"REPORT_DATE": "2025-12-31", "NETCASH_OPERATE": 100.0, "CONSTRUCT_LONG_ASSET": -10.0}]
     interim = [
         {"REPORT_DATE": "2026-06-30", "NETCASH_OPERATE": 60.0, "CONSTRUCT_LONG_ASSET": -2.0},
@@ -259,10 +259,16 @@ def test_ttm_fcff_fails_closed_when_absolute_capex_reconstruction_is_negative(tt
 
     outcome = reconstruct_ttm_fcff(annual, interim, period_contract=ttm_period_contract)
 
-    assert outcome["status"] == "negative_reconstructed_capex"
-    assert outcome["value"] is None
+    # A negative TTM capex reconstruction is a seasonal-mismatch artefact
+    # (annual + current_interim - prior_interim < 0 when Q1/project capex is
+    # large relative to the full year).  It is clipped to zero so the company
+    # stays in normal valuation; the raw negative value is preserved for audit.
+    assert outcome["status"] == "complete"
+    assert outcome["value"] == pytest.approx(120.0)
+    assert outcome["components"]["reconstructed_capex"] == pytest.approx(0.0)
+    assert outcome["components"]["reconstructed_capex_raw"] == pytest.approx(-8.0)
+    assert outcome["components"]["reconstructed_capex_clipped"] is True
     assert outcome["components"]["reconstructed_operating_cash_flow"] == pytest.approx(120.0)
-    assert outcome["components"]["reconstructed_capex"] == pytest.approx(-8.0)
 
 
 def test_terminal_value_grows_with_terminal_rate_not_forecast_rate():

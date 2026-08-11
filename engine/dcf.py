@@ -257,8 +257,20 @@ def reconstruct_ttm_fcff(
         result["status"] = "nonfinite_component"
         return result
     if reconstructed_capex < 0:
-        result["status"] = "negative_reconstructed_capex"
-        return result
+        # A negative TTM capex reconstruction is a seasonal-mismatch artefact,
+        # not a data contradiction: companies whose Q1 capex is large relative
+        # to the full year (property, engineering, project-based businesses)
+        # produce annual + current_interim - prior_interim < 0 even though capex
+        # is physically non-negative.  Treat it as zero capex for the period
+        # rather than failing closed: clipping is conservative (never inflates
+        # FCFF) and keeps the company in normal valuation instead of an
+        # artificial "口径异常" skip.  The raw negative value is preserved in
+        # reconstructed_capex_raw for audit; downstream normalisation consumes
+        # the clipped (zero) value so it does not double-count the artefact.
+        components["reconstructed_capex_raw"] = reconstructed_capex
+        components["reconstructed_capex_clipped"] = True
+        components["reconstructed_capex"] = 0.0
+        reconstructed_capex = 0.0
 
     fcff = reconstructed_cfo - reconstructed_capex
     if not math.isfinite(fcff):

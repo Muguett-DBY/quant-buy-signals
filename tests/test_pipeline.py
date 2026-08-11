@@ -500,7 +500,6 @@ def test_strict_ttm_source_binding_rejects_every_material_payload_tamper(tamper)
         ("ttm_fcff_missing_component", "fcff_missing"),
         ("ttm_fcff_duplicate_period", "fcff_duplicate"),
         ("ttm_fcff_nonfinite_component", "fcff_nonfinite"),
-        ("ttm_fcff_negative_reconstructed_capex", "fcff_negative_capex"),
         ("ttm_fcff_nonpositive", "fcff_nonpositive"),
         ("ttm_revenue_missing_component", "revenue_missing"),
         ("ttm_revenue_duplicate_period", "revenue_duplicate"),
@@ -545,6 +544,24 @@ def test_strict_ttm_skip_reasons_preserve_exact_reconstruction_status(expected_r
 
     assert outcome.results == {}
     assert outcome.skip_reasons == {"000002": expected_reason}
+
+
+def test_strict_ttm_clips_negative_capex_reconstruction_and_valuates_normally():
+    """A seasonal Q1-heavy capex profile (annual + Q1'26 - Q1'25 < 0) must be
+    clipped to zero capex, not fail-closed as a skip."""
+    company = _complete_industrial_company(1.0)
+    # Q1'25 capex far exceeds the full year -> negative TTM reconstruction.
+    company["cashflow_interim"][0] = _cashflow_row("2025-03-31", 4.0, 100.0)
+
+    outcome = compute_dcf_batch(
+        _quotes().iloc[[1]],
+        {"000002": company},
+        max_workers=1,
+        reporting_period_contract=_reporting_period_contract(),
+    )
+
+    assert outcome.results != {}
+    assert outcome.skip_reasons == {}
 
 
 def test_financial_pb_generation_requires_contract_but_never_uses_industrial_ttm(monkeypatch):
