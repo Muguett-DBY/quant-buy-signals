@@ -404,6 +404,8 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "generation '${response_generation:-none}' on attempt ${attempt} of ${mirror_attempt_limit}" in mirror_script
     assert "sleep $((mirror_retry_base_delay_seconds * attempt))" in mirror_script
     assert "verify_cloudflare_projection() {" in mirror_script
+    assert "/api/health?deep=1&generation_id=" in mirror_script
+    assert ".integrity_checked == true" in mirror_script
     assert 'if verify_cloudflare_projection "${attempt}"; then' in mirror_script
     assert "Cloudflare public projection has not converged on attempt ${attempt} of 6." in mirror_script
     assert "|| return 1" in mirror_script
@@ -527,25 +529,43 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "should_run": "${{ steps.guard.outputs.should_run }}",
         "reason": "${{ steps.guard.outputs.reason }}",
     }
-    assert workflow.count("data/cache/market_snapshot.json.gz") == 3
-    for path in (
+    steps = parsed["jobs"]["build"]["steps"]
+    baseline_restore = next(step for step in steps if step.get("name") == "Restore the last validated data baseline")
+    baseline_save = next(step for step in steps if step.get("name") == "Save the validated data baseline")
+    assert baseline_restore["with"]["path"] == "data/cache/market_snapshot.json.gz"
+    assert baseline_save["with"]["path"] == "data/cache/market_snapshot.json.gz"
+
+    expected_deep_paths = {
         "data/cache/market_coldness",
         "data/cache/market_history",
+        "data/cache/quality_history",
+        "data/cache/growth_evidence",
+        "data/cache/research_reports",
         "data/cache/patch4_evidence",
-    ):
-        assert workflow.count(path) == 4
-    # The pre-warm steps add fifth mentions for the growth_evidence,
-    # quality_history and research_reports cache paths.
-    assert workflow.count("data/cache/growth_evidence") == 5
-    assert workflow.count("data/cache/quality_history") == 5
-    assert workflow.count("data/cache/research_reports") == 5
-    for contract in (
-        "data/growth_evidence.py",
-        "data/quality_history.py",
-        "data/research_reports.py",
-        "data/patch4_evidence.py",
-    ):
-        assert workflow.count(contract) == 3
+        "data/cache/cninfo_annual",
+        "data/cache/datacenter_reports",
+        "data/cache/sina_financial",
+    }
+    deep_restore = next(
+        step for step in steps if step.get("name") == "Restore accumulated contract-validated deep evidence"
+    )
+    deep_save = next(step for step in steps if step.get("name") == "Save accumulated contract-validated deep evidence")
+    assert set(deep_restore["with"]["path"].splitlines()) == expected_deep_paths
+    assert set(deep_save["with"]["path"].splitlines()) == expected_deep_paths
+
+    local_bundle = next(
+        step for step in steps if step.get("name") == "Import a verified local evidence bundle when available"
+    )
+    local_script = local_bundle["run"]
+    assert local_script.count("curl.exe --fail") == 2
+    assert "python -m tools.evidence_bundle resolve" in local_script
+    assert "python -m tools.evidence_bundle import" in local_script
+    assert "--expected-source-commit" not in local_script
+    assert "No local evidence pointer is available; continuing with the Actions deep cache." in local_script
+    assert "Expand-Archive" not in workflow
+    assert "segment-cache-latest.zip" not in workflow
+    assert "quality-history-cache-latest.zip" not in workflow
+    assert "research-reports-cache-latest.zip" not in workflow
     assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 4
     assert "mobile-market-v1-${{ runner.os }}-\n" in workflow
     assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
@@ -948,10 +968,19 @@ def test_cloudflare_deploy_refuses_stale_main_and_verifies_every_endpoint():
     guard = next(step for step in steps if step["name"] == "Refuse an outdated main revision")
     assert "gh api \"repos/${{ github.repository }}/commits/main\" --jq '.sha'" in guard["run"]
     assert "skip=true" in guard["run"]
+    paths_step = next(step for step in steps if step["name"] == "Skip pushes that did not touch the website")
+    assert paths_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    paths = paths_step["run"]
+    assert "if ! changed=" in paths
+    assert "refusing a false-green deployment skip" in paths
+    assert "exit 1" in paths
+    assert "changed-file lookup failed; conservative skip" not in paths
     verify = next(step for step in steps if step["name"] == "Verify the deployed site")
     for endpoint in ("/api/methodology", "/api/health", "/api/meta", "https://quant.custard.top/"):
         assert endpoint in verify["run"]
     assert "jq -er '.methodology_version'" in verify["run"]
+    assert "/api/health?deep=1" in verify["run"]
+    assert ".integrity_checked == true" in verify["run"]
     assert "grep -qF" in verify["run"]
 
 

@@ -81,6 +81,14 @@ _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 6_000
 _TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS = 2700.0
 
 
+def _refresh_failure_message(snapshot: object) -> str:
+    """Keep the provider failure visible without flooding the workflow log."""
+
+    warning = " ".join(str(getattr(snapshot, "warning", "") or "").split())
+    suffix = f"; source warning: {warning[:500]}" if warning else ""
+    return "fresh market refresh did not complete; retaining the published mobile snapshot" + suffix
+
+
 def _require_company_detail_manifest(manifest: Mapping[str, object], expected_companies: int) -> None:
     details = manifest.get("company_details")
     if not isinstance(details, Mapping):
@@ -735,7 +743,7 @@ def publish_mobile_snapshot(
         persist_network=False,
     )
     if not _refresh_completed(refresh, getattr(snapshot, "source", None)):
-        raise RuntimeError("fresh market refresh did not complete; retaining the published mobile snapshot")
+        raise RuntimeError(_refresh_failure_message(snapshot))
     market_as_of = _market_as_of(snapshot)
     if refresh:
         now_shanghai = _shanghai_now()

@@ -588,6 +588,26 @@ def test_datacenter_security_and_proxy_failures_are_not_transient(error):
     assert dc._is_transient_datacenter_transport_error(error) is False
 
 
+def test_request_page_honours_retry_after_and_does_not_retry_terminal_http(monkeypatch):
+    sleeps = []
+    responses = [
+        FakeStreamingResponse([], status=429, headers={"Retry-After": "7"}),
+        FakeStreamingResponse([], status=404),
+    ]
+    monkeypatch.setattr(dc.time, "sleep", sleeps.append)
+    monkeypatch.setattr(dc.requests, "get", lambda *_args, **_kwargs: responses.pop(0))
+
+    with pytest.raises(dc.DataFetchError, match="HTTP 404"):
+        dc._request_page(dc.RPT_INCOME, "SECURITY_CODE", 1, page_size=1)
+
+    assert sleeps == [7]
+    assert len(responses) == 0
+    diagnostic = dc.get_datacenter_fetch_diagnostics()
+    assert diagnostic["request_attempts"] == 2
+    assert diagnostic["retry_wait_ms"] == 7_000
+    assert diagnostic["request_failure_counts"] == {"http_404": 1, "http_429": 1}
+
+
 def test_request_page_rejects_declared_oversized_response_without_retry(monkeypatch):
     calls = []
     monkeypatch.setattr(dc, "_MAX_DATACENTER_RESPONSE_BYTES", 64)

@@ -1820,7 +1820,9 @@ class DataFetcher:
         stable_keys = (
             "adapter_version",
             "strategy",
+            "candidate_codes",
             "candidate_requests",
+            "code_budget",
             "target_requests",
             "skipped_requests",
             "budget_exhausted",
@@ -1835,11 +1837,14 @@ class DataFetcher:
             "conflicts",
             "conflict_codes",
             "unverified_zero",
-            "status_counts",
         )
         return {
             "primary_source": "eastmoney_datacenter_bulk",
             "primary_companies": self._primary_financial_companies,
             "sina_fallback": {key: deepcopy(fallback[key]) for key in stable_keys if key in fallback},
-            "sina_history_overlay": dict(self._history_fallback_diagnostic),
+            "sina_history_overlay": {
+                key: deepcopy(self._history_fallback_diagnostic[key])
+                for key in stable_keys
+                if key in self._history_fallback_diagnostic
+            },
         }

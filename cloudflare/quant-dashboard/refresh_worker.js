@@ -13,10 +13,17 @@ const SOURCE_ASSET_BASE = "https://github.com/Muguett-DBY/quant-buy-signals/rele
 const HEX64 = /^[0-9a-f]{64}$/;
 const MAX_MANIFEST_BYTES = 1_000_000;
 const MAX_COMPRESSED_ASSET_BYTES = 8_000_000;
+const MAX_PRIMARY_UNCOMPRESSED_BYTES = 32_000_000;
 const MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000;
 const MAX_DETAIL_COMPRESSED_TOTAL = 48_000_000;
 const MAX_DETAIL_UNCOMPRESSED_TOTAL = 144_000_000;
 const DETAIL_DOWNLOAD_BATCH_SIZE = 4;
+const R2_HEAD_BATCH_SIZE = 4;
+const R2_PUT_BATCH_SIZE = 4;
+const R2_DELETE_BATCH_SIZE = 32;
+const MAX_GENERATION_OBJECTS = 64;
+const MAX_STALE_GENERATIONS_PER_REFRESH = 8;
+const DEFAULT_GENERATION_RETENTION_COUNT = 8;
 const ASSET_NAMES = {
   catalogue: /^catalog-[0-9a-f]{16}\.json\.gz$/,
   signals: /^signals-[0-9a-f]{16}\.json\.gz$/,
@@ -63,12 +70,25 @@ async function readBoundedStream(stream, maxBytes, label) {
   return output.buffer;
 }
 
-async function downloadAsset(name, kind, metadata = {}) {
+async function mapInBatches(items, batchSize, mapper) {
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new Error("invalid batch size");
+  const results = [];
+  for (let start = 0; start < items.length; start += batchSize) {
+    results.push(...await Promise.all(items.slice(start, start + batchSize).map(mapper)));
+  }
+  return results;
+}
+
+function validateAssetDeclaration(name, kind, metadata = {}) {
   if (!ASSET_NAMES[kind]?.test(name)) throw new Error(`invalid ${kind} filename`);
   if (kind !== "signature" && (!Number.isSafeInteger(metadata.size) || metadata.size <= 0 || metadata.size > MAX_COMPRESSED_ASSET_BYTES)) {
     throw new Error(`invalid ${kind} size`);
   }
   if (kind !== "signature" && !HEX64.test(String(metadata.sha256 || ""))) throw new Error(`invalid ${kind} checksum`);
+}
+
+async function downloadAsset(name, kind, metadata = {}) {
+  validateAssetDeclaration(name, kind, metadata);
   const response = await fetch(`${SOURCE_ASSET_BASE}${encodeURIComponent(name)}?mirror=${Date.now()}`, {
     cf: { cacheTtl: 0, cacheEverything: false },
   });
@@ -209,24 +229,37 @@ function generationFromNames(catalogue, signals, signature, detailAssets = []) {
 }
 
 async function downloadDetailAssets(assets) {
-  const results = [];
-  for (let start = 0; start < assets.length; start += DETAIL_DOWNLOAD_BATCH_SIZE) {
-    const batch = assets.slice(start, start + DETAIL_DOWNLOAD_BATCH_SIZE);
-    results.push(...await Promise.all(
-      batch.map((metadata) => downloadAsset(metadata.filename, "company_detail", metadata)),
-    ));
-  }
-  return results;
+  return await mapInBatches(
+    assets,
+    DETAIL_DOWNLOAD_BATCH_SIZE,
+    (metadata) => downloadAsset(metadata.filename, "company_detail", metadata),
+  );
 }
 
-async function gunzip(bytes, maxBytes) {
+async function gunzip(bytes, maxBytes, label) {
   const body = new Response(bytes).body;
-  if (!body) throw new Error("company detail compressed stream is unavailable");
+  if (!body) throw new Error(`${label} compressed stream is unavailable`);
   return await readBoundedStream(
     body.pipeThrough(new DecompressionStream("gzip")),
     maxBytes,
-    "company detail uncompressed response",
+    `${label} uncompressed response`,
   );
+}
+
+function validatePrimaryAssetMetadata(metadata, label) {
+  if (
+    !Number.isSafeInteger(metadata?.uncompressed_size)
+    || metadata.uncompressed_size < 1
+    || metadata.uncompressed_size > MAX_PRIMARY_UNCOMPRESSED_BYTES
+  ) {
+    throw new Error(`invalid ${label} uncompressed size`);
+  }
+}
+
+async function verifyPrimaryAssetSize(bytes, metadata, label) {
+  validatePrimaryAssetMetadata(metadata, label);
+  const raw = await gunzip(bytes, MAX_PRIMARY_UNCOMPRESSED_BYTES, label);
+  if (raw.byteLength !== metadata.uncompressed_size) throw new Error(`${label} uncompressed size mismatch`);
 }
 
 async function detailShardId(code) {
@@ -240,7 +273,7 @@ async function verifyCompanyDetailPayloads(manifest, assets, compressedAssets) {
   const seenCodes = new Set();
   for (let index = 0; index < assets.length; index += 1) {
     const metadata = assets[index];
-    const raw = await gunzip(compressedAssets[index], metadata.uncompressed_size);
+    const raw = await gunzip(compressedAssets[index], metadata.uncompressed_size, `company detail shard ${metadata.id}`);
     if (raw.byteLength !== metadata.uncompressed_size) throw new Error(`company detail shard ${metadata.id} uncompressed size mismatch`);
     if (await sha256(raw) !== metadata.uncompressed_sha256) throw new Error(`company detail shard ${metadata.id} uncompressed checksum mismatch`);
     let payload;
@@ -300,6 +333,205 @@ async function verifyCompanyDetailPayloads(manifest, assets, compressedAssets) {
   }
 }
 
+function expectedGenerationObjects({
+  generationId,
+  manifestBytes,
+  manifestHash,
+  catalogueName,
+  catalogueMetadata,
+  signalsName,
+  signalsMetadata,
+  detailAssets,
+  signatureName,
+  signatureBytes,
+  signatureHash,
+}) {
+  const prefix = `generations/${generationId}`;
+  return [
+    {
+      name: "manifest.json",
+      key: `${prefix}/manifest.json`,
+      body: manifestBytes,
+      contentType: "application/json; charset=utf-8",
+      contentEncoding: null,
+      expectedSize: manifestBytes.byteLength,
+      expectedHash: manifestHash,
+    },
+    {
+      name: catalogueName,
+      key: `${prefix}/${catalogueName}`,
+      body: null,
+      contentType: "application/json",
+      contentEncoding: "gzip",
+      expectedSize: catalogueMetadata.size,
+      expectedHash: catalogueMetadata.sha256,
+    },
+    {
+      name: signalsName,
+      key: `${prefix}/${signalsName}`,
+      body: null,
+      contentType: "application/json",
+      contentEncoding: "gzip",
+      expectedSize: signalsMetadata.size,
+      expectedHash: signalsMetadata.sha256,
+    },
+    ...detailAssets.map((metadata) => ({
+      name: metadata.filename,
+      key: `${prefix}/${metadata.filename}`,
+      body: null,
+      contentType: "application/json",
+      contentEncoding: "gzip",
+      expectedSize: metadata.size,
+      expectedHash: metadata.sha256,
+    })),
+    {
+      name: signatureName,
+      key: `${prefix}/${signatureName}`,
+      body: signatureBytes,
+      contentType: "application/octet-stream",
+      contentEncoding: null,
+      expectedSize: signatureBytes.byteLength,
+      expectedHash: signatureHash,
+    },
+  ];
+}
+
+async function inspectGenerationObjects(bucket, objects) {
+  return await mapInBatches(objects, R2_HEAD_BATCH_SIZE, async (object) => {
+    const existing = await bucket.head(object.key);
+    const complete = Boolean(
+      existing
+      && existing.size === object.expectedSize
+      && String(existing.customMetadata?.sha256 || "").toLowerCase() === String(object.expectedHash).toLowerCase()
+    );
+    return { ...object, complete };
+  });
+}
+
+async function putGenerationObjects(bucket, objects) {
+  await mapInBatches(objects, R2_PUT_BATCH_SIZE, async (object) => {
+    if (!object.body) throw new Error(`validated body is missing for ${object.name}`);
+    await bucket.put(object.key, object.body, {
+      httpMetadata: {
+        contentType: object.contentType,
+        ...(object.contentEncoding ? { contentEncoding: object.contentEncoding } : {}),
+      },
+      customMetadata: { sha256: String(object.expectedHash).toLowerCase() },
+    });
+  });
+}
+
+async function loadGenerationState(env, generationId) {
+  return await Promise.all([
+    env.DB.prepare(
+      `SELECT c.generation_id,
+              c.updated_at,
+              CASE WHEN g.generation_id IS NULL THEN 0 ELSE 1 END AS target_exists
+       FROM current_generation AS c
+       LEFT JOIN generations AS g ON g.generation_id = c.generation_id
+       WHERE c.singleton = 1`,
+    ).first(),
+    env.DB.prepare(
+      `SELECT generation_id, market_as_of, data_timestamp_utc, generated_at_utc,
+              manifest_sha256, company_count, triggered_company_count,
+              conditional_company_count, pending_company_count, source_commit,
+              created_at, last_checked_at
+       FROM generations
+       WHERE generation_id = ?`,
+    ).bind(generationId).first(),
+  ]);
+}
+
+async function touchCompleteGeneration(env, generationId, manifestHash, now) {
+  const result = await env.DB.prepare(
+    `UPDATE generations
+     SET last_checked_at = ?
+     WHERE generation_id = ?
+       AND manifest_sha256 = ?
+       AND EXISTS (
+         SELECT 1 FROM current_generation
+         WHERE singleton = 1 AND generation_id = ?
+       )`,
+  ).bind(now, generationId, manifestHash, generationId).run();
+  if (result?.success !== true || Number(result?.meta?.changes || 0) !== 1) {
+    throw new Error("complete generation audit timestamp was not updated");
+  }
+}
+
+function generationRetentionCount(env) {
+  const configured = Number(env.GENERATION_RETENTION_COUNT ?? DEFAULT_GENERATION_RETENTION_COUNT);
+  if (!Number.isSafeInteger(configured) || configured < 2 || configured > 32) {
+    throw new Error("generation retention count must be between 2 and 32");
+  }
+  return configured;
+}
+
+async function listGenerationObjectKeys(bucket, generationId) {
+  const prefix = `generations/${generationId}/`;
+  const keys = [];
+  const cursors = new Set();
+  let cursor;
+  while (true) {
+    const page = await bucket.list({ prefix, limit: MAX_GENERATION_OBJECTS, ...(cursor ? { cursor } : {}) });
+    if (!page || !Array.isArray(page.objects)) throw new Error(`invalid R2 listing for generation ${generationId}`);
+    for (const object of page.objects) {
+      const key = String(object?.key || "");
+      if (!key.startsWith(prefix)) throw new Error(`R2 listing escaped generation ${generationId}`);
+      keys.push(key);
+      if (keys.length > MAX_GENERATION_OBJECTS) throw new Error(`generation ${generationId} has too many R2 objects`);
+    }
+    if (!page.truncated) break;
+    const nextCursor = String(page.cursor || "");
+    if (!nextCursor || cursors.has(nextCursor)) throw new Error(`invalid R2 cursor for generation ${generationId}`);
+    cursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return keys;
+}
+
+async function deleteGenerationObjects(bucket, generationId) {
+  const keys = await listGenerationObjectKeys(bucket, generationId);
+  for (let start = 0; start < keys.length; start += R2_DELETE_BATCH_SIZE) {
+    await bucket.delete(keys.slice(start, start + R2_DELETE_BATCH_SIZE));
+  }
+}
+
+async function pruneOldGenerations(env, currentGenerationId) {
+  const retentionCount = generationRetentionCount(env);
+  const result = await env.DB.prepare(
+    `SELECT generation_id
+     FROM generations
+     ORDER BY CASE WHEN generation_id = ? THEN 0 ELSE 1 END,
+              market_as_of DESC, data_timestamp_utc DESC, generated_at_utc DESC,
+              created_at DESC, generation_id DESC
+     LIMIT ?`,
+  ).bind(currentGenerationId, retentionCount + MAX_STALE_GENERATIONS_PER_REFRESH).all();
+  if (result?.success !== true || !Array.isArray(result.results)) throw new Error("generation retention query failed");
+  const currentRow = result.results.find((row) => row.generation_id === currentGenerationId);
+  if (!currentRow) throw new Error("current generation is absent from retention query");
+  const staleRows = result.results.slice(retentionCount);
+  let pruned = 0;
+  for (const row of staleRows) {
+    const generationId = String(row.generation_id || "");
+    if (!/^[0-9a-f]{16}$/.test(generationId) || generationId === currentGenerationId) {
+      throw new Error("retention selected an invalid or current generation");
+    }
+    await deleteGenerationObjects(env.DATA_BUCKET, generationId);
+    const deleted = await env.DB.prepare(
+      `DELETE FROM generations
+       WHERE generation_id = ?
+         AND generation_id <> ?
+         AND NOT EXISTS (
+           SELECT 1 FROM current_generation
+           WHERE singleton = 1 AND generation_id = ?
+         )`,
+    ).bind(generationId, currentGenerationId, generationId).run();
+    if (deleted?.success !== true) throw new Error(`failed to delete stale generation row ${generationId}`);
+    pruned += Number(deleted?.meta?.changes || 0) === 1 ? 1 : 0;
+  }
+  return pruned;
+}
+
 async function refresh(env) {
   const response = await fetch(`${SOURCE_MANIFEST}?mirror=${Date.now()}`, { cf: { cacheTtl: 0, cacheEverything: false } });
   if (!response.ok) throw new Error(`manifest download HTTP ${response.status}`);
@@ -319,30 +551,13 @@ async function refresh(env) {
   await verifyManifestSignature(sourceManifestBytes, signatureBytes);
   const detailAssets = companyDetailAssets(manifest, preliminaryGeneration) || [];
   const generationId = generationFromNames(catalogueName, signalsName, signatureName, detailAssets);
-  const [catalogueBytes, signalsBytes] = await Promise.all([
-    downloadAsset(catalogueName, "catalogue", manifest.catalogue),
-    downloadAsset(signalsName, "signals", manifest.signals),
-  ]);
-  const detailBytes = await downloadDetailAssets(detailAssets);
-  await verifyCompanyDetailPayloads(manifest, detailAssets, detailBytes);
+  validateAssetDeclaration(catalogueName, "catalogue", manifest.catalogue);
+  validateAssetDeclaration(signalsName, "signals", manifest.signals);
+  validatePrimaryAssetMetadata(manifest.catalogue, "catalogue");
+  validatePrimaryAssetMetadata(manifest.signals, "signals");
   const now = new Date().toISOString();
   const manifestBytes = sourceManifestBytes;
-  const manifestHash = await sha256(manifestBytes);
-  const prefix = `generations/${generationId}`;
-  const objects = [
-    ["manifest.json", manifestBytes, "application/json; charset=utf-8", null, manifestBytes.byteLength, manifestHash],
-    [catalogueName, catalogueBytes, "application/json", "gzip", catalogueBytes.byteLength, manifest.catalogue.sha256],
-    [signalsName, signalsBytes, "application/json", "gzip", signalsBytes.byteLength, manifest.signals.sha256],
-    ...detailAssets.map((metadata, index) => [
-      metadata.filename,
-      detailBytes[index],
-      "application/json",
-      "gzip",
-      detailBytes[index].byteLength,
-      metadata.sha256,
-    ]),
-    [signatureName, signatureBytes, "application/octet-stream", null, signatureBytes.byteLength, await sha256(signatureBytes)],
-  ];
+  const [manifestHash, signatureHash] = await Promise.all([sha256(manifestBytes), sha256(signatureBytes)]);
   const summary = manifest.summary || {};
   const sourceCommit = String(manifest.provenance?.source_commit || "");
   const incomingMarketAsOf = String(manifest.market_as_of || "");
@@ -360,22 +575,23 @@ async function refresh(env) {
     pending_company_count: Number(summary.pending_company_count || 0),
     source_commit: sourceCommit,
   };
-  const previous = await env.DB.prepare(
-    `SELECT c.generation_id,
-            c.updated_at,
-            CASE WHEN g.generation_id IS NULL THEN 0 ELSE 1 END AS target_exists
-     FROM current_generation AS c
-     LEFT JOIN generations AS g ON g.generation_id = c.generation_id
-     WHERE c.singleton = 1`,
-  ).first();
-  const storedGeneration = await env.DB.prepare(
-    `SELECT generation_id, market_as_of, data_timestamp_utc, generated_at_utc,
-            manifest_sha256, company_count, triggered_company_count,
-            conditional_company_count, pending_company_count, source_commit,
-            created_at, last_checked_at
-     FROM generations
-     WHERE generation_id = ?`,
-  ).bind(generationId).first();
+  const expectedObjects = expectedGenerationObjects({
+    generationId,
+    manifestBytes,
+    manifestHash,
+    catalogueName,
+    catalogueMetadata: manifest.catalogue,
+    signalsName,
+    signalsMetadata: manifest.signals,
+    detailAssets,
+    signatureName,
+    signatureBytes,
+    signatureHash,
+  });
+  const [[previous, storedGeneration], inspectedObjects] = await Promise.all([
+    loadGenerationState(env, generationId),
+    inspectGenerationObjects(env.DATA_BUCKET, expectedObjects),
+  ]);
   const immutableMetadataMatches = !storedGeneration || (
     String(storedGeneration.generation_id || "") === expectedGeneration.generation_id
     && String(storedGeneration.market_as_of || "") === expectedGeneration.market_as_of
@@ -401,31 +617,39 @@ async function refresh(env) {
   const databaseRepairNeeded = pointerIsDangling
     || (sameGenerationPointer && (!storedGeneration || !auditTimestampsComplete || !String(previous?.updated_at || "").trim()))
     || (!previous?.generation_id && Boolean(storedGeneration));
-  let repairedObjects = false;
-  if (sameGenerationPointer || storedGeneration) {
-    for (const [name, body, contentType, contentEncoding, expectedSize, expectedHash] of objects) {
-      const key = `${prefix}/${name}`;
-      const existing = await env.DATA_BUCKET.head(key);
-      if (
-        !existing
-        || existing.size !== expectedSize
-        || String(existing.customMetadata?.sha256 || "").toLowerCase() !== String(expectedHash).toLowerCase()
-      ) {
-        await env.DATA_BUCKET.put(key, body, {
-          httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
-          customMetadata: { sha256: String(expectedHash).toLowerCase() },
-        });
-        repairedObjects = true;
-      }
-    }
-  } else {
-    for (const [name, body, contentType, contentEncoding, _expectedSize, expectedHash] of objects) {
-      await env.DATA_BUCKET.put(`${prefix}/${name}`, body, {
-        httpMetadata: { contentType, ...(contentEncoding ? { contentEncoding } : {}) },
-        customMetadata: { sha256: String(expectedHash).toLowerCase() },
-      });
-    }
+  const allObjectsComplete = inspectedObjects.every((object) => object.complete);
+  if (sameGenerationPointer && !databaseRepairNeeded && allObjectsComplete) {
+    await touchCompleteGeneration(env, generationId, manifestHash, now);
+    const prunedGenerations = await pruneOldGenerations(env, generationId);
+    return {
+      status: "unchanged",
+      generation_id: generationId,
+      market_as_of: manifest.market_as_of,
+      company_count: Number(summary.company_count || 0),
+      pruned_generations: prunedGenerations,
+    };
   }
+
+  const [catalogueBytes, signalsBytes] = await Promise.all([
+    downloadAsset(catalogueName, "catalogue", manifest.catalogue),
+    downloadAsset(signalsName, "signals", manifest.signals),
+  ]);
+  await verifyPrimaryAssetSize(catalogueBytes, manifest.catalogue, "catalogue");
+  await verifyPrimaryAssetSize(signalsBytes, manifest.signals, "signals");
+  const detailBytes = await downloadDetailAssets(detailAssets);
+  await verifyCompanyDetailPayloads(manifest, detailAssets, detailBytes);
+  const downloadedBodies = new Map([
+    [catalogueName, catalogueBytes],
+    [signalsName, signalsBytes],
+    ...detailAssets.map((metadata, index) => [metadata.filename, detailBytes[index]]),
+  ]);
+  const hydratedObjects = inspectedObjects.map((object) => ({
+    ...object,
+    body: object.body || downloadedBodies.get(object.name),
+  }));
+  const objectsToPut = hydratedObjects.filter((object) => !object.complete);
+  await putGenerationObjects(env.DATA_BUCKET, objectsToPut);
+  const repairedObjects = Boolean(sameGenerationPointer || storedGeneration) && objectsToPut.length > 0;
   const generationValues = [
     generationId,
     incomingMarketAsOf,
@@ -534,7 +758,14 @@ async function refresh(env) {
   const status = sameGenerationPointer
     ? (repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged")
     : (databaseRepairNeeded ? "repaired" : "updated");
-  return { status, generation_id: generationId, market_as_of: manifest.market_as_of, company_count: Number(summary.company_count || 0) };
+  const prunedGenerations = await pruneOldGenerations(env, generationId);
+  return {
+    status,
+    generation_id: generationId,
+    market_as_of: manifest.market_as_of,
+    company_count: Number(summary.company_count || 0),
+    pruned_generations: prunedGenerations,
+  };
 }
 
 export default {

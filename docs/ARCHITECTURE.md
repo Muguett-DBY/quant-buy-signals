@@ -45,7 +45,7 @@ GitHub Actions (mobile-market-data.yml) → 抓数据/评分 → 签名 catalogu
 | `fetcher.py` | 行情+财务抓取编排（东财主源 + 新浪兜底） |
 | `datacenter.py` | 东财数据中心接口 |
 | `sina_financial.py` | 新浪财务兜底（TTM 补缺 + 年度历史回填） |
-| `tdx_segment.py` | **通达信 TCP 主营构成兜底**（破东财限流，2026-08 新增） |
+| `tdx_segment.py` | **仅本地可选**的通达信 TCP 主营构成采集器（`mootdx` 不进入生产 Runner） |
 | `growth_evidence.py` | type3 增长证据（segment/并购） |
 | `quality_history.py` | type7 长期市场历史 |
 | `snapshot.py` / `mobile_snapshot.py` | 快照组装/移动端展示 |
@@ -56,7 +56,8 @@ GitHub Actions (mobile-market-data.yml) → 抓数据/评分 → 签名 catalogu
 - **content-addressed**：每个 generation 有 16 位哈希，manifest/catalogue/详情分片/签名绑定同一哈希
 - **证据契约**：所有评分输入带 provenance（source/SHA-256），audit 独立重放校验
 - **补丁系统**：补丁1-7 叠加在七类型规则上（见 docs/MODEL.md），总闸门在汇总后置过滤
-- **数据源降级**：东财（限流）→ 新浪（TTM/历史）→ 通达信 TCP（主营构成）→ 缓存/预加载
+- **数据源降级**：生产 Runner 使用东财/新浪及已校验缓存；通达信 TCP 只在可信本地机器采集，
+  通过内容寻址 evidence bundle 交给 Runner 校验和导入，绝不从本地直接发布 Cloudflare。
 
 ## 已知巨型文件改造风险
 
@@ -73,6 +74,30 @@ GitHub Actions (mobile-market-data.yml) → 抓数据/评分 → 签名 catalogu
 # 触发线上重建（复用已收盘快照 + 强刷财务源）
 # GitHub → Actions → mobile-market-data → workflow_dispatch → force_gap_refresh=true
 
-# 通达信主营构成回填（住宅 IP，本地跑）
-.venv\Scripts\python.exe scripts\_tdx_segment_backfill.py
+# 本地采集 segment / quality / research（日期必须显式指定）
+.venv\Scripts\python.exe -m tools.evidence_bundle collect `
+  --as-of 2026-08-10 `
+  --codes-file data\cache\tdx3d_gap_codes.json `
+  --sources segment,quality,research
+
+# 可选通达信采集：mootdx 只安装在本地，不加入 requirements 或 GitHub Runner
+.venv\Scripts\python.exe -m pip install mootdx
+.venv\Scripts\python.exe scripts\_tdx_segment_backfill.py `
+  --as-of 2026-08-10 `
+  --codes-file data\cache\tdx3d_gap_codes.json
+
+# 生成并在本地复核内容寻址 ZIP + pointer；先上传 immutable ZIP，最后更新 pointer
+.venv\Scripts\python.exe -m tools.evidence_bundle bundle --as-of 2026-08-10
+$pointer = Get-Content build\evidence-bundle\evidence-cache-pointer.json | ConvertFrom-Json
+.venv\Scripts\python.exe -m tools.evidence_bundle verify `
+  --pointer build\evidence-bundle\evidence-cache-pointer.json `
+  --bundle (Join-Path build\evidence-bundle $pointer.bundle.path)
+
+# GitHub Release 是唯一交接点：immutable ZIP 先上传，pointer 最后原子切换
+gh release upload mobile-market-data `
+  (Join-Path build\evidence-bundle $pointer.bundle.path) `
+  --repo Muguett-DBY/quant-buy-signals
+gh release upload mobile-market-data `
+  build\evidence-bundle\evidence-cache-pointer.json `
+  --clobber --repo Muguett-DBY/quant-buy-signals
 ```

@@ -27,6 +27,7 @@ from typing import Any
 import requests
 
 from data.cache import SafeFileCache
+from data.provider_http import is_transient_request_error, retry_delay_seconds
 
 EASTMONEY_DIVIDEND_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 DIVIDEND_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache" / "dividend_history"
@@ -61,9 +62,11 @@ def _parse_iso_date(value: Any) -> date | None:
 
 
 def _fetch_dividend_rows(code: str, *, session: Any = requests) -> list[dict[str, Any]]:
-    """Fetch Eastmoney dividend detail rows for one company with retries."""
+    """Fetch Eastmoney dividend detail rows for one company."""
     last_error: BaseException | None = None
     for attempt in range(REQUEST_ATTEMPTS):
+        response = None
+        should_retry = False
         try:
             response = session.get(
                 EASTMONEY_DIVIDEND_URL,
@@ -108,8 +111,20 @@ def _fetch_dividend_rows(code: str, *, session: Any = requests) -> list[dict[str
             return normalised
         except (requests.RequestException, DividendEvidenceError, ValueError) as exc:
             last_error = exc
-            if attempt < REQUEST_ATTEMPTS - 1:
-                time.sleep(REQUEST_BACKOFF_SECONDS * (attempt + 1))
+            should_retry = is_transient_request_error(exc, response)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        if not should_retry or attempt + 1 >= REQUEST_ATTEMPTS:
+            break
+        time.sleep(
+            retry_delay_seconds(
+                response,
+                attempt=attempt,
+                base_seconds=REQUEST_BACKOFF_SECONDS,
+            )
+        )
     raise DividendEvidenceError(f"eastmoney dividend fetch failed for {code}: {last_error!r}")
 
 

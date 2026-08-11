@@ -28,6 +28,7 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, CONCURRENCY, REQUEST_TIMEOUT
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
+from data.provider_http import is_transient_request_error, retry_delay_seconds
 from data.trading_calendar import is_a_share_trading_day
 
 
@@ -63,8 +64,6 @@ MARKET_COLDNESS_DECISION_READY_TIME = datetime_time(16, 15)
 _RECOVERY_TIMEOUT_FLOOR_SECONDS = 30.0
 _RECOVERY_RETRIES = 2
 _MAX_RECOVERY_PAGES = 5
-_RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
-
 _CACHE_SCHEMA_VERSION = 2
 _MAX_PAGE_RESPONSE_BYTES = 4 * 1024 * 1024
 _MAX_ACQUISITION_RESPONSE_BYTES = 32 * 1024 * 1024
@@ -165,14 +164,7 @@ class _AcquisitionByteBudget:
 
 
 def _is_transient_transport_error(exc: BaseException | None) -> bool:
-    if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
-        return False
-    if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
-        return True
-    if not isinstance(exc, requests.HTTPError):
-        return False
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    return isinstance(status, int) and (status in _RETRYABLE_HTTP_STATUSES or 500 <= status <= 599)
+    return bool(exc is not None and is_transient_request_error(exc))
 
 
 @dataclass(frozen=True)
@@ -667,9 +659,12 @@ class EastmoneyMarketColdnessAdapter:
             raise ValueError("page request timeout and retries must be positive")
         request_timeout = float(request_timeout)
         last_error: BaseException | None = None
-        transient_only = True
+        last_was_transient = False
+        attempts_used = 0
         for attempt in range(request_retries):
+            attempts_used = attempt + 1
             response = None
+            delay = 0.0
             try:
                 if acquisition_budget is not None:
                     acquisition_budget.raise_if_exhausted()
@@ -696,23 +691,25 @@ class EastmoneyMarketColdnessAdapter:
                 raise
             except Exception as exc:
                 last_error = exc
-                if not _is_transient_transport_error(exc):
-                    transient_only = False
-                if attempt + 1 < request_retries and self.retry_delay > 0:
-                    time.sleep(self.retry_delay * (attempt + 1))
+                last_was_transient = is_transient_request_error(exc, response)
+                if not last_was_transient:
+                    break
+                delay = retry_delay_seconds(
+                    response,
+                    attempt=attempt,
+                    base_seconds=self.retry_delay,
+                )
             finally:
                 close = getattr(response, "close", None)
                 if callable(close):
                     close()
+            if attempt + 1 < request_retries and delay > 0:
+                time.sleep(delay)
         if last_error is None:  # pragma: no cover - retries is validated as positive.
             raise MarketColdnessError(f"Eastmoney page {page} request failed")
-        error_type = (
-            _MarketColdnessTransientTransportError
-            if transient_only and _is_transient_transport_error(last_error)
-            else MarketColdnessError
-        )
+        error_type = _MarketColdnessTransientTransportError if last_was_transient else MarketColdnessError
         raise error_type(
-            f"Eastmoney page {page} failed after {request_retries} attempt(s): {_error_label(last_error)}"
+            f"Eastmoney page {page} failed after {attempts_used} attempt(s): {_error_label(last_error)}"
         ) from last_error
 
     def fetch_all(self) -> MarketColdnessBatch:

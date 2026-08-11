@@ -438,7 +438,7 @@ def test_calendar_pins_matching_official_sse_and_szse_2026_notices():
     guard_source = GUARD.read_text(encoding="utf-8")
     assert "[int]$MinimumCompanyCount = 4500" in guard_source
     assert "[int]$MaximumCompanyCount = 6500" in guard_source
-    assert "$script:MaximumUncompressedPayloadBytes = 24000000" in guard_source
+    assert "$script:MaximumUncompressedPayloadBytes = 32000000" in guard_source
     assert mobile_snapshot.MAX_UNCOMPRESSED_ASSET_BYTES == 32_000_000
     assert "MAX_UNCOMPRESSED_ASSET_BYTES = 32_000_000;" in ANDROID_REPOSITORY.read_text(encoding="utf-8")
 

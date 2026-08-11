@@ -19,6 +19,7 @@ import json
 import math
 from pathlib import Path
 import re
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -32,6 +33,7 @@ from data.market_history import (
     TencentWeeklyHistoryAdapter,
     WeeklyClose,
 )
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
 
 
 MODEL_ID = "type7-market-history-v1"
@@ -53,6 +55,10 @@ CACHE_SCHEMA_VERSION = 1
 REUSABLE_CACHE_MAX_AGE_DAYS = LATEST_MAX_AGE_DAYS
 PARTIAL_STRUCTURAL_RETRY_DAYS = 7
 PARTIAL_TRANSIENT_RETRY_DAYS = 1
+VALUATION_REQUEST_ATTEMPTS = 3
+VALUATION_REQUEST_INTERVAL_SECONDS = 0.25
+VALUATION_RETRY_BACKOFF_SECONDS = 1.0
+_VALUATION_RATE_LIMITER = RequestRateLimiter(VALUATION_REQUEST_INTERVAL_SECONDS)
 
 _COMPONENT_SHAREHOLDER_RETURN = "shareholder_return"
 _COMPONENT_VALUATION_HISTORY = "valuation_history"
@@ -227,6 +233,7 @@ def _fetch_valuation_rows(
     *,
     session: Any = requests,
     timeout: int = REQUEST_TIMEOUT,
+    rate_limiter: Any = _VALUATION_RATE_LIMITER,
 ) -> list[dict[str, Any]]:
     start = _years_before(as_of, 5)
     params = {
@@ -240,27 +247,43 @@ def _fetch_valuation_rows(
         "source": "WEB",
         "client": "WEB",
     }
-    response = None
-    try:
-        response = session.get(
-            EASTMONEY_VALUATION_ENDPOINT,
-            params=params,
-            headers=_HEADERS,
-            timeout=timeout,
-            stream=True,
-            allow_redirects=True,
-        )
-        response.raise_for_status()
-        _validate_final_https_url(getattr(response, "url", EASTMONEY_VALUATION_ENDPOINT))
-        payload = _decode_json(_read_bounded_response(response), label="Eastmoney valuation history")
-    except QualityHistoryError:
-        raise
-    except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
-        raise QualityHistoryError(f"Eastmoney valuation request failed: {_error_label(exc)}") from exc
-    finally:
-        close = getattr(response, "close", None)
-        if callable(close):
-            close()
+    last_error: BaseException | None = None
+    payload: Any = None
+    for attempt in range(VALUATION_REQUEST_ATTEMPTS):
+        response = None
+        retry_delay = 0.0
+        transient = False
+        try:
+            rate_limiter.acquire()
+            response = session.get(
+                EASTMONEY_VALUATION_ENDPOINT,
+                params=params,
+                headers=_HEADERS,
+                timeout=timeout,
+                stream=True,
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+            _validate_final_https_url(getattr(response, "url", EASTMONEY_VALUATION_ENDPOINT))
+            payload = _decode_json(_read_bounded_response(response), label="Eastmoney valuation history")
+            break
+        except QualityHistoryError:
+            raise
+        except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
+            last_error = exc
+            transient = is_transient_request_error(exc, response)
+            retry_delay = retry_delay_seconds(
+                response,
+                attempt=attempt,
+                base_seconds=VALUATION_RETRY_BACKOFF_SECONDS,
+            )
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        if not transient or attempt + 1 >= VALUATION_REQUEST_ATTEMPTS:
+            raise QualityHistoryError(f"Eastmoney valuation request failed: {_error_label(last_error)}") from last_error
+        time.sleep(retry_delay)
 
     if not isinstance(payload, Mapping) or payload.get("success") is not True:
         raise QualityHistoryError("Eastmoney valuation payload reports failure")

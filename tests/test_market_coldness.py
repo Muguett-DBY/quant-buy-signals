@@ -86,6 +86,17 @@ class _FakeResponse:
         self.closed = True
 
 
+class _StatusResponse(_FakeResponse):
+    def __init__(self, status_code, *, retry_after=None):
+        super().__init__(_page(1, [_row()]))
+        self.status_code = status_code
+        if retry_after is not None:
+            self.headers["Retry-After"] = str(retry_after)
+
+    def raise_for_status(self):
+        raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
 class _FakeHttpClient:
     def __init__(self, page_actions):
         self.page_actions = {
@@ -108,12 +119,12 @@ class _FakeHttpClient:
         return response
 
 
-def _adapter(client, *, page_size=2, retries=1, max_workers=10, clock=None):
+def _adapter(client, *, page_size=2, retries=1, retry_delay=0, max_workers=10, clock=None):
     return EastmoneyMarketColdnessAdapter(
         http_client=client,
         page_size=page_size,
         retries=retries,
-        retry_delay=0,
+        retry_delay=retry_delay,
         max_workers=max_workers,
         clock=clock or (lambda: FIXED_TIME),
     )
@@ -272,7 +283,7 @@ def test_recovery_schema_failure_is_not_masked_as_transport():
         _adapter(client, page_size=1, retries=1).fetch_all()
 
     assert not isinstance(caught.value, market_coldness._MarketColdnessTransientTransportError)
-    assert sum(kwargs["params"]["pn"] == 2 for _, kwargs in client.calls) == 3
+    assert sum(kwargs["params"]["pn"] == 2 for _, kwargs in client.calls) == 2
 
 
 def test_persistent_page_transport_failure_stops_after_bounded_recovery():
@@ -424,7 +435,7 @@ def test_only_retryable_http_statuses_are_classified_transient(status, expected)
     assert market_coldness._is_transient_transport_error(requests.HTTPError(response=response)) is expected
 
 
-def test_mixed_schema_and_transport_failures_are_not_typed_transient():
+def test_schema_failure_is_terminal_even_when_transport_retries_remain():
     client = _FakeHttpClient(
         {
             1: [
@@ -436,10 +447,11 @@ def test_mixed_schema_and_transport_failures_are_not_typed_transient():
     )
     adapter = _adapter(client, retries=3)
 
-    with pytest.raises(MarketColdnessError, match="failed after 3 attempt") as caught:
+    with pytest.raises(MarketColdnessError, match="failed after 1 attempt") as caught:
         adapter._request_page(1)
 
     assert not isinstance(caught.value, market_coldness._MarketColdnessTransientTransportError)
+    assert len(client.calls) == 1
 
 
 def test_declared_oversized_response_is_rejected_without_retry_and_closed():
@@ -453,17 +465,46 @@ def test_declared_oversized_response_is_rejected_without_retry_and_closed():
     assert response.closed
 
 
-def test_acquisition_byte_budget_counts_failed_attempt_bodies(monkeypatch):
+def test_invalid_response_body_is_not_retried_as_transport(monkeypatch):
     valid = _FakeResponse(_page(1, [_row()]))
     invalid = _FakeResponse(raw=b"{" + (b" " * (len(valid.content) - 1)))
     monkeypatch.setattr(market_coldness, "_MAX_ACQUISITION_RESPONSE_BYTES", len(valid.content) + 1)
     client = _FakeHttpClient({1: [invalid, valid]})
 
-    with pytest.raises(MarketColdnessError, match="acquisition attempts exceed byte limit"):
+    with pytest.raises(MarketColdnessError, match="failed after 1 attempt"):
         _adapter(client, retries=2).fetch_all()
 
+    assert len(client.calls) == 1
+    assert invalid.closed and not valid.closed
+
+
+def test_retry_after_controls_transient_http_retry(monkeypatch):
+    busy = _StatusResponse(429, retry_after=6)
+    client = _FakeHttpClient({1: [busy, _FakeResponse(_page(1, [_row()]))]})
+    waits = []
+    monkeypatch.setattr(market_coldness.time, "sleep", waits.append)
+
+    batch = _adapter(client, retries=2, retry_delay=0.5).fetch_all()
+
+    assert len(batch.records) == 1
     assert len(client.calls) == 2
-    assert invalid.closed and valid.closed
+    assert waits == [6.0]
+    assert busy.closed
+
+
+def test_terminal_http_status_is_not_retried(monkeypatch):
+    missing = _StatusResponse(404)
+    spare = _FakeResponse(_page(1, [_row()]))
+    client = _FakeHttpClient({1: [missing, spare]})
+    waits = []
+    monkeypatch.setattr(market_coldness.time, "sleep", waits.append)
+
+    with pytest.raises(MarketColdnessError, match="failed after 1 attempt"):
+        _adapter(client, retries=3, retry_delay=0.5).fetch_all()
+
+    assert len(client.calls) == 1
+    assert waits == []
+    assert missing.closed and not spare.closed
 
 
 def test_acquisition_byte_budget_latches_the_first_over_limit_chunk():

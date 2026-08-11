@@ -27,10 +27,18 @@ const worker = (await import(url)).default;
 const response = await worker.fetch(new Request("https://dashboard.test/"), {});
 if (response.status !== 200) throw new Error("root response was not successful");
 const html = await response.text();
-const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
+const match = html.match(/<script nonce="([^"]+)">\s*([\s\S]*?)\s*<\/script>/);
 if (!match) throw new Error("generated dashboard script was not found");
-if (html.includes("__QUANT_METHODOLOGY_") || html.includes("__CATALOGUE_INDEX_CONTRACT_VERSION__")) throw new Error("template token leaked");
-new Function(match[1]);
+const nonce = match[1];
+const csp = response.headers.get("content-security-policy") || "";
+if (!csp.includes("script-src 'nonce-" + nonce + "'")) throw new Error("script nonce is not bound to CSP");
+if (!csp.includes("style-src 'nonce-" + nonce + "'")) throw new Error("style nonce is not bound to CSP");
+if (csp.includes("unsafe-inline")) throw new Error("CSP permits unsafe inline content");
+if (!html.includes('<style nonce="' + nonce + '">')) throw new Error("style nonce is missing");
+if (response.headers.get("x-content-type-options") !== "nosniff") throw new Error("nosniff header is missing");
+if (response.headers.get("x-frame-options") !== "DENY") throw new Error("frame protection is missing");
+if (html.includes("__QUANT_METHODOLOGY_") || html.includes("__CATALOGUE_INDEX_CONTRACT_VERSION__") || html.includes("__QUANT_CSP_NONCE__")) throw new Error("template token leaked");
+new Function(match[2]);
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],
@@ -56,7 +64,7 @@ const worker = (await import(url)).default;
 const response = await worker.fetch(new Request("https://dashboard.test/"), {});
 assert.equal(response.status, 200);
 const html = await response.text();
-const scriptMatch = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
+const scriptMatch = html.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
 assert.ok(scriptMatch, "generated dashboard script was not found");
 const script = scriptMatch[1];
 const start = script.indexOf("function publicReasonText(value)");
@@ -271,7 +279,11 @@ const cacheBustedHealth = await worker.fetch(
   new Request("https://dashboard.test/api/health?verify=1"),
   env,
 );
-assert.equal(cacheBustedHealth.status, 200);
+assert.equal(cacheBustedHealth.status, 503);
+const unhealthy = await cacheBustedHealth.json();
+assert.equal(unhealthy.ok, false);
+assert.equal(unhealthy.stale, true);
+assert.equal(unhealthy.deep_check, false);
 for (const invalidUrl of [
   legacyUrl,
   legacyUrl + "&index_contract=1",
@@ -385,7 +397,7 @@ def test_dashboard_coverage_cards_separate_signals_conditions_and_unresolved_evi
         assert text in source
 
 
-def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_all_assets():
+def test_dashboard_health_separates_light_freshness_from_explicit_deep_asset_checks():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     for field in (
@@ -405,7 +417,11 @@ def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_al
         "signature_bytes",
     ):
         assert field in source
-    assert "manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk" in source
+    assert 'url.searchParams.get("deep")==="1"' in source
+    assert "deep?await deepGenerationHealth" in source
+    assert "recordOk&&!freshness.stale&&(!deep||integrityOk)" in source
+    assert "ok?200:503" in source
+    assert "manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk&&detailsOk" in source
     assert "actual!==expected||(marker&&marker!==expected)" in source
     assert "manifest?.company_details&&marker!==expected" in source
     assert source.index("object.size>MAX_MANIFEST_BYTES") < source.index("object.arrayBuffer()")
@@ -413,6 +429,113 @@ def test_dashboard_health_separates_data_time_from_mirror_checks_and_verifies_al
     assert "updated_at:generation?.data_timestamp_utc" in source
     assert 'requestedGeneration?"public, max-age=31536000, immutable":"no-store"' in source
     assert "数据生成时间距今不超过36小时" not in source
+
+
+def test_dashboard_health_is_light_by_default_and_deep_checks_assets_on_demand():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute dashboard health routes"
+    validator = r"""
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+Date.now = () => Date.parse("2026-08-11T12:00:00Z");
+const checksum = "a".repeat(64);
+const manifest = {
+  catalogue: { filename: "catalogue.json.gz", size: 120, sha256: checksum, uncompressed_size: 240 },
+  signals: { filename: "signals.json.gz", size: 80, sha256: checksum, uncompressed_size: 160 },
+  signature: { filename: "manifest.sig" },
+};
+const manifestBytes = Buffer.from(JSON.stringify(manifest));
+const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
+const objectFor = (size, bytes = null, hash = "") => ({
+  size,
+  customMetadata: hash ? { sha256: hash } : {},
+  arrayBuffer: async () => {
+    if (!bytes) throw new Error("unexpected body read");
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  },
+});
+const generation = {
+  generation_id: "0123456789abcdef",
+  manifest_sha256: manifestHash,
+  market_as_of: "2026-08-11",
+  data_timestamp_utc: "2026-08-11T09:00:00Z",
+  created_at: "2026-08-11T09:05:00Z",
+  last_checked_at: "2026-08-11T11:55:00Z",
+  company_count: 10,
+};
+const prefix = "generations/0123456789abcdef/";
+const objects = new Map([
+  [prefix + "manifest.json", objectFor(manifestBytes.byteLength, manifestBytes, manifestHash)],
+  [prefix + "catalogue.json.gz", objectFor(120)],
+  [prefix + "signals.json.gz", objectFor(80)],
+  [prefix + "manifest.sig", objectFor(64)],
+]);
+let getCount = 0;
+let headCount = 0;
+const env = {
+  DB: { prepare: () => ({ bind() { return this; }, first: async () => generation }) },
+  DATA_BUCKET: {
+    get: async key => { getCount++; return objects.get(key) || null; },
+    head: async key => { headCount++; return objects.get(key) || null; },
+  },
+};
+
+let response = await worker.fetch(new Request("https://dashboard.test/api/health"), env);
+assert.equal(response.status, 200);
+let payload = await response.json();
+assert.equal(payload.ok, true);
+assert.equal(payload.deep_check, false);
+assert.equal(payload.integrity_checked, false);
+assert.equal(payload.integrity_ok, null);
+assert.equal(payload.manifest_ok, null);
+assert.equal(getCount, 0);
+assert.equal(headCount, 0);
+assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+
+response = await worker.fetch(new Request("https://dashboard.test/api/health?deep=1"), env);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.ok, true);
+assert.equal(payload.deep_check, true);
+assert.equal(payload.integrity_checked, true);
+assert.equal(payload.integrity_ok, true);
+assert.equal(payload.manifest_ok, true);
+assert.equal(payload.company_details_declared, false);
+assert.equal(getCount, 1);
+assert.equal(headCount, 3);
+
+objects.delete(prefix + "signals.json.gz");
+response = await worker.fetch(new Request("https://dashboard.test/api/health?deep=1"), env);
+assert.equal(response.status, 503);
+payload = await response.json();
+assert.equal(payload.ok, false);
+assert.equal(payload.integrity_ok, false);
+assert.equal(payload.signals_ok, false);
+
+const requestsBeforeStale = getCount + headCount;
+generation.market_as_of = "2026-08-10";
+response = await worker.fetch(new Request("https://dashboard.test/api/health"), env);
+assert.equal(response.status, 503);
+payload = await response.json();
+assert.equal(payload.ok, false);
+assert.equal(payload.stale, true);
+assert.equal(payload.stale_reason, "尚未覆盖最近应完成的交易日");
+assert.equal(getCount + headCount, requestsBeforeStale);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
 
 
 def test_dashboard_health_uses_closed_trading_sessions_for_weekends_and_holidays():
@@ -523,6 +646,19 @@ def test_dashboard_loads_a_lightweight_index_and_company_details_on_demand():
     assert "function catalogueIndexCacheRequest" in source
     assert 'cacheKey=new Request(cacheRequest.url,{method:"GET"})' in source
     assert "headSafeResponse(request" in source
+    assert "const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;" in source
+    assert "24*1024*1024" not in source
+    assert "MAX_DETAIL_PREFETCHES=2" in source
+    assert 'addEventListener("pointerover"' in source
+    assert 'addEventListener("focusin"' in source
+    assert '"requestIdleCallback" in window' in source
+    assert "prefetchVisibleDetails" not in source
+    assert ".slice(0,MAX_DETAIL_PREFETCHES)" in source
+    assert "SHARD_CACHE_LIMIT=2" in source
+    assert "shardInflight.get(inflightKey)" in source
+    assert "shardInflight.set(inflightKey,pending)" in source
+    assert "shardInflight.delete(inflightKey)" in source
+    assert ".style." not in source
 
 
 def test_dashboard_formats_beijing_time_and_avoids_mobile_input_overflow():
@@ -678,7 +814,8 @@ def test_dashboard_focus_pagination_search_and_zero_bar_interactions_are_explici
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert "min-width:2px" not in source
-    assert "if(visibleCount===0)fill.hidden=true" in source
+    assert 'document.createElement("progress")' in source
+    assert "if(visibleCount===0)track.hidden=true" in source
     assert "function syncSearchStatus()" in source
     assert '$("status").disabled=searching' in source
     assert "代码/名称搜索会跨全部状态，状态筛选暂时停用。" in source
@@ -719,9 +856,10 @@ def test_refresh_worker_repairs_missing_objects_even_when_generation_is_unchange
     source = REFRESH_WORKER.read_text(encoding="utf-8")
 
     assert 'repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged"' in source
-    assert "existing.size !== expectedSize" in source
+    assert "existing.size === object.expectedSize" in source
     assert "existing.customMetadata?.sha256" in source
-    assert "await env.DATA_BUCKET.put(key, body" in source
+    assert "const objectsToPut = hydratedObjects.filter((object) => !object.complete)" in source
+    assert "await putGenerationObjects(env.DATA_BUCKET, objectsToPut)" in source
 
 
 def test_refresh_worker_switches_generation_with_one_idempotent_d1_transaction():
@@ -743,8 +881,220 @@ def test_refresh_worker_same_generation_validates_and_repairs_d1_before_returnin
     assert "stored generation metadata does not match the signed manifest" in source
     assert "const databaseRepairNeeded = pointerIsDangling" in source
     assert "if (previous?.generation_id === generationId)" not in source
+    assert "sameGenerationPointer && !databaseRepairNeeded && allObjectsComplete" in source
+    assert "await touchCompleteGeneration(env, generationId, manifestHash, now)" in source
+    assert source.index("inspectGenerationObjects(env.DATA_BUCKET, expectedObjects)") < source.index(
+        'downloadAsset(catalogueName, "catalogue", manifest.catalogue)'
+    )
+    assert source.index('status: "unchanged"') < source.index(
+        'downloadAsset(catalogueName, "catalogue", manifest.catalogue)'
+    )
     assert source.index("await env.DB.batch([generationStatement, pointerStatement])") < source.index(
         'repairedObjects || databaseRepairNeeded ? "repaired" : "unchanged"'
+    )
+
+
+def test_refresh_worker_bounds_primary_decompression_and_r2_head_put_concurrency():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the refresh resource contracts"
+    validator = r"""
+import assert from "node:assert/strict";
+import { gzipSync } from "node:zlib";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+source += "\nexport { inspectGenerationObjects, putGenerationObjects, validatePrimaryAssetMetadata, verifyPrimaryAssetSize };";
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const {
+  inspectGenerationObjects,
+  putGenerationObjects,
+  validatePrimaryAssetMetadata,
+  verifyPrimaryAssetSize,
+} = await import(url);
+
+const raw = Buffer.from('{"ok":true}');
+const compressed = gzipSync(raw);
+await verifyPrimaryAssetSize(compressed, { uncompressed_size: raw.byteLength }, "catalogue");
+await assert.rejects(
+  verifyPrimaryAssetSize(compressed, { uncompressed_size: raw.byteLength + 1 }, "signals"),
+  /signals uncompressed size mismatch/,
+);
+assert.throws(
+  () => validatePrimaryAssetMetadata({ uncompressed_size: 32_000_001 }, "catalogue"),
+  /invalid catalogue uncompressed size/,
+);
+const overflow = gzipSync(Buffer.alloc(32_000_001));
+await assert.rejects(
+  verifyPrimaryAssetSize(overflow, { uncompressed_size: 32_000_000 }, "catalogue"),
+  /catalogue uncompressed response exceeds its byte limit/,
+);
+
+const objects = Array.from({ length: 11 }, (_, index) => ({
+  name: `asset-${index}`,
+  key: `generations/0123456789abcdef/asset-${index}`,
+  body: new Uint8Array([index]).buffer,
+  contentType: "application/json",
+  contentEncoding: null,
+  expectedSize: 1,
+  expectedHash: "a".repeat(64),
+}));
+let activeHeads = 0;
+let maxHeads = 0;
+const inspected = await inspectGenerationObjects({
+  async head() {
+    activeHeads += 1;
+    maxHeads = Math.max(maxHeads, activeHeads);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    activeHeads -= 1;
+    return { size: 1, customMetadata: { sha256: "a".repeat(64) } };
+  },
+}, objects);
+assert.equal(inspected.length, objects.length);
+assert.equal(maxHeads, 4);
+assert.ok(inspected.every((object) => object.complete));
+
+let activePuts = 0;
+let maxPuts = 0;
+let putCount = 0;
+await putGenerationObjects({
+  async put() {
+    activePuts += 1;
+    maxPuts = Math.max(maxPuts, activePuts);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    putCount += 1;
+    activePuts -= 1;
+  },
+}, objects);
+assert.equal(putCount, objects.length);
+assert.equal(maxPuts, 4);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_refresh_worker_retention_never_deletes_current_and_retries_incomplete_r2_cleanup():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the refresh retention contract"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+source += "\nexport { pruneOldGenerations };";
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const { pruneOldGenerations } = await import(url);
+
+function row(index) {
+  return {
+    generation_id: index.toString(16).padStart(16, "0"),
+    market_as_of: `2026-08-${String(20 - index).padStart(2, "0")}`,
+    data_timestamp_utc: `2026-08-${String(20 - index).padStart(2, "0")}T08:00:00Z`,
+    generated_at_utc: `2026-08-${String(20 - index).padStart(2, "0")}T09:00:00Z`,
+    manifest_sha256: index.toString(16).padStart(64, "0"),
+    company_count: 5000,
+    triggered_company_count: 10,
+    conditional_company_count: 2,
+    pending_company_count: 1,
+    source_commit: "b".repeat(40),
+    created_at: "2026-08-20T10:00:00Z",
+    last_checked_at: "2026-08-20T11:00:00Z",
+  };
+}
+
+function database(rows, events) {
+  return {
+    prepare(sql) {
+      return {
+        bind(...parameters) {
+          return {
+            async all() {
+              assert.match(sql, /ORDER BY CASE WHEN generation_id = \?/);
+              assert.equal(parameters[1], 16);
+              return { success: true, results: rows };
+            },
+            async run() {
+              if (sql.includes("DELETE FROM generations")) {
+                events.push(`db-delete:${parameters[0]}`);
+                assert.notEqual(parameters[0], parameters[1]);
+                return { success: true, meta: { changes: 1 } };
+              }
+              throw new Error("unexpected SQL");
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+const rows = Array.from({ length: 10 }, (_, index) => row(index));
+const current = rows[0].generation_id;
+const events = [];
+const deletedKeys = [];
+const env = {
+  GENERATION_RETENTION_COUNT: "8",
+  DB: database(rows, events),
+  DATA_BUCKET: {
+    async list({ prefix }) {
+      const generation = prefix.split("/")[1];
+      events.push(`r2-list:${generation}`);
+      return { truncated: false, objects: [{ key: `${prefix}manifest.json` }] };
+    },
+    async delete(keys) { deletedKeys.push(...keys); },
+  },
+};
+assert.equal(await pruneOldGenerations(env, current), 2);
+assert.deepEqual(events, [
+  `r2-list:${rows[8].generation_id}`,
+  `db-delete:${rows[8].generation_id}`,
+  `r2-list:${rows[9].generation_id}`,
+  `db-delete:${rows[9].generation_id}`,
+]);
+assert.ok(deletedKeys.every((key) => !key.includes(current)));
+
+const failedEvents = [];
+const failedEnv = {
+  GENERATION_RETENTION_COUNT: "8",
+  DB: database(rows.slice(0, 9), failedEvents),
+  DATA_BUCKET: {
+    async list({ prefix }) {
+      failedEvents.push(`r2-list:${prefix.split("/")[1]}`);
+      throw new Error("R2 unavailable");
+    },
+    async delete() { throw new Error("delete must not run"); },
+  },
+};
+await assert.rejects(pruneOldGenerations(failedEnv, current), /R2 unavailable/);
+assert.deepEqual(failedEvents, [`r2-list:${rows[8].generation_id}`]);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    assert "MAX_STALE_GENERATIONS_PER_REFRESH = 8" in source
+    assert "generationId === currentGenerationId" in source
+    assert "AND generation_id <> ?" in source
+    assert "WHERE singleton = 1 AND generation_id = ?" in source
+    assert source.index("await touchCompleteGeneration(env, generationId, manifestHash, now)") < source.index(
+        "await pruneOldGenerations(env, generationId)"
+    )
+    assert source.index("await env.DB.batch([generationStatement, pointerStatement])") < source.rindex(
+        "await pruneOldGenerations(env, generationId)"
     )
 
 
@@ -1011,4 +1361,5 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
         }
     ]
     assert config["r2_buckets"] == [{"binding": "DATA_BUCKET", "bucket_name": "quant-market-data"}]
-    assert "vars" not in config
+    assert config["vars"] == {"GENERATION_RETENTION_COUNT": "8"}
+    assert "REFRESH_KEY" not in config["vars"]

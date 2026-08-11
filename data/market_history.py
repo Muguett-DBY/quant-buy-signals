@@ -25,6 +25,7 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, REQUEST_TIMEOUT
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
 
 
 TENCENT_HISTORY_ENDPOINT = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -43,6 +44,8 @@ _FETCH_BAR_LIMIT = 220
 _CACHE_SCHEMA_VERSION = 1
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _RESPONSE_CHUNK_BYTES = 64 * 1024
+TENCENT_REQUEST_INTERVAL_SECONDS = 0.25
+_TENCENT_RATE_LIMITER = RequestRateLimiter(TENCENT_REQUEST_INTERVAL_SECONDS)
 _A_SHARE_CODE = re.compile(r"^[0-9]{6}$")
 _TENCENT_SYMBOL = re.compile(r"^(?:sh|sz)[0-9]{6}$")
 _TENCENT_HEADERS = {
@@ -315,6 +318,7 @@ class TencentWeeklyHistoryAdapter:
         retry_delay: float = 0.5,
         bar_limit: int = _FETCH_BAR_LIMIT,
         stock_adjustment: str = "qfq",
+        rate_limiter: Any = _TENCENT_RATE_LIMITER,
     ):
         if (
             isinstance(timeout, bool)
@@ -342,6 +346,7 @@ class TencentWeeklyHistoryAdapter:
         self.retry_delay = float(retry_delay)
         self.bar_limit = bar_limit
         self.stock_adjustment = stock_adjustment
+        self.rate_limiter = rate_limiter
 
     def fetch_weekly_closes(
         self,
@@ -359,7 +364,10 @@ class TencentWeeklyHistoryAdapter:
         last_error: Exception | None = None
         for attempt in range(self.retries):
             response = None
+            delay = 0.0
+            transient = False
             try:
+                self.rate_limiter.acquire()
                 response = self.http_client.get(
                     TENCENT_HISTORY_ENDPOINT,
                     params={"param": request_value},
@@ -378,16 +386,23 @@ class TencentWeeklyHistoryAdapter:
                     require_forward_adjusted=require_forward_adjusted,
                     stock_adjustment=self.stock_adjustment,
                 )
-            except (requests.RequestException, MarketHistoryError, AttributeError, TypeError, ValueError) as exc:
+            except MarketHistoryError:
+                raise
+            except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
                 last_error = exc
-                if attempt + 1 < self.retries and self.retry_delay > 0:
-                    time.sleep(self.retry_delay * (attempt + 1))
+                transient = is_transient_request_error(exc, response)
+                delay = retry_delay_seconds(
+                    response,
+                    attempt=attempt,
+                    base_seconds=self.retry_delay,
+                )
             finally:
                 close = getattr(response, "close", None)
                 if callable(close):
                     close()
-        if last_error is None:  # Defensive guard; the retry loop always executes at least once.
-            raise MarketHistoryError("Tencent weekly fetch failed without a captured error")
+            if not transient or attempt + 1 >= self.retries:
+                break
+            time.sleep(delay)
         raise MarketHistoryError(f"Tencent weekly fetch failed: {_error_label(last_error)}") from last_error
 
 

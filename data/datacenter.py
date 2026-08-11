@@ -31,6 +31,7 @@ from data.capex_evidence import (
     NON_CAPEX_OUTFLOW_FIELDS,
 )
 from data.cache import SafeFileCache
+from data.provider_http import is_transient_request_error, request_error_kind, retry_delay_seconds
 
 
 DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -61,7 +62,6 @@ _DATACENTER_RECOVERY_TIMEOUT = max(int(REQUEST_TIMEOUT) * 2, 30)
 _DATACENTER_RECOVERY_RETRIES = 4
 _DATACENTER_RECOVERY_RETRY_DELAY = 2.0
 _MAX_DATACENTER_RECOVERY_PAGES = 3
-_RETRYABLE_DATACENTER_HTTP_STATUSES = frozenset({408, 425, 429})
 ANNUAL_HISTORY_YEARS = 10
 DETAILED_ANNUAL_HISTORY_YEARS = 5
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -212,14 +212,7 @@ class _PageResult:
 
 
 def _is_transient_datacenter_transport_error(exc: BaseException | None) -> bool:
-    if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
-        return False
-    if isinstance(exc, (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError)):
-        return True
-    if not isinstance(exc, requests.HTTPError):
-        return False
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    return isinstance(status, int) and (status in _RETRYABLE_DATACENTER_HTTP_STATUSES or 500 <= status <= 599)
+    return bool(exc is not None and is_transient_request_error(exc))
 
 
 def _strict_nonnegative_int(value: Any, *, field: str, report_name: str, page: int) -> int:
@@ -360,10 +353,13 @@ def _request_page(
 
     last_error: Exception | None = None
     transient_only = True
+    last_was_transient = False
     attempts_used = 0
     for attempt in range(retries):
         attempts_used = attempt + 1
+        response = None
         try:
+            _record_datacenter_stat("request_attempts")
             with _DATACENTER_REQUEST_SLOTS:
                 response = requests.get(
                     DC_URL,
@@ -430,15 +426,21 @@ def _request_page(
             raise
         except (requests.RequestException, ValueError, DataFetchError) as exc:
             last_error = exc
-            if not _is_transient_datacenter_transport_error(exc):
+            _record_datacenter_stat(f"request_failure:{request_error_kind(exc, response)}")
+            transient = is_transient_request_error(exc, response)
+            last_was_transient = transient
+            if not transient:
                 transient_only = False
+                break
             if attempt + 1 < retries:
-                time.sleep(float(retry_delay) * (attempt + 1))
-    error_type = (
-        _DataTransientTransportError
-        if transient_only and _is_transient_datacenter_transport_error(last_error)
-        else DataFetchError
-    )
+                delay = retry_delay_seconds(
+                    response,
+                    attempt=attempt,
+                    base_seconds=float(retry_delay),
+                )
+                _record_datacenter_stat("retry_wait_ms", round(delay * 1000))
+                time.sleep(delay)
+    error_type = _DataTransientTransportError if transient_only and last_was_transient else DataFetchError
     raise error_type(
         f"failed to fetch {report_name} page {page} after {attempts_used} attempts: {last_error}"
     ) from last_error
@@ -530,7 +532,14 @@ def get_datacenter_fetch_diagnostics() -> dict[str, Any]:
                 "network_queries",
                 "rows_from_cache",
                 "rows_from_network",
+                "request_attempts",
+                "retry_wait_ms",
             )
+        }
+        values["request_failure_counts"] = {
+            key.removeprefix("request_failure:"): int(count)
+            for key, count in sorted(_DATACENTER_CACHE_STATS.items())
+            if key.startswith("request_failure:")
         }
         values["miss_reasons"] = dict(sorted(_DATACENTER_CACHE_MISS_REASONS.items()))
         oldest = _DATACENTER_CACHE_STATS.get("oldest_cache_age_ms")

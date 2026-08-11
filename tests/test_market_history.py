@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 import numpy as np
 import pytest
+import requests
 
 from data.cache import SafeFileCache
 from data.market_history import (
@@ -148,6 +149,32 @@ class _FakeHttpClient:
         return response
 
 
+class _SequenceHttpClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
+
+
+class _NoWait:
+    def acquire(self):
+        return None
+
+
+class _StatusResponse(_FakeResponse):
+    def __init__(self, status, *, retry_after=None):
+        super().__init__({"code": status})
+        self.status_code = status
+        if retry_after is not None:
+            self.headers["Retry-After"] = str(retry_after)
+
+    def raise_for_status(self):
+        raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
 def _tencent_payload(symbol="sh600519", *, key="qfqweek"):
     return {
         "code": 0,
@@ -188,6 +215,29 @@ def test_tencent_adapter_requests_qfq_weekly_contract_and_parses_only_normalized
     assert kwargs["params"] == {"param": "sh600519,week,,2026-07-15,220,qfq"}
     assert kwargs["stream"] is True
     assert client.responses[0].closed
+
+
+def test_tencent_adapter_honours_retry_after_and_stops_on_terminal_http(monkeypatch):
+    busy = _StatusResponse(429, retry_after=5)
+    winner = _FakeResponse(_tencent_payload())
+    client = _SequenceHttpClient([busy, winner])
+    sleeps = []
+    monkeypatch.setattr("data.market_history.time.sleep", sleeps.append)
+    adapter = TencentWeeklyHistoryAdapter(http_client=client, rate_limiter=_NoWait())
+
+    bars = adapter.fetch_weekly_closes("sh600519", date(2026, 7, 15), require_forward_adjusted=True)
+
+    assert len(bars) == 2
+    assert sleeps == [5]
+    assert busy.closed and winner.closed
+
+    missing = _StatusResponse(404)
+    terminal = _SequenceHttpClient([missing])
+    adapter = TencentWeeklyHistoryAdapter(http_client=terminal, rate_limiter=_NoWait())
+    with pytest.raises(MarketHistoryError, match="HTTP 404"):
+        adapter.fetch_weekly_closes("sh600519", date(2026, 7, 15), require_forward_adjusted=True)
+    assert len(terminal.calls) == 1
+    assert missing.closed
 
 
 def test_tencent_adapter_requires_qfq_rows_for_stock_but_accepts_index_week_rows():

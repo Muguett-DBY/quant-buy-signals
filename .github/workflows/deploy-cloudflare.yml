@@ -94,15 +94,20 @@ jobs:
       - name: Skip pushes that did not touch the website
         if: github.event_name == 'workflow_run' && steps.stale.outputs.skip != 'true'
         id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           sha="${{ steps.resolve.outputs.sha }}"
-          changed="$(gh api "repos/${{ github.repository }}/commits/${sha}" --jq '.files[].filename' 2>/dev/null || true)"
+          changed=""
+          if ! changed="$(gh api --paginate "repos/${{ github.repository }}/commits/${sha}" --jq '.files[].filename')"; then
+            echo "Could not inspect changed files for ${sha}; refusing a false-green deployment skip." >&2
+            exit 1
+          fi
           if [[ -z "${changed}" ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "reason=changed-file lookup failed; conservative skip"
-            exit 0
+            echo "Changed-file lookup returned no files for ${sha}; refusing a false-green deployment skip." >&2
+            exit 1
           fi
           if ! grep -qE '^(cloudflare/|\.github/workflows/deploy-cloudflare\.yml$)' <<< "${changed}"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -209,9 +214,9 @@ jobs:
             echo "Deployed methodology ${actual_version} != expected ${expected_version}." >&2
             exit 1
           fi
-          health="$(curl --fail --silent --show-error https://quant.custard.top/api/health)"
-          if [[ "$(jq -er '.generation_id | length' <<< "${health}")" -lt 16 ]]; then
-            echo "Deployed /api/health has no valid generation." >&2
+          health="$(curl --fail --silent --show-error 'https://quant.custard.top/api/health?deep=1')"
+          if ! jq -e '.ok == true and .integrity_checked == true and .integrity_ok == true and (.generation_id | length) >= 16' <<< "${health}" >/dev/null; then
+            echo "Deployed /api/health did not verify the complete generation." >&2
             exit 1
           fi
           meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"

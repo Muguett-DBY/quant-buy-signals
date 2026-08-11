@@ -87,7 +87,7 @@ const METHODOLOGY={
 
 const INDEX_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>量化买入情况看板</title>
-<link rel="icon" href="data:,"><style>
+<link rel="icon" href="data:,"><style nonce="__QUANT_CSP_NONCE__">
 :root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--bg:#f5f7fb;--blue:#1d4ed8;--blue-soft:#dbeafe;--green:#166534;--amber:#92400e}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}body.drawer-open{overflow:hidden}header{background:linear-gradient(135deg,#102a63,#1d4ed8);color:#fff;padding:28px max(20px,calc((100vw - 1240px)/2)) 24px}header h1{margin:0 0 4px;font-size:clamp(24px,4vw,36px)}header p{margin:0;color:#dbeafe}.wrap{max-width:1240px;margin:auto;padding:18px 20px 48px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-bottom:16px}.card,.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 5px 18px #102a630c}.card small{color:var(--muted);display:block}.card strong{font-size:24px;display:block;margin-top:3px}.panel{margin-bottom:16px}.panel-title{font-size:15px;margin:0 0 10px}.filters{display:grid;grid-template-columns:2fr repeat(5,minmax(120px,1fr));gap:10px}.filters label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;min-width:0}.filters input,.filters select{border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:9px;color:var(--ink);min-width:0;width:100%;max-width:100%;font:inherit}.filter-hint{font-size:11px;line-height:1.35;color:#1d4ed8;min-height:1.35em}.filters select:disabled{background:#f1f5f9;color:#64748b}.coverage{display:grid;grid-template-columns:repeat(7,minmax(110px,1fr));gap:10px}.coverage button{background:#f8fafc;border:1px solid var(--line);text-align:left;padding:10px}.coverage button:hover{background:#eff6ff;border-color:#93c5fd}.coverage-label{display:flex;justify-content:space-between;gap:8px;font-size:12px}.coverage-track{display:block;height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;margin:7px 0 4px}.coverage-fill{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#38bdf8);border-radius:inherit}.coverage-breakdown{display:grid;gap:2px;margin-top:5px}.coverage-breakdown span{font-size:11px;line-height:1.35}.coverage-triggered{color:var(--green)}.coverage-conditional{color:var(--amber)}.coverage-evidence{color:#475569}.coverage-help{margin:0 0 10px;color:var(--muted);font-size:12px}.coverage small{color:var(--muted)}button{border:0;border-radius:9px;background:#e2e8f0;color:var(--ink);padding:9px 12px;cursor:pointer;font:inherit}button:hover{background:#cbd5e1}button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible,summary:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}.meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:13px}.table-wrap{overflow-x:auto;overflow-y:visible;border:1px solid var(--line);border-radius:12px;overscroll-behavior-x:contain;overscroll-behavior-y:auto;touch-action:pan-x pan-y}.table{border-collapse:collapse;width:100%;min-width:960px;background:#fff}.table th,.table td{padding:10px 9px;border-bottom:1px solid #edf1f7;text-align:left;white-space:nowrap}.table th{background:#f8fafc;color:#475569;font-size:12px;position:sticky;top:0;z-index:1}.table tbody tr{cursor:pointer}.table tbody tr:hover{background:#eff6ff}.status{border-radius:999px;padding:3px 7px;font-size:12px;display:inline-block;margin:1px}.s-triggered{background:#dcfce7;color:#166534}.s-conditional,.s-observe{background:#fef3c7;color:#92400e}.s-vetoed{background:#fee2e2;color:#991b1b}.s-insufficient_evidence,.s-not_applicable,.s-not_triggered{background:#e2e8f0;color:#475569}.pager{display:flex;justify-content:space-between;align-items:center;margin-top:12px}.drawer{position:fixed;inset:0;background:#0f172a70;display:none;align-items:flex-end;justify-content:center;padding:12px;z-index:10;overflow-y:auto;overscroll-behavior-y:contain;touch-action:pan-y}.drawer.open{display:flex}.drawer-card{background:#fff;border-radius:16px 16px 0 0;max-width:960px;width:100%;max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.drawer-head{display:flex;justify-content:space-between;gap:12px;align-items:start;position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:16px 20px;z-index:4}.drawer-head h2{margin:0 0 4px}.detail-rows{padding:0 20px max(20px,env(safe-area-inset-bottom))}.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 0 10px}.fact{border:1px solid var(--line);border-radius:9px;background:#f8fafc;padding:8px 10px;min-width:0}.fact small{display:block;color:var(--muted);font-size:11px}.fact strong{display:block;overflow-wrap:anywhere}.detail-help{margin:0 0 10px;color:var(--muted);font-size:13px}.type-nav{position:sticky;top:78px;z-index:3;display:flex;gap:6px;overflow-x:auto;padding:8px 0;background:#fff;border-bottom:1px solid var(--line);scrollbar-width:thin}.type-nav button{flex:0 0 auto;padding:6px 9px;background:#eff6ff;color:#1e40af}.type-row{display:grid;grid-template-columns:1fr auto;gap:5px 14px;border-top:1px solid var(--line);padding:16px 0;scroll-margin-top:132px}.type-row:first-of-type{border-top:0}.type-row>p{margin:2px 0;color:var(--muted);font-size:13px;grid-column:1/-1;white-space:pre-wrap}.type-method{grid-column:1/-1;border-left:3px solid #bfdbfe;background:#eff6ff;padding:8px 10px;border-radius:0 8px 8px 0;font-size:12px;color:#334155}.type-method strong{display:block;color:#1e3a8a}.scope-note{grid-column:1/-1;color:#475569;background:#f8fafc;border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}.model-gap{color:#991b1b;background:#fff7ed;border-color:#fdba74}.evidence-notes{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 10px;border:1px solid #dbeafe;background:#f8fbff;border-radius:8px;padding:8px 10px;font-size:12px}.evidence-note{display:grid;grid-template-columns:72px 1fr;gap:6px;min-width:0}.evidence-note strong{color:#475569}.evidence-note span{overflow-wrap:anywhere}.dimensions{grid-template-columns:1fr 1fr;gap:8px 12px;margin-top:6px;align-items:start}.dimension{border:1px solid #dbe3ef;border-radius:9px;background:#f8fafc;overflow:hidden}.dimension[open]{background:#fff;border-color:#bfdbfe}.dimension summary{cursor:pointer;list-style:none;padding:9px 10px;display:grid;grid-template-columns:1fr auto 96px;gap:2px 10px;align-items:center}.dimension summary::-webkit-details-marker{display:none}.dimension summary:before{content:"＋";grid-column:2;grid-row:1/3;color:#2563eb;font-weight:700}.dimension[open] summary:before{content:"－"}.dimension-title{font-size:12px;color:var(--muted)}.dimension-score{display:block;font-weight:700}.dimension-evidence{grid-column:1/-1;color:#475569;font-size:12px;overflow-wrap:anywhere}.dimension-body{border-top:1px solid #e2e8f0;padding:8px 10px;font-size:12px}.dimension-body dl{display:grid;grid-template-columns:76px 1fr;gap:4px 8px;margin:0}.dimension-body dt{color:var(--muted)}.dimension-body dd{margin:0;overflow-wrap:anywhere}.contribution{color:var(--green);font-weight:600}.gate-result{color:#1e40af;font-weight:600}.missing-text{color:#991b1b}.notice{color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-top:12px}
 .type7-method-detail{grid-column:1/-1;border:1px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:10px;display:grid;gap:8px}
 .verdict{border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:10px;grid-column:1/-1;background:#fff}
@@ -103,6 +103,8 @@ const INDEX_HTML = `<!doctype html>
 .score-bar{position:relative;height:7px;border-radius:4px;background:#e2e8f0;overflow:hidden}
 .score-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
 .dimension .score-bar{width:96px;flex:none;margin-left:auto}
+.coverage-track{appearance:none;width:100%;border:0}.coverage-track::-webkit-progress-bar{background:#e2e8f0}.coverage-track::-webkit-progress-value{background:linear-gradient(90deg,#2563eb,#38bdf8)}.coverage-track::-moz-progress-bar{background:linear-gradient(90deg,#2563eb,#38bdf8)}
+.score-bar{appearance:none;border:0;width:100%}.score-bar::-webkit-progress-bar{background:#e2e8f0}.score-bar::-webkit-progress-value{background:#dc2626}.score-bar::-moz-progress-bar{background:#dc2626}.score-bar.score-mid::-webkit-progress-value{background:#d97706}.score-bar.score-mid::-moz-progress-bar{background:#d97706}.score-bar.score-high::-webkit-progress-value{background:#16a34a}.score-bar.score-high::-moz-progress-bar{background:#16a34a}
 .dimension-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dimension-summary .dimension-title{flex:1;min-width:120px}
 .dimension-summary .dimension-evidence{flex-basis:100%}.type7-method-detail h4,.type7-method-detail h5{margin:0;color:#1e3a8a}.type7-overview,.type7-conclusion,.type7-section-help{margin:0;font-size:12px}.type7-classification{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.type7-classification .type7-atom-group{min-width:0}.type7-gates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.type7-gate{border:1px solid var(--line);border-radius:8px;background:#fff;padding:7px;font-size:12px}.type7-gate strong,.type7-gate span{display:block}.type7-atom-group{border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 8px}.type7-atom-group summary{cursor:pointer;padding:7px 0;font-weight:600}.type7-atom{display:grid;grid-template-columns:minmax(120px,1fr) auto;gap:2px 8px;border-top:1px solid #edf1f7;padding:7px 0;font-size:12px}.type7-atom small{grid-column:1/-1;color:var(--muted)}.type7-atom-detail{grid-column:1/-1;display:grid;gap:2px;color:#475569}.type7-inputs{overflow-wrap:anywhere}.type7-old-data{grid-column:1/-1;color:#991b1b;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:9px 10px;font-size:12px}
@@ -119,7 +121,7 @@ const METHODOLOGY_LABEL="__QUANT_METHODOLOGY_LABEL__";
 const CATALOGUE_INDEX_CONTRACT_VERSION=__CATALOGUE_INDEX_CONTRACT_VERSION__;
 const DECISION_BASIS_NAMES={full_evidence:"证据完整",scope_exclusion:"超出适用范围",confirmed_veto:"已有证据足以否决",conservative_upper_bound:"即使缺失项取最高分也不会触发",action_condition:"等待仓位确认",market_block:"交易状态阻断",unresolved_missing_evidence:"缺失资料仍可能改变结论"};
 const EVIDENCE_META_NAMES={_scope:"适用边界",_veto:"否决原因",_missing:"待补资料",_condition:"附加条件",_downgrade:"降级原因",_risk:"风险说明",_blocked:"交易状态",_adjustment:"样本调整",_coverage:"数据覆盖",_profile:"公司画像",_score_quality:"评分质量",_4f_formula:"股价透支计算"};
-const $=id=>document.getElementById(id);const pageSize=50;let data=[],page=0,generationId="",marketAsOf="",sourceVersion="",dimensionScoresAvailable=false,dimensionEstimatesAvailable=false,detailPrefetching=new Set(),type7MethodDetailAvailable=false,returnFocus=null,composing=false,renderFrame=0,activeDetailRequest=0,activeDetailCode="",detailAbort=null;const detailCache=new Map();
+const $=id=>document.getElementById(id);const pageSize=50,MAX_DETAIL_PREFETCHES=2;let data=[],page=0,generationId="",marketAsOf="",sourceVersion="",dimensionScoresAvailable=false,dimensionEstimatesAvailable=false,type7MethodDetailAvailable=false,returnFocus=null,composing=false,renderFrame=0,activeDetailRequest=0,activeDetailCode="",detailAbort=null,activeDetailPrefetches=0,idlePrefetchScheduled=false;const detailCache=new Map(),detailPrefetching=new Map();
 function market(code){return String(code).startsWith("6")?"沪市":"深市"}
 function score(row,type=""){const result=type?row.types?.[type]:null;const exact=finiteNumber(type?result?.score:row.diagnostic_score);if(exact!==null)return exact;const diagnostic=type==="type6"?finiteNumber(result?.diagnostic_score):null;if(diagnostic!==null)return diagnostic;const upper=finiteNumber(result?.score_upper_bound??result?.decision?.score_upper_bound);return type&&upper!==null?upper:-1}
 function scoreLabel(typeKey,typeResult){if(typeResult===undefined){typeResult=typeKey;typeKey=typeResult?.diagnostic_score!==undefined?"type6":""}if(!typeResult||typeResult.status==="not_applicable")return"";if(typeKey==="type7"&&!Object.prototype.hasOwnProperty.call(typeResult,"quality_complete"))return"旧数据待刷新";const digits=typeKey==="type7"?3:1,hasMissing=typeResult.has_missing_dimensions===true||(typeResult.decision?.missing_dimensions||[]).length>0;const exact=finiteNumber(typeResult.score);if(exact!==null&&!hasMissing)return exact.toFixed(digits)+"分";const diagnostic=typeKey==="type6"?finiteNumber(typeResult.diagnostic_score):null;if(diagnostic!==null)return"模型诊断 "+diagnostic.toFixed(1)+"分（未确认仓位，不构成信号）";const lower=finiteNumber(typeResult.score_lower_bound??typeResult.decision?.score_lower_bound),upper=finiteNumber(typeResult.score_upper_bound??typeResult.decision?.score_upper_bound);if(lower!==null&&upper!==null&&lower<=upper)return Math.abs(upper-lower)<.05?upper.toFixed(digits)+"分":"参考范围 "+lower.toFixed(digits)+"–"+upper.toFixed(digits)+"分";return"资料未齐，暂不显示精确分"}
@@ -141,7 +143,7 @@ function renderCoverage(summary,indexCoverage={}){
     const preferredStatus=triggered>0?"triggered":conditional>0?"conditional":evidence.evidenceMissing>0?"evidence_gap":"";
     const button=document.createElement("button");button.type="button";button.dataset.type=key;button.dataset.status=preferredStatus;button.setAttribute("aria-label",name+"，已触发 "+triggered+" 家，"+(qualityLabel?qualityLabel+"，":"")+conditionalLabel+"，"+evidenceLabel);
     const label=document.createElement("span");label.className="coverage-label coverage-triggered";label.append(document.createTextNode(name.replace(/^[^ ]+ /,"")),document.createTextNode(triggered.toLocaleString()+" 家已触发"));
-    const track=document.createElement("span"),fill=document.createElement("span");track.className="coverage-track";fill.className="coverage-fill";fill.style.width=Math.max(0,Math.min(100,visibleCount/total*100))+"%";if(visibleCount===0)fill.hidden=true;track.append(fill);
+    const track=document.createElement("progress");track.className="coverage-track";track.max=100;track.value=Math.max(0,Math.min(100,visibleCount/total*100));track.setAttribute("aria-hidden","true");if(visibleCount===0)track.hidden=true;
     const breakdown=document.createElement("span");breakdown.className="coverage-breakdown";
     if(qualityLabel){const qualityText=document.createElement("span");qualityText.className="coverage-triggered";qualityText.textContent=qualityLabel;breakdown.append(qualityText)}
     const conditionalText=document.createElement("span");conditionalText.className="coverage-conditional";conditionalText.textContent=conditionalLabel;
@@ -150,12 +152,24 @@ function renderCoverage(summary,indexCoverage={}){
   $("coverage").replaceChildren(...nodes)
 }
 function syncSearchStatus(){const searching=$("q").value.trim().length>0;$("status").disabled=searching;$("statusHint").textContent=searching?"代码/名称搜索会跨全部状态，状态筛选暂时停用。":""}
-function prefetchVisibleDetails(){
-  if(!generationId)return;
-  const rows=[...document.querySelectorAll("#rows tr[data-code]")].slice(0,12);
-  for(const row of rows){const code=row.dataset.code;if(detailPrefetching.has(code))continue;detailPrefetching.add(code);fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId,{cache:"force-cache"}).then(r=>{if(!r.ok)throw new Error(String(r.status));return r.json()}).catch(()=>{})}
+function prefetchDetail(code){
+  if(!generationId||!code||detailCache.has(code)||detailPrefetching.has(code)||activeDetailPrefetches>=MAX_DETAIL_PREFETCHES)return null;
+  activeDetailPrefetches++;
+  const pending=fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId,{cache:"force-cache"})
+    .then(response=>{if(!response.ok)throw new Error("公司明细预取 HTTP "+response.status);return response.json()})
+    .then(payload=>{if(payload?.company)detailCache.set(code,payload.company);return payload?.company||null})
+    .catch(()=>null)
+    .finally(()=>{activeDetailPrefetches--;detailPrefetching.delete(code)});
+  detailPrefetching.set(code,pending);
+  return pending
 }
-function render(){syncSearchStatus();const t=$("type").value,out=filtered(),pages=Math.max(1,Math.ceil(out.length/pageSize));page=Math.min(page,pages-1);const slice=out.slice(page*pageSize,(page+1)*pageSize);$("scoreHeading").textContent=t?TYPE_NAMES[t]+"分数或范围":"综合诊断分";$("typeHeading").textContent=t?"当前类型状态":"主要买入情况";$("statusHeading").textContent=t?"查看明细":"七类状态";const fragment=document.createDocumentFragment();for(const r of slice){const tr=document.createElement("tr");tr.tabIndex=0;tr.dataset.code=r.code;tr.setAttribute("aria-label","查看 "+r.name+" "+r.code+" 的七类明细");const displayedScore=t?(scoreLabel(t,r.types?.[t])||"—"):(score(r)>=0?score(r).toFixed(1):"—");for(const value of [r.code,r.name,r._market==="SH"?"沪市":"深市",r.industry||"—",displayedScore]){const td=document.createElement("td");td.textContent=value;tr.append(td)}const td=document.createElement("td");if(t){td.append(badge(r.types?.[t]?.status||"invalid","",t))}else{td.textContent=r.primary_label||"—"}tr.append(td);const statuses=document.createElement("td");if(t){statuses.textContent="点击查看完整依据"}else{for(const k of Object.keys(TYPE_NAMES)){const v=r.types?.[k];if(v)statuses.append(badge(v.status,k.slice(4)+" "+(STATUS_NAMES[v.status]||"异常"),k))}}tr.append(statuses);fragment.append(tr)}$("rows").replaceChildren(fragment);const hasQuery=$("q").value.trim().length>0;if(out.length)$("resultMeta").textContent="筛选后 "+out.length.toLocaleString()+" 家，当前显示 "+slice.length+" 家；"+(hasQuery?"代码/名称搜索已跨全部状态。":"")+"点击公司查看七类完整明细。";else if(hasQuery)$("resultMeta").textContent="已跨全部状态搜索，但没有找到匹配该代码或名称的公司。";else if(t&&$("status").value==="triggered")$("resultMeta").textContent=TYPE_NAMES[t]+"当前确实为 0 家命中；可切换状态查看未触发原因。";else $("resultMeta").textContent="当前筛选条件没有公司，请调整市场、行业或状态。";$("pageInfo").textContent="第 "+(page+1)+" / "+pages+" 页";$("prev").disabled=page===0;$("next").disabled=page>=pages-1;prefetchVisibleDetails()}
+function scheduleIdleDetailPrefetch(){
+  if(idlePrefetchScheduled||!generationId)return;
+  idlePrefetchScheduled=true;
+  const run=()=>{for(const row of [...document.querySelectorAll("#rows tr[data-code]")].slice(0,MAX_DETAIL_PREFETCHES))prefetchDetail(row.dataset.code)};
+  if("requestIdleCallback" in window)window.requestIdleCallback(run,{timeout:1500});else window.setTimeout(run,750)
+}
+function render(){syncSearchStatus();const t=$("type").value,out=filtered(),pages=Math.max(1,Math.ceil(out.length/pageSize));page=Math.min(page,pages-1);const slice=out.slice(page*pageSize,(page+1)*pageSize);$("scoreHeading").textContent=t?TYPE_NAMES[t]+"分数或范围":"综合诊断分";$("typeHeading").textContent=t?"当前类型状态":"主要买入情况";$("statusHeading").textContent=t?"查看明细":"七类状态";const fragment=document.createDocumentFragment();for(const r of slice){const tr=document.createElement("tr");tr.tabIndex=0;tr.dataset.code=r.code;tr.setAttribute("aria-label","查看 "+r.name+" "+r.code+" 的七类明细");const displayedScore=t?(scoreLabel(t,r.types?.[t])||"—"):(score(r)>=0?score(r).toFixed(1):"—");for(const value of [r.code,r.name,r._market==="SH"?"沪市":"深市",r.industry||"—",displayedScore]){const td=document.createElement("td");td.textContent=value;tr.append(td)}const td=document.createElement("td");if(t){td.append(badge(r.types?.[t]?.status||"invalid","",t))}else{td.textContent=r.primary_label||"—"}tr.append(td);const statuses=document.createElement("td");if(t){statuses.textContent="点击查看完整依据"}else{for(const k of Object.keys(TYPE_NAMES)){const v=r.types?.[k];if(v)statuses.append(badge(v.status,k.slice(4)+" "+(STATUS_NAMES[v.status]||"异常"),k))}}tr.append(statuses);fragment.append(tr)}$("rows").replaceChildren(fragment);const hasQuery=$("q").value.trim().length>0;if(out.length)$("resultMeta").textContent="筛选后 "+out.length.toLocaleString()+" 家，当前显示 "+slice.length+" 家；"+(hasQuery?"代码/名称搜索已跨全部状态。":"")+"点击公司查看七类完整明细。";else if(hasQuery)$("resultMeta").textContent="已跨全部状态搜索，但没有找到匹配该代码或名称的公司。";else if(t&&$("status").value==="triggered")$("resultMeta").textContent=TYPE_NAMES[t]+"当前确实为 0 家命中；可切换状态查看未触发原因。";else $("resultMeta").textContent="当前筛选条件没有公司，请调整市场、行业或状态。";$("pageInfo").textContent="第 "+(page+1)+" / "+pages+" 页";$("prev").disabled=page===0;$("next").disabled=page>=pages-1}
 function scheduleRender(){cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(()=>{page=0;render()})}
 function changePage(delta){page+=delta;render();$("resultsPanel").scrollIntoView({block:"start"});$("resultMeta").focus({preventScroll:true})}
 function finiteNumber(value){if(value===null||value===undefined||value===""||typeof value==="boolean")return null;const number=Number(value);return Number.isFinite(number)?number:null}
@@ -249,17 +263,14 @@ function renderType7MethodDetail(value){
   box.addEventListener("toggle",()=>{if(box.open&&!built){built=true;buildContent()}});
   return box;
 }
-function scoreBar(scoreValue,{tone=null,heightClass=""}={}){
-  const bar=document.createElement("span");bar.className="score-bar"+(heightClass?" "+heightClass:"");
-  const fill=document.createElement("i");
+function scoreBar(scoreValue,{heightClass=""}={}){
+  const bar=document.createElement("progress");bar.className="score-bar"+(heightClass?" "+heightClass:"");bar.max=10;bar.value=0;bar.setAttribute("aria-hidden","true");
   const value=finiteNumber(scoreValue);
   if(value!==null){
-    const pct=Math.max(0,Math.min(100,value*10));
-    fill.style.width=pct.toFixed(1)+"%";
-    const toneColor=tone||(value>=7?"#16a34a":value>=5?"#d97706":"#dc2626");
-    fill.style.background=toneColor;
+    bar.value=Math.max(0,Math.min(10,value));
+    if(value>=7)bar.classList.add("score-high");else if(value>=5)bar.classList.add("score-mid");
   }
-  bar.append(fill);return bar;
+  return bar;
 }
 function renderVerdict(r){
   const wrap=document.createElement("div");wrap.className="verdict";
@@ -401,6 +412,7 @@ async function detailByCode(code){
   openDrawer(indexRow.name+"（"+indexRow.code+"）");
   try{
     let company=detailCache.get(code);
+    if(!company&&detailPrefetching.has(code))company=await detailPrefetching.get(code);
     if(!company){const response=await fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId,{cache:"force-cache",signal:detailAbort.signal});if(!response.ok)throw new Error("公司明细读取 HTTP "+response.status);company=(await response.json()).company;if(!company)throw new Error("服务器未返回公司明细");detailCache.set(code,company)}
     if(requestId!==activeDetailRequest||activeDetailCode!==code||!$("drawer").classList.contains("open"))return;
     type7MethodDetailAvailable=Object.prototype.hasOwnProperty.call(company?.types?.type7||{},"quality_complete")&&Boolean(company?.types?.type7?.method_detail);
@@ -410,18 +422,73 @@ async function detailByCode(code){
     $("drawer").removeAttribute("aria-busy");$("detailMeta").textContent="明细读取失败";$("detailRows").textContent=String(error?.message||error);
   }
 }
-async function load(){try{const manifestResponse=await fetch("/api/manifest",{cache:"no-store"});if(!manifestResponse.ok)throw new Error("清单读取 HTTP "+manifestResponse.status);const m=await manifestResponse.json();generationId=encodeURIComponent(String(m.generation_id||m.provenance?.generation_id||""));marketAsOf=String(m.market_as_of||"");sourceVersion=String(m.provenance?.source_commit||"").slice(0,12);const indexResponse=await fetch("/api/catalogue-index?generation_id="+generationId+"&index_contract="+CATALOGUE_INDEX_CONTRACT_VERSION,{cache:"force-cache"});if(!indexResponse.ok)throw new Error("公司索引读取 HTTP "+indexResponse.status);const c=await indexResponse.json();if(Number(c.index_contract)!==CATALOGUE_INDEX_CONTRACT_VERSION)throw new Error("公司索引版本不匹配，请刷新页面");dimensionScoresAvailable=m.capabilities?.dimension_scores===true&&c.capabilities?.dimension_scores===true;dimensionEstimatesAvailable=m.capabilities?.dimension_score_estimates===true&&c.capabilities?.dimension_score_estimates===true;data=(Array.isArray(c.companies)?c.companies:[]).map(r=>({...r,_search:(String(r.code)+" "+String(r.name)).toLowerCase(),_market:String(r.code).startsWith("6")?"SH":"SZ"}));fillOptions();const s=m.summary||{},summary=c.summary||{};renderCoverage(s,summary.type_coverage||{});const evidenceGapCompanyCount=Number(summary.evidence_gap_company_count??s.insufficient_company_count??summary.insufficient_company_count??0),decisionRelevantGapCount=Number(summary.decision_relevant_gap_company_count??summary.insufficient_company_count??0),actionConfirmationCount=Number(summary.action_confirmation_company_count??s.action_confirmation_company_count??0);const cards=[["全市场公司",s.company_count||data.length],["至少一种已触发",s.triggered_company_count||0],["待满足附加条件",s.conditional_company_count||0],["其中待确认仓位",actionConfirmationCount],["有客观资料缺口",evidenceGapCompanyCount],["缺口可能改变结论",decisionRelevantGapCount],["七类触发次数",Object.values(s.type_coverage||{}).reduce((n,v)=>n+Number(v.triggered||0),0)]];$("cards").replaceChildren(...cards.map(([label,value])=>{const d=document.createElement("div");d.className="card";const sm=document.createElement("small");sm.textContent=label;const st=document.createElement("strong");st.textContent=Number(value||0).toLocaleString();d.append(sm,st);return d}));$("meta").textContent="数据日期："+(m.market_as_of||"—")+" · 更新时间："+formatBeijing(m.data_timestamp_utc)+" · 来源版本："+(sourceVersion||"—")+" · 量化口径："+METHODOLOGY_LABEL;if(!dimensionScoresAvailable){$("notice").hidden=false;$("notice").textContent="当前服务器数据版本较旧，尚未包含子指标分数，请等待下一次数据发布。"}render()}catch(error){$("meta").textContent="数据读取失败："+String(error?.message||error);$("notice").hidden=false;$("notice").textContent="请稍后重试；如果持续失败，请检查数据发布状态。"}}
-$("q").addEventListener("compositionstart",()=>{composing=true});$("q").addEventListener("compositionend",()=>{composing=false;scheduleRender()});$("q").addEventListener("input",()=>{syncSearchStatus();if(!composing)scheduleRender()});for(const id of ["market","type","status","industry","sort"])$(id).addEventListener("change",()=>{page=0;render()});$("coverage").addEventListener("click",event=>{const button=event.target.closest("button[data-type]");if(!button)return;$("type").value=button.dataset.type;$("status").value=button.dataset.status||"";page=0;render();$("resultMeta").scrollIntoView({block:"center"})});$("rows").addEventListener("click",event=>{const row=event.target.closest("tr[data-code]");if(row)detailByCode(row.dataset.code)});$("rows").addEventListener("keydown",event=>{if(event.key!=="Enter"&&event.key!==" ")return;const row=event.target.closest("tr[data-code]");if(row){event.preventDefault();detailByCode(row.dataset.code)}});$("detailRows").addEventListener("click",event=>{const button=event.target.closest("button[data-detail-type]");if(!button)return;const target=$("detail-"+button.dataset.detailType);if(target)$("drawerCard").scrollTo({top:Math.max(0,target.offsetTop-124),behavior:"smooth"})});$("prev").onclick=()=>changePage(-1);$("next").onclick=()=>changePage(1);$("close").onclick=closeDrawer;$("drawer").onclick=event=>{if(event.target===$("drawer"))closeDrawer()};document.addEventListener("keydown",event=>{if(event.key==="Escape"&&$("drawer").classList.contains("open")){event.preventDefault();closeDrawer();return}trapDrawerFocus(event)});load();
+async function load(){
+  const healthRequest=fetch("/api/health",{cache:"no-store"})
+    .then(async response=>{let payload=null;try{payload=await response.json()}catch{}return{response,payload}})
+    .catch(error=>({error}));
+  try{
+    const manifestResponse=await fetch("/api/manifest",{cache:"no-store"});
+    if(!manifestResponse.ok)throw new Error("清单读取 HTTP "+manifestResponse.status);
+    const m=await manifestResponse.json();
+    generationId=encodeURIComponent(String(m.generation_id||m.provenance?.generation_id||""));
+    marketAsOf=String(m.market_as_of||"");sourceVersion=String(m.provenance?.source_commit||"").slice(0,12);
+    const indexResponse=await fetch("/api/catalogue-index?generation_id="+generationId+"&index_contract="+CATALOGUE_INDEX_CONTRACT_VERSION,{cache:"force-cache"});
+    if(!indexResponse.ok)throw new Error("公司索引读取 HTTP "+indexResponse.status);
+    const c=await indexResponse.json();
+    if(Number(c.index_contract)!==CATALOGUE_INDEX_CONTRACT_VERSION)throw new Error("公司索引版本不匹配，请刷新页面");
+    dimensionScoresAvailable=m.capabilities?.dimension_scores===true&&c.capabilities?.dimension_scores===true;
+    dimensionEstimatesAvailable=m.capabilities?.dimension_score_estimates===true&&c.capabilities?.dimension_score_estimates===true;
+    data=(Array.isArray(c.companies)?c.companies:[]).map(r=>({...r,_search:(String(r.code)+" "+String(r.name)).toLowerCase(),_market:String(r.code).startsWith("6")?"SH":"SZ"}));
+    fillOptions();
+    const s=m.summary||{},summary=c.summary||{};renderCoverage(s,summary.type_coverage||{});
+    const evidenceGapCompanyCount=Number(summary.evidence_gap_company_count??s.insufficient_company_count??summary.insufficient_company_count??0),decisionRelevantGapCount=Number(summary.decision_relevant_gap_company_count??summary.insufficient_company_count??0),actionConfirmationCount=Number(summary.action_confirmation_company_count??s.action_confirmation_company_count??0);
+    const cards=[["全市场公司",s.company_count||data.length],["至少一种已触发",s.triggered_company_count||0],["待满足附加条件",s.conditional_company_count||0],["其中待确认仓位",actionConfirmationCount],["有客观资料缺口",evidenceGapCompanyCount],["缺口可能改变结论",decisionRelevantGapCount],["七类触发次数",Object.values(s.type_coverage||{}).reduce((n,v)=>n+Number(v.triggered||0),0)]];
+    $("cards").replaceChildren(...cards.map(([label,value])=>{const d=document.createElement("div");d.className="card";const sm=document.createElement("small");sm.textContent=label;const st=document.createElement("strong");st.textContent=Number(value||0).toLocaleString();d.append(sm,st);return d}));
+    $("meta").textContent="数据日期："+(m.market_as_of||"—")+" · 更新时间："+formatBeijing(m.data_timestamp_utc)+" · 来源版本："+(sourceVersion||"—")+" · 量化口径："+METHODOLOGY_LABEL;
+    const notices=[];let criticalNotice=false;
+    const healthResult=await healthRequest,health=healthResult.payload;
+    if(healthResult.error||!health){criticalNotice=true;notices.push("无法确认数据新鲜度，请谨慎使用并稍后刷新。")}else{
+      if(health.stale===true){criticalNotice=true;notices.push("数据新鲜度警告："+String(health.stale_reason||"数据已经陈旧")+"；最近应覆盖交易日："+String(health.expected_market_as_of||"未知")+"。")}else if(health.ok!==true){criticalNotice=true;notices.push("数据健康检查未通过，请稍后刷新。")}
+      if(health.generation_id&&String(health.generation_id)!==decodeURIComponent(generationId)){criticalNotice=true;notices.push("数据版本正在切换，请刷新页面确认最新批次。")}
+    }
+    if(!dimensionScoresAvailable)notices.push("当前服务器数据版本较旧，尚未包含子指标分数，请等待下一次数据发布。");
+    const notice=$("notice");notice.hidden=notices.length===0;notice.textContent=notices.join(" ");notice.setAttribute("role",criticalNotice?"alert":"status");notice.setAttribute("aria-live",criticalNotice?"assertive":"polite");
+    render();scheduleIdleDetailPrefetch();
+  }catch(error){
+    $("meta").textContent="数据读取失败："+String(error?.message||error);$("notice").hidden=false;$("notice").setAttribute("role","alert");$("notice").setAttribute("aria-live","assertive");$("notice").textContent="请稍后重试；如果持续失败，请检查数据发布状态。";
+  }
+}
+$("q").addEventListener("compositionstart",()=>{composing=true});
+$("q").addEventListener("compositionend",()=>{composing=false;scheduleRender()});
+$("q").addEventListener("input",()=>{syncSearchStatus();if(!composing)scheduleRender()});
+for(const id of ["market","type","status","industry","sort"])$(id).addEventListener("change",()=>{page=0;render()});
+$("coverage").addEventListener("click",event=>{const button=event.target.closest("button[data-type]");if(!button)return;$("type").value=button.dataset.type;$("status").value=button.dataset.status||"";page=0;render();$("resultMeta").scrollIntoView({block:"center"})});
+$("rows").addEventListener("pointerover",event=>{const row=event.target.closest("tr[data-code]");if(row)prefetchDetail(row.dataset.code)});
+$("rows").addEventListener("focusin",event=>{const row=event.target.closest("tr[data-code]");if(row)prefetchDetail(row.dataset.code)});
+$("rows").addEventListener("click",event=>{const row=event.target.closest("tr[data-code]");if(row)detailByCode(row.dataset.code)});
+$("rows").addEventListener("keydown",event=>{if(event.key!=="Enter"&&event.key!==" ")return;const row=event.target.closest("tr[data-code]");if(row){event.preventDefault();detailByCode(row.dataset.code)}});
+$("detailRows").addEventListener("click",event=>{const button=event.target.closest("button[data-detail-type]");if(!button)return;const target=$("detail-"+button.dataset.detailType);if(target)$("drawerCard").scrollTo({top:Math.max(0,target.offsetTop-124),behavior:"smooth"})});
+$("prev").onclick=()=>changePage(-1);$("next").onclick=()=>changePage(1);$("close").onclick=closeDrawer;$("drawer").onclick=event=>{if(event.target===$("drawer"))closeDrawer()};
+document.addEventListener("keydown",event=>{if(event.key==="Escape"&&$("drawer").classList.contains("open")){event.preventDefault();closeDrawer();return}trapDrawerFocus(event)});
+load();
 </script></body></html>`
   .replace("__QUANT_METHODOLOGY_JSON__",JSON.stringify(METHODOLOGY))
   .replace("__QUANT_METHODOLOGY_VERSION__",METHODOLOGY_VERSION)
   .replace("__QUANT_METHODOLOGY_LABEL__",METHODOLOGY_LABEL)
   .replace("__CATALOGUE_INDEX_CONTRACT_VERSION__",String(CATALOGUE_INDEX_CONTRACT_VERSION));
 
-const JSON_HEADERS={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
+const BASE_SECURITY_HEADERS={
+  "cross-origin-opener-policy":"same-origin",
+  "permissions-policy":"camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+  "referrer-policy":"no-referrer",
+  "strict-transport-security":"max-age=31536000; includeSubDomains",
+  "x-content-type-options":"nosniff",
+  "x-frame-options":"DENY",
+};
+const JSON_HEADERS={...BASE_SECURITY_HEADERS,"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
 const MAX_MANIFEST_BYTES=1024*1024;
 const MAX_COMPRESSED_ASSET_BYTES=8*1024*1024;
-const MAX_UNCOMPRESSED_ASSET_BYTES=24*1024*1024;
+const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;
 // Pages advanced mode deploys this Worker as one file, so the official closure
 // periods from tools/china_a_share_trading_calendar.json are embedded here.
 // Add each newly published exchange calendar explicitly; unlisted years fall
@@ -442,6 +509,12 @@ const CURRENT_SESSION_EXPECTED_AFTER_BEIJING_MINUTE=18*60;
 const MAX_TRADING_DATA_AGE_HOURS=14*24;
 const EXPECTED_TRADING_DAY_LOOKBACK=20;
 function json(value,status=200,headers={}){return new Response(JSON.stringify(value),{status,headers:{...JSON_HEADERS,...headers}})}
+function cspNonce(){const bytes=crypto.getRandomValues(new Uint8Array(16));return Array.from(bytes,value=>value.toString(16).padStart(2,"0")).join("")}
+function dashboardHtmlResponse(request){
+  const nonce=cspNonce(),html=INDEX_HTML.replaceAll("__QUANT_CSP_NONCE__",nonce).replace("<script>","<script nonce=\""+nonce+"\">");
+  const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
+  return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
+}
 async function currentGeneration(env,generationId=""){if(generationId)return await env.DB.prepare("SELECT * FROM generations WHERE generation_id=?").bind(generationId).first();return await env.DB.prepare("SELECT g.* FROM current_generation c JOIN generations g ON g.generation_id=c.generation_id WHERE c.singleton=1").first()}
 async function sha256Hex(bytes){const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("")}
 async function generationManifestRecord(env,generation){
@@ -493,8 +566,23 @@ function tradingDataFreshness(marketAsOf,timestamp,nowMs=Date.now()){
   else if(!withinHardAge)staleReason="数据生成时间超过14天安全上限";
   return{stale:Boolean(staleReason),stale_reason:staleReason,data_age_hours:dataAgeHours,expected_market_as_of:expectedMarketAsOf,market_date_current:marketDateCurrent,calendar_coverage:tradingCalendarCoverage(expectedMarketAsOf),hard_age_limit_hours:MAX_TRADING_DATA_AGE_HOURS};
 }
+function generationRecordHealthy(generation){const companyCount=Number(generation?.company_count);return Boolean(generation&&/^[0-9a-f]{16}$/.test(String(generation.generation_id||""))&&/^[0-9a-f]{64}$/.test(String(generation.manifest_sha256||"").toLowerCase())&&Number.isSafeInteger(companyCount)&&companyCount>0)}
+function uncheckedDeepHealth(){return{manifest_ok:null,manifest_bytes:null,catalogue_ok:null,catalogue_bytes:null,signals_ok:null,signals_bytes:null,signature_ok:null,signature_bytes:null,company_details_declared:null,company_details_ready:null,company_detail_shards:null,company_detail_bytes:null}}
+async function deepGenerationHealth(env,generation){
+  const failed={ok:false,manifest_ok:false,manifest_bytes:0,catalogue_ok:false,catalogue_bytes:0,signals_ok:false,signals_bytes:0,signature_ok:false,signature_bytes:0,company_details_declared:false,company_details_ready:false,company_detail_shards:0,company_detail_bytes:0};
+  if(!generation)return failed;
+  try{
+    const manifestRecord=await generationManifestRecord(env,generation),manifest=manifestRecord.manifest;
+    if(!manifest)return{...failed,manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0};
+    const catalogue=declaredAsset(manifest,"catalogue"),signals=declaredAsset(manifest,"signals"),signatureName=String(manifest?.signature?.filename||""),prefix="generations/"+generation.generation_id+"/",detailAssets=declaredCompanyDetails(manifest,generation.generation_id);
+    const [catalogueObject,signalsObject,signatureObject,...detailObjects]=await Promise.all([catalogue.filename?env.DATA_BUCKET.head(prefix+catalogue.filename):null,signals.filename?env.DATA_BUCKET.head(prefix+signals.filename):null,signatureName?env.DATA_BUCKET.head(prefix+signatureName):null,...(detailAssets||[]).map(entry=>env.DATA_BUCKET.head(prefix+entry.filename))]);
+    const detailsDeclared=Array.isArray(detailAssets),catalogueOk=Boolean(catalogueObject&&catalogue.size===catalogueObject.size&&(!detailsDeclared||String(catalogueObject.customMetadata?.sha256||"").toLowerCase()===catalogue.sha256)),signalsOk=Boolean(signalsObject&&signals.size===signalsObject.size&&(!detailsDeclared||String(signalsObject.customMetadata?.sha256||"").toLowerCase()===signals.sha256)),signatureOk=Boolean(signatureObject&&signatureObject.size>=64&&signatureObject.size<=128);
+    const detailsOk=!detailsDeclared||Boolean(detailAssets.length===16&&detailObjects.every((object,index)=>object&&object.size===detailAssets[index].size&&String(object.customMetadata?.sha256||"").toLowerCase()===String(detailAssets[index].sha256||"").toLowerCase())),detailBytes=detailObjects.reduce((total,object)=>total+Number(object?.size||0),0);
+    return{ok:Boolean(manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk&&detailsOk),manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0,catalogue_ok:catalogueOk,catalogue_bytes:catalogueObject?.size||0,signals_ok:signalsOk,signals_bytes:signalsObject?.size||0,signature_ok:signatureOk,signature_bytes:signatureObject?.size||0,company_details_declared:detailsDeclared,company_details_ready:detailsDeclared&&detailsOk,company_detail_shards:detailAssets?.length||0,company_detail_bytes:detailBytes};
+  }catch{return{...failed,error:"全资产完整性检查失败"}}
+}
 function limitedGzipStream(bytes,label){let total=0;const source=new Response(bytes).body;if(!source)throw new Error(label+"流不可用");return source.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TransformStream({transform(chunk,controller){const length=Number(chunk?.byteLength||0);if(!Number.isSafeInteger(length)||length<0||total+length>MAX_UNCOMPRESSED_ASSET_BYTES)throw new Error(label+"解压后超过安全上限");total+=length;controller.enqueue(chunk)}}))}
-const SHARD_CACHE_LIMIT=4,shardCache=new Map();
+const SHARD_CACHE_LIMIT=2,shardCache=new Map(),shardInflight=new Map();
 function shardCacheKey(generationId,shardId){return "https://shard-cache.invalid/company-shard-v1/"+generationId+"/"+shardId}
 function cachedShardPayload(generationId,shardId){const key=generationId+"/"+shardId;if(!shardCache.has(key))return null;const entry=shardCache.get(key);shardCache.delete(key);shardCache.set(key,entry);return entry}
 function rememberShardPayload(generationId,shardId,payload){const key=generationId+"/"+shardId;shardCache.set(key,payload);while(shardCache.size>SHARD_CACHE_LIMIT)shardCache.delete(shardCache.keys().next().value)}
@@ -502,22 +590,27 @@ async function verifiedCompressedAsset(env,prefix,metadata,label){if(!metadata.f
 async function readVerifiedGzipJson(bytes,metadata,label,uncompressedSha256=""){const raw=await new Response(limitedGzipStream(bytes,label)).arrayBuffer();if(raw.byteLength>MAX_UNCOMPRESSED_ASSET_BYTES||(metadata.uncompressed_size!==null&&raw.byteLength!==metadata.uncompressed_size))throw new Error(label+"解压后大小不一致");if(uncompressedSha256&&await sha256Hex(raw)!==uncompressedSha256)throw new Error(label+"解压正文完整性校验失败");try{return JSON.parse(new TextDecoder().decode(raw))}catch{throw new Error(label+"JSON无效")}}
 async function readCatalogue(env,prefix,manifest){const metadata=declaredAsset(manifest,"catalogue"),asset=await verifiedCompressedAsset(env,prefix,metadata,"目录");if(manifest?.company_details&&String(asset.object.customMetadata?.sha256||"").toLowerCase()!==metadata.sha256)throw new Error("目录对象校验标记不一致");const catalogue=await readVerifiedGzipJson(asset.bytes,metadata,"目录");if(!catalogue||!Array.isArray(catalogue.companies))throw new Error("目录结构无效");return catalogue}
 async function companyDetailShardId(code){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(code));return((new Uint8Array(digest)[0]>>4).toString(16)).padStart(2,"0")}
+function validCompanyDetailShard(payload,metadata,shardId){return Boolean(payload?.schema_version===2&&payload?.record_schema==="company_detail_v2"&&payload?.product==="DS_DCF"&&payload?.shard_id===shardId&&Array.isArray(payload?.companies)&&payload.company_count===payload.companies.length&&payload.company_count===metadata.company_count)}
+async function loadCompanyDetailShard(env,prefix,metadata,generationId,shardId){
+  const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=shardCacheKey(generationId,shardId);
+  if(edgeCache){try{const hit=await edgeCache.match(cacheKey),candidate=hit?await hit.json():null;if(validCompanyDetailShard(candidate,metadata,shardId)){rememberShardPayload(generationId,shardId,candidate);return candidate}}catch{}}
+  const asset=await verifiedCompressedAsset(env,prefix,{filename:metadata.filename,sha256:String(metadata.sha256||"").toLowerCase(),size:Number.isSafeInteger(metadata.size)&&metadata.size>0&&metadata.size<=MAX_COMPRESSED_ASSET_BYTES?metadata.size:null,uncompressed_size:Number.isSafeInteger(metadata.uncompressed_size)&&metadata.uncompressed_size>0&&metadata.uncompressed_size<=MAX_UNCOMPRESSED_ASSET_BYTES?metadata.uncompressed_size:null},"公司详情");
+  if(String(asset.object.customMetadata?.sha256||"").toLowerCase()!==String(metadata.sha256||"").toLowerCase())throw new Error("公司详情对象校验标记不一致");
+  const payload=await readVerifiedGzipJson(asset.bytes,{uncompressed_size:metadata.uncompressed_size},"公司详情",String(metadata.uncompressed_sha256||"").toLowerCase());
+  if(!validCompanyDetailShard(payload,metadata,shardId))throw new Error("公司详情分片结构无效");
+  rememberShardPayload(generationId,shardId,payload);
+  if(edgeCache){try{await edgeCache.put(cacheKey,new Response(JSON.stringify(payload),{headers:{"content-type":"application/json","cache-control":"public, max-age=3600"}}))}catch{}}
+  return payload;
+}
 async function readCompanyDetail(env,prefix,manifest,generationId,code){
   const shards=declaredCompanyDetails(manifest,generationId);if(!shards)return null;
   const shardId=await companyDetailShardId(code),metadata=shards.find(entry=>entry.id===shardId);if(!metadata)throw new Error("公司详情分片未声明");
   let payload=cachedShardPayload(generationId,shardId);
   if(payload===null){
-    const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=shardCacheKey(generationId,shardId);
-    if(edgeCache){try{const hit=await edgeCache.match(cacheKey);if(hit)payload=await hit.json()}catch{}}
-  }
-  if(payload===null){
-    const asset=await verifiedCompressedAsset(env,prefix,{filename:metadata.filename,sha256:String(metadata.sha256||"").toLowerCase(),size:Number.isSafeInteger(metadata.size)&&metadata.size>0&&metadata.size<=MAX_COMPRESSED_ASSET_BYTES?metadata.size:null,uncompressed_size:Number.isSafeInteger(metadata.uncompressed_size)&&metadata.uncompressed_size>0&&metadata.uncompressed_size<=MAX_UNCOMPRESSED_ASSET_BYTES?metadata.uncompressed_size:null},"公司详情");
-    if(String(asset.object.customMetadata?.sha256||"").toLowerCase()!==String(metadata.sha256||"").toLowerCase())throw new Error("公司详情对象校验标记不一致");
-    payload=await readVerifiedGzipJson(asset.bytes,{uncompressed_size:metadata.uncompressed_size},"公司详情",String(metadata.uncompressed_sha256||"").toLowerCase());
-    if(payload?.schema_version!==2||payload?.record_schema!=="company_detail_v2"||payload?.product!=="DS_DCF"||payload?.shard_id!==shardId||!Array.isArray(payload?.companies)||payload.company_count!==payload.companies.length||payload.company_count!==metadata.company_count)throw new Error("公司详情分片结构无效");
-    rememberShardPayload(generationId,shardId,payload);
-    const edgeCache=typeof caches!=="undefined"?caches.default:null;
-    if(edgeCache){try{await edgeCache.put(shardCacheKey(generationId,shardId),new Response(JSON.stringify(payload),{headers:{"content-type":"application/json","cache-control":"public, max-age=3600"}}))}catch{}}
+    const inflightKey=generationId+"/"+shardId;
+    let pending=shardInflight.get(inflightKey);
+    if(!pending){pending=loadCompanyDetailShard(env,prefix,metadata,generationId,shardId).finally(()=>shardInflight.delete(inflightKey));shardInflight.set(inflightKey,pending)}
+    payload=await pending;
   }
   const company=payload.companies.find(value=>String(value?.code||"")===code);return company||null;
 }
@@ -528,33 +621,27 @@ function compactCompany(company){const types={};for(const key of Object.keys(com
 function typeCoverageEvidence(typeKey,value){const state=typeDataGap(typeKey,value),decision=value?.decision||{},unresolved=state.has_gap&&value?.status!=="triggered"&&value?.status!=="conditional"&&decision.decision_complete===false&&decision.decision_basis==="unresolved_missing_evidence";return{...state,decision_unresolved:unresolved,potentially_triggerable:unresolved&&decision.potentially_triggerable===true}}
 function catalogueGapSummary(companies){let insufficient=0,evidenceGap=0,decisionRelevant=0,boundedGap=0,actionConfirmation=0;const typeCoverage={};for(const company of companies){const entries=Object.entries(company?.types||{}),values=entries.map(([,value])=>value),states=entries.map(([key,value])=>{const state=typeCoverageEvidence(key,value),coverage=typeCoverage[key]||(typeCoverage[key]={evidence_missing:0,decision_unresolved:0,potentially_triggerable:0,action_confirmation:0});if(state.has_gap)coverage.evidence_missing++;if(state.decision_unresolved)coverage.decision_unresolved++;if(state.potentially_triggerable)coverage.potentially_triggerable++;if(state.action_required)coverage.action_confirmation++;return state}),hasInsufficient=values.some(value=>value?.status==="insufficient_evidence"),hasGap=states.some(state=>state.has_gap),hasRelevant=states.some(state=>state.has_gap&&state.decision_relevant),hasAction=states.some(state=>state.action_required);if(hasInsufficient)insufficient++;if(hasGap)evidenceGap++;if(hasRelevant)decisionRelevant++;if(hasGap&&!hasRelevant)boundedGap++;if(hasAction)actionConfirmation++}return{insufficient_company_count:insufficient,evidence_gap_company_count:evidenceGap,decision_relevant_gap_company_count:decisionRelevant,bounded_gap_company_count:boundedGap,action_confirmation_company_count:actionConfirmation,type_coverage:typeCoverage}}
 function headSafeResponse(request,response){return request.method==="HEAD"?new Response(null,{status:response.status,statusText:response.statusText,headers:response.headers}):response}
+function securedResponse(response){const headers=new Headers(response.headers);for(const [key,value] of Object.entries(BASE_SECURITY_HEADERS))headers.set(key,value);return new Response(response.body,{status:response.status,statusText:response.statusText,headers})}
 function canonicalGenerationRequest(url){const entries=[...url.searchParams.entries()];return entries.length===0||(entries.length===1&&entries[0][0]==="generation_id"&&/^[0-9a-f]{16}$/.test(entries[0][1]))}
 function generationCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);return new Request(cacheUrl.toString(),{method:"GET"})}
 function canonicalCatalogueIndexRequest(url){const entries=[...url.searchParams.entries()];return entries.length===2&&entries.every(([key])=>key==="generation_id"||key==="index_contract")&&url.searchParams.getAll("generation_id").length===1&&Boolean(url.searchParams.get("generation_id"))&&url.searchParams.getAll("index_contract").length===1&&url.searchParams.get("index_contract")===String(CATALOGUE_INDEX_CONTRACT_VERSION)}
 function catalogueIndexCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);cacheUrl.searchParams.set("index_contract",String(CATALOGUE_INDEX_CONTRACT_VERSION));return new Request(cacheUrl.toString(),{method:"GET"})}
-async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,hit)}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
+async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,securedResponse(hit))}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
 export default{
   async fetch(request,env){
     if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405);
     const url=new URL(request.url),path=url.pathname;
     try{
-      if(path==="/"||path==="/index.html")return new Response(INDEX_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+      if(path==="/"||path==="/index.html")return dashboardHtmlResponse(request);
       if(path==="/api/methodology")return json({schema_version:1,methodology_version:METHODOLOGY_VERSION,qualify_threshold:7,types:METHODOLOGY},200,{"cache-control":"public, max-age=86400"});
       const requestedGeneration=url.searchParams.get("generation_id")||"";
       if(path==="/api/catalogue-index"&&!canonicalCatalogueIndexRequest(url))return headSafeResponse(request,json({error:"公司索引请求参数无效，请刷新页面"},400));
       if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
       const generation=await currentGeneration(env,requestedGeneration);
       if(path==="/api/health"){
-        const manifestRecord=await generationManifestRecord(env,generation),manifest=manifestRecord.manifest;
-        const catalogue=declaredAsset(manifest,"catalogue"),signals=declaredAsset(manifest,"signals");
-        const signatureName=String(manifest?.signature?.filename||"");
-        const prefix=generation?"generations/"+generation.generation_id+"/":"";
-        const detailAssets=generation&&manifest?declaredCompanyDetails(manifest,generation.generation_id):null;
-        const [catalogueObject,signalsObject,signatureObject,...detailObjects]=generation&&manifest?await Promise.all([catalogue.filename?env.DATA_BUCKET.head(prefix+catalogue.filename):null,signals.filename?env.DATA_BUCKET.head(prefix+signals.filename):null,signatureName?env.DATA_BUCKET.head(prefix+signatureName):null,...(detailAssets||[]).map(entry=>env.DATA_BUCKET.head(prefix+entry.filename))]):[null,null,null];
-        const detailsDeclared=Array.isArray(detailAssets),catalogueOk=Boolean(catalogueObject&&catalogue.size===catalogueObject.size&&(!detailsDeclared||String(catalogueObject.customMetadata?.sha256||"").toLowerCase()===catalogue.sha256)),signalsOk=Boolean(signalsObject&&signals.size===signalsObject.size&&(!detailsDeclared||String(signalsObject.customMetadata?.sha256||"").toLowerCase()===signals.sha256)),signatureOk=Boolean(signatureObject&&signatureObject.size>=64&&signatureObject.size<=128);
-        const detailsOk=!detailsDeclared||Boolean(detailAssets.length===16&&detailObjects.every((object,index)=>object&&object.size===detailAssets[index].size&&String(object.customMetadata?.sha256||"").toLowerCase()===String(detailAssets[index].sha256||"").toLowerCase())),detailBytes=detailObjects.reduce((total,object)=>total+Number(object?.size||0),0);
-        const freshness=tradingDataFreshness(generation?.market_as_of,generation?.data_timestamp_utc);
-        return json({ok:Boolean(generation&&manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk&&detailsOk),...freshness,freshness_basis:"北京时间18:00前要求覆盖上一交易日，18:00后要求覆盖当日已收盘交易日；已登记交易所休市日顺延，并保留14天绝对安全上限",generation_id:generation?.generation_id||null,market_as_of:generation?.market_as_of||null,updated_at:generation?.data_timestamp_utc||null,data_generated_at:generation?.data_timestamp_utc||null,generation_published_at:generation?.created_at||null,last_mirror_check_at:generation?.last_checked_at||null,manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0,catalogue_bytes:catalogueObject?.size||0,signals_bytes:signalsObject?.size||0,signature_bytes:signatureObject?.size||0,company_details_declared:detailsDeclared,company_details_ready:detailsDeclared&&detailsOk,company_detail_shards:detailAssets?.length||0,company_detail_bytes:detailBytes});
+        const deep=url.searchParams.get("deep")==="1",freshness=tradingDataFreshness(generation?.market_as_of,generation?.data_timestamp_utc),recordOk=generationRecordHealthy(generation),deepState=deep?await deepGenerationHealth(env,generation):{ok:true,...uncheckedDeepHealth()},{ok:integrityOk,...deepFields}=deepState;
+        const ok=Boolean(recordOk&&!freshness.stale&&(!deep||integrityOk));
+        return headSafeResponse(request,json({ok,deep_check:deep,integrity_checked:deep,integrity_ok:deep?integrityOk:null,...freshness,freshness_basis:"北京时间18:00前要求覆盖上一交易日，18:00后要求覆盖当日已收盘交易日；已登记交易所休市日顺延，并保留14天绝对安全上限",generation_record_ok:recordOk,generation_id:generation?.generation_id||null,market_as_of:generation?.market_as_of||null,updated_at:generation?.data_timestamp_utc||null,data_generated_at:generation?.data_timestamp_utc||null,generation_published_at:generation?.created_at||null,last_mirror_check_at:generation?.last_checked_at||null,...deepFields},ok?200:503));
       }
       if(path==="/api/meta")return json(generation||{ok:false,error:"尚未完成首次数据同步"});
       if(!generation)return json({error:"尚未完成首次数据同步"},503);
@@ -572,7 +659,7 @@ export default{
       if(companyMatch){
         const code=companyMatch[1],manifest=await generationManifest(env,generation);const build=async()=>{let company=await readCompanyDetail(env,prefix,manifest,generation.generation_id,code),detailContract="company_detail_v2",capabilities=manifest?.capabilities||{};if(!manifest?.company_details){const catalogue=await readCatalogue(env,prefix,manifest);company=catalogue.companies.find(value=>String(value?.code||"")===code);capabilities=catalogue.capabilities||capabilities;detailContract="legacy_catalogue"}if(!company)return{error:"未找到该公司",code};return{generation_id:generation.generation_id,market_as_of:generation.market_as_of,methodology_version:METHODOLOGY_VERSION,detail_contract:detailContract,capabilities,company}};if(requestedGeneration)return await immutableProjection(request,build,generationCacheRequest(request,generation.generation_id));const payload=await build();return headSafeResponse(request,json(payload,payload.error?404:200));
       }
-      return new Response("Not Found",{status:404});
+      return new Response("Not Found",{status:404,headers:BASE_SECURITY_HEADERS});
     }catch(error){
       return json({error:String(error?.message||error)},500);
     }

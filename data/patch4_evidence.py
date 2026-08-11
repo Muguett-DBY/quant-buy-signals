@@ -22,7 +22,6 @@ import json
 import math
 from pathlib import Path
 import re
-import threading
 import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -31,6 +30,7 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
 from engine.quality_equity import (
     PATCH4_MAX_EVIDENCE_AGE_DAYS,
     PATCH4_MODEL_ID,
@@ -279,23 +279,6 @@ class _RequestBudget:
         self.body_bytes += size
 
 
-class _RequestRateLimiter:
-    def __init__(self, interval_seconds: float) -> None:
-        if not math.isfinite(interval_seconds) or interval_seconds < 0:
-            raise ValueError("request interval must be a non-negative finite number")
-        self._interval = float(interval_seconds)
-        self._next_slot = 0.0
-        self._lock = threading.Lock()
-
-    def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            slot = max(now, self._next_slot)
-            self._next_slot = slot + self._interval
-        if slot > now:
-            time.sleep(slot - now)
-
-
 class _VisibleTextParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -320,7 +303,7 @@ class _VisibleTextParser(HTMLParser):
             self.parts.append(data)
 
 
-_GLOBAL_RATE_LIMITER = _RequestRateLimiter(REQUEST_INTERVAL_SECONDS)
+_GLOBAL_RATE_LIMITER = RequestRateLimiter(REQUEST_INTERVAL_SECONDS)
 
 
 def _error_label(exc: BaseException, *, limit: int = 180) -> str:
@@ -466,6 +449,7 @@ def _request_json(
     last_error: BaseException | None = None
     for attempt in range(REQUEST_ATTEMPTS):
         response = None
+        should_retry = False
         try:
             rate_limiter.acquire()
             response = session.get(
@@ -487,12 +471,20 @@ def _request_json(
             raise
         except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
             last_error = exc
+            should_retry = is_transient_request_error(exc, response)
         finally:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        if attempt + 1 < REQUEST_ATTEMPTS:
-            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+        if not should_retry or attempt + 1 >= REQUEST_ATTEMPTS:
+            break
+        time.sleep(
+            retry_delay_seconds(
+                response,
+                attempt=attempt,
+                base_seconds=RETRY_BACKOFF_SECONDS,
+            )
+        )
     raise Patch4EvidenceError(f"announcement request failed: {_error_label(last_error or RuntimeError())}")
 
 

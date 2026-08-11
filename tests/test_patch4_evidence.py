@@ -32,6 +32,7 @@ class _Response:
         raw: bytes | None = None,
         content_type: str = "text/plain; charset=UTF-8",
         status: int = 200,
+        retry_after: str | None = None,
     ) -> None:
         self.raw = raw if raw is not None else json.dumps(payload, ensure_ascii=False).encode()
         self.headers = {
@@ -39,12 +40,15 @@ class _Response:
             "Content-Length": str(len(self.raw)),
         }
         self.status = status
+        self.status_code = status
+        if retry_after is not None:
+            self.headers["Retry-After"] = retry_after
         self.url = ""
         self.closed = False
 
     def raise_for_status(self) -> None:
         if self.status >= 400:
-            raise requests.HTTPError(f"HTTP {self.status}")
+            raise requests.HTTPError(f"HTTP {self.status}", response=self)
 
     def iter_content(self, chunk_size: int) -> list[bytes]:
         return [self.raw[index : index + chunk_size] for index in range(0, len(self.raw), chunk_size)]
@@ -855,6 +859,38 @@ def test_transient_source_failure_is_not_cached_and_the_next_call_can_recover(
     assert replay.available is True
     assert replay.cache_hit is True
     assert replay_session.calls == []
+
+
+def test_request_retry_honours_retry_after_and_terminal_http_stops(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    waits: list[float] = []
+    monkeypatch.setattr(patch4.time, "sleep", waits.append)
+    first, second = _complete_pages()
+    retry_session = _Session(
+        [
+            _Response(status=429, retry_after="7"),
+            _Response(_metadata_payload()),
+            _Response(_content_payload(first)),
+            _Response(_content_payload(second)),
+        ]
+    )
+
+    recovered = _fetch(retry_session, tmp_path)
+
+    assert recovered.available is True
+    assert waits == [7.0]
+    assert len(retry_session.calls) == 4
+
+    waits.clear()
+    terminal_session = _Session([_Response(status=404), _Response(_metadata_payload())])
+    failed = _fetch(terminal_session, tmp_path)
+
+    assert failed.status == "source_unavailable"
+    assert "HTTP 404" in failed.reason
+    assert waits == []
+    assert len(terminal_session.calls) == 1
 
 
 def test_public_record_validator_replays_bindings_and_rejects_tampering(tmp_path: Path) -> None:

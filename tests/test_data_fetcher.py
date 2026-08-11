@@ -2059,7 +2059,19 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
 
     def fake_history_backfill(financials, contract, *, codes, force_refresh):
         observed["history_codes"] = codes
-        return SimpleNamespace(financials=source, diagnostic={})
+        return SimpleNamespace(
+            financials=source,
+            diagnostic={
+                "adapter_version": 2,
+                "strategy": "eastmoney_primary_sina_annual_history_secondary",
+                "candidate_codes": 1,
+                "target_codes": 1,
+                "filled_fields": 2,
+                "status_counts": {"ok": 3},
+                "duration_ms": 777.0,
+                "client": {"network_requests": 3, "cache_hits": 0},
+            },
+        )
 
     monkeypatch.setattr(fetcher, "backfill_strict_ttm_gaps", fake_backfill)
     monkeypatch.setattr(fetcher, "backfill_history_gaps", fake_history_backfill)
@@ -2087,7 +2099,12 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
     assert runtime["sina_fallback"]["duration_ms"] == 999.0
     assert "duration_ms" not in public["sina_fallback"]
     assert "client" not in public["sina_fallback"]
+    assert "status_counts" not in public["sina_fallback"]
     assert public["sina_fallback"]["filled_fields"] == 1
+    assert public["sina_history_overlay"]["filled_fields"] == 2
+    assert "duration_ms" not in public["sina_history_overlay"]
+    assert "client" not in public["sina_history_overlay"]
+    assert "status_counts" not in public["sina_history_overlay"]
 
 
 def test_financial_fetch_options_are_boolean_and_empty_scope_resets_prior_diagnostics():

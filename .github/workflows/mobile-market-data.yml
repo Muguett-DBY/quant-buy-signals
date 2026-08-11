@@ -127,15 +127,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            data/cache/market_snapshot.json.gz
-            data/cache/market_coldness
-            data/cache/market_history
-            data/cache/quality_history
-            data/cache/growth_evidence
-            data/cache/research_reports
-            data/cache/patch4_evidence
-            data/cache/cninfo_annual
+          path: data/cache/market_snapshot.json.gz
           key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
           restore-keys: |
             mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
@@ -159,55 +151,48 @@ jobs:
           restore-keys: |
             mobile-deep-evidence-v1-${{ runner.os }}-
 
-      - name: Pre-warm the segment evidence cache from the local backfill archive
+      - name: Import a verified local evidence bundle when available
         shell: pwsh
         run: |
-          # The GitHub runner IPs are rate-limited hard by Eastmoney, so the
-          # daily budgeted build captures almost no segment evidence.  A local
-          # backfill on a residential IP (uploaded as a release asset) carries
-          # the whole-market segment cache; pre-warm the cache directory from
-          # it so the build's network budget only tops up what is missing.
-          $archive = Join-Path $env:RUNNER_TEMP 'segment-cache-latest.zip'
-          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/segment-cache-latest.zip"
-          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 1MB) {
-            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
-            $count = (Get-ChildItem -LiteralPath 'data/cache/growth_evidence' -File -ErrorAction SilentlyContinue | Measure-Object).Count
-            Write-Host "Pre-warmed segment cache: $count entries."
-          } else {
-            Write-Host 'No segment cache archive available; continuing with the runner cache.'
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $releaseBase = 'https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data'
+          $pointer = Join-Path $env:RUNNER_TEMP 'evidence-cache-pointer.json'
+          & curl.exe --fail --silent --show-error --location --retry 3 --retry-all-errors `
+            --connect-timeout 20 --max-time 120 --max-filesize 16777216 `
+            --proto '=https' --proto-redir '=https' --output $pointer "$releaseBase/evidence-cache-pointer.json"
+          $pointerDownloadExit = $LASTEXITCODE
+          if ($pointerDownloadExit -ne 0) {
+            Remove-Item -LiteralPath $pointer -Force -ErrorAction SilentlyContinue
+            Write-Host 'No local evidence pointer is available; continuing with the Actions deep cache.'
+            exit 0
           }
 
-      - name: Pre-warm the quality-history cache from the local backfill archive
-        shell: pwsh
-        run: |
-          # The type2/type7 five-year valuation and weekly history are also
-          # rate-limited hard on GitHub runner IPs.  A local backfill archive
-          # (uploaded as a release asset) carries the missing companies' cache
-          # generations; pre-warm the cache directory so the build reuses them.
-          $archive = Join-Path $env:RUNNER_TEMP 'quality-history-cache-latest.zip'
-          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/quality-history-cache-latest.zip"
-          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 1MB) {
-            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
-            $count = (Get-ChildItem -LiteralPath 'data/cache/quality_history' -File -Filter '*.json.gz' -ErrorAction SilentlyContinue | Measure-Object).Count
-            Write-Host "Pre-warmed quality-history cache: $count entries."
-          } else {
-            Write-Host 'No quality-history cache archive available; continuing with the runner cache.'
+          $bundleOutput = & python -m tools.evidence_bundle resolve --pointer $pointer
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The local evidence pointer failed its schema, path, or provenance contract.'
           }
-
-      - name: Pre-warm the research-report cache from the local backfill archive
-        shell: pwsh
-        run: |
-          # Type 7's category/moat evidence needs research-report bodies that
-          # the rate-limited runner IP cannot fetch; a local backfill archive
-          # carries them so the build reuses them.
-          $archive = Join-Path $env:RUNNER_TEMP 'research-reports-cache-latest.zip'
-          curl.exe -sL -o $archive "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data/research-reports-cache-latest.zip"
-          if ((Test-Path -LiteralPath $archive) -and (Get-Item -LiteralPath $archive).Length -gt 10KB) {
-            Expand-Archive -LiteralPath $archive -DestinationPath 'data/cache' -Force
-            $count = (Get-ChildItem -LiteralPath 'data/cache/research_reports' -File -Filter '*.json.gz' -ErrorAction SilentlyContinue | Measure-Object).Count
-            Write-Host "Pre-warmed research-report cache: $count entries."
-          } else {
-            Write-Host 'No research-report cache archive available; continuing with the runner cache.'
+          $bundleName = [string]($bundleOutput | Select-Object -Last 1)
+          $bundleName = $bundleName.Trim()
+          $archive = Join-Path $env:RUNNER_TEMP $bundleName
+          & curl.exe --fail --silent --show-error --location --retry 3 --retry-all-errors `
+            --connect-timeout 20 --max-time 900 --max-filesize 536870912 `
+            --proto '=https' --proto-redir '=https' --output $archive "$releaseBase/$bundleName"
+          if ($LASTEXITCODE -ne 0) {
+            throw "The immutable local evidence bundle could not be downloaded: $bundleName"
+          }
+          & python -m tools.evidence_bundle import `
+            --pointer $pointer --bundle $archive --cache-root data/cache
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The local evidence bundle failed digest/member verification or atomic import.'
+          }
+          foreach ($directory in @('growth_evidence', 'quality_history', 'research_reports')) {
+            $path = Join-Path 'data/cache' $directory
+            $count = (Get-ChildItem -LiteralPath $path -File -Filter '*.json.gz' -ErrorAction SilentlyContinue |
+              Measure-Object).Count
+            Write-Host "Verified local evidence cache ${directory}: $count entries."
           }
 
       - name: Install locked production dependencies
@@ -770,15 +755,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            data/cache/market_snapshot.json.gz
-            data/cache/market_coldness
-            data/cache/market_history
-            data/cache/quality_history
-            data/cache/growth_evidence
-            data/cache/research_reports
-            data/cache/patch4_evidence
-            data/cache/cninfo_annual
+          path: data/cache/market_snapshot.json.gz
           key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
 
       - name: Save accumulated contract-validated deep evidence
@@ -1728,9 +1705,10 @@ jobs:
                "${actual_source_commit}" == "${expected_source_commit}" ]] || return 1
             health="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \
-              "https://quant.custard.top/api/health?generation_id=${expected_generation}&attempt=${attempt}")" || return 1
+              "https://quant.custard.top/api/health?deep=1&generation_id=${expected_generation}&attempt=${attempt}")" || return 1
             jq -e --arg generation "${expected_generation}" \
-              '.ok == true and .generation_id == $generation' <<<"${health}" >/dev/null || return 1
+              '.ok == true and .integrity_checked == true and .integrity_ok == true and .generation_id == $generation' \
+              <<<"${health}" >/dev/null || return 1
             catalogue_index="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \
               "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=2")" || return 1

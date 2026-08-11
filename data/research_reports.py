@@ -21,7 +21,6 @@ import json
 import math
 from pathlib import Path
 import re
-import threading
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -30,6 +29,11 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
+from data.provider_http import (
+    RequestRateLimiter as _RequestRateLimiter,
+    is_transient_request_error,
+    retry_delay_seconds,
+)
 from engine.quality_equity import (
     MAX_RESEARCH_SOURCES,
     MAX_RESEARCH_BODY_CHARACTERS,
@@ -110,26 +114,6 @@ class ResearchReportEvidence:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-class _RequestRateLimiter:
-    """Reserve globally spaced request slots across batch worker threads."""
-
-    def __init__(self, interval_seconds: float) -> None:
-        if not math.isfinite(interval_seconds) or interval_seconds < 0:
-            raise ValueError("request interval must be a non-negative finite number")
-        self._interval_seconds = float(interval_seconds)
-        self._next_slot = 0.0
-        self._lock = threading.Lock()
-
-    def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            slot = max(now, self._next_slot)
-            self._next_slot = slot + self._interval_seconds
-        delay = slot - now
-        if delay > 0:
-            time.sleep(delay)
 
 
 _GLOBAL_RATE_LIMITER = _RequestRateLimiter(REQUEST_INTERVAL_SECONDS)
@@ -510,6 +494,8 @@ def _request_detail(
     last_error: BaseException | None = None
     for attempt in range(REQUEST_ATTEMPTS):
         response = None
+        retry_delay = 0.0
+        transient = False
         try:
             rate_limiter.acquire()
             response = session.get(
@@ -531,12 +517,19 @@ def _request_detail(
             raise
         except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
             last_error = exc
+            transient = is_transient_request_error(exc, response)
+            retry_delay = retry_delay_seconds(
+                response,
+                attempt=attempt,
+                base_seconds=RETRY_BACKOFF_SECONDS,
+            )
         finally:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        if attempt + 1 < REQUEST_ATTEMPTS:
-            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+        if not transient or attempt + 1 >= REQUEST_ATTEMPTS:
+            break
+        time.sleep(retry_delay)
     raise ResearchReportError(f"Eastmoney report-detail request failed: {_error_label(last_error or RuntimeError())}")
 
 
@@ -758,6 +751,8 @@ def _request_page(
     last_error: BaseException | None = None
     for attempt in range(REQUEST_ATTEMPTS):
         response = None
+        retry_delay = 0.0
+        transient = False
         try:
             rate_limiter.acquire()
             response = session.get(
@@ -778,12 +773,19 @@ def _request_page(
             raise
         except (requests.RequestException, AttributeError, TypeError, ValueError) as exc:
             last_error = exc
+            transient = is_transient_request_error(exc, response)
+            retry_delay = retry_delay_seconds(
+                response,
+                attempt=attempt,
+                base_seconds=RETRY_BACKOFF_SECONDS,
+            )
         finally:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        if attempt + 1 < REQUEST_ATTEMPTS:
-            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+        if not transient or attempt + 1 >= REQUEST_ATTEMPTS:
+            break
+        time.sleep(retry_delay)
     raise ResearchReportError(f"Eastmoney report request failed: {_error_label(last_error or RuntimeError())}")
 
 

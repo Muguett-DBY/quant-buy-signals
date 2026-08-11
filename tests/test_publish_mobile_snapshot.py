@@ -80,9 +80,10 @@ def _scores():
     )
 
 
-def _snapshot(source="cache", market_as_of="2026-07-17"):
+def _snapshot(source="cache", market_as_of="2026-07-17", warning=""):
     return SimpleNamespace(
         source=source,
+        warning=warning,
         eligible_codes=("000001",),
         analysis_quotes=pd.DataFrame(),
         analysis_financials={"000001": {}},
@@ -815,6 +816,26 @@ def test_publish_mobile_snapshot_refuses_to_replace_daily_data_with_stale_refres
     monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: _snapshot(source="cache"))
 
     with pytest.raises(RuntimeError, match="fresh market refresh did not complete"):
+        publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_stale_refresh_reports_the_provider_failure_in_the_workflow_log(monkeypatch, tmp_path):
+    _after_close(monkeypatch)
+    monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
+    monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        publisher,
+        "get_market_snapshot",
+        lambda *_args, **_kwargs: _snapshot(
+            source="stale_cache",
+            warning="refresh failed: HTTPError: 429 Too Many Requests",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="429 Too Many Requests"):
         publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=True)
 
     assert not list(tmp_path.iterdir())

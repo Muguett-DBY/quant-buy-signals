@@ -5,7 +5,9 @@ import json
 import math
 
 import pytest
+import requests
 
+from data import quality_history as qh
 from data.cache import SafeFileCache
 from data.market_history import TencentWeeklyHistoryAdapter, WeeklyClose
 from data.quality_history import (
@@ -56,6 +58,32 @@ class _Session:
         return self.response
 
 
+class _SequenceSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
+
+
+class _NoWait:
+    def acquire(self):
+        return None
+
+
+class _StatusResponse(_Response):
+    def __init__(self, status, *, retry_after=None):
+        super().__init__({"success": False})
+        self.status_code = status
+        if retry_after is not None:
+            self.headers["Retry-After"] = str(retry_after)
+
+    def raise_for_status(self):
+        raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
 def _weekly_bars(as_of=date(2026, 7, 17), annual_return=0.12):
     first = as_of - timedelta(days=7 * 619)
     return [
@@ -87,6 +115,43 @@ def _valuation_payload(code="600519", as_of=date(2026, 7, 17)):
     rows[-1]["PB_MRQ"] = 2.1
     rows.reverse()
     return {"success": True, "message": "ok", "result": {"pages": 1, "count": len(rows), "data": rows}}
+
+
+def test_valuation_history_honours_retry_after_for_transient_http_failures(monkeypatch):
+    busy = _StatusResponse(429, retry_after=7)
+    winner = _Response(_valuation_payload())
+    session = _SequenceSession([busy, winner])
+    sleeps = []
+    monkeypatch.setattr(qh.time, "sleep", sleeps.append)
+
+    rows = qh._fetch_valuation_rows(
+        "600519",
+        date(2026, 7, 17),
+        session=session,
+        rate_limiter=_NoWait(),
+    )
+
+    assert len(rows) >= qh.VALUATION_MIN_OBSERVATIONS
+    assert len(session.calls) == 2
+    assert sleeps == [7]
+    assert busy.closed and winner.closed
+
+
+def test_valuation_history_does_not_retry_a_terminal_http_status(monkeypatch):
+    missing = _StatusResponse(404)
+    session = _SequenceSession([missing])
+    monkeypatch.setattr(qh.time, "sleep", lambda _seconds: pytest.fail("must not sleep"))
+
+    with pytest.raises(qh.QualityHistoryError, match="HTTP 404"):
+        qh._fetch_valuation_rows(
+            "600519",
+            date(2026, 7, 17),
+            session=session,
+            rate_limiter=_NoWait(),
+        )
+
+    assert len(session.calls) == 1
+    assert missing.closed
 
 
 def test_quality_history_replays_ten_year_return_and_five_year_valuation():
