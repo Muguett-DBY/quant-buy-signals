@@ -14,6 +14,9 @@ import pytest
 from desktop import updater
 
 
+pytestmark = pytest.mark.desktop
+
+
 def _manifest_payload(**updates):
     payload = {
         "schema_version": 1,

@@ -39,6 +39,7 @@ from tools.run_full_audit import (
 from tools.verify_release_zip import (
     _REQUIRED_FILES,
     _RULE_FILES as _RELEASE_RULE_FILES,
+    _audit_decision_contract_valid,
     _audit_patch4_evidence_valid,
     _audit_type7_ledger_valid,
     _desktop_launcher_errors,
@@ -1494,6 +1495,60 @@ _TYPE_WEIGHTS = {
 }
 
 
+def _patch7_pending_type_payload(requirements=None):
+    requirements = list(requirements or ["patch7_optimistic_upper"])
+    requirement_labels = {
+        "patch7_current_price": "当前股价",
+        "patch7_optimistic_upper": "乐观估值上界",
+    }
+    scores = {dimension: 8.0 for dimension in _TYPE_WEIGHTS["type3"]}
+    reasons = {
+        **{dimension: "补丁7前已核验分项" for dimension in scores},
+        "_missing": "补丁7泡沫线证据待补："
+        + "、".join(requirement_labels[requirement] for requirement in requirements),
+        "_status": STATUS_INSUFFICIENT_EVIDENCE,
+        "_applicable": "yes",
+        "_evidence": "incomplete",
+        "_decision_missing_dimensions": [],
+        "_decision_missing_requirements": requirements,
+    }
+    payload = {
+        "triggered": False,
+        "total": 8.0,
+        "sub_scores": scores,
+        "reasons": reasons,
+        "veto": False,
+        "status": STATUS_INSUFFICIENT_EVIDENCE,
+        "applicable": True,
+        "evidence_complete": False,
+        "decision_market_context": {
+            "tradable": True,
+            "reference_price": False,
+            "risk_status": "",
+        },
+    }
+    payload["decision"] = replay_buy_decision("type3", payload)
+    return payload
+
+
+def _set_patch7_pending_type(payload):
+    company = payload["companies"][0]
+    code = company["code"]
+    assert payload["dcf_results"].pop(code, None) is not None
+    skip_reason = "fixture_patch7_optimistic_upper_missing"
+    payload["dcf_skip_reasons"][code] = skip_reason
+    payload["dcf_skip_classifications"][code] = {
+        "category": "source_missing",
+        "reason": skip_reason,
+    }
+    payload["dcf_valid"] = len(payload["dcf_results"])
+    _set_fixture_type1_from_skip(company, "source_missing")
+    _set_fixture_type7_ledger(company, valuation_evidence_complete=False)
+    company["type3"] = _patch7_pending_type_payload()
+    company["type3_score"] = company["type3"]["total"]
+    _refresh_fixture_company_summary(company)
+
+
 def _refresh_fixture_company_summary(company):
     for type_key in _TYPE_PRIORITY:
         company[f"{type_key}_score"] = company[type_key]["total"]
@@ -2336,6 +2391,7 @@ def test_release_zip_verifier_rejects_legacy_type7_as_top_level_ledger():
         b'{"manifest_url":NaN}\n',
     ],
 )
+@pytest.mark.desktop
 def test_release_zip_verifier_requires_one_strict_official_update_source(tmp_path, invalid_config):
     path = tmp_path / "invalid-update-source.zip"
     _write_minimal_release(
@@ -2576,6 +2632,7 @@ def test_release_zip_verifier_independently_replays_financial_pb_endpoints(tmp_p
     assert any("complete valuation result or structured skip" in error for error in _verify(path))
 
 
+@pytest.mark.desktop
 def test_checked_in_desktop_launcher_preserves_secure_domestic_install_contract():
     launcher = (Path(__file__).resolve().parents[1] / "run.bat").read_bytes()
     without_crlf = launcher.replace(b"\r\n", b"")
@@ -2616,6 +2673,7 @@ def test_checked_in_desktop_launcher_preserves_secure_domestic_install_contract(
         ),
     ],
 )
+@pytest.mark.desktop
 def test_release_zip_verifier_rejects_weakened_desktop_installers(tmp_path, launcher, expected_error):
     path = tmp_path / "unsafe-installer.zip"
     _write_minimal_release(path, content_overrides={"run.bat": launcher})
@@ -2756,6 +2814,142 @@ def test_release_zip_verifier_accepts_confirmed_veto_with_other_evidence_incompl
     _write_minimal_release(path, mutate_payload=mutate, rerender_companions=True)
 
     assert _verify(path) == ()
+
+
+def test_release_zip_verifier_accepts_patch7_non_score_requirement_ledger(tmp_path):
+    path = tmp_path / "patch7-requirement-ledger.zip"
+
+    _write_minimal_release(
+        path,
+        mutate_payload=_set_patch7_pending_type,
+        rerender_companions=True,
+    )
+
+    assert _verify(path) == ()
+
+
+def test_release_zip_verifier_rejects_patch7_requirement_when_valuation_upper_exists(tmp_path):
+    path = tmp_path / "patch7-forged-requirement-ledger.zip"
+
+    def forge_requirement(payload):
+        company = payload["companies"][0]
+        company["type3"] = _patch7_pending_type_payload()
+        company["type3_score"] = company["type3"]["total"]
+        _refresh_fixture_company_summary(company)
+
+    _write_minimal_release(
+        path,
+        mutate_payload=forge_requirement,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_patch7_missing_upper_when_requirement_marker_is_removed(tmp_path):
+    path = tmp_path / "patch7-removed-requirement-ledger.zip"
+
+    def remove_requirement_marker(payload):
+        _set_patch7_pending_type(payload)
+        payload["companies"][0]["type3"]["reasons"].pop("_decision_missing_requirements")
+
+    _write_minimal_release(
+        path,
+        mutate_payload=remove_requirement_marker,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
+
+
+def test_release_zip_decision_audit_rejects_patch7_requirements_that_disagree_with_outer_facts():
+    payload = _patch7_pending_type_payload()
+
+    assert _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result=None,
+    )
+    assert not _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result={"dcf_points": {"optimistic": {"upper": 30.0}}},
+    )
+
+    payload["reasons"]["_decision_missing_requirements"] = ["patch7_current_price"]
+    assert not _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result=None,
+    )
+
+    payload = _patch7_pending_type_payload()
+    payload["reasons"].pop("_decision_missing_requirements")
+    assert not _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_requirements",
+    [
+        [],
+        ["patch7_current_price", "patch7_current_price"],
+        ["unknown_requirement"],
+        [1],
+        "patch7_current_price",
+        {"patch7_current_price": True},
+    ],
+)
+def test_release_zip_decision_audit_rejects_malformed_patch7_requirement_ledgers(invalid_requirements):
+    payload = _patch7_pending_type_payload()
+    payload["reasons"]["_decision_missing_requirements"] = invalid_requirements
+
+    assert not _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "applicable", "evidence_complete"),
+    [
+        ("not_applicable", False, False),
+        ("insufficient_evidence", True, True),
+        ("observe", True, False),
+    ],
+)
+def test_release_zip_decision_audit_rejects_patch7_requirement_state_conflicts(
+    status,
+    applicable,
+    evidence_complete,
+):
+    payload = _patch7_pending_type_payload()
+    payload.update(
+        status=status,
+        applicable=applicable,
+        evidence_complete=evidence_complete,
+    )
+    payload["reasons"].update(
+        _status=status,
+        _applicable="yes" if applicable else "no",
+        _evidence="complete" if evidence_complete else "incomplete",
+    )
+
+    assert not _audit_decision_contract_valid(
+        "type3",
+        payload,
+        company={"price": 10.0},
+        dcf_result=None,
+    )
 
 
 def test_release_zip_verifier_accepts_48_character_evidence_and_rejects_49(tmp_path):

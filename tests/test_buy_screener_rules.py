@@ -5471,11 +5471,25 @@ class TestMarketScreen(unittest.TestCase):
             result = bs.screen_all_types(
                 {"1": {}},
                 quotes,
+                dcf_results={
+                    "1": {
+                        "zone": "观察区",
+                        "bubble_warning": False,
+                        "dcf_points": {"optimistic": {"upper": 100.0}},
+                    }
+                },
                 type3_growth_loader=loader,
             )
             deferred = bs.screen_all_types(
                 {"1": {}},
                 quotes,
+                dcf_results={
+                    "1": {
+                        "zone": "观察区",
+                        "bubble_warning": False,
+                        "dcf_points": {"optimistic": {"upper": 100.0}},
+                    }
+                },
                 type3_growth_loader=lambda _requests, *, progress_cb: {},
             )
 

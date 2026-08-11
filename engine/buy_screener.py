@@ -143,6 +143,11 @@ _DECISION_FIELDS = frozenset(
     }
 )
 _DECISION_MISSING_DIMENSIONS_REASON = "_decision_missing_dimensions"
+_DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
+_DECISION_MISSING_REQUIREMENTS = (
+    "patch7_current_price",
+    "patch7_optimistic_upper",
+)
 _DECISION_MARKET_BLOCK_REASON = "_decision_market_block"
 _DECISION_MARKET_CONTEXT = "decision_market_context"
 _DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
@@ -6112,6 +6117,24 @@ def _apply_patch7_total_gate(
         updated["_status"] = STATUS_VETOED
         gated[key] = (False, total, sub_scores, updated)
 
+    def _await_price_evidence(key: str, gate_name: str) -> None:
+        triggered, total, sub_scores, reasons = outcomes[key]
+        missing = []
+        missing_requirements = []
+        if price is None:
+            missing.append("当前股价")
+            missing_requirements.append("patch7_current_price")
+        if optimistic_upper is None:
+            missing.append("乐观估值上界")
+            missing_requirements.append("patch7_optimistic_upper")
+        updated = dict(reasons)
+        updated.pop("_veto", None)
+        updated["_missing"] = f"补丁7{gate_name}证据待补：" + "、".join(missing)
+        updated[_DECISION_MISSING_REQUIREMENTS_REASON] = missing_requirements
+        updated["_status"] = STATUS_INSUFFICIENT_EVIDENCE
+        updated["_evidence"] = "incomplete"
+        gated[key] = (False, total, sub_scores, updated)
+
     gated = dict(outcomes)
     only_type1 = qualifiers == ["type1"]
     only_type7 = qualifiers == ["type7"]
@@ -6137,12 +6160,17 @@ def _apply_patch7_total_gate(
         if in_bubble:
             for key in qualifiers:
                 _suppress(key, "补丁7泡沫线否决：价格高于乐观值120%")
+        elif price is None or optimistic_upper is None:
+            for key in qualifiers:
+                _await_price_evidence(key, "泡沫线")
     elif only_type7:
         overvalued = zone == "卖出区" or (
             price is not None and optimistic_upper is not None and price > optimistic_upper
         )
         if overvalued:
             _suppress("type7", "补丁7价格闸门：股价未合理或低估")
+        elif price is None or optimistic_upper is None:
+            _await_price_evidence("type7", "价格闸门")
     return gated
 
 
@@ -7227,12 +7255,32 @@ def _decision_dimension_bounds(
     return lower, upper, upper_dimensions
 
 
+def _decision_missing_requirements(reasons: Mapping[str, Any]) -> list[str]:
+    """Return validated non-score evidence required by a decision post-gate."""
+
+    raw = reasons.get(_DECISION_MISSING_REQUIREMENTS_REASON)
+    if raw is None:
+        return []
+    if (
+        not isinstance(raw, (list, tuple))
+        or not raw
+        or any(not isinstance(value, str) for value in raw)
+        or len(raw) != len(set(raw))
+    ):
+        raise ValueError("decision missing requirements are invalid")
+    unknown = set(raw) - set(_DECISION_MISSING_REQUIREMENTS)
+    if unknown:
+        raise ValueError(f"unknown decision missing requirements: {sorted(unknown)}")
+    return [key for key in _DECISION_MISSING_REQUIREMENTS if key in raw]
+
+
 def _decision_missing_dimensions(
     type_key: str,
     reasons: Mapping[str, Any],
     *,
     applicable: bool,
     evidence_complete: bool,
+    missing_requirements: Sequence[str] = (),
 ) -> list[str]:
     weights = TYPE_WEIGHTS[type_key]
     if not applicable:
@@ -7242,7 +7290,11 @@ def _decision_missing_dimensions(
         declared = [key for key in weights if key in raw]
     else:
         declared = []
-    if not evidence_complete and not declared:
+    # A validated post-gate requirement (for example the Patch 7 price line)
+    # does not make already-scored framework dimensions unknown.  Legacy
+    # incomplete outcomes without either ledger still fail closed to every
+    # dimension, preserving the original safety boundary.
+    if not evidence_complete and not declared and not missing_requirements:
         declared = list(weights)
     if type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and "6e" not in declared:
         declared.append("6e")
@@ -7406,11 +7458,17 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
         raise ValueError(f"{type_key} evidence source is invalid")
     applicable = applicable_marker == "yes"
     evidence_complete = evidence_marker == "complete"
+    missing_requirements = _decision_missing_requirements(reasons)
+    if missing_requirements and (
+        not applicable or evidence_complete or reasons.get("_status") != STATUS_INSUFFICIENT_EVIDENCE
+    ):
+        raise ValueError(f"{type_key} decision missing requirements conflict with its evidence state")
     missing = _decision_missing_dimensions(
         type_key,
         reasons,
         applicable=applicable,
         evidence_complete=evidence_complete,
+        missing_requirements=missing_requirements,
     )
     ledger = payload.get("ledger") if type_key == "type7" else None
 
@@ -7552,9 +7610,11 @@ def _decision_source_hard_veto(type_key: str, payload: Mapping[str, Any]) -> boo
     # _apply_patch7_total_gate; their veto text is the replay's model basis.
     if str(reasons.get("_veto") or "").startswith("补丁7"):
         return True
+    missing_requirements = _decision_missing_requirements(reasons)
     missing = _decision_missing_dimensions(
         type_key,
         reasons,
+        missing_requirements=missing_requirements,
         applicable=True,
         evidence_complete=evidence_marker == "complete",
     )

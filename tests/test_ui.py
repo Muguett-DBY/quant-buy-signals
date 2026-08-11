@@ -50,6 +50,9 @@ from ui.buy_types_page import (
 from ui.leaders_page import _add_business_candidate_columns
 
 
+pytestmark = pytest.mark.parked_client
+
+
 def test_score_formatter_rejects_non_finite_values():
     assert _fmt_score(None) is None
     assert _fmt_score("nan") is None

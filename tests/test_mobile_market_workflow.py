@@ -230,7 +230,8 @@ def test_pages_deployment_builds_a_static_chinese_status_page_and_manifest(tmp_p
 
     pages = tmp_path / "mobile-pages"
     index = (pages / "index.html").read_text(encoding="utf-8")
-    assert "DS_DCF 移动数据服务" in index
+    assert "DS_DCF 网站市场数据服务" in index
+    assert "供 quant.custard.top 使用" in index
     assert (pages / "mobile-data" / "manifest.json").read_bytes() == (release / "manifest.json").read_bytes()
     expected_files = [
         "index.html",
@@ -313,15 +314,17 @@ def test_mobile_publication_rechecks_close_time_hashes_signatures_and_exact_file
     assert "[TimeSpan]::FromHours(15)" in workflow
     assert workflow.count("Compare-Object $actual $expected") >= 2
     assert "does not match the signed manifest" in workflow
-    assert "workflow signing secret does not match the public key pinned by the Android client" in workflow
-    assert "Transferred manifest signature does not match the app-pinned key" in workflow
+    assert "workflow signing secret does not match the website market-data trust anchor" in workflow
+    assert workflow.count("cloudflare/quant-dashboard/market_signing_public_key.txt") == 2
+    assert "android/app/src/main" not in workflow
+    assert "Transferred manifest signature does not match the website market-data trust anchor" in workflow
     assert "Previous manifest signature is invalid" in workflow
     assert "Previous asset $($entry[1]) is incomplete" in workflow
     assert "Public immutable asset $name differs from the verified build artifact" in workflow
     signing = next(
         step
         for step in parsed["jobs"]["build"]["steps"]
-        if step.get("name") == "Sign the exact market manifest and verify the app-pinned key"
+        if step.get("name") == "Sign the exact market manifest and verify the website trust anchor"
     )
     assert "sign_mobile_manifest.ps1" in signing["run"]
     assert "$LASTEXITCODE" not in signing["run"]
@@ -360,11 +363,15 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
         assert jobs[name]["if"] == "github.ref == 'refs/heads/main'"
     for name in ("prepare_pages", "mirror_cloudflare", "verify_cleanup"):
         assert jobs[name]["if"] == "github.ref == 'refs/heads/main' && needs.publish.outputs.published == 'true'"
-    assert jobs["preflight"]["permissions"] == {"contents": "read"}
+    assert jobs["preflight"]["permissions"] == {"actions": "read", "contents": "read"}
     assert jobs["build"]["permissions"] == {"contents": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert jobs["prepare_pages"]["permissions"] == {"contents": "read", "pages": "write"}
-    assert jobs["deploy_pages"]["permissions"] == {"pages": "write", "id-token": "write"}
+    assert jobs["deploy_pages"]["permissions"] == {
+        "contents": "read",
+        "pages": "write",
+        "id-token": "write",
+    }
     assert jobs["mirror_cloudflare"]["permissions"] == {}
     assert jobs["verify_cleanup"]["permissions"] == {"contents": "write"}
     assert jobs["archive_manifest"]["permissions"] == {"contents": "write"}
@@ -378,12 +385,24 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert jobs["deploy_pages"]["environment"]["name"] == "github-pages"
     assert jobs["mirror_cloudflare"]["needs"] == ["publish", "deploy_pages"]
     assert jobs["verify_cleanup"]["needs"] == ["publish", "deploy_pages", "mirror_cloudflare"]
+    publish = jobs["publish"]
+    assert "env" not in publish
+    release = next(step for step in publish["steps"] if step.get("id") == "release")
+    assert release["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "GH_REPO": "${{ github.repository }}",
+    }
     mirror = jobs["mirror_cloudflare"]
-    assert mirror["env"]["REFRESH_URL"] == "https://quant-market-refresh.1203135430.workers.dev/refresh"
-    assert mirror["env"]["REFRESH_KEY"] == "${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}"
+    assert "env" not in mirror
     mirror_download = mirror["steps"][0]
     assert mirror_download["with"]["name"] == "mobile-market-data-published-${{ github.run_id }}"
-    mirror_script = mirror["steps"][1]["run"]
+    assert "env" not in mirror_download
+    mirror_step = mirror["steps"][1]
+    assert mirror_step["env"] == {
+        "REFRESH_URL": "https://quant-market-refresh.1203135430.workers.dev/refresh",
+        "REFRESH_KEY": "${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}",
+    }
+    mirror_script = mirror_step["run"]
     assert "x-refresh-key: ${REFRESH_KEY}" in mirror_script
     assert "quant.custard.top/api/meta" in mirror_script
     assert "expected_generation" in mirror_script
@@ -419,6 +438,25 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
+    verify_cleanup = jobs["verify_cleanup"]
+    assert "GH_TOKEN" not in verify_cleanup["env"]
+    assert "GH_REPO" not in verify_cleanup["env"]
+    public_verify = next(
+        step
+        for step in verify_cleanup["steps"]
+        if step.get("name") == "Verify the public Pages switch and immutable downloads"
+    )
+    assert public_verify["env"] == {"GH_REPO": "${{ github.repository }}"}
+    retention = next(
+        step
+        for step in verify_cleanup["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )
+    assert retention["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "GH_REPO": "${{ github.repository }}",
+    }
+
 
 def test_old_main_reruns_are_noops_before_build_and_immediately_before_publication():
     parsed = _workflow(MOBILE_WORKFLOW)
@@ -442,6 +480,36 @@ def test_old_main_reruns_are_noops_before_build_and_immediately_before_publicati
     assert jobs["publish"]["outputs"]["published"] == "${{ steps.release.outputs.published }}"
 
 
+def test_stable_pages_manifest_refuses_to_publish_after_main_advances():
+    deploy = _workflow(MOBILE_WORKFLOW)["jobs"]["deploy_pages"]
+    guard = deploy["steps"][0]
+    switch = deploy["steps"][1]
+
+    assert guard["name"] == "Refuse a stable switch after main advances"
+    assert guard["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert 'gh api "repos/${{ github.repository }}/commits/main"' in guard["run"]
+    assert '"${remote}" != "${GITHUB_SHA}"' in guard["run"]
+    assert "refusing to switch the stable market-data manifest" in guard["run"]
+    assert switch["name"] == "Atomically switch the stable mobile manifest"
+
+
+def test_market_data_publication_requires_a_successful_tests_run_for_the_exact_main_sha():
+    jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
+    preflight = jobs["preflight"]
+    verify = next(
+        step
+        for step in preflight["steps"]
+        if step.get("name") == "Verify the current main revision passed the website gate"
+    )
+
+    assert verify["if"] == "steps.guard.outputs.should_run == 'true'"
+    assert verify["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert "actions/workflows/tests.yml/runs?branch=main&status=success&per_page=100" in verify["run"]
+    assert "[string]$_.head_sha -ceq $env:GITHUB_SHA" in verify["run"]
+    assert "[string]$_.conclusion -ceq 'success'" in verify["run"]
+    assert "No successful tests workflow exists" in verify["run"]
+
+
 def test_job_level_environment_does_not_reference_runner_context():
     workflow = _workflow_text(MOBILE_WORKFLOW)
     jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
@@ -460,6 +528,23 @@ def test_job_level_environment_does_not_reference_runner_context():
         assert "Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append" in setup["run"]
 
 
+def test_release_retention_never_manages_local_evidence_assets():
+    jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
+    retention = next(
+        step
+        for step in jobs["verify_cleanup"]["steps"]
+        if step.get("name") == "Retain only the current and previous complete generations"
+    )["run"]
+    match = re.search(r"\$managedPattern = '([^']+)'", retention)
+    assert match is not None
+    managed = re.compile(match.group(1))
+
+    assert managed.fullmatch("evidence-cache-pointer.json") is None
+    assert managed.fullmatch("evidence-cache-" + "a" * 64 + ".zip") is None
+    assert managed.fullmatch("catalog-0123456789abcdef.json.gz") is not None
+    assert managed.fullmatch("company-details-0123456789abcdef-0f.json.gz") is not None
+
+
 def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch():
     workflow = _workflow_text(MOBILE_WORKFLOW)
     parsed = _workflow(MOBILE_WORKFLOW)
@@ -468,8 +553,13 @@ def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch()
 
     assert archive["if"] == "github.ref == 'refs/heads/main'"
     assert archive["needs"] == "verify_cleanup"
+    assert "env" not in archive
     checkout = archive_steps[0]
-    assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 1}
+    assert checkout["with"] == {
+        "ref": "${{ github.sha }}",
+        "fetch-depth": 1,
+        "persist-credentials": False,
+    }
     branch_setup = archive_steps[1]["run"]
     assert '"${GITHUB_REF}" != "refs/heads/main"' in branch_setup
     assert '"$(git rev-parse HEAD)" != "${GITHUB_SHA}"' in branch_setup
@@ -494,6 +584,14 @@ def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch()
     assert "gh release download mobile-market-data" in workflow
     assert "source_commit=\"$(jq -er '.provenance.source_commit'" in workflow
     assert "retry gh release download mobile-market-data" in workflow
+    record = next(
+        step for step in archive_steps if step.get("name") == "Record the signed generation without changing main"
+    )
+    assert record["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "GH_REPO": "${{ github.repository }}",
+    }
+    assert "gh auth setup-git" in record["run"]
     assert "retry git push origin HEAD:mobile-data" in workflow
     assert "git push origin HEAD:mobile-data" in workflow
     assert "git push --force" not in workflow
@@ -600,14 +698,6 @@ def test_production_workflows_use_only_the_validated_python_lanes():
     assert 'python-version: "3.12"' not in mobile_workflow
     assert 'python-version: "3.13"' in tests_workflow
     assert 'python-version: "3.13"' in mobile_workflow
-
-
-def test_stale_tracked_audit_defers_desktop_archive_check_without_failing_ci():
-    workflow = _workflow_text(TEST_WORKFLOW)
-    marker = "Tracked release audit is bound to"
-    assert marker in workflow
-    assert workflow.index(marker) < workflow.index("$root = Join-Path $env:RUNNER_TEMP 'ds-dcf-source-package'")
-    assert "desktop archive verification is deferred until a fresh audit is committed" in workflow
 
 
 def test_every_powershell_workflow_script_parses_with_the_real_parser(tmp_path):
@@ -801,18 +891,6 @@ def test_cleanup_runtime_never_invokes_github_when_previous_manifest_validation_
     assert "Skipping retention cleanup" in result.stdout + result.stderr
 
 
-def test_ci_workflow_runs_on_every_branch_push_and_supports_manual_reverification():
-    workflow = _workflow_text(TEST_WORKFLOW)
-    parsed = _workflow(TEST_WORKFLOW)
-
-    push_section = workflow[workflow.index("  push:") : workflow.index("  pull_request:")]
-    assert "branches:" in push_section
-    assert '- "**"' in push_section
-    assert "tags-ignore:" not in push_section
-    assert "  workflow_dispatch:" in workflow
-    assert parsed["jobs"]["verify"]["timeout-minutes"] >= 45
-
-
 def _locked_versions(path: Path) -> dict[str, str]:
     matches = re.findall(
         r"(?m)^([A-Za-z0-9_.-]+)(?:\[[A-Za-z0-9_,.-]+\])?==([^\s\\]+)",
@@ -827,13 +905,13 @@ def _locked_versions(path: Path) -> dict[str, str]:
     return versions
 
 
-def test_security_workflow_audits_the_hashed_dev_lock_once_without_invoking_pip():
+def test_security_workflow_audits_the_hashed_website_runtime_lock_once_without_invoking_pip():
     workflow = _workflow_text(TEST_WORKFLOW)
     commands = [line.strip() for line in workflow.splitlines() if "python -m pip_audit" in line]
 
     assert commands == [
         "python -m pip_audit --strict --progress-spinner off --require-hashes "
-        "--disable-pip --timeout 30 -r requirements-dev-lock.txt"
+        "--disable-pip --timeout 30 -r requirements-lock.txt"
     ]
 
 
@@ -843,47 +921,6 @@ def test_security_workflow_rejects_mobile_and_update_signing_material():
     assert "pem|key|der|pk8|pkcs8|p8|ppk|p12|pfx|jks|keystore" in workflow
     assert "signing-private-key|release-credentials" in workflow
     assert "android/release\\.properties" in workflow
-
-
-def test_android_sdk_install_reports_sdkmanager_status_instead_of_yes_broken_pipe():
-    workflow = _workflow_text(TEST_WORKFLOW)
-
-    assert "set +o pipefail" in workflow
-    assert 'pipeline_status=("${PIPESTATUS[@]}")' in workflow
-    assert "sdkmanager_status=${pipeline_status[1]}" in workflow
-    assert "for attempt in 1 2 3" in workflow
-    assert "sleep $((attempt * 2))" in workflow
-    assert 'exit "$sdkmanager_status"' in workflow
-
-
-@pytest.mark.parametrize("sdkmanager_status", [0, 23])
-def test_android_sdk_install_block_ignores_yes_broken_pipe_but_propagates_sdkmanager(tmp_path, sdkmanager_status):
-    executable = _bash_executable()
-    if executable is None:
-        pytest.skip("Bash is not installed on this test host")
-    parsed = _workflow(TEST_WORKFLOW)
-    step = next(
-        item
-        for item in parsed["jobs"]["android"]["steps"]
-        if item.get("name") == "Install the pinned Android SDK components"
-    )
-    sdkmanager = tmp_path / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
-    sdkmanager.parent.mkdir(parents=True)
-    sdkmanager.write_text(f"#!/usr/bin/env bash\nexit {sdkmanager_status}\n", encoding="utf-8")
-    sdkmanager.chmod(0o755)
-    environment = os.environ.copy()
-    environment["ANDROID_HOME"] = tmp_path.as_posix()
-
-    result = subprocess.run(
-        [executable, "-e", "-o", "pipefail", "-c", step["run"]],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        env=environment,
-    )
-
-    assert result.returncode == sdkmanager_status, result.stderr
 
 
 @pytest.mark.parametrize(
@@ -912,89 +949,3 @@ def test_runtime_lock_is_a_same_version_subset_of_the_audited_dev_lock():
     development = _locked_versions(ROOT / "requirements-dev-lock.txt")
 
     assert runtime.items() <= development.items()
-
-
-DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy-cloudflare.yml"
-
-
-def test_cloudflare_deploy_waits_for_tests_on_main_and_serializes_production_deploys():
-    parsed = _workflow(DEPLOY_WORKFLOW)
-    trigger = parsed.get("on", parsed.get(True))
-    assert trigger["workflow_run"]["workflows"] == ["tests"]
-    assert trigger["workflow_run"]["types"] == ["completed"]
-    assert trigger["workflow_run"]["branches"] == ["main"]
-    assert "workflow_dispatch" in trigger
-    assert parsed["concurrency"]["group"] == "cloudflare-site-deploy"
-    assert parsed["concurrency"]["cancel-in-progress"] is False
-    jobs = parsed["jobs"]
-    assert set(jobs) == {"deploy"}
-    assert jobs["deploy"]["if"] == (
-        "github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'"
-    )
-
-
-def test_cloudflare_deploy_pins_wrangler_and_never_embeds_or_logs_secrets():
-    workflow = _workflow_text(DEPLOY_WORKFLOW)
-    assert "WRANGLER_VERSION: 4.118.0" in workflow
-    assert workflow.count("wrangler@") == workflow.count("wrangler@${WRANGLER_VERSION}")
-    assert "@latest" not in workflow
-    assert "REFRESH_KEY" not in workflow
-    assert "CLOUDFLARE_MARKET_REFRESH_KEY" not in workflow
-    assert "x-refresh-key" not in workflow
-    parsed = _workflow(DEPLOY_WORKFLOW)
-    env = parsed["jobs"]["deploy"]["env"]
-    assert env["CLOUDFLARE_API_TOKEN"] == "${{ secrets.CLOUDFLARE_API_TOKEN }}"
-    assert env["CLOUDFLARE_ACCOUNT_ID"] == "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
-    assert "CLOUDFLARE_MARKET_REFRESH_KEY" not in env
-    assert "GH_TOKEN" not in env
-
-
-def test_cloudflare_deploy_keeps_refresh_bindings_and_stages_only_the_pages_worker():
-    parsed = _workflow(DEPLOY_WORKFLOW)
-    steps = parsed["jobs"]["deploy"]["steps"]
-    refresh = next(step for step in steps if "Deploy the quant-market-refresh worker" in step["name"])
-    assert refresh["working-directory"] == "cloudflare/quant-dashboard"
-    assert "--keep-vars" in refresh["run"]
-    assert "CLOUDFLARE_API_TOKEN" in refresh["run"] and "CLOUDFLARE_ACCOUNT_ID" in refresh["run"]
-    pages = next(step for step in steps if "Deploy the Cloudflare Pages worker" in step["name"])
-    assert 'cp cloudflare/quant-dashboard/pages_worker.js "${pages_dir}/_worker.js"' in pages["run"]
-    assert 'find "${pages_dir}" -type f | wc -l' in pages["run"]
-    assert pages["run"].count("wrangler@") == 1  # pages worker deploy
-
-
-def test_cloudflare_deploy_refuses_stale_main_and_verifies_every_endpoint():
-    parsed = _workflow(DEPLOY_WORKFLOW)
-    steps = parsed["jobs"]["deploy"]["steps"]
-    guard = next(step for step in steps if step["name"] == "Refuse an outdated main revision")
-    assert "gh api \"repos/${{ github.repository }}/commits/main\" --jq '.sha'" in guard["run"]
-    assert "skip=true" in guard["run"]
-    paths_step = next(step for step in steps if step["name"] == "Skip pushes that did not touch the website")
-    assert paths_step["env"]["GH_TOKEN"] == "${{ github.token }}"
-    paths = paths_step["run"]
-    assert "if ! changed=" in paths
-    assert "refusing a false-green deployment skip" in paths
-    assert "exit 1" in paths
-    assert "changed-file lookup failed; conservative skip" not in paths
-    verify = next(step for step in steps if step["name"] == "Verify the deployed site")
-    for endpoint in ("/api/methodology", "/api/health", "/api/meta", "https://quant.custard.top/"):
-        assert endpoint in verify["run"]
-    assert "jq -er '.methodology_version'" in verify["run"]
-    assert "/api/health?deep=1" in verify["run"]
-    assert ".integrity_checked == true" in verify["run"]
-    assert "grep -qF" in verify["run"]
-
-
-def test_cloudflare_deploy_bash_blocks_parse_with_bash():
-    blocks = _bash_run_blocks(DEPLOY_WORKFLOW)
-    executable = _bash_executable()
-    if executable is None:
-        pytest.skip("bash is not installed on this test host")
-    for block in blocks:
-        result = subprocess.run(
-            [executable, "--noprofile", "--norc", "-n"],
-            input=block,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert result.returncode == 0, f"bash syntax failure:\n{block}\n{result.stderr}"

@@ -49,6 +49,11 @@ tools = ["china_a_share_trading_calendar.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config -p no:cacheprovider"
+markers = [
+  "android: Android application tests outside the website release gate",
+  "desktop: Windows desktop application tests outside the website release gate",
+  "parked_client: local Streamlit client tests outside the website release gate",
+]
 filterwarnings = [
   "error::RuntimeWarning",
   "ignore:.*missing ScriptRunContext.*:UserWarning",
@@ -68,8 +73,12 @@ line-ending = "lf"
 
 [tool.coverage.run]
 branch = true
-source = ["data", "engine", "ui", "tools"]
-omit = ["tests/*"]
+source = ["data", "engine", "tools"]
+omit = [
+  "tests/*",
+  "tools/android_release.py",
+  "tools/build_desktop.py",
+]
 
 [tool.coverage.report]
 show_missing = true

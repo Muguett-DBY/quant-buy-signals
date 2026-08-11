@@ -14,6 +14,9 @@ from desktop.updater import UpdateError
 from desktop.version import __version__
 
 
+pytestmark = pytest.mark.desktop
+
+
 def _write_bundled_release(root: Path, *, package_url: str | None = None) -> Path:
     package = root / f"DS_DCF-v{__version__}-windows-x64-portable.zip"
     archive_root = f"DS_DCF-v{__version__}"

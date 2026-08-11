@@ -249,6 +249,13 @@ _AUDIT_DECISION_FIELDS = frozenset(
         "missing_dimensions",
     }
 )
+_AUDIT_DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
+_AUDIT_DECISION_MISSING_REQUIREMENTS = (
+    "patch7_current_price",
+    "patch7_optimistic_upper",
+)
+_AUDIT_DECISION_PATCH7_PRICE_GATE_TYPES = frozenset({"type2", "type3", "type4", "type7"})
+_AUDIT_DECISION_FACT_UNSET = object()
 _AUDIT_DECISION_POTENTIAL_VETO_DIMENSIONS = {
     "type1": frozenset({"1a", "1b"}),
     "type2": frozenset({"2a", "2b", "2c"}),
@@ -3102,7 +3109,55 @@ def _audit_compact_decision_reason(value: Any) -> str:
     return prefix + "…"
 
 
-def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) -> bool:
+def _audit_decision_missing_requirements(reasons: Mapping[str, Any]) -> tuple[bool, list[str]]:
+    """Validate the serialized Patch 7 post-gate requirement ledger."""
+
+    raw = reasons.get(_AUDIT_DECISION_MISSING_REQUIREMENTS_REASON)
+    if raw is None:
+        return True, []
+    if (
+        not isinstance(raw, list)
+        or not raw
+        or any(not isinstance(value, str) for value in raw)
+        or len(raw) != len(set(raw))
+        or set(raw) - set(_AUDIT_DECISION_MISSING_REQUIREMENTS)
+    ):
+        return False, []
+    return True, [key for key in _AUDIT_DECISION_MISSING_REQUIREMENTS if key in raw]
+
+
+def _audit_patch7_requirements_match(
+    type_key: str,
+    requirements: Sequence[str],
+    *,
+    company: Mapping[str, Any] | None,
+    dcf_result: object,
+) -> bool:
+    """Bind serialized Patch 7 requirements to the audited company facts."""
+
+    if type_key not in _AUDIT_DECISION_PATCH7_PRICE_GATE_TYPES:
+        return not requirements
+    if not isinstance(company, Mapping) or dcf_result is _AUDIT_DECISION_FACT_UNSET:
+        return not requirements
+
+    expected: list[str] = []
+    if _finite_number(company.get("price")) is None:
+        expected.append("patch7_current_price")
+    dcf = dcf_result if isinstance(dcf_result, Mapping) else {}
+    points = dcf.get("dcf_points") if isinstance(dcf.get("dcf_points"), Mapping) else {}
+    optimistic = points.get("optimistic") if isinstance(points.get("optimistic"), Mapping) else {}
+    if _finite_number(optimistic.get("upper")) is None:
+        expected.append("patch7_optimistic_upper")
+    return list(requirements) == expected
+
+
+def _audit_decision_contract_valid(
+    type_key: str,
+    payload: Mapping[str, Any],
+    *,
+    company: Mapping[str, Any] | None = None,
+    dcf_result: object = _AUDIT_DECISION_FACT_UNSET,
+) -> bool:
     """Duplicate the bounded decision model and compare all serialized fields."""
 
     weights = _AUDIT_TYPE_WEIGHTS[type_key]
@@ -3135,11 +3190,23 @@ def _audit_decision_contract_valid(type_key: str, payload: Mapping[str, Any]) ->
         return False
     applicable = applicable_marker == "yes"
     evidence_complete = evidence_marker == "complete"
+    requirements_valid, missing_requirements = _audit_decision_missing_requirements(reasons)
+    if (
+        not requirements_valid
+        or (missing_requirements and (not applicable or evidence_complete or status != "insufficient_evidence"))
+        or not _audit_patch7_requirements_match(
+            type_key,
+            missing_requirements,
+            company=company,
+            dcf_result=dcf_result,
+        )
+    ):
+        return False
     raw_missing = reasons.get("_decision_missing_dimensions")
     if not isinstance(raw_missing, list):
         return False
     missing = [dimension for dimension in weights if dimension in raw_missing]
-    if not evidence_complete and not missing:
+    if not evidence_complete and not missing and not missing_requirements:
         missing = list(weights)
     action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
     if action_condition and "6e" not in missing:
@@ -3533,7 +3600,8 @@ def _audit_company_codes(
     patch4_bindings: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
 ) -> list[str] | None:
     companies = payload.get("companies")
-    if not isinstance(companies, list) or len(companies) != 100:
+    dcf_results = payload.get("dcf_results")
+    if not isinstance(companies, list) or len(companies) != 100 or not isinstance(dcf_results, Mapping):
         return None
     codes: list[str] = []
     for company in companies:
@@ -3609,7 +3677,14 @@ def _audit_company_codes(
                 or any(
                     not str(value or "").strip() or len(str(value)) > _AUDIT_REASON_MAX_LENGTH
                     for key, value in reasons.items()
-                    if key not in {"_status", "_applicable", "_evidence", "_decision_missing_dimensions"}
+                    if key
+                    not in {
+                        "_status",
+                        "_applicable",
+                        "_evidence",
+                        "_decision_missing_dimensions",
+                        _AUDIT_DECISION_MISSING_REQUIREMENTS_REASON,
+                    }
                 )
             ):
                 return None
@@ -3640,7 +3715,16 @@ def _audit_company_codes(
             evidence_complete = type_payload["evidence_complete"]
             triggered = type_payload["triggered"]
             condition = bool(reasons.get("_condition"))
-            if not _audit_decision_contract_valid(type_key, type_payload):
+            patch7_fact_context = bool(
+                _AUDIT_DECISION_MISSING_REQUIREMENTS_REASON in reasons
+                or str(reasons.get("_missing") or "").startswith("补丁7")
+            )
+            if not _audit_decision_contract_valid(
+                type_key,
+                type_payload,
+                company=company if patch7_fact_context else None,
+                dcf_result=(dcf_results.get(code) if patch7_fact_context else _AUDIT_DECISION_FACT_UNSET),
+            ):
                 return None
             if type_key == "type5" and not _audit_type5_bottom_evidence_valid(code, company, type_payload):
                 return None

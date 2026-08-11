@@ -7,16 +7,18 @@ DS_DCF 是面向 A 股的多情景估值与七类型量化诊断工具。它把�
 ## 网站（主攻方向）
 
 - **线上站点**：https://quant.custard.top
-- **架构**：GitHub Actions 每个交易日收盘后生成签名 catalogue → Cloudflare R2 存储 → Pages worker 只读 API（GET-only）→ 网站按需拉取
-- **代码**：`cloudflare/quant-dashboard/`（worker + schema）、`cloudflare-cron/`（恢复镜像）、发布流水线 `tools/publish_mobile_snapshot.py`
+- **架构**：Cloudflare 工作日 16:15 调度（GitHub 16:17 兜底）→ GitHub Actions 生成并签名不可变数据代 → Release → refresh Worker 验签后写入 R2/D1 → Pages worker 只读 API（GET-only）→ 网站按需拉取
+- **代码**：`cloudflare/quant-dashboard/`（Pages API + R2/D1 镜像）、`cloudflare-cron/`（收盘数据构建调度加速器）、发布流水线 `tools/publish_mobile_snapshot.py`
 - **量化口径**：见 `docs/MODEL.md`；**架构总览**：见 `docs/ARCHITECTURE.md`
+
+交易所休市时，本次运行会记录原因后成功结束且不发布新数据；交易日若来源未刷新、数据并非当日、收盘时间证据不足或质量检查失败，则失败关闭并保留上一完整 generation。
 
 手机 app（`android/`）与桌面版（`desktop/` + `app.py`）已搁置，代码保留但不迭代。
 
 ## 环境
 
-- Python 3.11–3.14
-- Windows 是主要验证平台
+- Python 3.13（与网站数据生产流水线一致）
+- GitHub Actions `windows-latest` 是数据/评分的权威验证环境
 - 生产依赖根及显式安全版本下限固定在 `requirements.txt`，完整传递依赖及制品 SHA256 固定在 `requirements-lock.txt`
 
 ```powershell
@@ -26,13 +28,15 @@ if (-not $env:PIP_INDEX_URL) { $env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.
 python -m pip install --require-hashes -r requirements-dev-lock.txt
 ```
 
-## 运行
+## 网站本地验证
 
 ```powershell
-python -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501
+.venv\Scripts\python.exe -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py -q
+node --check cloudflare/quant-dashboard/pages_worker.js
+node --check cloudflare/quant-dashboard/refresh_worker.js
 ```
 
-也可以双击 `run.bat`。脚本只会创建/复用项目内 `.venv`，不会向 PATH 中的全局 Python 安装包。首次启动、锁文件变化、Python 解释器变化或 `pip check` 发现环境损坏时，才会按生产锁文件重新安装；正常重复启动会通过锁文件/解释器指纹直接复用已验证环境，避免每次联网安装。依赖下载默认使用清华大学 PyPI HTTPS 镜像；如需改用其他索引，在启动脚本前设置标准环境变量 `PIP_INDEX_URL` 即可，脚本不会覆盖已有值，锁文件也不会内嵌索引地址反向覆盖它。哈希锁校验和虚拟环境隔离始终保留，也不需要降低 TLS 校验或配置 `trusted-host`。桌面启动默认只绑定 `127.0.0.1`，不会向局域网暴露无认证界面；服务器在当前终端前台运行，按 `Ctrl+C` 可完整停止。如需共享部署，必须另行配置认证、访问控制和资源限额。
+网站不在本机运行 Streamlit；权威页面是 Cloudflare Pages advanced-mode worker。本地只做语法、合同与数据流水线验证，生产发布仍由 GitHub Actions 验证后执行。
 
 首次分析会从外部数据源拉取行情与财报。schema 8 快照要求每条行情同时具备可解析的源交易日期、源时刻、获取时间和带来源绑定的上市日期状态，并保存整代唯一的 `reporting_period_contract`；该合同固定完整年度、当前累计报告期及上年同期，供非金融企业严格重构 TTM 收入与现金流。每个 TTM 资本开支组件还必须绑定来源披露或可复算的详细现金流恒等式；未知空值不会被填成 0。schema 8 还要求每家公司明确保存 Type3 深度取数需要的商誉与并购现金流字段是否由源接口返回；源字段真实留空时仍保持未知，绝不擅自填成 0。上市日期只用于区分“上市前不存在”与“上市后年度缺口”，没有可靠上市日期时保持未知，不会猜测。产品投资范围明确限定为沪深 A 股；北交所记录即使出现在原始源中也统一标记 `unsupported_market`，不进入 DCF/PB、七类型评分、严格 TTM 覆盖率分母或随机 100 抽样。只有通过数据完整性、股票资格边界、严格 TTM 源覆盖、完整分析质量闸门和并发代检查的候选快照才会替换上一代；“刷新数据”不会预先删除可用结果。schema 4 缺少报告期合同，schema 5 未强制资本开支来源证明，schema 6 缺少独立上市日期来源证明，schema 7 又没有强制保存 Type3 补充字段，均不能冒充 schema 8 继续分析。
 
@@ -42,42 +46,28 @@ python -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501
 
 行情获取时间不等于成交时间。系统分别保存上游交易日期/时刻与本机获取时间；周末、休市或上游缓存响应不会因为本次刚获取就被表述为实时成交。
 
-## Windows 桌面版
+## 已搁置客户端（仅保留历史实现）
 
-桌面版是 Windows EXE 安装器与便携 ZIP，不是 Android APK。首次使用请双击版本目录中的 `DS_DCF-v<版本>-windows-x64-installer.exe`；它不需要管理员权限，会先核对内置 ZIP 的字节数、SHA256、内部版本清单和安全路径，再安装到当前用户的版本库。它在本机 `127.0.0.1` 启动内置 Streamlit 服务，运行缓存写入 `%LOCALAPPDATA%\DS_DCF\cache`，不会污染安装目录。成功完成一次完整分析后，下一次启动可以复用与快照文件 SHA256、规则哈希和 schema 严格绑定的结果；快照或规则变化时会自动失效并重新分析。
+`desktop/`、`app.py`、`ui/` 与 `android/` 只保留历史代码和兼容协议，不属于当前网站交付，也不进入网站 CI、Cloudflare 部署或市场数据发布门禁。现阶段不构建 EXE、安装器或 APK；若未来恢复客户端开发，应另行恢复其独立 CI 与发布验收，不能借用网站绿灯。
 
-```powershell
-$desktopSigningKey = 'C:\safe\ds-dcf-desktop-update-signing-key.properties'
-python -m tools.build_desktop --signing-private-key $desktopSigningKey
-python -m tools.build_desktop --desktop --signing-private-key $desktopSigningKey
-```
-
-正式构建必须使用仓库外的独立 P-256 桌面更新密钥，且不得复用 Android 市场数据签名密钥；构建器会用应用内固定的桌面公钥立即复核签名。构建器还会实际启动冻结后的 Streamlit 子进程并请求本机健康端点；只有版本、资源与服务器三项冒烟检查全部通过才生成便携包和安装器。第二条命令把每一版的应用目录、便携 ZIP、安装器和该版本更新清单统一放进桌面 `6BUYING_POINT/<版本>/`（程序位于该目录的 `app/`），稳定快捷方式放在 `6BUYING_POINT/DS_DCF.lnk`，不会再把不同版本散落在桌面根目录。控制窗口提供“检查更新”；官方随包配置指向公开仓库 `Muguett-DBY/quant-buy-signals` 的 HTTPS 清单，下载包必须同时通过清单签名、字节数、SHA256、内部版本清单和安全 ZIP 路径校验，并安装到新的 `6BUYING_POINT/<版本>/app/`，旧版本和已下载便携 ZIP 都会保留。更新源优先级是环境变量、`6BUYING_POINT/update_config.json`、随包配置；配置缺失时更新按钮会明确报告“尚未配置更新源”，不会接受 HTTP 地址。公开 CI 只运行 `--ci-smoke` 的不可发布构建，不接触私钥，也不会生成更新清单或签名。
-
-## Android 只读版
-
-Android APK 是独立的只读结果客户端，不会在手机上抓取财报、计算估值或生成买入结论。它从公开 GitHub Release 的每日市场快照读取已完成质量闸门的沪深结果；稳定清单带独立数字签名，目录、候选详情和签名文件必须使用同一个不可变批次编号。手机会复核官方签名、版本、字节数、内容摘要、交易日、文件大小上限和解压上限，任一项失败都保留上一份已验证数据，并可从备用批次恢复损坏的活动缓存。公开移动数据只包含手机实际展示的紧凑分数与中文解释，不发布完整估值账本。每个工作日北京时间 16:17 仅由 GitHub Actions 发起一次收盘后刷新；下载与公开可见性波动在同一次运行内做有界重试，不再创建多个独立补跑通知。交易所休市时，本次运行会记录原因后成功结束且不发布新数据；交易日若来源未刷新、数据并非当日、收盘时间证据不足或质量检查失败，运行才会失败，并且绝不会用旧数据覆盖已发布结果。每次通过公开下载复核的签名清单还会在专用 `mobile-data` 分支留存清单、签名和 SHA256 审计轨迹，不改动 `main`，也避免公开仓库长期无活动后定时任务被自动停用。
-
-手机客户端把结果分成三层：“实际买入信号”、“只差真实仓位/操作确认的候选”和“缺少部分源证据、但数学上仍可能达到门槛的待补证据候选”。后两者都不是买入信号，待补证据也不等于操作确认；首页按七种情况分别列出实际、待确认和待补证据数量。每家公司、七类状态、分数上下界、硬否决状态和待补维度都会留在完整目录中，避免把资料不足误报成“不符合”或从列表中消失。应用更新从固定的 `android-app` 发布通道读取更新清单及其独立 P-256 签名，必须先验签并完整校验全部字段，之后才比较版本；手机会持久记录已见最高版本，拒绝旧清单回放。APK 会边下载边校验到应用私有目录，并确认新安装包与当前版本使用同一发布证书；Android 系统仍要求用户确认安装，不支持静默更新。构建、签名和发布流程见 [Android 客户端说明](android/README.md)。
+数据协议中的 `mobile-*`、`mobile-data`、`MOBILE_*` 等名字为已上线兼容标识，当前消费者是网站数据服务；保留名称不表示手机客户端仍在维护。
 
 ## 验证
 
 交易日 16:15 前，两市持续到 15:30 的盘后固定价格交易及延迟行情尚未完成稳定汇总，量比和当日换手率不能作为可决策的收盘证据，Type2“市场周期冷度”会统一保持证据不足。界面会持久提示当前买入信号数量不包含可能依赖收盘冷度的公司；16:15 后重新刷新才可解读为当日七类现有证据下的候选数。
 
 ```powershell
-python -m pytest --cov --cov-report=term-missing
+.venv\Scripts\python.exe -m pytest -m "not desktop and not android and not parked_client" --cov --cov-report=term-missing
 python -m ruff check .
 python -m ruff format --check .
-python -m bandit -q -r app.py config.py data engine ui tools --severity-level medium --confidence-level medium
+python -m bandit -q -r config.py data engine tools --severity-level medium --confidence-level medium
 python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-lock.txt
-python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-dev-lock.txt
 python -m pip check
-python -m build --wheel --no-isolation
 ```
 
-覆盖率配置要求总覆盖率不低于 75%。CI 在 Python 3.11、3.13、3.14 上运行测试，并在经过验证的 Python 3.13 上集中执行覆盖率、格式、静态安全、依赖漏洞、wheel 安装验证和发布包卫生检查。GitHub Actions 固定到提交 SHA，不使用可移动标签；依赖安装强制校验 lock 中的 SHA256，行尾策略由 `.gitattributes` 与 CI 共同检查。
+覆盖率配置要求活跃网站数据/评分代码总覆盖率不低于 75%。CI 使用与生产一致的 Python 3.13：纯 Cloudflare 改动走轻量网页门禁，数据、评分或未分类改动一律 fail-closed 走完整网站数据门禁。桌面与 Android 专属测试保留在仓库，但不再阻塞网站发布。GitHub Actions 固定到提交 SHA，不使用可移动标签；依赖安装强制校验 lock 中的 SHA256，行尾策略由 `.gitattributes` 与 CI 共同检查。
 
-测试覆盖数据分页与部分失败、schema 8 快照/CAS 完整性、上市日期来源与历史窗口、Type3 补充字段、严格 TTM 报告期与资本开支来源绑定、非金融 DCF 与金融 justified P/B 公式及边界、七类型权重与否决规则、Type7 归类/12个子指标/前置路径重放、UI 持久结果身份校验、桌面更新包安全边界及固定种子随机样本审计。
+网站门禁覆盖数据分页与部分失败、schema 8 快照/CAS 完整性、上市日期来源与历史窗口、Type3 补充字段、严格 TTM 报告期与资本开支来源绑定、非金融 DCF 与金融 justified P/B 公式及边界、七类型权重与否决规则、Type7 归类/12个子指标/前置路径重放、签名发布合同、Cloudflare 读取链与固定种子随机样本审计。
 
 ## 模型边界
 

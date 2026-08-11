@@ -169,6 +169,13 @@ _DECISION_FIELDS = frozenset(
         "missing_dimensions",
     }
 )
+_DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
+_DECISION_MISSING_REQUIREMENTS = (
+    "patch7_current_price",
+    "patch7_optimistic_upper",
+)
+_DECISION_PATCH7_PRICE_GATE_TYPES = frozenset({"type2", "type3", "type4", "type7"})
+_DECISION_FACT_UNSET = object()
 _DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
 _DECISION_POTENTIAL_VETO_DIMENSIONS = {
     "type1": frozenset({"1a", "1b"}),
@@ -1104,7 +1111,60 @@ def _decision_reason(value: object) -> str:
     return prefix + "…"
 
 
-def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -> dict[str, object] | None:
+def _independent_decision_missing_requirements(reasons: Mapping[str, object]) -> tuple[bool, list[str]]:
+    """Validate the private Patch 7 post-gate requirement ledger.
+
+    The audit deliberately duplicates the producer contract.  Missing means
+    the historical decision format; a present ledger must be non-empty,
+    duplicate-free, string-only, and limited to the pinned requirement keys.
+    """
+
+    raw = reasons.get(_DECISION_MISSING_REQUIREMENTS_REASON)
+    if raw is None:
+        return True, []
+    if (
+        not isinstance(raw, (list, tuple))
+        or not raw
+        or any(not isinstance(value, str) for value in raw)
+        or len(raw) != len(set(raw))
+        or set(raw) - set(_DECISION_MISSING_REQUIREMENTS)
+    ):
+        return False, []
+    return True, [key for key in _DECISION_MISSING_REQUIREMENTS if key in raw]
+
+
+def _independent_patch7_requirements_match(
+    type_key: str,
+    requirements: Sequence[str],
+    *,
+    company: Mapping[str, object] | None,
+    dcf_result: object,
+) -> bool:
+    """Bind Patch 7's private requirement ledger to the audited outer facts."""
+
+    if type_key not in _DECISION_PATCH7_PRICE_GATE_TYPES:
+        return not requirements
+    if not isinstance(company, Mapping) or dcf_result is _DECISION_FACT_UNSET:
+        return not requirements
+
+    expected: list[str] = []
+    if _finite_numeric(company.get("price")) is None:
+        expected.append("patch7_current_price")
+    dcf = dcf_result if isinstance(dcf_result, Mapping) else {}
+    points = dcf.get("dcf_points") if isinstance(dcf.get("dcf_points"), Mapping) else {}
+    optimistic = points.get("optimistic") if isinstance(points.get("optimistic"), Mapping) else {}
+    if _finite_numeric(optimistic.get("upper")) is None:
+        expected.append("patch7_optimistic_upper")
+    return list(requirements) == expected
+
+
+def _independent_decision_replay(
+    type_key: str,
+    payload: Mapping[str, object],
+    *,
+    company: Mapping[str, object] | None = None,
+    dcf_result: object = _DECISION_FACT_UNSET,
+) -> dict[str, object] | None:
     """Independently reconstruct one published buy/no-buy decision contract.
 
     This intentionally duplicates the public scoring boundary rather than
@@ -1152,7 +1212,19 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
         return None
     applicable = applicable_marker == "yes"
     evidence_complete = evidence_marker == "complete"
-    if not evidence_complete and not missing:
+    requirements_valid, missing_requirements = _independent_decision_missing_requirements(reasons)
+    if (
+        not requirements_valid
+        or (missing_requirements and (not applicable or evidence_complete or status != "insufficient_evidence"))
+        or not _independent_patch7_requirements_match(
+            type_key,
+            missing_requirements,
+            company=company,
+            dcf_result=dcf_result,
+        )
+    ):
+        return None
+    if not evidence_complete and not missing and not missing_requirements:
         missing = list(weights)
     # Type 6's position size is an action input, not company evidence.  It is
     # nevertheless an unresolved decision dimension until the user confirms
@@ -1494,18 +1566,20 @@ def _independent_decision_replay(type_key: str, payload: Mapping[str, object]) -
     }
 
 
-def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
+def _analysis_coverage_summary(
+    scores: pd.DataFrame,
+    dcf_results: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     """Summarise full-universe triggers, statuses and evidence authority."""
     if not isinstance(scores, pd.DataFrame):
         raise TypeError("analysis scores must be a pandas DataFrame")
+    if dcf_results is not None and not isinstance(dcf_results, Mapping):
+        raise TypeError("analysis DCF results must be a code mapping or None")
     framework_statuses: dict[str, dict[str, int]] = {}
     framework_triggers: dict[str, int] = {}
     framework_evidence: dict[str, dict[str, object]] = {}
-    codes = (
-        [str(value) for value in scores["code"].tolist()]
-        if "code" in scores
-        else [f"row:{index}" for index in range(len(scores))]
-    )
+    company_rows = scores.to_dict(orient="records")
+    codes = [str(row.get("code", f"row:{index}")) for index, row in enumerate(company_rows)]
     for type_key in _TYPE_KEYS:
         statuses: Counter[str] = Counter()
         triggers = 0
@@ -1514,7 +1588,7 @@ def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
         invalid_sub_scores: list[str] = []
         invalid_decisions: list[str] = []
         if type_key in scores:
-            for code, payload in zip(codes, scores[type_key]):
+            for code, company, payload in zip(codes, company_rows, scores[type_key], strict=True):
                 if not isinstance(payload, Mapping):
                     statuses["invalid_payload"] += 1
                     contract["invalid_payload"] += 1
@@ -1568,7 +1642,24 @@ def _analysis_coverage_summary(scores: pd.DataFrame) -> dict[str, object]:
                     contract["invalid_sub_scores"] += 1
                     if len(invalid_sub_scores) < 10:
                         invalid_sub_scores.append(code)
-                replayed_decision = _independent_decision_replay(type_key, payload)
+                decision_reasons = payload.get("reasons")
+                patch7_fact_context = bool(
+                    isinstance(decision_reasons, Mapping)
+                    and (
+                        _DECISION_MISSING_REQUIREMENTS_REASON in decision_reasons
+                        or str(decision_reasons.get("_missing") or "").startswith("补丁7")
+                    )
+                )
+                replayed_decision = _independent_decision_replay(
+                    type_key,
+                    payload,
+                    company=company if patch7_fact_context else None,
+                    dcf_result=(
+                        dcf_results.get(code)
+                        if patch7_fact_context and dcf_results is not None
+                        else _DECISION_FACT_UNSET
+                    ),
+                )
                 if replayed_decision is None:
                     import os
 
@@ -2320,7 +2411,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         research_report_loader=fetch_research_reports_batch,
         patch4_loader=fetch_patch4_evidence_batch,
     )
-    screening_coverage = _analysis_coverage_summary(analysis.scores)
+    screening_coverage = _analysis_coverage_summary(analysis.scores, analysis.dcf_results)
     if args.require_complete_evidence and not bool(screening_coverage["goal_readiness"]["ready"]):
         print(
             json.dumps(

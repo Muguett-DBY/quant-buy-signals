@@ -1,96 +1,146 @@
-# 运行、审计与发布
+# 网站运行、审计与发布
+
+## 当前范围
+
+唯一生产产品是 `https://quant.custard.top`。网站由 Cloudflare Pages advanced-mode worker 提供 GET-only 页面与 API；评分、估值和数据抓取只在 GitHub Actions 的受控数据流水线中发生。
+
+`desktop/`、`app.py`、`ui/` 与 `android/` 已搁置，只保留历史实现。它们不进入网站 CI、Cloudflare 部署或市场数据发布门禁。协议中的 `mobile-*`、`mobile-data` 和 `MOBILE_*` 是已上线兼容名称，不代表手机客户端仍在维护。
 
 ## 环境与依赖
 
-生产代码的依赖根是 `numpy`、`orjson`、`pandas`、`plotly`、`requests` 和 `streamlit`；`pillow` 作为 Streamlit 图像链、`GitPython` 作为 Streamlit Git 集成链的显式安全版本下限一并固定。`orjson` 用于带格式标识和校验和的快照编码，不是可选的静默加速器。`requirements.txt` 固定这些版本，`requirements-lock.txt` 是生产环境的完整 SHA256 哈希锁；测试和开发分别使用 `requirements-test.txt`、`requirements-dev.txt`，解析结果统一写入 `requirements-dev-lock.txt` 哈希锁。wheel 元数据中的直接依赖也必须保留这些安全下限，不能让从 wheel 安装的环境重新解析到已知有漏洞的传递版本。`build`、`pyinstaller`、`setuptools` 和 `wheel` 是显式发布依赖，不能只依赖当前环境恰好带入的传递关系。
+- 生产与 CI 使用 Python 3.13。
+- `requirements-lock.txt` 固定网站运行依赖及传递依赖 SHA256；`requirements-dev-lock.txt` 固定测试工具。
+- 安装必须使用 `--require-hashes`，不得关闭 TLS 校验或以 `trusted-host` 绕过证书验证。
+- Cloudflare Wrangler 固定版本；GitHub Actions 固定到提交 SHA，不使用浮动 action 标签。
 
-依赖升级必须作为显式维护动作完成：
-
-1. 在干净的 Python 3.12 环境安装 `requirements-dev.txt` 中固定版本的 `pip-tools`，执行 `python -m piptools compile --generate-hashes --no-emit-index-url --no-emit-trusted-host --resolver=backtracking --output-file=requirements-lock.txt requirements.txt`，再执行 `python -m piptools compile --generate-hashes --allow-unsafe --no-emit-index-url --no-emit-trusted-host --resolver=backtracking --output-file=requirements-dev-lock.txt requirements-dev.txt`；解析时可以通过环境变量选择 HTTPS 镜像，但锁文件不得内嵌 `--index-url` 或 `--trusted-host`，否则会覆盖运行者的 `PIP_INDEX_URL`。不要从包含无关工具的全局环境直接复制整个 `pip freeze`。
-2. 执行 Python 3.11、3.13、3.14 测试矩阵，并在 Python 3.13 上执行覆盖率、Ruff、Bandit、`pip-audit` 和 `pip check`。
-3. 在四个 Python 版本上分别以 `pip install --require-hashes -r ...-lock.txt` 验证单一锁文件。若任一版本不能解析，必须为每个 Python 版本生成独立哈希锁并在 CI 中显式选择，不能降级为无哈希约束。
-4. 记录直接依赖和传递依赖变化；只有全部验证通过才提交 lock 文件。
-
-`run.bat` 创建/复用 `.venv`，优先通过 Windows `py` launcher 从受支持的 Python 3.14、3.13、3.12、3.11 中选择解释器；没有 `py` 时才验证 PATH 中的 `python`。脚本以两个锁文件内容、解释器路径和 Python 版本生成依赖指纹：首次启动、指纹变化或 `pip check` 失败时，先用 `requirements-bootstrap.txt` 的 SHA256 哈希锁安装固定 pip，再通过 `.venv\Scripts\python.exe` 使用 `--require-hashes` 安装生产锁；指纹未变且依赖一致时跳过重复安装。脚本始终设置 `PIP_REQUIRE_VIRTUALENV=true`。若调用方没有设置标准 `PIP_INDEX_URL`，桌面脚本默认使用 `https://pypi.tuna.tsinghua.edu.cn/simple`；已有 `PIP_INDEX_URL` 原样优先，可用于企业镜像或官方索引。HTTPS 镜像不配置 `trusted-host`，不能以国内网络兼容为由关闭证书验证、哈希校验或虚拟环境隔离。如果已有 `.venv` 使用了不支持的 Python，脚本会停止，不会退回全局安装。桌面脚本固定绑定 `127.0.0.1`；不得把无认证的刷新/分析界面直接监听到全网卡。共享部署必须显式增加认证、网络访问控制和计算资源限额。
-
-wheel 构建使用 `pyproject.toml` 中固定的 setuptools/wheel 后端，并必须包含 `tools.run_full_audit`、F10/映射文件、官方零收入证明、`data/industry_capco_2025h2.json` 与 `data/industry_exchange_new_listings_2026.json`。CI 会在仓库目录之外安装生成的 wheel，再调用行业加载器并核验官方记录数、来源元数据和审计入口，防止源码目录意外掩盖缺失的包数据。
-
-## 数据与分析晋级
-
-发布 wheel 和桌面包除既有官方零收入证明外，还必须携带 `data/financial_zero_capex_evidence.json`。该文件只允许逐代码、逐 Q1 报告期的显式零，绑定巨潮 HTTPS PDF、SHA256、页码和陈述；任何普通空值、比较列金额或未列入白名单的公司都不得借此转成零。
-
-新抓取数据依次经过：
-
-1. 行情身份、源交易日期/时刻、获取时间、带来源和获取时间的上市日期状态、价格/市值单位和市场覆盖校验；
-2. 财报字段、报告日期、连续年度、逐公司当期核心财报、Type3 商誉/并购现金流源字段存在性和行业数据校验；行业层分别核验官方权威覆盖、可绑定来源覆盖和模型行业覆盖，并生成 schema 8 的整代 `reporting_period_contract`；资本开支直接披露或详细现金流恒等式推导均保存可复算来源证明；银行、保险、证券年度专属指标分别保存数据商标准化字段、公式推导、监管来源、规则版本和显式缺失状态；
-3. 生成 `eligible_codes` 及逐公司排除原因，并在沪深非金融分母上检查严格 TTM 收入与 FCFF 源覆盖；
-4. 仅对 eligible universe 执行对应估值模型：非金融企业必须按 `FY + current YTD - prior YTD` 重构 TTM 收入及 CFO-Capex，并在 `[FY-1, FY, TTM]` 上归一化；金融企业走独立 justified P/B；
-5. 检查评分覆盖、估值尝试/有效覆盖、异常率及相对上一代退化；
-6. 在同一晋级锁内同时校验上一代 `data_timestamp` 与规范化 payload SHA256 两个令牌，再执行 compare-and-swap 晋级。
-
-任一步失败都保留最后成功代。已有活动代时，调用者不能省略任一 CAS 令牌；同时间戳异内容、较旧代、获取时间倒退或令牌不匹配都会拒绝晋级。原始行情可以保留停牌、风险警示、退市整理或北交所记录，但这些记录不得进入自动买入分析；北交所和金融企业也不进入严格 TTM 源覆盖分母。`retrieved_at` 仅是获取时间，schema 8 另存上游 `source_trade_date`、`quote_tick_time`、上市日期来源、报告期合同、资本开支来源证明，以及 Type3 商誉/并购现金流字段是否由源接口返回；本次刚获取不等于刚成交，源字段存在但值为空也只能保持未知。schema 4 缺少报告期合同，schema 5 未强制资本开支来源证明，schema 6 缺少独立上市日期来源证明，schema 7 缺少 Type3 补充字段存在性，均不能由 schema 8 加载器继续用于分析。
-
-## 固定种子审计
-
-仓库提供可直接复现的全链路命令；默认复用仍有效的 schema 8 快照，增加 `--refresh` 才强制抓取新行情并在整代源质量门通过后晋级新一代。投资分析、估值、七类型评分和随机审计的 eligible universe 只包含沪深 A 股；北交所即使存在于原始源中也不参与上述分析：
+本地网站验证环境：
 
 ```powershell
-python -m tools.run_full_audit --seed 20260715 --sample-size 100
-python -m tools.run_full_audit --refresh --seed 20260715 --sample-size 100
-python -m tools.run_full_audit --require-complete-evidence --seed 20260715 --sample-size 100
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-bootstrap.txt
+.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-dev-lock.txt
+.venv\Scripts\python.exe -m pip check
 ```
 
-底层 `engine.audit.audit_random_sample()` 强制要求调用者传入快照验证生成的沪深 `eligible_codes`；命令行入口负责整代源质量门、候选代 CAS 晋级、快照 SHA256 和审计产物写入，任一独立不变量失败时退出码为 1。
+## 网站 CI
 
-`--require-complete-evidence` 是七类买入框架的严格完整性验收：全市场每一类都必须有完整且有限的固定子分结构，所有适用框架必须证据完整；合法的不适用结果仍要明确说明，不能用缺失或零分伪装。底层量化证据不得再含 `partial` 或 `missing`，空结果或任一框架整列缺失也会失败。普通审计仍会完整报告这些计数而不隐藏它们；只有严格模式可以作为“全部适用子指标无数据缺失”的证明。
+`.github/workflows/tests.yml` 是唯一权威测试工作流：
 
-普通发布门与上述“理想零缺口”门不是同一个承诺。普通发布必须同时证明制品完整、每个真实/待确认/待补证据候选都可见，并通过独立决策重放证明没有漏掉数学上仍可能触发的公司；它允许上游确实没有提供的原始事实继续标为资料不足。每类结果都携带固定的分数下界、分数上界、硬否决状态和待补维度：只有上下界与硬规则已经足以终局判断时，才能把不完整证据归入确定结论；否则必须进入待补证据集合。不得把普通发布成功描述为全市场原始数据零缺口。
+- 每次 push 到 `main` 固定运行 Cloudflare web gate、网站 data-integrity gate 和仓库卫生检查，不能由窄提交隐藏此前失败的改动。
+- PR 与非 main 分支按路径选择重门禁；未知路径 fail-closed 进入 data-integrity gate。
+- 仓库卫生检查始终运行，拒绝私钥、环境文件、缓存、压缩包、coverage 产物和错误行尾。
+- Cloudflare gate 校验三个 Worker 语法及网站合同。
+- data-integrity gate 只收集网站生产测试；搁置客户端模块用 `--ignore` 隔离，`test_release_zip.py` 中仍与网站审计相关的测试继续运行。
+- 活跃的 `data/`、`engine/`、`tools/` 覆盖率不得低于 75%。
+- 聚合 job 只接受显式 `true|false` 的门禁选择，并要求所有已选门禁与卫生检查成功。
 
-JSON 产物包含完整七类型子分/依据、Type7 归类结果、12个类内子指标、质量认证与当前买点前置门、证据完整性状态、估值模型与六点区间（非金融 DCF 参数或金融 P/B 参数）、严格 TTM 三组件、报告期合同、`[FY-1, FY, TTM]` 归一化依据、Type 4 独立十年面、逐公司跳过原因、管线问题、质量指标，以及快照内容、外部快照文件、代码、规则、行业数据、依赖、Git 和运行时哈希。旧的三份百分制账本仅嵌套保留为不可决策诊断。引擎自身 validator、评分全字段重放及估值存在性/完整 payload/跳过原因重放都明确标为“同源”；另一个独立实现重算权重总分、Type7 归类/原子权重/严格均值/分类路径、触发与优先级关系、空头证据排序、估值区间、关键公式和来源绑定。财务证据到每个业务子分的规则正确性由 `tests/test_buy_screener_rules.py`、`tests/test_type7_patch6.py` 和 `tests/test_quality_equity.py` 中固定预期、边界和反例向量验证，不能把同源重放误称为这部分的独立证明。
-
-解读候选数量时必须同时给出 eligible universe、估值成功/跳过数、各框架证据完整覆盖和具体跳过原因。“证据不足”表示当前数据链不能完成判断，不得统计成“公司确定不符合”；同样，总分达到 7.0 但证据不完整、命中硬否决或未满足附加条件，也不得统计成已触发候选。系统不会因为 TTM 组件缺失而使用年度现金流补位。
-
-命令行摘要会列出所有非经济性估值例外的代码与原因（数据缺失、源内矛盾、模型暂不支持或内部异常），避免把正常的经济不适用与需要处理的数据问题混在一起。交易日 16:15 前，两市 15:30 结束的盘后固定价格交易及延迟行情尚未稳定，同日量价批次不会产生 Type2 自动触发；界面必须持久说明此时候选数不包含依赖收盘冷度的公司。
-
-## 本地发布验证
-
-发布验证必须在由 `requirements-dev-lock.txt` 新建的干净 Python 3.13 虚拟环境中执行，不能以全局环境“恰好能运行”代替锁文件验证：
+本地等价检查：
 
 ```powershell
-if (-not $env:PIP_INDEX_URL) { $env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple" }
-python -m pip install --require-hashes -r requirements-bootstrap.txt
-python -m pip install --require-hashes -r requirements-dev-lock.txt
-python -m pip check
-python -m pytest --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=75
-python -m ruff check .
-python -m ruff format --check .
-python -m bandit -q -r app.py config.py data desktop engine ui tools --severity-level medium --confidence-level medium
-python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-lock.txt
-python -m pip_audit --strict --progress-spinner off --require-hashes -r requirements-dev-lock.txt
-python -m build --wheel --no-isolation
-$desktopSigningKey = 'C:\safe\ds-dcf-desktop-update-signing-key.properties'
-python -m tools.build_desktop --signing-private-key $desktopSigningKey
+.venv\Scripts\python.exe -m pytest `
+  --ignore=tests/test_android_release.py `
+  --ignore=tests/test_build_desktop.py `
+  --ignore=tests/test_desktop_installer.py `
+  --ignore=tests/test_desktop_launcher.py `
+  --ignore=tests/test_desktop_updater.py `
+  --ignore=tests/test_streamlit_app.py `
+  --ignore=tests/test_ui.py `
+  -m "not desktop and not android and not parked_client"
+.venv\Scripts\python.exe -m ruff check .
+.venv\Scripts\python.exe -m ruff format --check .
+node --check cloudflare-cron/worker.js
+node --check cloudflare/quant-dashboard/pages_worker.js
+node --check cloudflare/quant-dashboard/refresh_worker.js
 ```
 
-使用 `python -m tools.build_desktop --desktop` 交付时，所有版本化制品必须进入桌面 `6BUYING_POINT/<版本>/`：应用目录固定为 `app/`，并同放可双击的 `DS_DCF-v<版本>-windows-x64-installer.exe`、便携 ZIP 和该版本更新清单；稳定快捷方式固定放在 `6BUYING_POINT/DS_DCF.lnk`。安装器必须在不需要管理员权限的当前用户目录内先完成内置 ZIP 的字节数、SHA256、内部版本清单与安全路径校验，才允许首次安装。不得重新把版本目录、ZIP、安装器或快捷方式散放到桌面根目录。
+## Cloudflare 网站部署
 
-构建后还必须把唯一 wheel 安装到仓库外的空目录，并从该目录导入 `data.industry` 与 `tools.run_full_audit`，确认行业 JSON 和审计入口确实打入制品。wheel 是库/导入完整性制品，不是桌面运行包；根目录 `.streamlit/config.toml` 仅由受控的源码桌面包携带。随后检查 `git status --short`、`git ls-files --eol` 和下述禁入清单；固定种子沪深 eligible universe 审计必须在代码树干净且提交已确定时生成。最终源码压缩包必须从干净提交的 tracked files 构造，并执行 `python -m tools.verify_release_zip <zip路径>`；该检查会验证禁入文件、行尾、schema、沪深随机 100 身份及审计哈希与包内代码/规则/行业/依赖完全一致，禁止直接压缩含缓存的工作目录。
+`.github/workflows/deploy-cloudflare.yml` 只接受成功的 `tests` workflow_run，不提供手动绕过入口。部署前再次确认事件 SHA 是当前远端 `main`，旧排队任务只做成功 no-op。
 
-Windows 运行制品由 `python -m tools.build_desktop --signing-private-key <仓库外桌面私钥>` 使用固定版本 PyInstaller 构建。桌面私钥必须独立于 Android 市场数据私钥；可用 `pwsh -NoProfile -File tools/generate_p256_signing_key.ps1 -Output <仓库外路径> -EnvironmentVariableName DS_DCF_DESKTOP_SIGNING_PRIVATE_KEY_BASE64` 一次性生成，生成器拒绝覆盖已有文件且只向标准输出写公钥。构建器依次运行 EXE 的 `--version`、资源 `--health-check`，并让冻结 EXE 真正拉起 Streamlit 子进程、等待本机健康端点返回 `ok`；三项全部通过后才生成包含内部发布清单的便携 ZIP。随后构建一份单文件安装器，安装器内嵌同一 ZIP 与更新清单，并实际执行 `--version` 和只读 `--verify-bundle`。公开 CI 的 Windows/Python 3.13 门禁使用 `python -m tools.build_desktop --ci-smoke --output-root build/ci-smoke-output --work-root build/ci-smoke-work` 复用上述可执行文件与安装器冒烟链，但该模式只允许 `GITHUB_ACTIONS=true`，拒绝桌面交付、发布 URL 和任何签名输入，并且不会生成可发布更新清单或签名；正式默认路径仍在缺少私钥时失败。`--desktop` 仅把已经验证的目录、ZIP、安装器、更新清单和稳定快捷方式复制到当前用户桌面。桌面启动器只监听 `127.0.0.1`，缓存保存在 `%LOCALAPPDATA%\DS_DCF\cache`。上次成功分析结果仅在快照制品 SHA256、规则状态哈希、schema 和公司身份全部一致时恢复；任何不一致都会拒绝复用。更新必须来自配置的 HTTPS 清单，先以应用内固定桌面公钥验证独立签名，再按包大小和 SHA256 校验 ZIP 路径、大小、压缩率、内部版本和 EXE 身份，并安装到桌面 `6BUYING_POINT/<版本>/app/`，同时保留经校验的便携 ZIP。环境变量、`6BUYING_POINT/update_config.json`、随包配置按此顺序选择更新源；已有目标版本还会逐文件复核，任何额外、缺失或被篡改文件都会拒绝当成已安装版本。不得用 HTTP、无签名、无哈希下载或原地覆盖旧版本替代该流程。
+同一部署依次更新：
 
-证监会行业源只能由 `tools/build_official_industry_source.py` 从官方代码排序 PDF 确定性生成。生成器会核验 PDF SHA256、最少记录数、代码唯一性和门类代码映射；期后新股的补录 JSON 必须保存交易所文件 URL、SHA256、页码和行业代码。任何手工改写但无法回溯到这些来源的数据都不能进入发布包。
+1. `quant-market-refresh`：验证签名 Release 数据并镜像到 R2/D1；
+2. `ds-dcf-dispatch`：工作日收盘数据构建调度器；
+3. Pages advanced-mode worker：公开页面与 GET-only API；
+4. `/api/methodology`、`/api/health`、`/api/health?deep=1`、`/api/meta` 与首页在线验收。
 
-Type 7 的五份权威规则源位于模型编制环境的 `E:\模板汇总MD`：`第1模板.md`=`98D8A101A08CDB122AFD23C793FAA3EDF5E4E426EAE09E7FC20901476EA95B1D`，`第5模板.md`=`37A9CD43633BCD0BC1F2811738D48A7D1CFF659E5EF11B6FD9152F2ED0686946`，`补丁5.md`=`8E1C5114BE74254D686AC2B65EC7B3563E09F6C3B3F9A82B43E4D60A84CA42A4`，`补丁6.md`=`AA6A5B27E279B324A304A6BEA2C6FBA9AF6DC015F81ADB758329137B4E28B8F6`，`后续附加补丁们.md`=`0DEA9125BBE2039ACF741AC997E62B53C49B6E3DC32E7D956ED96F9D7054B64F`。最后一份文件提供当前“先归类、再按类内12项评分”的第七类规则；前三份旧账本仍用于非决策诊断。路径只作编制记录，审计与发布校验绑定全部五个哈希。
+Cloudflare Cron 使用 UTC 和无歧义 weekday 名称：调度器为 `15 8 * * MON-FRI`，恢复镜像为 `0 15 * * MON-FRI`。GitHub Actions 自身保留 `17 8 * * 1-5` 作为调度兜底；两种平台的数字星期语义不同，不得互相照抄。
+
+Cloudflare 账户令牌只注入三个 Wrangler 部署 step；refresh key、GitHub dispatch token 和签名私钥也只注入各自消费 step。
+
+## 市场数据生产与发布
+
+`.github/workflows/mobile-market-data.yml` 的兼容文件名保持不变，实际职责是发布网站市场数据。生产顺序为：
+
+1. `preflight`：确认本次 SHA 仍是远端 `main`，并通过 GitHub API 证明同一 SHA 的 `tests.yml` 已成功；休市或已发布交易日可安全 no-op。
+2. `build`：加载上次验证快照与合同化缓存，完成抓取、评分、独立审计、签名和完整分片校验。
+3. `publish`：先上传不可变 Release 资产，校验当前与上一完整 generation；不覆盖同名不同字节资产。
+4. `prepare_pages`：构建包含 manifest、catalogue、signals、16 个详情分片和签名的完整 Pages artifact。
+5. `deploy_pages`：切换 stable manifest 前再次确认远端 `main == GITHUB_SHA`；main 已前进时失败关闭，已上传的不可变资产保持无害。
+6. `mirror_cloudflare`：调用 refresh Worker，等待 D1/R2 与公开 API 收敛到精确 generation。
+7. `verify_cleanup`：通过公开 URL 复核签名、哈希、大小、分片和深度健康，再只清理旧 market generation 资产。
+8. `archive_manifest`：将已验证 manifest、签名和 SHA256 记录到 `mobile-data` 审计分支，不修改 `main`。
+
+任一阶段失败都不得用旧数据冒充新数据，也不得把空响应、缺失字段或抓取错误写成数值 0。
+
+## 本地住宅 IP 证据包
+
+GitHub Runner 出口受限时，本地只负责采集慢变证据，不在本机评分、签名或直接写 Cloudflare。内容寻址证据包的标准流程为：
+
+```powershell
+.venv\Scripts\python.exe -m tools.evidence_bundle collect `
+  --as-of YYYY-MM-DD `
+  --codes-file data\cache\tdx3d_gap_codes.json `
+  --sources segment,quality,research `
+  --segment-provider eastmoney `
+  --max-workers 4
+.venv\Scripts\python.exe -m tools.evidence_bundle bundle --as-of YYYY-MM-DD
+$bundleName = .venv\Scripts\python.exe -m tools.evidence_bundle resolve `
+  --pointer build\evidence-bundle\evidence-cache-pointer.json `
+  --expected-as-of YYYY-MM-DD
+.venv\Scripts\python.exe -m tools.evidence_bundle verify `
+  --pointer build\evidence-bundle\evidence-cache-pointer.json `
+  --bundle (Join-Path build\evidence-bundle $bundleName) `
+  --expected-as-of YYYY-MM-DD
+```
+
+发布时必须先上传不可变 `evidence-cache-<sha256>.zip`，从 Release 重新下载并完整验证，最后才原子覆盖 `evidence-cache-pointer.json`。pointer 缺失时流水线可回退 Actions cache；pointer 存在但非法、摘要不符或导入失败时必须失败，不能静默退回。旧 mutable cache ZIP 只能在新证据包已导入、市场数据 generation 已发布且线上深度健康通过后删除。
+
+`a-stock-data` 只作为端点和故障经验参考。生产不整体引入其 Skill、`mootdx` 或关闭 TLS 的实现；新浪财报备用源已经按本项目合同重写，只针对东财留下的精确 TTM 字段缺口调用。
+
+## 数据与模型审计
+
+权威数据链要求：
+
+- 行情身份、交易日期/时刻、获取时间、上市日期来源、报告期合同和公司资格可追溯；
+- 非金融企业严格按 `FY + current YTD - prior YTD` 重构 TTM 收入与 CFO-Capex；金融企业使用独立 justified P/B；
+- CAPEX 必须来自可验证的直接披露或可复算现金流恒等式，负重构值与缺失值不得改成 0；
+- 七类型结果保存固定子分、理由、分数边界、硬否决和待补证据；补丁 7 的价格/乐观估值闸门缺口必须由生产重放、独立全市场审计和发布 ZIP 验证共同确认；
+- 普通发布允许上游确实不存在的事实继续显示“资料不足”，但不得把未决公司隐藏为确定不符合。
+
+固定种子审计：
+
+```powershell
+.venv\Scripts\python.exe -m tools.run_full_audit --seed 20260715 --sample-size 100
+.venv\Scripts\python.exe -m tools.run_full_audit --require-complete-evidence --seed 20260715 --sample-size 100
+```
+
+`--require-complete-evidence` 是理想零缺口审计，不是日常发布承诺。真实无历史、无盈利、机构不覆盖或需持仓确认的缺口应保持可见，不为降低缺口数而放松模型。
+
+## 发布与回滚验收
+
+提交到 `main` 后按以下顺序收口：
+
+1. 等待同一 SHA 的 `tests`、两个网站门禁和聚合 gate 全部成功；
+2. 等待自动 Cloudflare 部署成功，确认不是 stale no-op；
+3. 激活并公开复核本地证据包；
+4. 手动运行网站市场数据工作流，`rebuild_latest_closed=true`、`force_gap_refresh=false`；
+5. 确认 `/api/meta` 的 `source_commit` 等于最终 SHA，`/api/health?deep=1` 为 `integrity_ok=true`、`stale=false`；
+6. 验证 catalogue index、至少一家公司详情、搜索/筛选/详情抽屉和移动视口；
+7. 最后删除已无引用的旧 mutable cache ZIP。
+
+Cloudflare 页面代码回滚应回到最近已通过 `tests` 的 main 提交并等待自动部署。市场数据不通过修改 D1 指针手工拼接；保留上一完整 generation，由正式签名发布/镜像流程恢复。
 
 ## 发布卫生
 
-发行包不得包含：
-
-- `.reasonix/` 内部运行日志与状态；
-- `__pycache__/`、`.pyc`、`.pyo`；
-- `data/cache/` 下除 `.gitkeep` 外的运行时缓存；
-- pickle、parquet、本地 secrets、coverage 和临时文件。
-
-`.gitignore` 只防止新文件加入，不能移除已经跟踪的历史文件。发布前必须先从 Git 索引移除既有运行时产物，同时保留需要的本地缓存；CI 会检查并拒绝任何仍被跟踪的产物。
-
-`.gitattributes` 规定源码、Markdown、JSON、YAML、TOML 和文本文件在仓库及工作树中统一为 LF，Windows `bat/cmd` 启动器工作树使用 CRLF，图片、字体、Office、PDF、pickle 和 parquet 明确按二进制处理。首次引入该策略时应由维护者执行一次 `git add --renormalize .` 并人工检查 diff；CI 会使用 `git ls-files --eol` 拒绝违反策略的已跟踪文件。
+仓库不得跟踪私钥、token、`.env`、`__pycache__`、运行缓存、coverage、构建目录、压缩包或本地代理状态。`data/cache/` 仅允许 `.gitkeep`。本地 `build/evidence-bundle/` 与抓取缓存保持 ignored；上传 Release 不等于加入 Git。

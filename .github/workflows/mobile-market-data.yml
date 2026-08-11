@@ -1,4 +1,4 @@
-name: publish mobile market data
+name: publish website market data
 
 on:
   schedule:
@@ -32,6 +32,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
     outputs:
       should_run: ${{ steps.guard.outputs.should_run }}
@@ -96,6 +97,36 @@ jobs:
             return
           }
           & .\tools\mobile_market_workflow_guard.ps1 -EventName '${{ github.event_name }}'
+
+      - name: Verify the current main revision passed the website gate
+        if: steps.guard.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw 'The current main revision is malformed.'
+          }
+          $apiPath = "repos/$env:GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?branch=main&status=success&per_page=100"
+          $responseText = @(gh api $apiPath 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            $detail = (($responseText | ForEach-Object { [string]$_ }) -join ' ').Trim()
+            throw "Could not verify the website gate for $($env:GITHUB_SHA): $detail"
+          }
+          $response = (($responseText | ForEach-Object { [string]$_ }) -join "`n") | ConvertFrom-Json -Depth 20
+          $verifiedRun = @(
+            $response.workflow_runs | Where-Object {
+              [string]$_.head_sha -ceq $env:GITHUB_SHA -and [string]$_.conclusion -ceq 'success'
+            }
+          ) | Select-Object -First 1
+          if ($null -eq $verifiedRun -or [long]$verifiedRun.id -le 0) {
+            throw "No successful tests workflow exists for $($env:GITHUB_SHA); refusing market-data publication."
+          }
+          Write-Host "Website gate verified by tests run $([long]$verifiedRun.id)."
 
   build:
     if: github.ref == 'refs/heads/main' && needs.preflight.outputs.should_run == 'true'
@@ -640,7 +671,7 @@ jobs:
           "MOBILE_SIGNATURE_NAME=$signatureName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_DETAIL_NAMES=$($detailNames -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Sign the exact market manifest and verify the app-pinned key
+      - name: Sign the exact market manifest and verify the website trust anchor
         shell: pwsh
         env:
           MOBILE_DATA_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.MOBILE_DATA_SIGNING_PRIVATE_KEY_BASE64 }}
@@ -650,29 +681,23 @@ jobs:
           $signature = Join-Path $env:MOBILE_DATA_DIR $env:MOBILE_SIGNATURE_NAME
           & .\tools\sign_mobile_manifest.ps1 -Manifest $manifest -Output $signature
           if (-not (Test-Path -LiteralPath $signature -PathType Leaf)) {
-            throw 'Could not sign the mobile market manifest.'
+            throw 'Could not sign the website market manifest.'
           }
           $signatureSize = (Get-Item -LiteralPath $signature).Length
           if ($signatureSize -lt 64 -or $signatureSize -gt 128) {
             throw "Unexpected ECDSA signature size: $signatureSize"
           }
 
-          $androidSource = Get-Content -LiteralPath 'android/app/src/main/java/com/muguett/dsdcf/MarketRepository.java' -Raw
-          $keyMatch = [regex]::Match(
-            $androidSource,
-            'MOBILE_SIGNING_PUBLIC_KEY_BASE64\s*=\s*"(?<key>[A-Za-z0-9+/=]+)"\s*;',
-            [Text.RegularExpressions.RegexOptions]::Singleline
-          )
-          if (-not $keyMatch.Success) {
-            throw 'Could not read the public market-data signing key pinned by the Android client.'
-          }
-          $publicKey = [Convert]::FromBase64String($keyMatch.Groups['key'].Value)
+          $publicKeyBase64 = (
+            Get-Content -LiteralPath 'cloudflare/quant-dashboard/market_signing_public_key.txt' -Raw
+          ).Trim()
+          $publicKey = [Convert]::FromBase64String($publicKeyBase64)
           $verifier = [Security.Cryptography.ECDsa]::Create()
           try {
             $bytesRead = 0
             $verifier.ImportSubjectPublicKeyInfo($publicKey, [ref]$bytesRead)
             if ($bytesRead -ne $publicKey.Length) {
-              throw 'The Android public market-data signing key contains trailing data.'
+              throw 'The website public market-data signing key contains trailing data.'
             }
             $valid = $verifier.VerifyData(
               [IO.File]::ReadAllBytes($manifest),
@@ -681,7 +706,7 @@ jobs:
               [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
             )
             if (-not $valid) {
-              throw 'The workflow signing secret does not match the public key pinned by the Android client.'
+              throw 'The workflow signing secret does not match the website market-data trust anchor.'
             }
           } finally {
             $verifier.Dispose()
@@ -791,9 +816,6 @@ jobs:
       detail_names: ${{ steps.release.outputs.detail_names }}
       previous_assets: ${{ steps.release.outputs.previous_assets }}
       previous_manifest_state: ${{ steps.release.outputs.previous_manifest_state }}
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -910,16 +932,10 @@ jobs:
               throw "Transferred payload $($entry[1]) does not match the signed manifest."
             }
           }
-          $androidSource = Get-Content -LiteralPath 'android/app/src/main/java/com/muguett/dsdcf/MarketRepository.java' -Raw
-          $keyMatch = [regex]::Match(
-            $androidSource,
-            'MOBILE_SIGNING_PUBLIC_KEY_BASE64\s*=\s*"(?<key>[A-Za-z0-9+/=]+)"\s*;',
-            [Text.RegularExpressions.RegexOptions]::Singleline
-          )
-          if (-not $keyMatch.Success) {
-            throw 'Could not read the public market-data signing key pinned by the Android client.'
-          }
-          $publicKey = [Convert]::FromBase64String($keyMatch.Groups['key'].Value)
+          $publicKeyBase64 = (
+            Get-Content -LiteralPath 'cloudflare/quant-dashboard/market_signing_public_key.txt' -Raw
+          ).Trim()
+          $publicKey = [Convert]::FromBase64String($publicKeyBase64)
           $verifier = [Security.Cryptography.ECDsa]::Create()
           try {
             $bytesRead = 0
@@ -932,7 +948,7 @@ jobs:
               [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
             )
             if (-not $valid) {
-              throw 'Transferred manifest signature does not match the app-pinned key.'
+              throw 'Transferred manifest signature does not match the website market-data trust anchor.'
             }
           } finally {
             $verifier.Dispose()
@@ -941,11 +957,14 @@ jobs:
           "MOBILE_SIGNALS_NAME=$signalsName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_SIGNATURE_NAME=$signatureName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_DETAIL_NAMES=$($detailNames -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "MOBILE_PUBLIC_KEY=$($keyMatch.Groups['key'].Value)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MOBILE_PUBLIC_KEY=$publicKeyBase64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish immutable payload assets and validate the previous generation
         id: release
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
@@ -1009,7 +1028,7 @@ jobs:
             $lastReleaseCreateFailure = $lastReleaseProbeFailure
             for ($attempt = 1; $attempt -le $releaseQueryAttemptLimit; $attempt++) {
               $createOutput = @(
-                gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF mobile market data' --notes 'Automated post-close market snapshot for the DS_DCF mobile client.' 2>&1
+                gh release create $tag --repo $env:GH_REPO --target $env:GITHUB_SHA --prerelease --title 'DS_DCF website market data' --notes 'Automated post-close market snapshot for quant.custard.top.' 2>&1
               )
               $createExitCode = $LASTEXITCODE
               if ($createExitCode -eq 0) {
@@ -1533,7 +1552,7 @@ jobs:
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="referrer" content="no-referrer">
-            <title>DS_DCF 移动数据服务</title>
+            <title>DS_DCF 网站市场数据服务</title>
             <style>
               body { max-width: 42rem; margin: 4rem auto; padding: 0 1.25rem; font: 16px/1.7 system-ui, sans-serif; color: #172033; }
               main { border: 1px solid #d8dfeb; border-radius: 14px; padding: 1.5rem; background: #f8fafc; }
@@ -1542,10 +1561,10 @@ jobs:
           </head>
           <body>
             <main>
-              <h1>DS_DCF 移动数据服务</h1>
-              <p>这里发布沪深收盘后通过完整质量检查并签名的只读数据。Android 客户端不会在手机上计算估值或生成买入结论。</p>
+              <h1>DS_DCF 网站市场数据服务</h1>
+              <p>这里发布沪深收盘后通过完整质量检查并签名的只读数据，供 quant.custard.top 使用。</p>
               <p><a href="mobile-data/manifest.json">查看当前签名数据清单</a></p>
-              <p><a href="https://github.com/Muguett-DBY/quant-buy-signals/releases">查看官方安装包与历史版本</a></p>
+              <p><a href="https://github.com/Muguett-DBY/quant-buy-signals/releases">查看不可变数据资产与历史版本</a></p>
             </main>
           </body>
           </html>
@@ -1602,12 +1621,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Refuse a stable switch after main advances
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$(gh api "repos/${{ github.repository }}/commits/main" --jq '.sha')"
+          if [[ ! "${remote}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Could not confirm the current remote main revision." >&2
+            exit 1
+          fi
+          if [[ "${remote}" != "${GITHUB_SHA}" ]]; then
+            echo "Remote main advanced to ${remote:0:12}; refusing to switch the stable market-data manifest from ${GITHUB_SHA:0:12}." >&2
+            exit 1
+          fi
+
       - name: Atomically switch the stable mobile manifest
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
@@ -1623,9 +1659,6 @@ jobs:
     # this cap covers their combined worst-case transport budget.
     timeout-minutes: 60
     permissions: {}
-    env:
-      REFRESH_URL: https://quant-market-refresh.1203135430.workers.dev/refresh
-      REFRESH_KEY: ${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}
     steps:
       - name: Download the exact published generation
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1635,6 +1668,9 @@ jobs:
 
       - name: Mirror and verify the public Cloudflare dashboard
         shell: bash
+        env:
+          REFRESH_URL: https://quant-market-refresh.1203135430.workers.dev/refresh
+          REFRESH_KEY: ${{ secrets.CLOUDFLARE_MARKET_REFRESH_KEY }}
         run: |
           set -euo pipefail
           if [[ -z "${REFRESH_KEY}" ]]; then
@@ -1752,8 +1788,6 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
       MOBILE_CATALOG_NAME: ${{ needs.publish.outputs.catalogue_name }}
       MOBILE_SIGNALS_NAME: ${{ needs.publish.outputs.signals_name }}
       MOBILE_SIGNATURE_NAME: ${{ needs.publish.outputs.signature_name }}
@@ -1775,6 +1809,8 @@ jobs:
 
       - name: Verify the public Pages switch and immutable downloads
         shell: pwsh
+        env:
+          GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
           $manifest = Join-Path $env:MOBILE_DATA_DIR 'manifest.json'
@@ -1855,6 +1891,9 @@ jobs:
 
       - name: Retain only the current and previous complete generations
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
@@ -1954,15 +1993,13 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
     steps:
       - name: Check out the verified main revision
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Select or safely initialize the data audit branch
         shell: bash
@@ -2044,6 +2081,9 @@ jobs:
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
 
       - name: Record the signed generation without changing main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
@@ -2092,6 +2132,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git
           git add -- latest
           if git diff --cached --quiet; then
             echo "The signed mobile generation is already archived."

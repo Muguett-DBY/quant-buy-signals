@@ -5,8 +5,8 @@ param(
   [string]$EventName,
 
   [string]$CalendarPath = (Join-Path $PSScriptRoot 'china_a_share_trading_calendar.json'),
-  [string]$AndroidSourcePath = (
-    Join-Path (Split-Path -Parent $PSScriptRoot) 'android/app/src/main/java/com/muguett/dsdcf/MarketRepository.java'
+  [string]$PublicKeyPath = (
+    Join-Path (Split-Path -Parent $PSScriptRoot) 'cloudflare/quant-dashboard/market_signing_public_key.txt'
   ),
   [string]$ManifestUrl = 'https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json',
   [string]$ReleaseBaseUrl = (
@@ -358,7 +358,7 @@ function Expand-StrictGzipJson([string]$Path, [string]$Label) {
     $buffer = [byte[]]::new(65536)
     while (($read = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {
       if ($output.Length + $read -gt $script:MaximumUncompressedPayloadBytes) {
-        throw "$Label exceeds the Android uncompressed byte limit."
+        throw "$Label exceeds the website market-data uncompressed byte limit."
       }
       $output.Write($buffer, 0, $read)
     }
@@ -395,13 +395,13 @@ function Assert-AnalysisQuality([object]$Snapshot, [long]$CompanyCount, [string]
     Get-RequiredProperty $quality 'score_coverage' "$Label analysis quality"
   ) "$Label score_coverage"
   if ($coverage -lt 0.99 -or $coverage -gt 1.0) {
-    throw "$Label analysis score coverage is outside the Android acceptance range."
+    throw "$Label analysis score coverage is outside the website acceptance range."
   }
 }
 
 function Assert-SharedSnapshotFields([object]$Manifest, [object]$Payload, [string]$Label) {
   if ((ConvertTo-RequiredInteger (Get-RequiredProperty $Payload 'schema_version' $Label) "$Label schema_version") -ne 1) {
-    throw "$Label schema version is unsupported by the Android client."
+    throw "$Label schema version is unsupported by the website market-data contract."
   }
   if ([string](Get-RequiredProperty $Payload 'product' $Label) -cne 'DS_DCF') {
     throw "$Label product identity is invalid."
@@ -528,7 +528,7 @@ function Assert-MobilePayloadContract(
   [DateTimeOffset]$ShanghaiNow
 ) {
   if ((ConvertTo-RequiredInteger (Get-RequiredProperty $Manifest 'schema_version' 'Published manifest') 'manifest schema_version') -ne 1) {
-    throw 'Published manifest schema version is unsupported by the Android client.'
+    throw 'Published manifest schema version is unsupported by the website market-data contract.'
   }
   if ([string](Get-RequiredProperty $Manifest 'product' 'Published manifest') -cne 'DS_DCF') {
     throw 'Published manifest product identity is invalid.'
@@ -549,7 +549,7 @@ function Assert-MobilePayloadContract(
     [Globalization.DateTimeStyles]::RoundtripKind
   )
   if ($dataTimestamp -gt $ShanghaiNow.ToUniversalTime().Add($script:MaximumFutureClockSkew)) {
-    throw 'Published generation timestamp is later than the Android future-clock allowance.'
+    throw 'Published generation timestamp is later than the website future-clock allowance.'
   }
 
   $companies = @(Get-RequiredProperty $Catalogue 'companies' 'Published catalogue')
@@ -561,7 +561,7 @@ function Assert-MobilePayloadContract(
     $companyCount -lt $script:MinimumCompanyCount -or
     $companyCount -gt $script:MaximumCompanyCount
   ) {
-    throw 'Published catalogue company count is outside the Android acceptance range.'
+    throw 'Published catalogue company count is outside the website acceptance range.'
   }
   Assert-AnalysisQuality $Manifest $companyCount 'Published manifest'
   Assert-AnalysisQuality $Catalogue $companyCount 'Published catalogue'
@@ -930,16 +930,8 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
       throw 'Published catalogue and signals unexpectedly have identical bytes.'
     }
 
-    $androidSource = Get-Content -LiteralPath $AndroidSourcePath -Raw -Encoding utf8
-    $keyMatch = [regex]::Match(
-      $androidSource,
-      'MOBILE_SIGNING_PUBLIC_KEY_BASE64\s*=\s*"(?<key>[A-Za-z0-9+/=]+)"\s*;',
-      [Text.RegularExpressions.RegexOptions]::Singleline
-    )
-    if (-not $keyMatch.Success) {
-      throw 'Android client signing key is unavailable.'
-    }
-    $publicKey = [Convert]::FromBase64String($keyMatch.Groups['key'].Value)
+    $publicKeyBase64 = (Get-Content -LiteralPath $PublicKeyPath -Raw -Encoding utf8).Trim()
+    $publicKey = [Convert]::FromBase64String($publicKeyBase64)
     $verifier = [Security.Cryptography.ECDsa]::Create()
     try {
       $bytesRead = 0
@@ -951,7 +943,7 @@ function Test-PublishedGeneration([DateTimeOffset]$ShanghaiNow) {
         [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
       )
       if (-not $valid) {
-        throw 'Published manifest signature does not match the Android client key.'
+        throw 'Published manifest signature does not match the website market-data key.'
       }
     } finally {
       $verifier.Dispose()

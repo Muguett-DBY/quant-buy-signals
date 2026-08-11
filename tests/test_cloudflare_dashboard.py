@@ -431,6 +431,37 @@ def test_dashboard_health_separates_light_freshness_from_explicit_deep_asset_che
     assert "数据生成时间距今不超过36小时" not in source
 
 
+def test_dashboard_rejects_write_methods_and_advertises_get_and_head():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute dashboard method routes"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+
+for (const method of ["POST", "OPTIONS"]) {
+  const response = await worker.fetch(new Request("https://dashboard.test/api/meta", { method }), {});
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "GET, HEAD");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(await response.json(), { error: "只读接口不接受写请求" });
+}
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
 def test_dashboard_health_is_light_by_default_and_deep_checks_assets_on_demand():
     source = DASHBOARD.read_text(encoding="utf-8")
     node = shutil.which("node")

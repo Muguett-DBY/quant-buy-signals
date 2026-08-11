@@ -12,6 +12,9 @@ import pytest
 from desktop import launcher
 
 
+pytestmark = pytest.mark.desktop
+
+
 @pytest.mark.parametrize(
     ("error", "operation", "expected"),
     [

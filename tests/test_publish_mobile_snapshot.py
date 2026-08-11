@@ -681,7 +681,7 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     monkeypatch.setattr(
         publisher,
         "_analysis_coverage_summary",
-        lambda _scores: {
+        lambda _scores, _dcf_results=None: {
             "goal_readiness": {gate: True for gate in publisher._MOBILE_STRUCTURAL_EVIDENCE_GATES} | {"ready": False}
         },
     )
@@ -719,7 +719,10 @@ def test_mobile_screening_gate_publishes_honest_gaps_but_rejects_broken_records(
     monkeypatch.setattr(
         publisher,
         "_analysis_coverage_summary",
-        lambda _scores: {"goal_readiness": dict(readiness), "quantitative_evidence_gap_examples": []},
+        lambda _scores, _dcf_results=None: {
+            "goal_readiness": dict(readiness),
+            "quantitative_evidence_gap_examples": [],
+        },
     )
 
     published = publisher._mobile_screening_coverage(pd.DataFrame([{"code": "000001"}]))
@@ -736,7 +739,7 @@ def test_mobile_screening_gate_publishes_honest_gaps_but_rejects_broken_records(
         monkeypatch.setattr(
             publisher,
             "_analysis_coverage_summary",
-            lambda _scores, payload=broken: {"goal_readiness": payload},
+            lambda _scores, _dcf_results=None, payload=broken: {"goal_readiness": payload},
         )
         with pytest.raises(RuntimeError, match=gate):
             publisher._mobile_screening_coverage(pd.DataFrame([{"code": "000001"}]))

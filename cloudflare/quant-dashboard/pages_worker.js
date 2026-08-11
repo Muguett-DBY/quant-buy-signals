@@ -629,7 +629,7 @@ function catalogueIndexCacheRequest(request,generationId){const cacheUrl=new URL
 async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,securedResponse(hit))}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
 export default{
   async fetch(request,env){
-    if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405);
+    if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405,{allow:"GET, HEAD"});
     const url=new URL(request.url),path=url.pathname;
     try{
       if(path==="/"||path==="/index.html")return dashboardHtmlResponse(request);

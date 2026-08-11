@@ -272,12 +272,19 @@ def _require_post_close_quotes(snapshot: object, market_as_of: str) -> float:
     return coverage
 
 
-def _mobile_screening_coverage(scores: object) -> dict[str, object]:
+def _mobile_screening_coverage(
+    scores: object,
+    dcf_results: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     """Require replayable score records while publishing honest source gaps."""
 
     if not isinstance(scores, pd.DataFrame):
         raise RuntimeError("whole-market screening result is not a score frame")
-    coverage = _analysis_coverage_summary(scores)
+    coverage = (
+        _analysis_coverage_summary(scores, dcf_results)
+        if dcf_results is not None
+        else _analysis_coverage_summary(scores)
+    )
     readiness = coverage.get("goal_readiness")
     if not isinstance(readiness, Mapping):
         raise RuntimeError("whole-market screening evidence contract is missing")
@@ -815,7 +822,7 @@ def publish_mobile_snapshot(
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")
     if not isinstance(analysis.quality, Mapping) or analysis.quality.get("ok") is not True:
         raise RuntimeError("whole-market analysis quality gate did not pass")
-    screening_coverage = _mobile_screening_coverage(analysis.scores)
+    screening_coverage = _mobile_screening_coverage(analysis.scores, analysis.dcf_results)
 
     active_payload_sha256 = getattr(snapshot, "baseline_payload_sha256", None)
     if snapshot.source == "network":

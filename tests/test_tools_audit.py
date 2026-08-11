@@ -468,6 +468,30 @@ def _outcome_payload(type_key, outcome, *, ledger=None):
     return payload
 
 
+def _patch7_pending_payload():
+    outcomes = {type_key: bs._not_applicable(type_key, "补丁7审计夹具不适用") for type_key in bs.TYPE_WEIGHTS}
+    scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type3"]}
+    outcomes["type3"] = bs._finish(
+        "type3",
+        scores,
+        {key: "补丁7前已核验分项" for key in scores},
+    )
+    gated = bs._apply_patch7_total_gate(
+        outcomes,
+        {"price": 25.0},
+        {"zone": "观察区", "bubble_warning": False, "dcf_points": {"optimistic": {}}},
+        {"ALL": {}},
+    )
+    return _outcome_payload("type3", gated["type3"])
+
+
+def _patch7_fact_context(*, price=25.0, optimistic_upper=None):
+    company = {"price": price}
+    optimistic = {} if optimistic_upper is None else {"upper": optimistic_upper}
+    dcf_result = {"dcf_points": {"optimistic": optimistic}}
+    return company, dcf_result
+
+
 def _complete_framework_row(*, quantitative_evidence=...):
     row = {
         "code": "000001",
@@ -705,6 +729,166 @@ def test_independent_decision_replay_rejects_tampering_and_preserves_type3_theor
 
     payload["decision"]["score_upper_bound"] = 6.0
     assert run_full_audit._independent_decision_replay("type3", payload) is None
+
+
+def test_independent_decision_replay_preserves_patch7_non_score_requirement_ledger():
+    payload = _patch7_pending_payload()
+    company, dcf_result = _patch7_fact_context()
+
+    assert payload["reasons"]["_decision_missing_requirements"] == ["patch7_optimistic_upper"]
+    assert payload["decision"]["missing_dimensions"] == []
+    assert payload["decision"]["score_lower_bound"] == 8.0
+    assert payload["decision"]["score_upper_bound"] == 8.0
+
+    replayed = run_full_audit._independent_decision_replay(
+        "type3",
+        payload,
+        company=company,
+        dcf_result=dcf_result,
+    )
+    assert replayed is not None
+    assert {key: replayed[key] for key in payload["decision"]} == payload["decision"]
+    assert replayed["visible"] is True
+    assert replayed["recall_safe"] is True
+
+    row = _complete_framework_row(quantitative_evidence=_quantitative_evidence())
+    row.update(company)
+    row["type3"] = payload
+    summary = run_full_audit._analysis_coverage_summary(
+        pd.DataFrame([row]),
+        {row["code"]: dcf_result},
+    )
+    contract = summary["framework_evidence_contract"]["type3"]
+    assert contract["valid_decision"] == 1
+    assert contract["invalid_decision"] == 0
+
+    forged_summary = run_full_audit._analysis_coverage_summary(
+        pd.DataFrame([row]),
+        {row["code"]: {"dcf_points": {"optimistic": {"upper": 30.0}}}},
+    )
+    forged_contract = forged_summary["framework_evidence_contract"]["type3"]
+    assert forged_contract["valid_decision"] == 0
+    assert forged_contract["invalid_decision"] == 1
+
+    markerless_row = deepcopy(row)
+    markerless_row["type3"]["reasons"].pop("_decision_missing_requirements")
+    markerless_summary = run_full_audit._analysis_coverage_summary(
+        pd.DataFrame([markerless_row]),
+        {row["code"]: dcf_result},
+    )
+    markerless_contract = markerless_summary["framework_evidence_contract"]["type3"]
+    assert markerless_contract["valid_decision"] == 0
+    assert markerless_contract["invalid_decision"] == 1
+
+
+def test_independent_decision_replay_rejects_patch7_requirements_that_disagree_with_outer_facts():
+    payload = _patch7_pending_payload()
+
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company={"price": 25.0},
+            dcf_result={"dcf_points": {"optimistic": {"upper": 30.0}}},
+        )
+        is None
+    )
+
+    payload = _patch7_pending_payload()
+    payload["reasons"].pop("_decision_missing_requirements")
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company={"price": 25.0},
+            dcf_result={"dcf_points": {"optimistic": {}}},
+        )
+        is None
+    )
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company={"price": None},
+            dcf_result={"dcf_points": {"optimistic": {}}},
+        )
+        is None
+    )
+
+    payload["reasons"]["_decision_missing_requirements"] = ["patch7_current_price"]
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company={"price": 25.0},
+            dcf_result={"dcf_points": {"optimistic": {"upper": 30.0}}},
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_requirements",
+    [
+        [],
+        ["patch7_current_price", "patch7_current_price"],
+        ["unknown_requirement"],
+        [1],
+        "patch7_current_price",
+        {"patch7_current_price": True},
+    ],
+)
+def test_independent_decision_replay_rejects_malformed_patch7_requirement_ledgers(invalid_requirements):
+    payload = _patch7_pending_payload()
+    payload["reasons"]["_decision_missing_requirements"] = invalid_requirements
+    company, dcf_result = _patch7_fact_context()
+
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company=company,
+            dcf_result=dcf_result,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "applicable", "evidence_complete"),
+    [
+        ("not_applicable", False, False),
+        ("insufficient_evidence", True, True),
+        ("observe", True, False),
+    ],
+)
+def test_independent_decision_replay_rejects_patch7_requirement_state_conflicts(
+    status,
+    applicable,
+    evidence_complete,
+):
+    payload = _patch7_pending_payload()
+    payload.update(
+        status=status,
+        applicable=applicable,
+        evidence_complete=evidence_complete,
+    )
+    payload["reasons"].update(
+        _status=status,
+        _applicable="yes" if applicable else "no",
+        _evidence="complete" if evidence_complete else "incomplete",
+    )
+    company, dcf_result = _patch7_fact_context()
+
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company=company,
+            dcf_result=dcf_result,
+        )
+        is None
+    )
 
 
 def test_independent_decision_replay_handles_scope_exclusion_and_rejects_legacy_type7():

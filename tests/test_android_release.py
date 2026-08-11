@@ -12,6 +12,9 @@ from tools import android_release
 from tools.android_release import build_android_update_manifest, write_android_update_manifest
 
 
+pytestmark = pytest.mark.android
+
+
 TEST_GIT_SHA = "1234567890abcdef1234567890abcdef12345678"
 
 

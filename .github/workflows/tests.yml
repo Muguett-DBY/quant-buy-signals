@@ -15,39 +15,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    runs-on: windows-latest
-    timeout-minutes: 60
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - python-version: "3.11"
-          - python-version: "3.13"
-          - python-version: "3.14"
-
+  classify:
+    name: Classify website changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.paths.outputs.web }}
+      data: ${{ steps.paths.outputs.data }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            requirements*.txt
-
-      - name: Install dependencies
+      - name: Select required website gates
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
         run: |
-          python -m pip install --require-hashes -r requirements-bootstrap.txt
-          python -m pip install --require-hashes -r requirements-dev-lock.txt
-          python -m pip check
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ "${EVENT_NAME}" == "push" && "${REF_NAME}" == "refs/heads/main" ]]; then
+            # main has no server-side required checks.  Always test its whole
+            # accumulated state so a later narrow commit cannot hide an
+            # earlier failed data or Cloudflare change.
+            {
+              echo "web=true"
+              echo "data=true"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid head revision: ${HEAD_SHA}" >&2
+            exit 1
+          fi
+          if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || [[ "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] || ! git cat-file -e "${BASE_SHA}^{commit}"; then
+            echo "No bounded base revision is available; running both website gates."
+            python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          changed_file="${RUNNER_TEMP}/website-changed-files.txt"
+          git diff --no-renames --name-only "${BASE_SHA}" "${HEAD_SHA}" -- > "${changed_file}"
+          python .github/scripts/classify_website_ci.py --github-output "${GITHUB_OUTPUT}" < "${changed_file}"
+          echo "Website CI classification:"
+          cat "${GITHUB_OUTPUT}"
 
-      - name: Validate line-ending policy
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Validate tracked files and line endings
         shell: pwsh
         run: |
           $lfExtensions = @('.py', '.pyi', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.sh', '.ps1', '.md', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.spec', '.txt', '.xml', '.csv', '.java', '.kt', '.kts', '.properties')
@@ -75,9 +104,6 @@ jobs:
             exit 1
           }
 
-      - name: Reject tracked runtime and internal artifacts
-        shell: pwsh
-        run: |
           $forbidden = git ls-files | Where-Object {
             $_ -match '(^|/)__pycache__/' -or
             $_ -match '\.py[co]$' -or
@@ -102,155 +128,128 @@ jobs:
             exit 1
           }
 
-      - name: Unit and integration tests with coverage
-        if: matrix.python-version == '3.13'
-        run: python -m pytest --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+  web:
+    name: Fast Cloudflare web gate
+    needs: classify
+    if: needs.classify.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
-      - name: Unit and integration tests
-        if: matrix.python-version != '3.13'
-        run: python -m pytest
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Install web contract dependencies
+        run: python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+
+      - name: Worker syntax and website contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check cloudflare-cron/worker.js
+          node --check cloudflare/quant-dashboard/pages_worker.js
+          node --check cloudflare/quant-dashboard/refresh_worker.js
+          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py -q
+
+  data:
+    name: Website data-integrity gate
+    needs: classify
+    if: needs.classify.outputs.data == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements-bootstrap.txt
+          python -m pip install --require-hashes -r requirements-dev-lock.txt
+          python -m pip check
+
+      - name: Website Python tests
+        run: >-
+          python -m pytest
+          --ignore=tests/test_android_release.py
+          --ignore=tests/test_build_desktop.py
+          --ignore=tests/test_desktop_installer.py
+          --ignore=tests/test_desktop_launcher.py
+          --ignore=tests/test_desktop_updater.py
+          --ignore=tests/test_streamlit_app.py
+          --ignore=tests/test_ui.py
+          -m "not desktop and not android and not parked_client"
+          --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Lint and formatting checks
-        if: matrix.python-version == '3.13'
         run: |
           python -m ruff check .
           python -m ruff format --check .
 
-      - name: Security and dependency checks
-        if: matrix.python-version == '3.13'
+      - name: Security and website runtime dependency checks
         run: |
-          python -m bandit -q -r app.py config.py data desktop engine ui tools --severity-level medium --confidence-level medium
-          python -m pip_audit --strict --progress-spinner off --require-hashes --disable-pip --timeout 30 -r requirements-dev-lock.txt
+          python -m bandit -q -r config.py data engine tools --severity-level medium --confidence-level medium
+          python -m pip_audit --strict --progress-spinner off --require-hashes --disable-pip --timeout 30 -r requirements-lock.txt
           python -m pip check
 
-      - name: Build and verify wheel package data
-        if: matrix.python-version == '3.13'
-        shell: pwsh
-        run: |
-          python -m build --wheel --no-isolation
-          if ($LASTEXITCODE -ne 0) { throw "Wheel build failed with exit code $LASTEXITCODE" }
-          $wheels = @(Get-ChildItem -LiteralPath dist -Filter '*.whl')
-          if ($wheels.Count -ne 1) {
-            throw "Expected exactly one wheel, found $($wheels.Count)"
-          }
-          $target = Join-Path $env:RUNNER_TEMP 'ds-dcf-wheel-check'
-          New-Item -ItemType Directory -Path $target -Force | Out-Null
-          python -m pip install --no-deps --target $target $wheels[0].FullName
-          if ($LASTEXITCODE -ne 0) { throw "Wheel installation failed with exit code $LASTEXITCODE" }
-          $oldPythonPath = $env:PYTHONPATH
-          try {
-            $env:PYTHONPATH = $target
-            Push-Location $env:RUNNER_TEMP
-            python -c "from datetime import date; from data.industry import industry_data_status; from data.trading_calendar import is_a_share_trading_day; import tools.run_full_audit; status = industry_data_status(); assert status['loader_ok'], status; assert status['f10_entries'] > 0, status; assert status['authoritative_records'] >= 5000, status; assert status['authoritative_source']['source_sha256'], status; assert is_a_share_trading_day(date(2026, 7, 23))"
-            if ($LASTEXITCODE -ne 0) { throw "Installed wheel verification failed with exit code $LASTEXITCODE" }
-          } finally {
-            Pop-Location
-            $env:PYTHONPATH = $oldPythonPath
-          }
-
-      - name: Build and smoke-test Windows desktop release
-        if: matrix.python-version == '3.13'
-        run: >-
-          python -m tools.build_desktop --ci-smoke
-          --output-root build/ci-smoke-output
-          --work-root build/ci-smoke-work
-
-      - name: Verify tracked desktop source archive
-        if: matrix.python-version == '3.13'
-        shell: pwsh
-        run: |
-          $audit = 'audit/random100_audit_seed20260715.json'
-          if (-not (Test-Path -LiteralPath $audit)) {
-            Write-Host 'No tracked release audit yet; desktop archive verification is deferred.'
-            exit 0
-          }
-          $currentCommit = (git rev-parse HEAD).Trim()
-          $auditPayload = Get-Content -LiteralPath $audit -Raw -Encoding utf8 | ConvertFrom-Json
-          $auditCommit = ([string]$auditPayload.provenance.git.commit).Trim()
-          if ([string]::IsNullOrWhiteSpace($auditCommit) -or $auditCommit -cne $currentCommit) {
-            Write-Warning "Tracked release audit is bound to $auditCommit, not $currentCommit; desktop archive verification is deferred until a fresh audit is committed."
-            exit 0
-          }
-          $root = Join-Path $env:RUNNER_TEMP 'ds-dcf-source-package'
-          $version = (python -c "from desktop.version import __version__; print(__version__)").Trim()
-          if (-not $version) {
-            throw 'Could not determine the desktop release version.'
-          }
-          $package = Join-Path $root "DS_DCF-v$version"
-          New-Item -ItemType Directory -Path $package -Force | Out-Null
-          git ls-files | ForEach-Object {
-            $source = Join-Path $PWD $_
-            $destination = Join-Path $package $_
-            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-            Copy-Item -LiteralPath $source -Destination $destination
-          }
-          $zip = Join-Path $env:RUNNER_TEMP "DS_DCF-v$version.zip"
-          Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel Optimal
-          python -m tools.verify_release_zip $zip
-
-  android:
+  website-ci:
+    name: Website release gate
+    needs: [classify, hygiene, web, data]
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-
-      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-          cache-dependency-path: |
-            android/*.gradle.kts
-            android/gradle/wrapper/gradle-wrapper.properties
-            android/app/*.gradle.kts
-
-      - name: Validate the tracked Gradle wrapper
-        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-
-      - name: Install the pinned Android SDK components
+      - name: Require every selected website gate
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          HYGIENE_RESULT: ${{ needs.hygiene.result }}
+          WEB_REQUIRED: ${{ needs.classify.outputs.web }}
+          WEB_RESULT: ${{ needs.web.result }}
+          DATA_REQUIRED: ${{ needs.classify.outputs.data }}
+          DATA_RESULT: ${{ needs.data.result }}
         shell: bash
         run: |
-          sdkmanager_status=1
-          for attempt in 1 2 3; do
-            set +e
-            set +o pipefail
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-              'platforms;android-35' \
-              'build-tools;35.0.0'
-            pipeline_status=("${PIPESTATUS[@]}")
-            set -o pipefail
-            set -e
-            sdkmanager_status=${pipeline_status[1]}
-            if [[ "$sdkmanager_status" -eq 0 ]]; then
-              break
-            fi
-            if [[ "$attempt" -lt 3 ]]; then
-              sleep $((attempt * 2))
-            fi
-          done
-          exit "$sdkmanager_status"
-
-      - name: Compile and lint the Android client
-        working-directory: android
-        run: bash ./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
-
-      - name: Verify APK metadata, icon and debug signature
-        shell: bash
-        run: |
-          apk='android/app/build/outputs/apk/debug/app-debug.apk'
-          aapt="$ANDROID_HOME/build-tools/35.0.0/aapt"
-          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          test -f "$apk"
-          "$aapt" dump badging "$apk" | tee "$RUNNER_TEMP/android-badging.txt"
-          grep -F "package: name='com.muguett.dsdcf' versionCode='6' versionName='11.3.4'" "$RUNNER_TEMP/android-badging.txt"
-          "$apksigner" verify --verbose "$apk"
-
-      - name: Prove unsigned release builds fail closed
-        working-directory: android
-        shell: bash
-        run: |
-          if bash ./gradlew --no-daemon --console=plain :app:verifyReleaseSigningInputs; then
-            echo 'Unsigned Android release guard unexpectedly passed.' >&2
+          set -euo pipefail
+          if [[ "${CLASSIFY_RESULT}" != "success" ]]; then
+            echo "Changed-file classification did not succeed." >&2
             exit 1
           fi
+          if [[ "${HYGIENE_RESULT}" != "success" ]]; then
+            echo "Repository hygiene did not succeed." >&2
+            exit 1
+          fi
+          if [[ "${WEB_REQUIRED}" != "true" && "${WEB_REQUIRED}" != "false" ]]; then
+            echo "Cloudflare gate selection is invalid: ${WEB_REQUIRED:-missing}." >&2
+            exit 1
+          fi
+          if [[ "${DATA_REQUIRED}" != "true" && "${DATA_REQUIRED}" != "false" ]]; then
+            echo "Data-integrity gate selection is invalid: ${DATA_REQUIRED:-missing}." >&2
+            exit 1
+          fi
+          if [[ "${WEB_REQUIRED}" == "true" && "${WEB_RESULT}" != "success" ]]; then
+            echo "The selected Cloudflare web gate finished as ${WEB_RESULT}." >&2
+            exit 1
+          fi
+          if [[ "${DATA_REQUIRED}" == "true" && "${DATA_RESULT}" != "success" ]]; then
+            echo "The selected website data-integrity gate finished as ${DATA_RESULT}." >&2
+            exit 1
+          fi
+          echo "All selected website gates passed."

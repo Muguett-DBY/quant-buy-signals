@@ -4,9 +4,13 @@ import time
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from ui import buy_types_page
+
+
+pytestmark = pytest.mark.parked_client
 
 
 APP_PATH = Path(__file__).resolve().parents[1] / "app.py"

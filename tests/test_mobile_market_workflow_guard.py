@@ -14,9 +14,8 @@ from data import mobile_snapshot
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "tools" / "mobile_market_workflow_guard.ps1"
 CALENDAR = ROOT / "tools" / "china_a_share_trading_calendar.json"
-ANDROID_REPOSITORY = (
-    ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "muguett" / "dsdcf" / "MarketRepository.java"
-)
+WEBSITE_PUBLIC_KEY = ROOT / "cloudflare" / "quant-dashboard" / "market_signing_public_key.txt"
+REFRESH_WORKER = ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
 SOURCE_COMMIT = "a" * 40
 TYPE_STATUSES = (
     "triggered",
@@ -67,7 +66,7 @@ def _run_guard(
     manifest: Path | None = None,
     release: Path | None = None,
     archive: Path | None = None,
-    android_source: Path | None = None,
+    public_key_path: Path | None = None,
     expected_source_commit: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
     output = tmp_path / "guard-output.txt"
@@ -96,8 +95,8 @@ def _run_guard(
         command.extend(("-ReleaseDirectory", str(release)))
     if archive is not None:
         command.extend(("-ArchiveDirectory", str(archive)))
-    if android_source is not None:
-        command.extend(("-AndroidSourcePath", str(android_source)))
+    if public_key_path is not None:
+        command.extend(("-PublicKeyPath", str(public_key_path)))
     if expected_source_commit is not None:
         command.extend(("-ExpectedSourceCommit", expected_source_commit))
     result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
@@ -364,13 +363,13 @@ def _signed_generation(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
-    android_source = tmp_path / "MarketRepository.java"
+    public_key_path = tmp_path / "market_signing_public_key.txt"
     environment = os.environ.copy()
     environment.update(
         {
             "TEST_MANIFEST": str(manifest),
             "TEST_SIGNATURE": str(signature),
-            "TEST_ANDROID_SOURCE": str(android_source),
+            "TEST_PUBLIC_KEY_PATH": str(public_key_path),
         }
     )
     signer = r"""
@@ -385,11 +384,7 @@ try {
     [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
   )
   [IO.File]::WriteAllBytes($env:TEST_SIGNATURE, $signature)
-  [IO.File]::WriteAllText(
-    $env:TEST_ANDROID_SOURCE,
-    'private static final String MOBILE_SIGNING_PUBLIC_KEY_BASE64 = "' + $publicKey + '";',
-    [Text.UTF8Encoding]::new($false)
-  )
+  [IO.File]::WriteAllText($env:TEST_PUBLIC_KEY_PATH, $publicKey + "`n", [Text.UTF8Encoding]::new($false))
 } finally {
   $key.Dispose()
 }
@@ -412,7 +407,7 @@ try {
         f"{hashlib.sha256(signature.read_bytes()).hexdigest()}  {signature.name}\n",
         encoding="ascii",
     )
-    return manifest, release, archive, android_source
+    return manifest, release, archive, public_key_path
 
 
 def test_calendar_pins_matching_official_sse_and_szse_2026_notices():
@@ -440,7 +435,18 @@ def test_calendar_pins_matching_official_sse_and_szse_2026_notices():
     assert "[int]$MaximumCompanyCount = 6500" in guard_source
     assert "$script:MaximumUncompressedPayloadBytes = 32000000" in guard_source
     assert mobile_snapshot.MAX_UNCOMPRESSED_ASSET_BYTES == 32_000_000
-    assert "MAX_UNCOMPRESSED_ASSET_BYTES = 32_000_000;" in ANDROID_REPOSITORY.read_text(encoding="utf-8")
+    assert "MAX_PRIMARY_UNCOMPRESSED_BYTES = 32_000_000;" in REFRESH_WORKER.read_text(encoding="utf-8")
+
+
+def test_website_owns_the_market_signing_trust_anchor():
+    public_key = WEBSITE_PUBLIC_KEY.read_text(encoding="ascii").strip()
+    refresh_worker = REFRESH_WORKER.read_text(encoding="utf-8")
+    guard = GUARD.read_text(encoding="utf-8")
+
+    assert public_key
+    assert f'base64Bytes("{public_key}")' in refresh_worker
+    assert "cloudflare/quant-dashboard/market_signing_public_key.txt" in guard
+    assert "android/" not in guard.lower()
 
 
 def test_manual_dispatch_forces_post_close_refresh_without_reading_network(tmp_path):
@@ -455,7 +461,7 @@ def test_manual_dispatch_forces_post_close_refresh_without_reading_network(tmp_p
 
 
 def test_manual_dispatch_before_close_with_published_session_is_a_successful_noop(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(tmp_path, market_date="2026-07-21")
+    manifest, release, archive, public_key_path = _signed_generation(tmp_path, market_date="2026-07-21")
     result, decision = _run_guard(
         tmp_path,
         event="workflow_dispatch",
@@ -463,7 +469,7 @@ def test_manual_dispatch_before_close_with_published_session_is_a_successful_noo
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -530,7 +536,7 @@ def test_scheduled_weekend_is_a_successful_noop(tmp_path):
 
 
 def test_valid_same_day_signed_generation_suppresses_a_duplicate_scheduled_run(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(tmp_path)
+    manifest, release, archive, public_key_path = _signed_generation(tmp_path)
 
     result, decision = _run_guard(
         tmp_path,
@@ -539,7 +545,7 @@ def test_valid_same_day_signed_generation_suppresses_a_duplicate_scheduled_run(t
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -551,7 +557,7 @@ def test_valid_same_day_signed_generation_suppresses_a_duplicate_scheduled_run(t
 
 
 def test_valid_pending_candidate_is_visible_without_entering_the_legacy_signal_array(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         pending_candidate=True,
     )
@@ -563,7 +569,7 @@ def test_valid_pending_candidate_is_visible_without_entering_the_legacy_signal_a
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -575,7 +581,7 @@ def test_valid_pending_candidate_is_visible_without_entering_the_legacy_signal_a
 
 
 def test_complete_confirmed_veto_may_retain_unneeded_missing_dimensions(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         complete_veto_with_missing=True,
     )
@@ -587,7 +593,7 @@ def test_complete_confirmed_veto_may_retain_unneeded_missing_dimensions(tmp_path
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -599,7 +605,7 @@ def test_complete_confirmed_veto_may_retain_unneeded_missing_dimensions(tmp_path
 
 
 def test_company_with_trigger_and_conditional_type_is_not_counted_as_conditional_only(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         overlapping_candidate=True,
     )
@@ -611,7 +617,7 @@ def test_company_with_trigger_and_conditional_type_is_not_counted_as_conditional
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -623,7 +629,7 @@ def test_company_with_trigger_and_conditional_type_is_not_counted_as_conditional
 
 
 def test_legacy_signed_generation_remains_accepted_during_the_11_2_upgrade_window(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         legacy_decision_contract=True,
     )
@@ -635,7 +641,7 @@ def test_legacy_signed_generation_remains_accepted_during_the_11_2_upgrade_windo
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -659,7 +665,7 @@ def test_current_signed_generation_rejects_invalid_counts_or_uncompressed_metada
     tmp_path,
     generation_options,
 ):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         **generation_options,
     )
@@ -671,7 +677,7 @@ def test_current_signed_generation_rejects_invalid_counts_or_uncompressed_metada
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -694,7 +700,7 @@ def test_signed_generation_rejects_inconsistent_or_partial_candidate_decisions(
     tmp_path,
     generation_options,
 ):
-    manifest, release, archive, android_source = _signed_generation(
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         **generation_options,
     )
@@ -706,7 +712,7 @@ def test_signed_generation_rejects_inconsistent_or_partial_candidate_decisions(
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -724,10 +730,10 @@ def test_signed_generation_rejects_inconsistent_or_partial_candidate_decisions(
         ({}, "b" * 40),
     ],
 )
-def test_signed_generation_must_match_the_android_payload_and_source_contract(
+def test_signed_generation_must_match_the_website_payload_and_source_contract(
     tmp_path, generation_options, expected_source_commit
 ):
-    manifest, release, archive, android_source = _signed_generation(tmp_path, **generation_options)
+    manifest, release, archive, public_key_path = _signed_generation(tmp_path, **generation_options)
 
     result, decision = _run_guard(
         tmp_path,
@@ -736,7 +742,7 @@ def test_signed_generation_must_match_the_android_payload_and_source_contract(
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=expected_source_commit,
     )
 
@@ -746,8 +752,8 @@ def test_signed_generation_must_match_the_android_payload_and_source_contract(
 
 
 @pytest.mark.parametrize("property_name", ["buy_types", "conditional_types"])
-def test_signed_generation_rejects_scalar_type_lists_that_android_cannot_parse(tmp_path, property_name):
-    manifest, release, archive, android_source = _signed_generation(
+def test_signed_generation_rejects_scalar_type_lists_outside_the_website_contract(tmp_path, property_name):
+    manifest, release, archive, public_key_path = _signed_generation(
         tmp_path,
         scalar_type_list=property_name,
     )
@@ -759,7 +765,7 @@ def test_signed_generation_rejects_scalar_type_lists_that_android_cannot_parse(t
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -769,7 +775,7 @@ def test_signed_generation_rejects_scalar_type_lists_that_android_cannot_parse(t
 
 
 def test_live_generation_without_matching_archive_completion_marker_is_retried(tmp_path):
-    manifest, release, archive, android_source = _signed_generation(tmp_path)
+    manifest, release, archive, public_key_path = _signed_generation(tmp_path)
     (archive / "SHA256SUMS.txt").unlink()
 
     result, decision = _run_guard(
@@ -779,7 +785,7 @@ def test_live_generation_without_matching_archive_completion_marker_is_retried(t
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -790,7 +796,7 @@ def test_live_generation_without_matching_archive_completion_marker_is_retried(t
 
 @pytest.mark.parametrize("damage", ["catalogue", "signature", "manifest_date", "duplicate_key"])
 def test_invalid_or_stale_published_generation_never_suppresses_refresh(tmp_path, damage):
-    manifest, release, archive, android_source = _signed_generation(tmp_path)
+    manifest, release, archive, public_key_path = _signed_generation(tmp_path)
     if damage == "catalogue":
         (release / "catalog-0123456789abcdef.json.gz").write_bytes(b"tampered")
     elif damage == "signature":
@@ -816,7 +822,7 @@ def test_invalid_or_stale_published_generation_never_suppresses_refresh(tmp_path
         manifest=manifest,
         release=release,
         archive=archive,
-        android_source=android_source,
+        public_key_path=public_key_path,
         expected_source_commit=SOURCE_COMMIT,
     )
 
@@ -832,7 +838,7 @@ def test_missing_published_manifest_on_a_trading_day_runs_refresh(tmp_path):
         now_utc="2026-07-22T08:17:00.0000000+00:00",
         manifest=tmp_path / "missing-manifest.json",
         release=tmp_path / "missing-release",
-        android_source=tmp_path / "missing-source.java",
+        public_key_path=tmp_path / "missing-public-key.txt",
     )
 
     assert result.returncode == 0, result.stderr

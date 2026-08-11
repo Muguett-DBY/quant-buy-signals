@@ -10,7 +10,7 @@ pass size, hash, schema, partition, and coverage validation.
 - `schema.sql` is applied once to the D1 database.
 - `refresh_worker.js` is deployed as `quant-market-refresh`.  The GitHub
   publication workflow calls its key-protected `/refresh` endpoint immediately
-  after the stable Pages manifest is deployed; the weekday `0 15 * * 1-5` UTC
+  after the stable Pages manifest is deployed; the weekday `0 15 * * MON-FRI` UTC
   trigger (23:00 Beijing) remains a recovery-only mirror check after the 16:17
   GitHub refresh and leaves room for delayed GitHub runners.  It never calculates scores.
 - `pages_worker.js` is the Pages advanced-mode worker.  Its API is GET-only:
