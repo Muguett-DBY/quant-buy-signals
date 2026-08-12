@@ -164,6 +164,46 @@
       "source_statement": "合并现金流量表本期资本开支及投资活动现金流出小计均为空；2,500.00位于上期列。"
     },
     {
+      "code": "000802",
+      "report_date": "2021-12-31",
+      "value": 0.0,
+      "source_document": "北京京西文化旅游股份有限公司2021年年度报告全文",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2022-04-27/1213133963.PDF",
+      "source_sha256": "06f90b5b98d63220c70ffdef6b5e966d17433ac59806a1e9af44baccda3a9b4e",
+      "source_page": 84,
+      "source_statement": "合并现金流量表2021年度当期资本开支为空；171,693.70位于2020年度列。"
+    },
+    {
+      "code": "000802",
+      "report_date": "2024-12-31",
+      "value": 0.0,
+      "source_document": "北京京西文化旅游股份有限公司2024年财务报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147212.PDF",
+      "source_sha256": "f256d47e2143c98643c13f7be5fcf26fa8de9558a98b96c29e4fb3b344ba40a6",
+      "source_page": 13,
+      "source_statement": "合并现金流量表2024年度当期资本开支为空；25,692.07位于2023年度列，2024年度投资活动现金流出小计为空。"
+    },
+    {
+      "code": "000802",
+      "report_date": "2025-03-31",
+      "value": 0.0,
+      "source_document": "北京京西文化旅游股份有限公司2025年第一季度报告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147198.PDF",
+      "source_sha256": "00232729f4566b5f7687f7a3d22673f5a920fe50e77c48493063adfb8b380926",
+      "source_page": 11,
+      "source_statement": "合并现金流量表2025年第一季度当期资本开支及投资活动现金流出小计均为空。"
+    },
+    {
+      "code": "000802",
+      "report_date": "2026-03-31",
+      "value": 0.0,
+      "source_document": "北京京西文化旅游股份有限公司2026年第一季度报告",
+      "source_url": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-04-25/6272da2c-4737-4b1c-82b9-95e3fbbdda55.PDF",
+      "source_sha256": "a89ed84000416a905c9ef5e995e3f8b3c04f590e1c48c4440c2af557abc5bfeb",
+      "source_page": 11,
+      "source_statement": "合并现金流量表2026年第一季度当期资本开支及投资活动现金流出小计均为空。"
+    },
+    {
       "code": "000995",
       "report_date": "2025-03-31",
       "value": 0.0,

@@ -30,6 +30,10 @@ _STATIC_CNINFO_SOURCE_PATHS = {
 _CAPEX_SOURCE_PATHS = {
     **_STATIC_CNINFO_SOURCE_PATHS,
     "dataclouds.cninfo.com.cn": re.compile(r"^/shgonggao/hsomarket/\d{4}/\d{8}/[0-9a-f]{32}\.PDF$"),
+    "disc.static.szse.cn": re.compile(
+        r"^/download/disc/disk\d{2}/finalpage/\d{4}-\d{2}-\d{2}/"
+        r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.PDF$"
+    ),
 }
 _BALANCE_REQUIRED_FIELDS = {
     "TOTAL_ASSETS",

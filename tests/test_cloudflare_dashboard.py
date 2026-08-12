@@ -114,6 +114,115 @@ assert.deepEqual(["C", "T", "N", "W"].map(publicClassName), ["强周期", "强�
     assert "text.textContent=String(value)" not in source
 
 
+def test_dashboard_uses_signed_analysis_scope_and_type6_decision_contract():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the dashboard scope helpers"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(response.status, 200);
+const html = await response.text();
+const scriptMatch = html.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const start = script.indexOf("const EXCLUSION_REASON_NAMES");
+const end = script.indexOf("function formatBeijing", start);
+assert.ok(start >= 0 && end > start, "analysis-scope helper source was not found");
+const helpers = new Function(
+  script.slice(start, end) + ";return {analysisScope,analysisScopeText,positionConfirmationRequired};",
+)();
+
+const analysisExclusions = {};
+for (let index = 0; index < 204; index++) analysisExclusions["ST" + index] = "special_treatment";
+analysisExclusions.suspended = "suspended_or_no_trade";
+for (let index = 0; index < 3; index++) analysisExclusions["financial" + index] = "incomplete_financial_evidence";
+analysisExclusions.stale = "stale_or_incomplete_current_financials";
+analysisExclusions.interim = "missing_comparative_interim";
+for (let index = 0; index < 7; index++) analysisExclusions["industry" + index] = "unclassified_industry";
+analysisExclusions.bj = "unsupported_market";
+const scope = helpers.analysisScope({
+  provenance: {
+    snapshot_validation: {
+      analysis_market_quotes: 5207,
+      eligible_companies: 4990,
+      analysis_eligible_coverage: 4990 / 5207,
+      analysis_exclusions: analysisExclusions,
+    },
+  },
+}, 4990);
+assert.deepEqual({ market: scope.market, eligible: scope.eligible, excluded: scope.excluded }, {
+  market: 5207,
+  eligible: 4990,
+  excluded: 217,
+});
+const scopeText = helpers.analysisScopeText(scope, 4990);
+for (const expected of [
+  "沪深市场 5,207 家",
+  "纳入 4,990 家（95.83%）",
+  "未纳入 217 家",
+  "ST/特别处理 204 家",
+  "停牌或无成交 1 家",
+  "财务证据不完整 3 家",
+  "最新财务数据陈旧或不完整 1 家",
+  "缺少同期中报 1 家",
+  "行业未分类 7 家",
+]) assert.ok(scopeText.includes(expected), expected);
+assert.ok(!scopeText.includes("unsupported_market"));
+assert.equal(helpers.analysisScope({}, 4990), null);
+assert.equal(helpers.analysisScopeText(null, 4990), "纳入分析公司：4,990 家");
+
+const observeAction = {
+  status: "observe",
+  decision: {
+    decision_basis: "action_condition",
+    potentially_triggerable: true,
+    missing_dimensions: ["6e"],
+  },
+};
+assert.equal(helpers.positionConfirmationRequired("type6", observeAction), true);
+assert.equal(helpers.positionConfirmationRequired("type7", observeAction), false);
+assert.equal(helpers.positionConfirmationRequired("type6", {
+  decision: {
+    decision_basis: "conservative_upper_bound",
+    potentially_triggerable: false,
+    missing_dimensions: ["6e"],
+  },
+}), false);
+assert.equal(helpers.positionConfirmationRequired("type6", {
+  decision: {
+    decision_basis: "action_condition",
+    potentially_triggerable: true,
+    missing_dimensions: [],
+  },
+}), false);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    assert 'const cards=[["纳入分析公司"' in source
+    assert '"全市场公司"' not in source
+    assert "m.provenance?.snapshot_validation" not in source
+    assert "manifest?.provenance?.snapshot_validation" in source
+    assert (
+        "const hasPositionConfirmation=conditional.some(([key,value])=>positionConfirmationRequired(key,value))"
+        in source
+    )
+    assert '点击对应类型查看附加条件"+(hasPositionConfirmation?"与仓位确认要求":"")' in source
+    assert "点击对应类型查看附加条件与仓位确认要求。" not in source
+
+
 def test_catalogue_index_enforces_contract_and_aggregates_action_and_evidence_gaps():
     source = DASHBOARD.read_text(encoding="utf-8")
     node = shutil.which("node")
@@ -754,8 +863,10 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
         in source
     )
     assert '["其中待确认仓位",actionConfirmationCount]' in source
-    assert 'positionAction=positionInstruction&&v.status==="conditional"' in source
+    assert 'positionAction=dimension==="6e"&&positionConfirmationRequired(k,v)' in source
+    assert 'positionAction?(v.status==="conditional"?"待仓位确认":"仓位待输入")' in source
     assert 'inactivePositionAction?"当前无需确认"' in source
+    assert "仓位输入仍可能改变评分上界，当前尚非买入信号" in source
 
 
 def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail_facts():

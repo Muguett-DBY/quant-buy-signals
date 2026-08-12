@@ -36,11 +36,16 @@ _INTERNAL_PROXY_ID_PREFIX = "patch6-observable-outcomes-v"
 _INTERNAL_PROXY_SOURCE_PREFIX = "Eastmoney reported data; Patch6 observable-outcome formula v"
 
 # ``primary`` is reserved for a dated score supplied by an external research
-# adapter.  This module emits the other three levels.  Keeping the level
+# adapter.  This module emits derived/partial/missing records and explicit
+# not-applicable records for sector-inapplicable measures.  Keeping the level
 # separate from the numeric diagnostic is intentional: a score calculated from
 # defaults can still be useful for debugging, but must never acquire the same
 # authority as a fully observed proxy merely because it is a finite number.
-EVIDENCE_LEVELS = ("primary", "derived_proxy", "partial", "missing")
+EVIDENCE_LEVELS = ("primary", "derived_proxy", "partial", "missing", "not_applicable")
+FINANCIAL_INDUSTRIES = frozenset({"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"})
+FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS = frozenset({"accounting_integrity_score", "management_alignment_score"})
+_FINANCIAL_APPLICABILITY_RULE = "financial-sector-specific-evidence-v1"
+_NOT_APPLICABLE_SOURCE_LABEL = "Industry classification; Patch6 applicability rule v1"
 SCORE_KEYS = (
     "industry_durability_score",
     "accounting_integrity_score",
@@ -737,6 +742,16 @@ def _quality_record(
         "required_inputs": required,
         "available_inputs": available,
         "missing_inputs": missing,
+    }
+
+
+def _financial_not_applicable_quality() -> dict[str, Any]:
+    return {
+        "level": "not_applicable",
+        "input_coverage": 1.0,
+        "required_inputs": ["industry_classification"],
+        "available_inputs": ["industry_classification"],
+        "missing_inputs": [],
     }
 
 
@@ -3014,22 +3029,27 @@ def _build_evidence_qualities(
             ),
         }
     )
-    qualities["accounting_integrity_score"] = _quality_record(
-        {
-            "adjusted_profit_ratio": finite("adjusted_profit_ratio"),
-            "ocf_to_net_profit": finite("ocf_np_ratio"),
-            "free_cash_flow_history": fcf_ready,
-            "share_dilution": finite("share_dilution_1yr"),
-        }
-    )
-    qualities["management_alignment_score"] = _quality_record(
-        {
-            "share_dilution": finite("share_dilution_1yr"),
-            "roic_and_wacc": roic_wacc_ready,
-            "free_cash_flow_history": fcf_ready,
-            "balance_sheet_leverage": balance_ready,
-        }
-    )
+    industry = str(metric.get("industry") or "")
+    if industry in FINANCIAL_INDUSTRIES:
+        qualities["accounting_integrity_score"] = _financial_not_applicable_quality()
+        qualities["management_alignment_score"] = _financial_not_applicable_quality()
+    else:
+        qualities["accounting_integrity_score"] = _quality_record(
+            {
+                "adjusted_profit_ratio": finite("adjusted_profit_ratio"),
+                "ocf_to_net_profit": finite("ocf_np_ratio"),
+                "free_cash_flow_history": fcf_ready,
+                "share_dilution": finite("share_dilution_1yr"),
+            }
+        )
+        qualities["management_alignment_score"] = _quality_record(
+            {
+                "share_dilution": finite("share_dilution_1yr"),
+                "roic_and_wacc": roic_wacc_ready,
+                "free_cash_flow_history": fcf_ready,
+                "balance_sheet_leverage": balance_ready,
+            }
+        )
 
     accounting_complete = qualities["accounting_integrity_score"]["level"] == "derived_proxy"
     if str(metric.get("industry") or "") == "INSURANCE":
@@ -3358,14 +3378,26 @@ def _evidence_record(
     quality: Mapping[str, Any],
 ) -> dict[str, Any]:
     level = str(quality.get("level") or "missing")
-    summary = f"{key}={score:.1f};model={MODEL_ID};evidence_level={level}"
-    record_details = dict(details)
+    published_score: float | None = None if level == "not_applicable" else score
+    score_label = "N/A" if published_score is None else f"{published_score:.1f}"
+    summary = f"{key}={score_label};model={MODEL_ID};evidence_level={level}"
+    record_details = (
+        {
+            "basis": "financial_sector_specific_evidence",
+            "applicability": {
+                "applicable": False,
+                "rule": _FINANCIAL_APPLICABILITY_RULE,
+            },
+        }
+        if level == "not_applicable"
+        else dict(details)
+    )
     record_details["evidence_quality"] = dict(quality)
     return {
-        "score": score,
+        "score": published_score,
         "evidence_level": level,
         "evidence": {
-            "source": SOURCE_LABEL,
+            "source": _NOT_APPLICABLE_SOURCE_LABEL if level == "not_applicable" else SOURCE_LABEL,
             "evidence_id": f"{MODEL_ID}:{key}:{code}:{as_of.replace('-', '')}",
             "as_of": as_of,
             "summary": summary,
@@ -4534,6 +4566,7 @@ def validate_quantitative_evidence_record(
     *,
     key: str,
     code: str,
+    industry: str | None = None,
     primary_validation_token: Any = None,
 ) -> dict[str, Any]:
     """Replay one score record, rejecting serialized primary claims by default.
@@ -4552,18 +4585,29 @@ def validate_quantitative_evidence_record(
     level = value.get("evidence_level")
     evidence = value.get("evidence")
     details = value.get("details")
+    financial_industrial_not_applicable = bool(
+        key in FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS and industry in FINANCIAL_INDUSTRIES
+    )
+    score_valid = bool(
+        level == "not_applicable"
+        and score is None
+        or level != "not_applicable"
+        and not isinstance(score, bool)
+        and isinstance(score, (int, float))
+        and math.isfinite(float(score))
+        and 0 <= float(score) <= 10
+        and math.isclose(float(score), round(float(score), 1), rel_tol=0.0, abs_tol=1e-12)
+    )
     if (
-        isinstance(score, bool)
-        or not isinstance(score, (int, float))
-        or not math.isfinite(float(score))
-        or not 0 <= float(score) <= 10
-        or not math.isclose(float(score), round(float(score), 1), rel_tol=0.0, abs_tol=1e-12)
+        not score_valid
         or level not in EVIDENCE_LEVELS
         or not isinstance(evidence, Mapping)
         or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
         or not isinstance(details, Mapping)
     ):
         raise ValueError("quantitative evidence score, level, or payload is invalid")
+    if (level == "not_applicable") is not financial_industrial_not_applicable:
+        raise ValueError("quantitative evidence applicability binding is invalid")
     as_of = evidence.get("as_of")
     if not isinstance(as_of, str):
         raise ValueError("quantitative evidence date is invalid")
@@ -4573,7 +4617,8 @@ def validate_quantitative_evidence_record(
         raise ValueError("quantitative evidence date is invalid") from exc
     if parsed_as_of.isoformat() != as_of or parsed_as_of > date.today():
         raise ValueError("quantitative evidence date is not canonical")
-    expected_summary = f"{key}={float(score):.1f};model={MODEL_ID};evidence_level={level}"
+    score_label = "N/A" if level == "not_applicable" else f"{float(score):.1f}"
+    expected_summary = f"{key}={score_label};model={MODEL_ID};evidence_level={level}"
     if any(
         not isinstance(evidence.get(field), str)
         or not str(evidence[field]).strip()
@@ -4615,6 +4660,17 @@ def validate_quantitative_evidence_record(
             or "derived_proxy" in source_summary.lower()
         ):
             raise ValueError("primary quantitative evidence source binding is invalid")
+    elif level == "not_applicable":
+        expected_id = f"{MODEL_ID}:{key}:{code}:{as_of.replace('-', '')}"
+        if (
+            key not in FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS
+            or industry not in FINANCIAL_INDUSTRIES
+            or evidence.get("source") != _NOT_APPLICABLE_SOURCE_LABEL
+            or evidence.get("evidence_id") != expected_id
+            or details.get("basis") != "financial_sector_specific_evidence"
+            or details.get("applicability") != {"applicable": False, "rule": _FINANCIAL_APPLICABILITY_RULE}
+        ):
+            raise ValueError("quantitative evidence applicability binding is invalid")
     else:
         expected_id = f"{MODEL_ID}:{key}:{code}:{as_of.replace('-', '')}"
         if evidence.get("source") != SOURCE_LABEL or evidence.get("evidence_id") != expected_id:
@@ -4657,14 +4713,23 @@ def validate_quantitative_evidence_record(
         or (level == "primary" and (required != ["primary_source_score"] or available != required or missing))
         or (level == "partial" and (not available or not missing))
         or (level == "missing" and not missing)
+        or (
+            level == "not_applicable"
+            and (
+                required != ["industry_classification"]
+                or available != required
+                or missing
+                or not math.isclose(float(coverage), 1.0, rel_tol=0.0, abs_tol=1e-12)
+            )
+        )
     ):
         raise ValueError("quantitative evidence quality partition is invalid")
-    if level != "primary":
+    if level not in {"primary", "not_applicable"}:
         replayed_score = _replay_quantitative_score(key, details, code=code)
         if not math.isclose(float(score), replayed_score, rel_tol=0.0, abs_tol=1e-9):
             raise ValueError("quantitative evidence score does not replay from its formula ledger")
     return {
-        "score": float(score),
+        "score": None if score is None else float(score),
         "evidence_level": str(level),
         "evidence": dict(evidence),
         "details": dict(details),
@@ -4851,7 +4916,9 @@ def enrich_metrics(
         evidence_by_code[code] = normalized_evidence
         metric["quantitative_evidence"] = normalized_evidence
         metric["quantitative_evidence_levels"] = effective_levels
-        if effective_levels and all(level in {"primary", "derived_proxy"} for level in effective_levels.values()):
+        if effective_levels and all(
+            level in {"primary", "derived_proxy", "not_applicable"} for level in effective_levels.values()
+        ):
             metric["quantitative_evidence_status"] = "complete"
         elif effective_levels and all(level == "missing" for level in effective_levels.values()):
             metric["quantitative_evidence_status"] = "missing"
@@ -4866,6 +4933,8 @@ __all__ = [
     "PRIMARY_EVIDENCE_VALIDATION_TOKEN",
     "MODEL_ID",
     "EVIDENCE_LEVELS",
+    "FINANCIAL_INDUSTRIES",
+    "FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS",
     "SCORE_KEYS",
     "build_company_contexts",
     "build_sector_context",

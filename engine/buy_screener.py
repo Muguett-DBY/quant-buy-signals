@@ -6337,7 +6337,7 @@ def _refresh_type3_quantitative_evidence(
             metric[key] = record["score"]
             metric[f"{key}_evidence"] = record["evidence"]
             metric[f"{key}_evidence_level"] = level
-    if levels and all(level in {"primary", "derived_proxy"} for level in levels.values()):
+    if levels and all(level in {"primary", "derived_proxy", "not_applicable"} for level in levels.values()):
         metric["quantitative_evidence_status"] = "complete"
     elif levels and all(level == "missing" for level in levels.values()):
         metric["quantitative_evidence_status"] = "missing"

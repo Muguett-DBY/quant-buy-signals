@@ -64,6 +64,14 @@ _SINA_HOST = "quotes.sina.cn"
 _SINA_PATH = "/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _STATEMENTS = frozenset({"lrb", "llb", "fzb"})
+_OFFICIAL_DISCLOSURE_SOURCES = frozenset(
+    {
+        "定期报告",
+        "招股说明书/意向书",
+        "招股说明书(申报稿)",
+        "更正或补充",
+    }
+)
 _CODE = re.compile(r"(?:[036]\d{5})")
 _PERIOD = re.compile(r"\d{8}")
 _REPORT_DATE = re.compile(r"\d{4}-(?:03-31|06-30|09-30|12-31)")
@@ -302,7 +310,7 @@ def _period_metadata(value: Any, *, report_date: str) -> dict[str, Any]:
     data_source = value.get("data_source")
     publish_date = value.get("publish_date")
     update_time = value.get("update_time")
-    if report_type != "合并期末" or currency != "CNY" or data_source != "定期报告":
+    if report_type != "合并期末" or currency != "CNY" or data_source not in _OFFICIAL_DISCLOSURE_SOURCES:
         raise SinaFinancialSchemaError(f"Sina financial period {report_date} has an unsupported statement basis")
     if not isinstance(publish_date, str) or re.fullmatch(r"\d{8}", publish_date) is None:
         raise SinaFinancialSchemaError(f"Sina financial period {report_date} has invalid publish_date")

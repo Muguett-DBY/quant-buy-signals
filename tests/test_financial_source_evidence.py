@@ -148,6 +148,30 @@ def test_zero_capex_evidence_loads_exact_q1_statement_contract(tmp_path):
     assert evidence["metric"] == "CONSTRUCT_LONG_ASSET"
 
 
+def test_committed_000802_zero_capex_evidence_uses_exact_current_period_filings():
+    evidence = load_zero_capex_evidence()
+
+    prior_annual = evidence[("000802", "2021-12-31")]
+    assert prior_annual["source_url"] == "https://static.cninfo.com.cn/finalpage/2022-04-27/1213133963.PDF"
+    assert prior_annual["source_sha256"] == "06f90b5b98d63220c70ffdef6b5e966d17433ac59806a1e9af44baccda3a9b4e"
+    assert prior_annual["source_page"] == 84
+
+    annual = evidence[("000802", "2024-12-31")]
+    assert annual["source_url"] == "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147212.PDF"
+    assert annual["source_sha256"] == "f256d47e2143c98643c13f7be5fcf26fa8de9558a98b96c29e4fb3b344ba40a6"
+    assert annual["source_page"] == 13
+
+    prior_q1 = evidence[("000802", "2025-03-31")]
+    assert prior_q1["source_url"] == "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147198.PDF"
+    assert prior_q1["source_sha256"] == "00232729f4566b5f7687f7a3d22673f5a920fe50e77c48493063adfb8b380926"
+    assert prior_q1["source_page"] == 11
+
+    q1 = evidence[("000802", "2026-03-31")]
+    assert q1["source_url"].startswith("https://disc.static.szse.cn/download/disc/")
+    assert q1["source_sha256"] == "a89ed84000416a905c9ef5e995e3f8b3c04f590e1c48c4440c2af557abc5bfeb"
+    assert q1["source_page"] == 11
+
+
 def test_zero_capex_evidence_loads_exact_annual_statement_contract(tmp_path):
     payload = _capex_payload(
         code="000670",
@@ -169,6 +193,10 @@ def test_committed_zero_capex_evidence_is_limited_to_reviewed_identities():
     expected = {
         ("000670", "2019-12-31"),
         ("000691", "2018-12-31"),
+        ("000802", "2021-12-31"),
+        ("000802", "2024-12-31"),
+        ("000802", "2025-03-31"),
+        ("000802", "2026-03-31"),
         ("000953", "2019-12-31"),
         ("002072", "2019-12-31"),
         ("002072", "2020-12-31"),

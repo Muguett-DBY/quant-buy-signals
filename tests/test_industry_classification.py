@@ -302,6 +302,13 @@ def test_production_authoritative_sources_cover_known_f10_gap_and_post_period_li
         "001396": "PROFESSIONAL_SERVICES",
         "301449": "PROFESSIONAL_SERVICES",
         "688712": "INDUST_MACHINERY",
+        "001232": "ELEC_COMPONENT",
+        "301677": "INDUST_MACHINERY",
+        "301707": "SEMICONDUCTOR",
+        "301717": "ELEC_COMPONENT",
+        "603468": "INDUST_MACHINERY",
+        "688825": "SEMICONDUCTOR",
+        "688828": "INDUST_MACHINERY",
     }
     quotes = pd.DataFrame(
         [{"code": code, "name": "source-bound", "market": "SH" if code.startswith("6") else "SZ"} for code in expected]

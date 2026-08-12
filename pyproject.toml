@@ -16,8 +16,9 @@ dependencies = [
   "pillow==12.3.0",
   "requests==2.34.2",
   "streamlit==1.59.2",
-  "gitpython==3.1.55",
+  "gitpython==3.1.58",
   "orjson==3.11.9",
+  "pymupdf==1.28.0",
 ]
 
 [tool.setuptools]

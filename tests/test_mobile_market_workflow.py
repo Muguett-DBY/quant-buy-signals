@@ -942,6 +942,14 @@ def test_security_workflow_audits_the_hashed_website_runtime_lock_once_without_i
     ]
 
 
+def test_market_data_workflow_installs_every_runtime_dependency_from_the_hashed_lock():
+    workflow = _workflow_text(MOBILE_WORKFLOW)
+
+    assert "python -m pip install --require-hashes -r requirements-lock.txt" in workflow
+    assert "pip install pymupdf" not in workflow.casefold()
+    assert _locked_versions(ROOT / "requirements-lock.txt")["pymupdf"] == "1.28.0"
+
+
 def test_security_workflow_rejects_mobile_and_update_signing_material():
     workflow = _workflow_text(TEST_WORKFLOW)
 

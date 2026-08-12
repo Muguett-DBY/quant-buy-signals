@@ -177,10 +177,12 @@ gitdb==4.0.12 \
     --hash=sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571 \
     --hash=sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf
     # via gitpython
-gitpython==3.1.55 \
-    --hash=sha256:781e3b1624dad81b24e9524bf0297b69786a0706db2cbceec1e2b05c38e5152f \
-    --hash=sha256:7c9ec1e69c158c081632ab35c41471e302c96db2ae42165036a5d2403378812e
-    # via streamlit
+gitpython==3.1.58 \
+    --hash=sha256:621416df10ef3fd0e19fabf9172ddeed0fa704d353d04f194eec56a625a95b22 \
+    --hash=sha256:d331e722577f0fd7fc1f857419b3ecc07af66282b933d2a4d95f84a042fdd50f
+    # via
+    #   -r requirements.txt
+    #   streamlit
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
@@ -732,6 +734,18 @@ pydeck==0.9.3 \
     --hash=sha256:695775cbfe51f5fdffbd9735ba469987fdc5efc96bc40a0ee4808170509c78b2 \
     --hash=sha256:d8a47c11c81fb12d51b1feb42427ff4f0e13cb599e48931021b2cba98b6849a6
     # via streamlit
+pymupdf==1.28.0 \
+    --hash=sha256:44f0973f5e5edbaec95bc34b64e71d1959d4ee90b1328de1b4f4f5b4fa78673f \
+    --hash=sha256:47a5c29ed4eb0744de9c4e37bb49b1259b18d4d75fcc8a7c130f7c9fa15956f6 \
+    --hash=sha256:4d61ec323a706e153a12e262e51febfb43eeaa20977785ace135d18d48bcdc83 \
+    --hash=sha256:4d692dcf44d3566ae96bc6f6346c6ad432274a29ba617bf7a9fe18009e24adb4 \
+    --hash=sha256:74c6d00ba2a9aad3a635db73b07c15db462b480741d831a34a75a56535ebc22b \
+    --hash=sha256:892b89ba88e8f98b53133b62877a9dc9b5e7dc6a4aeb837b612db56a8d2e03ac \
+    --hash=sha256:b3e1399c7a64c6914239116a369efcdaac4cfb9e838bde2656d7accc4a85c72d \
+    --hash=sha256:caea2b3b67347fd79e5d15ed7929b0e886aac594ea228073b6d39de0078189da \
+    --hash=sha256:e01e90fd86abfeb37ceb921eddb951f988a11d45ff6ce6b7664f2039849068ec \
+    --hash=sha256:e53f3567403a92da15caa9e7ae0164327fff48817e9f40175367fb9de524258d
+    # via -r requirements.txt
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427

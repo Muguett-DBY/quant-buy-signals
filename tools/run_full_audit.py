@@ -152,8 +152,9 @@ _QUANTITATIVE_EVIDENCE_KEYS = frozenset(
         "business_model_score",
     }
 )
-_QUANTITATIVE_RECORD_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing"})
+_QUANTITATIVE_RECORD_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing", "not_applicable"})
 _QUANTITATIVE_EFFECTIVE_LEVELS = _QUANTITATIVE_RECORD_LEVELS
+_QUANTITATIVE_COMPLETE_LEVELS = frozenset({"primary", "derived_proxy", "not_applicable"})
 _DECISION_SCHEMA_VERSION = 1
 _DECISION_MODEL_ID = "buy-decision-bounds-v1"
 _DECISION_FIELDS = frozenset(
@@ -1790,6 +1791,7 @@ def _analysis_coverage_summary(
                         payload,
                         key=evidence_key,
                         code=code,
+                        industry=str(score_row.get("industry") or ""),
                     )
                 except (TypeError, ValueError) as exc:
                     quantitative_contract["invalid_record"] += 1
@@ -1813,7 +1815,7 @@ def _analysis_coverage_summary(
                             and attached_evidence == normalized_record["evidence"]
                         )
                         or (
-                            raw_level in {"partial", "missing"}
+                            raw_level in {"partial", "missing", "not_applicable"}
                             and attached_score is None
                             and not isinstance(attached_evidence, Mapping)
                         )
@@ -1856,7 +1858,7 @@ def _analysis_coverage_summary(
                 expected_status = (
                     "complete"
                     if effective_levels
-                    and all(level in {"primary", "derived_proxy"} for level in effective_levels.values())
+                    and all(level in _QUANTITATIVE_COMPLETE_LEVELS for level in effective_levels.values())
                     else "missing"
                     if effective_levels and all(level == "missing" for level in effective_levels.values())
                     else "partial"

@@ -135,6 +135,49 @@ def test_insurance_moat_uses_sector_evidence_without_industrial_defaults() -> No
     assert metric["moat_durability_score"] == durability["score"]
 
 
+@pytest.mark.parametrize("industry", sorted(quantitative_evidence.FINANCIAL_INDUSTRIES))
+def test_financial_industrial_governance_proxies_are_explicitly_not_applicable(industry: str) -> None:
+    metric = _metric("FIN-N-A", industry=industry)
+
+    _contexts, evidence_by_code = enrich_metrics([metric], {})
+
+    for key in quantitative_evidence.FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS:
+        record = evidence_by_code["FIN-N-A"][key]
+        assert record["score"] is None
+        assert record["evidence_level"] == "not_applicable"
+        assert record["details"]["applicability"] == {
+            "applicable": False,
+            "rule": "financial-sector-specific-evidence-v1",
+        }
+        assert record["details"]["evidence_quality"]["missing_inputs"] == []
+        assert key not in metric
+        assert f"{key}_evidence" not in metric
+        assert metric[f"{key}_evidence_level"] == "not_applicable"
+        assert (
+            validate_quantitative_evidence_record(
+                record,
+                key=key,
+                code="FIN-N-A",
+                industry=industry,
+            )["score"]
+            is None
+        )
+        with pytest.raises(ValueError, match="applicability binding"):
+            validate_quantitative_evidence_record(
+                record,
+                key=key,
+                code="FIN-N-A",
+                industry="INDUSTRIAL",
+            )
+        with pytest.raises(ValueError, match="applicability binding"):
+            validate_quantitative_evidence_record(
+                record,
+                key=key,
+                code="OTHER-COMPANY",
+                industry=industry,
+            )
+
+
 def test_single_undated_fcf_cannot_complete_accounting_management_or_moat() -> None:
     metric = _metric("TARGET", fcf_history=[10.0], fcf_years=[])
 

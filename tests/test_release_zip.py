@@ -593,6 +593,19 @@ def _convert_first_valuation_to_financial_pb(payload):
     payload["dcf_results"][code] = _financial_pb_valuation_result(code)
     company = next(company for company in payload["companies"] if company["code"] == code)
     company["industry"] = "BANK"
+    quantitative_evidence = _quantitative_evidence_fixture(code, industry="BANK")
+    company["quantitative_evidence"] = quantitative_evidence
+    company["quantitative_evidence_levels"] = {
+        key: record["evidence_level"] for key, record in quantitative_evidence.items()
+    }
+    company["quantitative_evidence_status"] = "partial"
+    for key, record in quantitative_evidence.items():
+        company.pop(key, None)
+        company.pop(f"{key}_evidence", None)
+        company[f"{key}_evidence_level"] = record["evidence_level"]
+        if record["evidence_level"] in {"primary", "derived_proxy"}:
+            company[key] = record["score"]
+            company[f"{key}_evidence"] = record["evidence"]
     _set_fixture_type1_from_valuation(company, payload["dcf_results"][code])
     coverage = payload["provenance"]["caller_metadata"]["validation"]["strict_ttm_source_coverage"]
     coverage["denominator"] -= 1
@@ -601,6 +614,7 @@ def _convert_first_valuation_to_financial_pb(payload):
         metric_coverage = coverage[metric]
         metric_coverage["complete_codes"].remove(code)
         metric_coverage["complete"] -= 1
+        metric_coverage["usable"] -= 1
         metric_coverage["status_counts"]["complete"] -= 1
         metric_coverage["coverage"] = 1.0
     _set_fixture_type7_ledger(
@@ -784,19 +798,27 @@ def _quantitative_context():
     return context
 
 
-def _quantitative_evidence_fixture(code):
+def _quantitative_evidence_fixture(code, *, industry="TEST"):
     eligible_codes = tuple(_eligible_codes())
     _artifact, coldness, _summary, _status = _market_coldness_audit_fixture(
         eligible_codes,
         eligible_codes,
     )
     metric = _quantitative_metric(code)
+    metric["industry"] = industry
     metric["source_trade_date"] = "2026-07-15"
     coldness_record = deepcopy(coldness[code])
     metric.update({key: value for key, value in coldness_record.items() if key != "components"})
     metric["market_coldness_components"] = coldness_record["components"]
     evidence = derive_company_evidence(metric, _quantitative_context())
-    assert all(record["evidence_level"] == "derived_proxy" for record in evidence.values())
+    expected_not_applicable = (
+        {"accounting_integrity_score", "management_alignment_score"}
+        if industry in {"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"}
+        else set()
+    )
+    assert {
+        key for key, record in evidence.items() if record["evidence_level"] == "not_applicable"
+    } == expected_not_applicable
     return evidence
 
 
@@ -884,11 +906,20 @@ def _audit_payload(files):
     }
 
     def company_row(code):
-        quantitative_evidence = _quantitative_evidence_fixture(code)
+        industry = "SOFTWARE" if code in {sample_codes[0], sample_codes[-1]} else "BANK"
+        quantitative_evidence = _quantitative_evidence_fixture(code, industry=industry)
+        quantitative_levels = {key: record["evidence_level"] for key, record in quantitative_evidence.items()}
+        quantitative_status = (
+            "complete"
+            if all(level in {"primary", "derived_proxy", "not_applicable"} for level in quantitative_levels.values())
+            else "missing"
+            if all(level == "missing" for level in quantitative_levels.values())
+            else "partial"
+        )
         row = {
             "code": code,
             "name": f"样本{code}",
-            "industry": "SOFTWARE" if code in {sample_codes[0], sample_codes[-1]} else "BANK",
+            "industry": industry,
             "source_trade_date": "2026-07-15",
             "price": 10.0,
             "pb": 0.95,
@@ -906,15 +937,14 @@ def _audit_payload(files):
                 {"dimension": "1c", "score": 0.0, "reason": "审计夹具"},
             ],
             "quantitative_evidence": quantitative_evidence,
-            "quantitative_evidence_levels": {
-                key: record["evidence_level"] for key, record in quantitative_evidence.items()
-            },
-            "quantitative_evidence_status": "complete",
+            "quantitative_evidence_levels": quantitative_levels,
+            "quantitative_evidence_status": quantitative_status,
         }
         for key, record in quantitative_evidence.items():
-            row[key] = record["score"]
-            row[f"{key}_evidence"] = record["evidence"]
             row[f"{key}_evidence_level"] = record["evidence_level"]
+            if record["evidence_level"] in {"primary", "derived_proxy"}:
+                row[key] = record["score"]
+                row[f"{key}_evidence"] = record["evidence"]
         for type_key, dimensions in type_dimensions.items():
             row[f"{type_key}_score"] = 0.0
             row[type_key] = {
@@ -1029,18 +1059,24 @@ def _audit_payload(files):
         "excluded_financial_codes": excluded_financial_codes,
         "revenue": {
             "complete": len(nonfinancial_codes),
+            "adjusted": 0,
+            "usable": len(nonfinancial_codes),
             "missing": 0,
             "coverage": 1.0,
             "status_counts": {"complete": len(nonfinancial_codes)},
             "complete_codes": list(nonfinancial_codes),
+            "adjusted_codes_by_status": {},
             "missing_codes_by_status": {},
         },
         "fcff": {
             "complete": len(nonfinancial_codes),
+            "adjusted": 0,
+            "usable": len(nonfinancial_codes),
             "missing": 0,
             "coverage": 1.0,
             "status_counts": {"complete": len(nonfinancial_codes)},
             "complete_codes": list(nonfinancial_codes),
+            "adjusted_codes_by_status": {},
             "missing_codes_by_status": {},
         },
     }

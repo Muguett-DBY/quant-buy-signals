@@ -1440,10 +1440,10 @@ def test_missing_interim_capex_fails_closed_only_for_that_company_without_removi
     [
         (float("nan"), "nonfinite_component"),
         (1_000_000_000_000_000.0, "implausible_unit"),
-        (10.0, "negative_reconstructed_capex"),
+        (10.0, "seasonal_reconstruction_clipped"),
     ],
 )
-def test_abnormal_interim_capex_is_a_deterministic_per_company_ttm_failure(value, expected_status):
+def test_abnormal_interim_capex_has_a_deterministic_per_company_ttm_status(value, expected_status):
     financials = _financials(3)
     financials["000002"]["cashflow_interim"][0]["CONSTRUCT_LONG_ASSET"] = value
     if math.isfinite(value):
@@ -1464,7 +1464,19 @@ def test_abnormal_interim_capex_is_a_deterministic_per_company_ttm_failure(value
 
     fcff = validation["strict_ttm_source_coverage"]["fcff"]
     assert fcff["status_counts"] == {"complete": 1, expected_status: 1}
-    assert fcff["missing_codes_by_status"] == {expected_status: ["000002"]}
+    if expected_status == "seasonal_reconstruction_clipped":
+        assert fcff["complete"] == 1
+        assert fcff["adjusted"] == 1
+        assert fcff["usable"] == 2
+        assert fcff["missing"] == 0
+        assert fcff["coverage"] == 1.0
+        assert fcff["adjusted_codes_by_status"] == {expected_status: ["000002"]}
+        assert fcff["missing_codes_by_status"] == {}
+    else:
+        assert fcff["adjusted"] == 0
+        assert fcff["usable"] == 1
+        assert fcff["adjusted_codes_by_status"] == {}
+        assert fcff["missing_codes_by_status"] == {expected_status: ["000002"]}
 
 
 def test_strict_ttm_source_market_gate_rejects_broad_missing_interim_capex():

@@ -911,7 +911,7 @@ def _strict_ttm_metric_status(
     if not math.isfinite(reconstructed_capex):
         return "nonfinite_component"
     if reconstructed_capex < 0:
-        return "negative_reconstructed_capex"
+        return "seasonal_reconstruction_clipped"
     return "complete"
 
 
@@ -944,19 +944,30 @@ def _strict_ttm_source_coverage(
                     market_cap=_finite_number(market_cap_by_code.get(code)),
                 )
             status_by_code[code] = status
+        adjusted_statuses = {"seasonal_reconstruction_clipped"} if metric == "fcff" else set()
         complete_codes = sorted(code for code, status in status_by_code.items() if status == "complete")
-        status_counts: dict[str, int] = {}
+        adjusted_codes_by_status: dict[str, list[str]] = {}
         missing_codes_by_status: dict[str, list[str]] = {}
+        status_counts: dict[str, int] = {}
         for code, status in status_by_code.items():
             status_counts[status] = status_counts.get(status, 0) + 1
-            if status != "complete":
+            if status in adjusted_statuses:
+                adjusted_codes_by_status.setdefault(status, []).append(code)
+            elif status != "complete":
                 missing_codes_by_status.setdefault(status, []).append(code)
+        adjusted = sum(len(codes) for codes in adjusted_codes_by_status.values())
+        usable = len(complete_codes) + adjusted
         result[metric] = {
             "complete": len(complete_codes),
-            "missing": denominator - len(complete_codes),
-            "coverage": (len(complete_codes) / denominator if denominator else 1.0) if contract is not None else None,
+            "adjusted": adjusted,
+            "usable": usable,
+            "missing": denominator - usable,
+            "coverage": (usable / denominator if denominator else 1.0) if contract is not None else None,
             "status_counts": dict(sorted(status_counts.items())),
             "complete_codes": complete_codes,
+            "adjusted_codes_by_status": {
+                status: sorted(values) for status, values in sorted(adjusted_codes_by_status.items())
+            },
             "missing_codes_by_status": {
                 status: sorted(values) for status, values in sorted(missing_codes_by_status.items())
             },

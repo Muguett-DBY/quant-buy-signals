@@ -19,11 +19,17 @@ CONTRACT = {
 }
 
 
-def _period(statement: str, rows: list[tuple[str, str, object]], *, publish_date: str = "20260425") -> dict:
+def _period(
+    statement: str,
+    rows: list[tuple[str, str, object]],
+    *,
+    publish_date: str = "20260425",
+    data_source: str = "定期报告",
+) -> dict:
     return {
         "rType": "合并期末",
         "rCurrency": "CNY",
-        "data_source": "定期报告",
+        "data_source": data_source,
         "is_audit": "未审计",
         "audit_opinion": "",
         "publish_date": publish_date,
@@ -123,6 +129,31 @@ def test_normalize_a_share_code_accepts_only_canonical_shenzhen_shanghai(value):
 def test_normalize_a_share_code_rejects_ambiguous_or_unsupported_values(value):
     with pytest.raises((TypeError, ValueError)):
         sf.normalize_a_share_code(value)
+
+
+@pytest.mark.parametrize(
+    "data_source",
+    ["定期报告", "招股说明书/意向书", "招股说明书(申报稿)", "更正或补充"],
+)
+def test_client_accepts_pinned_official_disclosure_categories(tmp_path, data_source):
+    payload = _payload("lrb", {"20260331": [("BIZTOTINCO", "营业总收入", "1")]})
+    payload["result"]["data"]["report_list"]["20260331"]["data_source"] = data_source
+    session = FakeSession([FakeResponse(payload, url=_response_url("600519", "lrb"))])
+
+    result = _client(tmp_path, session).fetch_one("600519", "lrb", contract=CONTRACT)
+
+    assert result.status == "ok"
+    assert result.records[0]["SOURCE_PROVENANCE"]["metadata"]["data_source"] == data_source
+
+
+def test_client_rejects_unknown_disclosure_category(tmp_path):
+    payload = _payload("lrb", {"20260331": [("BIZTOTINCO", "营业总收入", "1")]})
+    payload["result"]["data"]["report_list"]["20260331"]["data_source"] = "未知来源"
+    session = FakeSession([FakeResponse(payload, url=_response_url("600519", "lrb"))])
+
+    result = _client(tmp_path, session).fetch_one("600519", "lrb", contract=CONTRACT)
+
+    assert result.status == "schema_drift"
 
 
 def test_client_uses_exact_contract_and_maps_stable_item_fields(tmp_path):

@@ -234,8 +234,9 @@ _AUDIT_QUANTITATIVE_EVIDENCE_KEYS = frozenset(
         "business_model_score",
     }
 )
-_AUDIT_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing"})
-_AUDIT_COMPLETE_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy"})
+_AUDIT_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy", "partial", "missing", "not_applicable"})
+_AUDIT_COMPLETE_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy", "not_applicable"})
+_AUDIT_SCORED_QUANTITATIVE_LEVELS = frozenset({"primary", "derived_proxy"})
 _AUDIT_DECISION_FIELDS = frozenset(
     {
         "schema_version",
@@ -3064,12 +3065,17 @@ def _audit_quantitative_evidence_valid(company: Mapping[str, Any], code: str) ->
         ):
             return False
         try:
-            normalized = validate_quantitative_evidence_record(record, key=key, code=code)
+            normalized = validate_quantitative_evidence_record(
+                record,
+                key=key,
+                code=code,
+                industry=str(company.get("industry") or ""),
+            )
         except (TypeError, ValueError):
             return False
         attached_score = _finite_number(company.get(key))
         attached_evidence = company.get(f"{key}_evidence")
-        if level in _AUDIT_COMPLETE_QUANTITATIVE_LEVELS:
+        if level in _AUDIT_SCORED_QUANTITATIVE_LEVELS:
             if (
                 attached_score is None
                 or not math.isclose(attached_score, float(normalized["score"]), rel_tol=0.0, abs_tol=1e-12)
@@ -4706,32 +4712,44 @@ def _strict_ttm_analysis_population(validation: Mapping[str, Any]) -> set[str] |
         "invalid_period_contract",
         "nonfinite_component",
         "implausible_unit",
-        "negative_reconstructed_capex",
+        "seasonal_reconstruction_clipped",
     }
+    adjusted_statuses = {"seasonal_reconstruction_clipped"}
     population_sets: list[set[str]] = []
     for metric in ("revenue", "fcff"):
         metric_coverage = coverage.get(metric)
         if not isinstance(metric_coverage, Mapping):
             return None
         complete = metric_coverage.get("complete")
+        adjusted = metric_coverage.get("adjusted")
+        usable = metric_coverage.get("usable")
         missing = metric_coverage.get("missing")
         ratio = _finite_number(metric_coverage.get("coverage"))
         status_counts = metric_coverage.get("status_counts")
         complete_codes = metric_coverage.get("complete_codes")
+        adjusted_by_status = metric_coverage.get("adjusted_codes_by_status")
         missing_by_status = metric_coverage.get("missing_codes_by_status")
         if (
             isinstance(complete, bool)
             or not isinstance(complete, int)
+            or isinstance(adjusted, bool)
+            or not isinstance(adjusted, int)
+            or isinstance(usable, bool)
+            or not isinstance(usable, int)
             or isinstance(missing, bool)
             or not isinstance(missing, int)
             or complete < 0
+            or adjusted < 0
+            or usable < 0
             or missing < 0
-            or complete + missing != denominator
+            or usable != complete + adjusted
+            or usable + missing != denominator
             or ratio is None
-            or not math.isclose(ratio, complete / denominator, rel_tol=0.0, abs_tol=1e-12)
+            or not math.isclose(ratio, usable / denominator, rel_tol=0.0, abs_tol=1e-12)
             or ratio < _MIN_RELEASE_STRICT_TTM_SOURCE_COVERAGE
             or not isinstance(status_counts, Mapping)
             or not isinstance(complete_codes, list)
+            or not isinstance(adjusted_by_status, Mapping)
             or not isinstance(missing_by_status, Mapping)
         ):
             return None
@@ -4747,15 +4765,35 @@ def _strict_ttm_analysis_population(validation: Mapping[str, Any]) -> set[str] |
             or any(re.fullmatch(r"[036][0-9]{5}", str(code)) is None for code in complete_codes)
         ):
             return None
+        expected_adjusted_statuses = {
+            status for status, count in status_counts.items() if status in adjusted_statuses and count
+        }
+        if set(adjusted_by_status) != expected_adjusted_statuses:
+            return None
+        adjusted_codes: list[str] = []
+        for status, codes in adjusted_by_status.items():
+            if (
+                status not in adjusted_statuses
+                or not isinstance(codes, list)
+                or codes != sorted(set(str(code) for code in codes))
+                or len(codes) != status_counts.get(status)
+                or any(re.fullmatch(r"[036][0-9]{5}", str(code)) is None for code in codes)
+            ):
+                return None
+            adjusted_codes.extend(str(code) for code in codes)
+        if len(adjusted_codes) != adjusted or len(set(adjusted_codes)) != adjusted:
+            return None
         expected_missing_statuses = {
-            status for status, count in status_counts.items() if status != "complete" and count
+            status
+            for status, count in status_counts.items()
+            if status != "complete" and status not in adjusted_statuses and count
         }
         if set(missing_by_status) != expected_missing_statuses:
             return None
         missing_codes: list[str] = []
         for status, codes in missing_by_status.items():
             if (
-                status not in allowed_statuses - {"complete"}
+                status not in allowed_statuses - {"complete", *adjusted_statuses}
                 or not isinstance(codes, list)
                 or codes != sorted(set(str(code) for code in codes))
                 or len(codes) != status_counts.get(status)
@@ -4764,16 +4802,18 @@ def _strict_ttm_analysis_population(validation: Mapping[str, Any]) -> set[str] |
                 return None
             missing_codes.extend(str(code) for code in codes)
         complete_set = {str(code) for code in complete_codes}
+        adjusted_set = set(adjusted_codes)
         missing_set = set(missing_codes)
         if (
             len(missing_codes) != missing
             or len(missing_set) != missing
-            or complete_set & missing_set
-            or (complete_set | missing_set) & set(excluded)
-            or len(complete_set | missing_set) != denominator
+            or complete_set & (adjusted_set | missing_set)
+            or adjusted_set & missing_set
+            or (complete_set | adjusted_set | missing_set) & set(excluded)
+            or len(complete_set | adjusted_set | missing_set) != denominator
         ):
             return None
-        population_sets.append(complete_set | missing_set)
+        population_sets.append(complete_set | adjusted_set | missing_set)
     if population_sets[0] != population_sets[1]:
         return None
     eligible_codes = validation.get("eligible_codes")

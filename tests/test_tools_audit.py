@@ -362,6 +362,15 @@ def _quantitative_record(
     payload = deepcopy(_quantitative_evidence_fixture(code)[key])
     if level == "derived_proxy":
         return payload
+    if level == "not_applicable":
+        return qe.derive_company_evidence(
+            {
+                "code": code,
+                "industry": "BANK",
+                "financial_indicator_as_of": "2025-12-31",
+            },
+            {},
+        )[key]
     quality = payload["details"]["evidence_quality"]
     requested_missing = list(missing_inputs or ["missing_input"])
     if level == "partial":
@@ -510,7 +519,7 @@ def _complete_framework_row(*, quantitative_evidence=...):
             row["quantitative_evidence_levels"] = levels
             row["quantitative_evidence_status"] = (
                 "complete"
-                if levels and all(level in {"primary", "derived_proxy"} for level in levels.values())
+                if levels and all(level in {"primary", "derived_proxy", "not_applicable"} for level in levels.values())
                 else "missing"
                 if levels and all(level == "missing" for level in levels.values())
                 else "partial"
@@ -1130,6 +1139,22 @@ def test_analysis_coverage_summary_rejects_level_only_quantitative_records():
     assert summary["quantitative_evidence_contract"]["invalid_record"] == 13
     assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
     assert summary["goal_readiness"]["ready"] is False
+
+
+def test_analysis_coverage_summary_treats_financial_industrial_metrics_as_not_applicable() -> None:
+    evidence = _quantitative_evidence()
+    for key in qe.FINANCIAL_INDUSTRIAL_NOT_APPLICABLE_KEYS:
+        evidence[key] = _quantitative_record(key, "not_applicable")
+    row = _complete_framework_row(quantitative_evidence=evidence)
+    row["industry"] = "BANK"
+
+    summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
+
+    assert summary["quantitative_evidence_contract"]["valid_rows"] == 1
+    assert summary["quantitative_evidence_level_counts"]["not_applicable"] == 2
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is True
+    assert summary["goal_readiness"]["no_missing_quantitative_evidence"] is True
+    assert summary["goal_readiness"]["no_partial_quantitative_evidence"] is True
 
 
 def test_analysis_coverage_summary_rejects_quantitative_level_or_status_summary_mismatch():

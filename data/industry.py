@@ -1118,6 +1118,13 @@ _CAPCO_DIVISION_MODEL_MAP = {
     "89": "MEDIA",
     "91": "DIVERSIFIED",
 }
+
+# A post-CAPCO listing may disclose a narrower activity than its two-digit
+# division.  Keep refinements small and tied to a division whose broad model
+# bucket would otherwise erase a material distinction.
+_NEW_LISTING_MODEL_REFINEMENTS = {
+    "39": {"ELEC_COMPONENT", "SEMICONDUCTOR"},
+}
 _MIN_CAPCO_RECORDS = 5_000
 
 # Eastmoney's broad "多元金融" bucket contains banks, insurers, capital-market
@@ -1205,6 +1212,12 @@ def _authoritative_records(capco_payload: Any, new_listing_payload: Any) -> tupl
             record = dict(raw_record)
             division_code = str(record.get("division_code") or "").strip()
             model_industry = _CAPCO_DIVISION_MODEL_MAP.get(division_code)
+            if source_kind == "exchange_new_listing" and record.get("model_industry") is not None:
+                refined_industry = str(record.get("model_industry") or "").strip()
+                allowed_refinements = _NEW_LISTING_MODEL_REFINEMENTS.get(division_code, {model_industry})
+                if refined_industry not in allowed_refinements:
+                    raise ValueError(f"new-listing industry {code} has an unsupported model refinement")
+                model_industry = refined_industry
             if (
                 not str(record.get("name") or "").strip()
                 or model_industry not in INDUSTRY_BENCHMARKS
