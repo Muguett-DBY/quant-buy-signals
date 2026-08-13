@@ -1099,7 +1099,7 @@ def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail
 
 
 def test_dashboard_rule_sources_match_the_signed_manifest_contract():
-    from tools.publish_mobile_snapshot import _public_model_source_contract
+    from engine.model_sources import public_model_source_contract
 
     source = DASHBOARD.read_text(encoding="utf-8")
     worker_sources = {
@@ -1109,7 +1109,7 @@ def test_dashboard_rule_sources_match_the_signed_manifest_contract():
             source,
         )
     }
-    published = _public_model_source_contract()
+    published = public_model_source_contract()
 
     assert worker_sources == published["documents"]
     assert f"precedence:Object.freeze({json.dumps(published['precedence'], separators=(',', ':'))})" in source

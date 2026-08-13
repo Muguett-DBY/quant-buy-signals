@@ -701,7 +701,9 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert manifest["provenance"]["methodology_version"] == publisher.METHODOLOGY_VERSION
     model_sources = manifest["provenance"]["model_sources"]
     assert model_sources["schema_version"] == 1
-    assert model_sources["audit_schema_version"] == publisher.AUDIT_SCHEMA_VERSION
+    from engine.audit import AUDIT_SCHEMA_VERSION
+
+    assert model_sources["audit_schema_version"] == AUDIT_SCHEMA_VERSION
     assert set(model_sources["documents"]) == {
         "template1",
         "template5",
