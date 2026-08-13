@@ -428,7 +428,8 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "sleep $((mirror_retry_base_delay_seconds * attempt))" in mirror_script
     assert "verify_cloudflare_projection() {" in mirror_script
     assert "/api/health?deep=1&generation_id=" in mirror_script
-    assert "index_contract=3" in mirror_script
+    assert "index_contract=4" in mirror_script
+    assert ".index_contract == 4" in mirror_script
     assert ".methodology_version == $methodology and .methodology_current == true" in mirror_script
     assert 'grep -Fq "${expected_methodology_version}"' in mirror_script
     assert "patch6-seven-types-2026-08-01-classified-type7-v4" not in mirror_script

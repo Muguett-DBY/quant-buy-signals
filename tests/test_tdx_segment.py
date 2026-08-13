@@ -208,3 +208,83 @@ def test_load_tdx_cache_falls_back_to_newer_when_at_or_before_stale(tmp_path, mo
     record = ts._load_tdx_cache(code, date(2026, 8, 7))
     assert record is not None
     assert record["segment_growth_sources"]["status"] in {"complete", "partial"}
+
+
+def test_backfill_rebuilds_complete_cache_with_request_annual_revenue(tmp_path, monkeypatch):
+    """A cache that looked complete without filed revenue must be rebuilt
+    against the request's annual revenue before it is returned."""
+    from data import growth_evidence as ge
+    from data import tdx_segment as ts
+
+    code = "002731"
+    as_of = date(2026, 8, 10)
+    outcome = parse_f10_segments(_f10_block(), code)
+    monkeypatch.setattr(ge, "SEGMENT_CACHE_DIR", tmp_path)
+    ts._write_tdx_cache(code, as_of, outcome.as_list())
+
+    cached_without_revenue = ts._load_tdx_cache(code, as_of)
+    assert cached_without_revenue is not None
+    assert cached_without_revenue["segment_growth_sources"]["status"] == "complete"
+
+    filled = ts.backfill_tdx_segments(
+        [
+            {
+                "code": code,
+                "as_of": as_of.isoformat(),
+                "revenue_records": [{"year": 2025, "value": 1.0e9}],
+                "goodwill_records": [],
+            }
+        ],
+        max_workers=1,
+    )
+    segment = filled[code]["segment_growth_sources"]
+    assert segment["status"] == "partial"
+    assert segment["reason"] == "latest_segment_identity_match_below_95_percent"
+    assert segment["annual_revenue_latest"] == pytest.approx(1.0e9)
+    assert segment["matched_latest_share"] == pytest.approx(0.5)
+
+
+def test_backfill_live_path_uses_request_annual_revenue(monkeypatch):
+    """Fresh Tongdaxin rows use the same filed-revenue denominator as cache hits."""
+    import sys
+    from types import ModuleType
+
+    from data import tdx_segment as ts
+
+    class FakeClient:
+        def F10(self, *, symbol, name):
+            assert symbol == "002731"
+            assert name == "经营分析"
+            return _f10_block()
+
+    class FakeQuotes:
+        @staticmethod
+        def factory(*, market, timeout):
+            assert market == "std"
+            assert timeout == 8
+            return FakeClient()
+
+    mootdx_module = ModuleType("mootdx")
+    mootdx_module.__path__ = []
+    quotes_module = ModuleType("mootdx.quotes")
+    quotes_module.Quotes = FakeQuotes
+    monkeypatch.setitem(sys.modules, "mootdx", mootdx_module)
+    monkeypatch.setitem(sys.modules, "mootdx.quotes", quotes_module)
+    monkeypatch.setattr(ts, "_load_tdx_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ts, "_write_tdx_cache", lambda *args, **kwargs: None)
+
+    filled = ts.backfill_tdx_segments(
+        [
+            {
+                "code": "002731",
+                "as_of": "2026-08-10",
+                "revenue_records": [{"year": 2025, "value": 1.0e9}],
+                "goodwill_records": [],
+            }
+        ],
+        max_workers=1,
+    )
+    segment = filled["002731"]["segment_growth_sources"]
+    assert segment["status"] == "partial"
+    assert segment["annual_revenue_latest"] == pytest.approx(1.0e9)
+    assert segment["matched_latest_share"] == pytest.approx(0.5)

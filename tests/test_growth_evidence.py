@@ -676,6 +676,7 @@ def test_segment_cache_reuses_21_day_raw_capture_and_revalidates_current_as_of(t
     assert rebased.cache_diagnostic == "reused_source_as_of:2026-07-08"
     assert rebased.as_of == "2026-07-29"
     assert rebased.segment_growth_sources["as_of"] == "2026-07-29"
+    assert rebased.segment_growth_sources["annual_revenue_latest"] == pytest.approx(revenues[-1]["value"])
     assert rebased.segment_growth_sources["records"] == captured.segment_growth_sources["records"]
     assert rebased.segment_growth_sources["evidence_id"] != captured.segment_growth_sources["evidence_id"]
 
@@ -932,12 +933,14 @@ def test_type3_retry_state_rejects_tampered_backoff_and_cache_write_failure(
 def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(monkeypatch, tmp_path):
     assert ge.MAX_BATCH_COMPANIES >= 5_200
     calls = []
+    segment_annual_revenue = {}
 
     def fake_cashflow(years, *, codes):
         calls.append((tuple(years), tuple(codes)))
         return pd.DataFrame([_acquisition_row(year, code=code) for code in codes for year in range(2021, 2026)])
 
-    def fake_segment(code, cutoff, **_kwargs):
+    def fake_segment(code, cutoff, **kwargs):
+        segment_annual_revenue[code] = kwargs.get("annual_revenue")
         payload = ge._validate_business_payload(
             _segment_payload(code=code),
             code=code,
@@ -972,6 +975,8 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
     assert list(result) == ["000001", "600519"]
     assert all(item["available"] for item in result.values())
     assert calls == [((2025, 2024, 2023, 2022, 2021), ("000001", "600519"))]
+    expected_revenue = {int(record["year"]): float(record["value"]) for record in revenues}
+    assert segment_annual_revenue == {"000001": expected_revenue, "600519": expected_revenue}
     assert sorted(progress) == [(1, 2), (2, 2)]
     with pytest.raises(ValueError, match="request shape"):
         ge.fetch_growth_evidence_batch(

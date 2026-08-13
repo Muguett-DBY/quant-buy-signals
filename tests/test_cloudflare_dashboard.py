@@ -284,6 +284,22 @@ const knownPositionDecision = {
   score_upper_bound: 6,
   missing_dimensions: [],
 };
+const proxyVerificationDecision = {
+  decision_complete: true,
+  decision_basis: "conservative_upper_bound",
+  potentially_triggerable: false,
+  score_lower_bound: 2,
+  score_upper_bound: 6,
+  missing_dimensions: ["6b", "6c"],
+};
+const mixedVerificationDecision = {
+  decision_complete: false,
+  decision_basis: "unresolved_missing_evidence",
+  potentially_triggerable: true,
+  score_lower_bound: 2,
+  score_upper_bound: 8,
+  missing_dimensions: ["6a", "6b", "6c"],
+};
 const catalogue = {
   capabilities: { dimension_scores: true },
   companies: [
@@ -313,6 +329,32 @@ const catalogue = {
       types: {
         type3: { status: "triggered", score: 8.5, applicable: true, evidence_complete: true },
         type5: { status: "triggered", score: 7.3, applicable: true, evidence_complete: true },
+      },
+    },
+    {
+      code: "300006", name: "代理证据待核验", industry: "测试行业", diagnostic_score: 4, primary_label: "",
+      types: {
+        type6: {
+          status: "insufficient_evidence", score: null, applicable: true, evidence_complete: false,
+          estimated_sub_score_reasons: {
+            "6b": "未确认估算，不用于触发；技术模型代理证据，最高4分；须补可追溯原始资料",
+            "6c": "未确认估算，不用于触发；商业模式模型代理证据，最高4分；须补可追溯原始资料",
+          },
+          decision: proxyVerificationDecision,
+        },
+      },
+    },
+    {
+      code: "300007", name: "直接资料与代理均待补", industry: "测试行业", diagnostic_score: null, primary_label: "",
+      types: {
+        type6: {
+          status: "insufficient_evidence", score: null, applicable: true, evidence_complete: false,
+          estimated_sub_score_reasons: {
+            "6b": "未确认估算，不用于触发；技术模型代理证据，最高4分；须补可追溯原始资料",
+            "6c": "未确认估算，不用于触发；商业模式模型代理证据，最高4分；须补可追溯原始资料",
+          },
+          decision: mixedVerificationDecision,
+        },
       },
     },
   ],
@@ -351,7 +393,7 @@ const env = {
   },
 };
 const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
-const canonicalUrl = legacyUrl + "&index_contract=3";
+const canonicalUrl = legacyUrl + "&index_contract=4";
 cached.set(legacyUrl, new Response(JSON.stringify({ index_contract: 1, generation_id: "0123456789abcdef", summary: { company_count: 1 }, companies: [] })));
 const response = await worker.fetch(
   new Request(canonicalUrl),
@@ -359,21 +401,41 @@ const response = await worker.fetch(
 );
 assert.equal(response.status, 200);
 const payload = await response.json();
-assert.equal(payload.index_contract, 3);
+assert.equal(payload.index_contract, 4);
 assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-04-v5");
 assert.equal(payload.methodology_current, true);
-assert.equal(payload.summary.company_count, 6);
+assert.equal(payload.summary.company_count, 8);
+assert.equal(payload.summary.evidence_gap_company_count, 4);
+assert.equal(payload.summary.source_gap_company_count, 3);
+assert.equal(payload.summary.proxy_verification_company_count, 2);
+assert.equal(payload.summary.decision_relevant_gap_company_count, 2);
+assert.equal(payload.summary.source_decision_relevant_company_count, 2);
+assert.equal(payload.summary.proxy_decision_relevant_company_count, 1);
+assert.equal(payload.summary.bounded_gap_company_count, 2);
+assert.equal(payload.summary.action_confirmation_company_count, 1);
 assert.ok(cached.has(canonicalUrl));
 assert.deepEqual(payload.summary.type_coverage.type3, {
   evidence_missing: 2,
+  source_missing: 2,
+  proxy_verification: 0,
+  decision_relevant: 1,
+  source_decision_relevant: 1,
+  proxy_decision_relevant: 0,
+  bounded: 1,
   decision_unresolved: 1,
   potentially_triggerable: 1,
   action_confirmation: 0,
 });
 assert.deepEqual(payload.summary.type_coverage.type6, {
-  evidence_missing: 0,
-  decision_unresolved: 0,
-  potentially_triggerable: 0,
+  evidence_missing: 2,
+  source_missing: 1,
+  proxy_verification: 2,
+  decision_relevant: 1,
+  source_decision_relevant: 1,
+  proxy_decision_relevant: 1,
+  bounded: 1,
+  decision_unresolved: 1,
+  potentially_triggerable: 1,
   action_confirmation: 1,
 });
 assert.deepEqual(payload.companies[0].types.type3, {
@@ -383,8 +445,16 @@ assert.deepEqual(payload.companies[0].types.type3, {
   score_upper_bound: 8,
   has_missing_dimensions: true,
   has_evidence_gap: true,
+  source_gap: true,
+  proxy_verification: false,
+  decision_relevant: true,
+  bounded: false,
 });
 assert.equal(payload.companies[1].types.type3.has_evidence_gap, true);
+assert.equal(payload.companies[1].types.type3.source_gap, true);
+assert.equal(payload.companies[1].types.type3.proxy_verification, false);
+assert.equal(payload.companies[1].types.type3.decision_relevant, false);
+assert.equal(payload.companies[1].types.type3.bounded, true);
 assert.equal(payload.companies[2].types.type6.has_evidence_gap, false);
 assert.equal(payload.companies[3].types.type6.has_evidence_gap, false);
 assert.equal(payload.companies[4].types.type6.has_evidence_gap, false);
@@ -393,6 +463,17 @@ const projectedSignal = payload.companies[5];
 assert.deepEqual(projectedSignal.buy_types, ["type3", "type5"]);
 assert.equal(projectedSignal.primary_type, "type3");
 assert.equal(projectedSignal.primary_label, "第三种情况");
+const projectedProxy = payload.companies[6].types.type6;
+assert.equal(projectedProxy.has_evidence_gap, true);
+assert.equal(projectedProxy.source_gap, false);
+assert.equal(projectedProxy.proxy_verification, true);
+assert.equal(projectedProxy.decision_relevant, false);
+assert.equal(projectedProxy.bounded, true);
+const projectedMixed = payload.companies[7].types.type6;
+assert.equal(projectedMixed.source_gap, true);
+assert.equal(projectedMixed.proxy_verification, true);
+assert.equal(projectedMixed.decision_relevant, true);
+assert.equal(projectedMixed.bounded, false);
 
 const pageResponse = await worker.fetch(new Request("https://dashboard.test/"), env);
 assert.equal(pageResponse.status, 200);
@@ -410,11 +491,11 @@ assert.deepEqual(helpers.actualBuyTypes(projectedSignal), ["type5", "type3"]);
 assert.equal(helpers.primaryTriggeredType(projectedSignal), "type3");
 assert.equal(helpers.primaryTriggeredScore(projectedSignal), 8.5);
 const reordered = await worker.fetch(
-  new Request("https://dashboard.test/api/catalogue-index?index_contract=3&generation_id=0123456789abcdef"),
+  new Request("https://dashboard.test/api/catalogue-index?index_contract=4&generation_id=0123456789abcdef"),
   env,
 );
 assert.equal(reordered.status, 200);
-assert.equal((await reordered.json()).index_contract, 3);
+assert.equal((await reordered.json()).index_contract, 4);
 const cacheBustedHealth = await worker.fetch(
   new Request("https://dashboard.test/api/health?verify=1"),
   env,
@@ -466,7 +547,11 @@ def test_dashboard_select_filters_use_change_events_and_type_scoped_statuses():
     assert 'typeState.status!=="not_applicable"' in source
     assert "function typeStatusMatches" in source
     assert "typeState?.status===status" in source
-    assert 'status==="evidence_gap"?typeState?.has_evidence_gap===true' in source
+    assert 'if(status==="evidence_gap")return typeState?.has_evidence_gap===true' in source
+    assert 'if(status==="decision_relevant")return typeState?.decision_relevant===true' in source
+    assert 'if(status==="source_gap")return typeState?.source_gap===true' in source
+    assert 'if(status==="proxy_verification")return typeState?.proxy_verification===true' in source
+    assert 'if(status==="bounded")return typeState?.bounded===true' in source
 
 
 def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
@@ -691,17 +776,21 @@ def test_dashboard_coverage_cards_separate_signals_conditions_and_unresolved_evi
     assert 'decision.decision_basis==="unresolved_missing_evidence"' in source
     assert "decision.potentially_triggerable===true" in source
     assert (
-        'preferredStatus=triggered>0?"triggered":conditional>0?"conditional":evidence.evidenceMissing>0?"evidence_gap":""'
+        'preferredStatus=triggered>0?"triggered":conditional>0?"conditional":evidence.decisionRelevant>0?"decision_relevant"'
         in source
     )
     assert "function conditionalCoverageLabel" in source
     assert "action_confirmation" in source
     for text in (
-        "七类实际触发、待确认与资料缺口分布",
+        "七类实际触发、待确认与证据完整度分布",
         "已触发”才是实际买入候选",
-        "资料缺口 ",
-        "其中结论待定 ",
-        "其中补齐后仍可能触发 ",
+        "结论相关",
+        "直接/结构化资料",
+        "代理待核验",
+        "结论已锁定",
+        "并非抓取失败",
+        "两者可重叠",
+        "补齐后仍可能触发 ",
         "待满足其它条件 ",
         "coverage-breakdown",
     ):
@@ -1044,10 +1133,20 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
         "需要建立相应专属模型后才能评价",
         "action_confirmation_company_count",
         "decision_relevant_gap_company_count",
+        "source_gap_company_count",
+        "proxy_verification_company_count",
+        "source_decision_relevant_company_count",
+        "proxy_decision_relevant_company_count",
+        "bounded_gap_company_count",
         "待行动确认/附加条件（非信号）",
         "其中待确认仓位",
         "资料待补候选（非信号）",
         "当前不买（其余公司）",
+        "结论相关资料待补（并集）",
+        "其中缺直接/结构化证据（可重叠）",
+        "不等同于抓取失败，也不保证能够补齐",
+        "其中量化代理待核验（可重叠）",
+        "未完全核验但结论已锁定",
         "数据覆盖",
         "评分质量",
         "股价透支计算",
@@ -1060,8 +1159,14 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
     assert "dataMissingScore=missingScore&&!positionInstruction" in source
     assert "function typeDataGap(typeKey,value)" in source
     assert "dataMissing=missing.filter(dimension=>!actionDimensions.has(dimension))" in source
+    assert "function proxyVerificationDimensions(value,dimensions)" in source
+    assert '.includes("模型代理证据，最高4分")' in source
     assert 'actionRequired=actionDimensions.has("6e")&&missing.includes("6e")&&value?.status==="conditional"' in source
     assert "declaredIncomplete=value?.applicable===true&&value?.evidence_complete===false" in source
+    assert "source_gap:gap.source_gap" in source
+    assert "proxy_verification:gap.proxy_verification" in source
+    assert "decision_relevant:gap.decision_relevant" in source
+    assert "bounded:gap.bounded" in source
     assert "hasAction=states.some(state=>state.action_required)" in source
     assert 'state.key==="type6"&&company.types?.type6?.status==="conditional"' not in source
     assert "function conditionalCoverageLabel" in source

@@ -219,7 +219,12 @@ def _write_tdx_cache(code: str, as_of: date, records: list[dict[str, Any]]) -> N
         return
 
 
-def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
+def _load_tdx_cache(
+    code: str,
+    as_of: date,
+    *,
+    annual_revenue: dict[int, float] | None = None,
+) -> dict[str, Any] | None:
     """Return a cached Tongdaxin segment evidence record, partial or complete.
 
     The cache is keyed by its capture ``as_of``; the build requests the closed
@@ -289,7 +294,12 @@ def _load_tdx_cache(code: str, as_of: date) -> dict[str, Any] | None:
             if not records:
                 continue
             segment = _validate_segment_evidence(
-                _build_segment_growth_sources(code, as_of, records),
+                _build_segment_growth_sources(
+                    code,
+                    as_of,
+                    records,
+                    annual_revenue=annual_revenue,
+                ),
                 code=code,
                 as_of=as_of,
             )
@@ -321,6 +331,7 @@ def backfill_tdx_segments(
     from data.growth_evidence import (
         _build_segment_growth_sources,
         _parse_as_of,
+        _prepare_financial_records,
         _validate_cached_segment_records,
         _validate_segment_evidence,
     )
@@ -330,10 +341,16 @@ def backfill_tdx_segments(
         as_of = _parse_as_of(request.get("as_of"))
         if not code or as_of is None:
             return code, None
+        annual_revenue = _prepare_financial_records(
+            request.get("revenue_records") or [],
+            label="revenue_records",
+            nonnegative=True,
+            as_of=as_of,
+        )
         # Cache-first: the Tongdaxin fallback persists partial captures too,
         # and a partial 2-year row is strictly better than the unavailable
         # state a rate-limited CI runner would re-fetch.
-        cached = _load_tdx_cache(code, as_of)
+        cached = _load_tdx_cache(code, as_of, annual_revenue=annual_revenue)
         if cached is not None:
             return code, cached
         try:
@@ -353,7 +370,12 @@ def backfill_tdx_segments(
             if not records:
                 return code, None
             segment = _validate_segment_evidence(
-                _build_segment_growth_sources(code, as_of, records),
+                _build_segment_growth_sources(
+                    code,
+                    as_of,
+                    records,
+                    annual_revenue=annual_revenue,
+                ),
                 code=code,
                 as_of=as_of,
             )

@@ -1772,9 +1772,9 @@ jobs:
               <<<"${health}" >/dev/null || return 1
             catalogue_index="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \
-              "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=3")" || return 1
+              "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=4")" || return 1
             jq -e --arg generation "${expected_generation}" --arg methodology "${expected_methodology_version}" --argjson company_count "${expected_company_count}" \
-              '.generation_id == $generation and .methodology_version == $methodology and .methodology_current == true and .summary.company_count == $company_count and .capabilities.type7_method_detail == true' \
+              '.index_contract == 4 and .generation_id == $generation and .methodology_version == $methodology and .methodology_current == true and .summary.company_count == $company_count and .capabilities.type7_method_detail == true' \
               <<<"${catalogue_index}" >/dev/null || return 1
             moutai="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \

@@ -1605,6 +1605,7 @@ def _fetch_segment_growth_sources(
                 code,
                 as_of,
                 cache_dir=Path(cache_dir),
+                annual_revenue=annual_revenue,
             )
             if reusable is not None:
                 return (
@@ -1687,7 +1688,16 @@ def _fetch_segment_growth_sources(
                         code=code,
                         as_of=as_of,
                     )
-                    return _build_segment_growth_sources(code, as_of, winner_records), True, "race_winner"
+                    return (
+                        _build_segment_growth_sources(
+                            code,
+                            as_of,
+                            winner_records,
+                            annual_revenue=annual_revenue,
+                        ),
+                        True,
+                        "race_winner",
+                    )
             except GrowthEvidenceError:
                 pass
         return evidence, False, f"{diagnostic};write_conflict"
@@ -2880,6 +2890,12 @@ def fetch_growth_evidence_batch(
                 recent_cache_state=cache_state,
                 cache_dir=directory,
                 cache_ttl_seconds=cache_ttl_seconds,
+                annual_revenue=_prepare_financial_records(
+                    revenue_records,
+                    label="revenue_records",
+                    nonnegative=True,
+                    as_of=cutoff,
+                ),
             ): (code, cutoff, revenue_records, goodwill_records)
             for code, cutoff, revenue_records, goodwill_records in prepared
         }
