@@ -467,8 +467,11 @@ _DEPENDENCY_FILES = (
     _ROOT / "requirements-dev-lock.txt",
     _ROOT / "pyproject.toml",
 )
-PATCH6_SOURCE_PATH = r"E:\模板汇总MD\补丁6.md"
-PATCH6_SOURCE_SHA256 = "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6"
+AUDIT_SCHEMA_VERSION = 6
+PATCH6_SOURCE_PATH = r"E:\模板汇总MD\补丁6· 公司三属性分类与三维度量化打分机制.md"
+PATCH6_SOURCE_SHA256 = "dfade9961a182bfff67f95e2f8d55fd637cf8a15cedd44c12300b4f9c4c1549b"
+PATCH7_SOURCE_PATH = r"E:\模板汇总MD\补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
+PATCH7_SOURCE_SHA256 = "69b6bbeaa44755b9935518c665bc1ac0cac5c473aaba5b106bdf0f9fc88beb6d"
 TYPE7_SOURCE_DOCUMENTS = {
     "template1": {
         "path_at_model_authoring": r"E:\模板汇总MD\第1模板.md",
@@ -485,6 +488,10 @@ TYPE7_SOURCE_DOCUMENTS = {
     "patch6": {
         "path_at_model_authoring": PATCH6_SOURCE_PATH,
         "sha256": PATCH6_SOURCE_SHA256,
+    },
+    "patch7": {
+        "path_at_model_authoring": PATCH7_SOURCE_PATH,
+        "sha256": PATCH7_SOURCE_SHA256,
     },
     "subsequent_addenda": {
         "path_at_model_authoring": r"E:\模板汇总MD\后续附加补丁们.md",
@@ -612,7 +619,7 @@ def _build_provenance(
 ) -> dict[str, Any]:
     state_hashes = audit_state_hashes()
     provenance = {
-        "audit_schema_version": 5,
+        "audit_schema_version": AUDIT_SCHEMA_VERSION,
         "generated_at_utc": datetime.now(tz=timezone.utc).isoformat(),
         "snapshot_content_sha256": _input_snapshot_hash(quotes, financials),
         "snapshot_artifact_sha256": snapshot_sha256,
@@ -621,6 +628,10 @@ def _build_provenance(
         "patch6_source": {
             "path_at_model_authoring": PATCH6_SOURCE_PATH,
             "sha256": PATCH6_SOURCE_SHA256,
+        },
+        "patch7_source": {
+            "path_at_model_authoring": PATCH7_SOURCE_PATH,
+            "sha256": PATCH7_SOURCE_SHA256,
         },
         "type7_source_documents": {key: dict(value) for key, value in TYPE7_SOURCE_DOCUMENTS.items()},
         "risk_parameter_sources": dict(RISK_PARAMETER_SOURCES),
@@ -7152,6 +7163,7 @@ def render_audit_markdown(audit: RandomSampleAudit, *, data_timestamp: float) ->
         f"- dependency_manifest_sha256: `{provenance.get('dependency_manifest_sha256')}`",
         f"- industry_sha256: `{provenance.get('industry_sha256')}`",
         f"- patch6_source: `{provenance.get('patch6_source')}`",
+        f"- patch7_source: `{provenance.get('patch7_source')}`",
         f"- type7_source_documents: `{provenance.get('type7_source_documents')}`",
         f"- risk_parameter_sources: `{provenance.get('risk_parameter_sources')}`",
         f"- scoring_verification_scope: `{provenance.get('scoring_verification_scope')}`",

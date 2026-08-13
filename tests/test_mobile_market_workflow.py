@@ -148,15 +148,16 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
     assert "$publisherArguments += '--force-financial-fallback-refresh'" in build
 
 
-def test_cloudflare_live_check_uses_the_same_methodology_version_as_the_pages_worker():
-    workflow = _workflow_text(MOBILE_WORKFLOW)
+def test_publisher_and_cloudflare_use_the_same_methodology_version():
+    from engine.buy_screener import METHODOLOGY_VERSION
+
     pages_worker = (ROOT / "cloudflare" / "quant-dashboard" / "pages_worker.js").read_text(encoding="utf-8")
     version_match = re.search(r'^const METHODOLOGY_VERSION="([^"]+)";', pages_worker)
 
     assert version_match is not None
-    assert version_match.group(1) in workflow
-    assert "classified-type7-v2" not in workflow
-    assert "classified-type7-v3" not in workflow
+    assert version_match.group(1) == METHODOLOGY_VERSION
+    publisher = (ROOT / "tools" / "publish_mobile_snapshot.py").read_text(encoding="utf-8")
+    assert '"methodology_version": METHODOLOGY_VERSION' in publisher
 
 
 def test_mobile_publication_removes_only_incomplete_starter_assets_before_retry():
@@ -412,6 +413,7 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "expected_manifest_sha256" in mirror_script
     assert "expected_company_count" in mirror_script
     assert "expected_source_commit" in mirror_script
+    assert "expected_methodology_version" in mirror_script
     assert "actual_generation" in mirror_script
     assert "actual_manifest_sha256" in mirror_script
     assert 'transport_ok="false"' not in mirror_script
@@ -426,6 +428,10 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert "sleep $((mirror_retry_base_delay_seconds * attempt))" in mirror_script
     assert "verify_cloudflare_projection() {" in mirror_script
     assert "/api/health?deep=1&generation_id=" in mirror_script
+    assert "index_contract=3" in mirror_script
+    assert ".methodology_version == $methodology and .methodology_current == true" in mirror_script
+    assert 'grep -Fq "${expected_methodology_version}"' in mirror_script
+    assert "patch6-seven-types-2026-08-01-classified-type7-v4" not in mirror_script
     assert ".integrity_checked == true" in mirror_script
     assert 'if verify_cloudflare_projection "${attempt}"; then' in mirror_script
     assert "Cloudflare public projection has not converged on attempt ${attempt} of 6." in mirror_script

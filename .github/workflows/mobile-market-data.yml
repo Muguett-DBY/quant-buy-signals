@@ -1707,6 +1707,7 @@ jobs:
           expected_market_as_of="$(jq -er '.market_as_of' "${manifest}")"
           expected_company_count="$(jq -er '.summary.company_count' "${manifest}")"
           expected_source_commit="$(jq -er '.provenance.source_commit' "${manifest}")"
+          expected_methodology_version="$(jq -er '.provenance.methodology_version' "${manifest}")"
           expected_manifest_sha256="$(sha256sum "${manifest}" | cut -d' ' -f1)"
           if [[ "${expected_source_commit}" != "${GITHUB_SHA}" ]]; then
             echo "Published generation is not bound to this workflow revision." >&2
@@ -1771,19 +1772,19 @@ jobs:
               <<<"${health}" >/dev/null || return 1
             catalogue_index="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \
-              "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=2")" || return 1
-            jq -e --arg generation "${expected_generation}" --argjson company_count "${expected_company_count}" \
-              '.generation_id == $generation and .summary.company_count == $company_count and .capabilities.type7_method_detail == true' \
+              "https://quant.custard.top/api/catalogue-index?generation_id=${expected_generation}&index_contract=3")" || return 1
+            jq -e --arg generation "${expected_generation}" --arg methodology "${expected_methodology_version}" --argjson company_count "${expected_company_count}" \
+              '.generation_id == $generation and .methodology_version == $methodology and .methodology_current == true and .summary.company_count == $company_count and .capabilities.type7_method_detail == true' \
               <<<"${catalogue_index}" >/dev/null || return 1
             moutai="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 \
               "https://quant.custard.top/api/company/600519?generation_id=${expected_generation}")" || return 1
-            jq -e --arg generation "${expected_generation}" \
-              '.generation_id == $generation and .detail_contract == "company_detail_v2" and .capabilities.type7_method_detail == true and .company.code == "600519" and (.company.types.type7.method_detail.status == "current" or .company.types.type7.method_detail.status == "not_applicable")' \
+            jq -e --arg generation "${expected_generation}" --arg methodology "${expected_methodology_version}" \
+              '.generation_id == $generation and .methodology_version == $methodology and .methodology_current == true and .detail_contract == "company_detail_v2" and .capabilities.type7_method_detail == true and .company.code == "600519" and (.company.types.type7.method_detail.status == "current" or .company.types.type7.method_detail.status == "not_applicable")' \
               <<<"${moutai}" >/dev/null || return 1
             homepage="$(curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --connect-timeout 20 --max-time 60 "https://quant.custard.top/?generation_id=${expected_generation}")" || return 1
-            grep -Fq 'patch6-seven-types-2026-08-01-classified-type7-v4' <<<"${homepage}"
+            grep -Fq "${expected_methodology_version}" <<<"${homepage}"
           }
 
           for attempt in {1..6}; do

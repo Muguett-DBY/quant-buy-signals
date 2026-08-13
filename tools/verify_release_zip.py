@@ -174,8 +174,12 @@ _EXPECTED_UPDATE_MANIFEST_URL = (
     "https://github.com/Muguett-DBY/quant-buy-signals/releases/download/windows-app/update-manifest.json"
 )
 _EXPECTED_PATCH6_SOURCE = {
-    "path_at_model_authoring": r"E:\模板汇总MD\补丁6.md",
-    "sha256": "aa6a5b27e279b324a304a6bea2c6fba9af6dc015f81adb758329137b4e28b8f6",
+    "path_at_model_authoring": r"E:\模板汇总MD\补丁6· 公司三属性分类与三维度量化打分机制.md",
+    "sha256": "dfade9961a182bfff67f95e2f8d55fd637cf8a15cedd44c12300b4f9c4c1549b",
+}
+_EXPECTED_PATCH7_SOURCE = {
+    "path_at_model_authoring": r"E:\模板汇总MD\补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md",
+    "sha256": "69b6bbeaa44755b9935518c665bc1ac0cac5c473aaba5b106bdf0f9fc88beb6d",
 }
 _EXPECTED_TYPE7_SOURCE_DOCUMENTS = {
     "template1": {
@@ -191,6 +195,7 @@ _EXPECTED_TYPE7_SOURCE_DOCUMENTS = {
         "sha256": "8e1c5114be74254d686ac2b65ec7b3563e09f6c3b3f9a82b43e4d60a84ca42a4",
     },
     "patch6": dict(_EXPECTED_PATCH6_SOURCE),
+    "patch7": dict(_EXPECTED_PATCH7_SOURCE),
     "subsequent_addenda": {
         "path_at_model_authoring": r"E:\模板汇总MD\后续附加补丁们.md",
         "sha256": "0dea9125bbe2039acf741ac997e62b53c49b6e3dc32e7d956ed96f9d7054b64f",
@@ -252,9 +257,14 @@ _AUDIT_DECISION_FIELDS = frozenset(
 )
 _AUDIT_DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
 _AUDIT_DECISION_MISSING_REQUIREMENTS = (
+    "patch7_declining_industry",
+    "patch7_long_term_operating_trend",
+    "patch7_future_fcf",
     "patch7_current_price",
     "patch7_optimistic_upper",
 )
+_AUDIT_DECISION_PATCH7_VETO_REASON = "_decision_patch7_veto"
+_AUDIT_DECISION_PATCH7_VETOES = frozenset({"type1_redline", "bubble_line", "type7_price", "future_fcf"})
 _AUDIT_DECISION_PATCH7_PRICE_GATE_TYPES = frozenset({"type2", "type3", "type4", "type7"})
 _AUDIT_DECISION_FACT_UNSET = object()
 _AUDIT_DECISION_POTENTIAL_VETO_DIMENSIONS = {
@@ -3136,15 +3146,50 @@ def _audit_patch7_requirements_match(
     type_key: str,
     requirements: Sequence[str],
     *,
+    reasons: Mapping[str, Any],
     company: Mapping[str, Any] | None,
     dcf_result: object,
 ) -> bool:
     """Bind serialized Patch 7 requirements to the audited company facts."""
 
+    if not requirements:
+        return True
+
+    red_line_requirements = {
+        "patch7_declining_industry",
+        "patch7_long_term_operating_trend",
+    }
+    selected_red_lines = set(requirements).intersection(red_line_requirements)
+    if selected_red_lines:
+        gate = str(reasons.get("_patch7_gate") or "")
+        expected_red_lines: set[str] = set()
+        if "行业样本缺" in gate:
+            expected_red_lines.add("patch7_declining_industry")
+        if "营收缺" in gate:
+            expected_red_lines.add("patch7_long_term_operating_trend")
+        return bool(
+            type_key == "type1"
+            and set(requirements) == selected_red_lines == expected_red_lines
+            and gate.startswith("待补|")
+        )
+
+    if "patch7_future_fcf" in requirements:
+        if list(requirements) != ["patch7_future_fcf"] or not isinstance(company, Mapping):
+            return False
+        type7 = company.get("type7")
+        ledger = type7.get("ledger") if isinstance(type7, Mapping) else None
+        gates = ledger.get("decision_gates") if isinstance(ledger, Mapping) else None
+        future_fcf = gates.get("future_fcf") if isinstance(gates, Mapping) else None
+        return not (
+            isinstance(future_fcf, Mapping)
+            and future_fcf.get("complete") is True
+            and isinstance(future_fcf.get("passed"), bool)
+        )
+
     if type_key not in _AUDIT_DECISION_PATCH7_PRICE_GATE_TYPES:
-        return not requirements
+        return False
     if not isinstance(company, Mapping) or dcf_result is _AUDIT_DECISION_FACT_UNSET:
-        return not requirements
+        return False
 
     expected: list[str] = []
     if _finite_number(company.get("price")) is None:
@@ -3155,6 +3200,62 @@ def _audit_patch7_requirements_match(
     if _finite_number(optimistic.get("upper")) is None:
         expected.append("patch7_optimistic_upper")
     return list(requirements) == expected
+
+
+def _audit_patch7_veto_match(
+    type_key: str,
+    reasons: Mapping[str, Any],
+    *,
+    company: Mapping[str, Any] | None,
+    dcf_result: object,
+) -> tuple[bool, str | None]:
+    """Bind a Patch 7 post-gate veto marker to release facts."""
+
+    marker = reasons.get(_AUDIT_DECISION_PATCH7_VETO_REASON)
+    if marker is None:
+        return True, None
+    if not isinstance(marker, str) or marker not in _AUDIT_DECISION_PATCH7_VETOES:
+        return False, None
+    veto = str(reasons.get("_veto") or "")
+    if marker == "type1_redline":
+        gate = str(reasons.get("_patch7_gate") or "")
+        valid = type_key == "type1" and gate.startswith("否决|") and veto.startswith("补丁7红线否决：")
+        return valid, marker if valid else None
+    if not isinstance(company, Mapping):
+        return False, None
+    if marker == "future_fcf":
+        type7 = company.get("type7")
+        ledger = type7.get("ledger") if isinstance(type7, Mapping) else None
+        gates = ledger.get("decision_gates") if isinstance(ledger, Mapping) else None
+        future_fcf = gates.get("future_fcf") if isinstance(gates, Mapping) else None
+        valid = bool(
+            veto == "补丁7未来自由现金流前置条件未通过"
+            and isinstance(future_fcf, Mapping)
+            and future_fcf.get("complete") is True
+            and future_fcf.get("passed") is False
+        )
+        return valid, marker if valid else None
+    if dcf_result is _AUDIT_DECISION_FACT_UNSET or type_key not in _AUDIT_DECISION_PATCH7_PRICE_GATE_TYPES:
+        return False, None
+    price = _finite_number(company.get("price"))
+    dcf = dcf_result if isinstance(dcf_result, Mapping) else {}
+    points = dcf.get("dcf_points") if isinstance(dcf.get("dcf_points"), Mapping) else {}
+    optimistic = points.get("optimistic") if isinstance(points.get("optimistic"), Mapping) else {}
+    upper = _finite_number(optimistic.get("upper"))
+    if marker == "bubble_line":
+        valid = bool(
+            veto == "补丁7泡沫线否决：价格高于乐观值120%"
+            and (
+                dcf.get("bubble_warning") is True or (price is not None and upper is not None and price >= upper * 1.2)
+            )
+        )
+        return valid, marker if valid else None
+    valid = bool(
+        type_key == "type7"
+        and veto == "补丁7价格闸门：股价未合理或低估"
+        and ((price is not None and upper is not None and price > upper) or dcf.get("zone") == "卖出区")
+    )
+    return valid, marker if valid else None
 
 
 def _audit_decision_contract_valid(
@@ -3197,12 +3298,20 @@ def _audit_decision_contract_valid(
     applicable = applicable_marker == "yes"
     evidence_complete = evidence_marker == "complete"
     requirements_valid, missing_requirements = _audit_decision_missing_requirements(reasons)
+    patch7_veto_valid, patch7_veto = _audit_patch7_veto_match(
+        type_key,
+        reasons,
+        company=company,
+        dcf_result=dcf_result,
+    )
     if (
         not requirements_valid
+        or not patch7_veto_valid
         or (missing_requirements and (not applicable or evidence_complete or status != "insufficient_evidence"))
         or not _audit_patch7_requirements_match(
             type_key,
             missing_requirements,
+            reasons=reasons,
             company=company,
             dcf_result=dcf_result,
         )
@@ -3214,10 +3323,11 @@ def _audit_decision_contract_valid(
     missing = [dimension for dimension in weights if dimension in raw_missing]
     if not evidence_complete and not missing and not missing_requirements:
         missing = list(weights)
-    action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
-    if action_condition and "6e" not in missing:
+    type6_position_input = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
+    if type6_position_input and "6e" not in missing:
         missing.append("6e")
         missing = [dimension for dimension in weights if dimension in missing]
+    action_condition = bool(type6_position_input and set(missing) == {"6e"})
 
     lower_dimensions = dict(scores)
     upper_dimensions = dict(scores)
@@ -3363,6 +3473,8 @@ def _audit_decision_contract_valid(
                 and safety_score is not None
                 and safety_score < 8.0
             )
+    if patch7_veto is not None:
+        confirmed_hard_veto = True
     if not applicable:
         lower = upper = 0.0
         complete, basis, veto_state, potential = True, "scope_exclusion", "none", False
@@ -3724,6 +3836,7 @@ def _audit_company_codes(
             patch7_fact_context = bool(
                 _AUDIT_DECISION_MISSING_REQUIREMENTS_REASON in reasons
                 or str(reasons.get("_missing") or "").startswith("补丁7")
+                or _AUDIT_DECISION_PATCH7_VETO_REASON in reasons
             )
             if not _audit_decision_contract_valid(
                 type_key,
@@ -5835,10 +5948,12 @@ def verify_release_zip(path: str, *, repository: str | Path | None = ".") -> tup
                     caller = caller if isinstance(caller, Mapping) else {}
                     git_state = provenance.get("git", {})
                     git_state = git_state if isinstance(git_state, Mapping) else {}
-                    if provenance.get("audit_schema_version") != 5:
-                        errors.append("audit schema version is not 5")
+                    if provenance.get("audit_schema_version") != 6:
+                        errors.append("audit schema version is not 6")
                     if provenance.get("patch6_source") != _EXPECTED_PATCH6_SOURCE:
                         errors.append("audit is not bound to the authoritative Patch 6 source hash")
+                    if provenance.get("patch7_source") != _EXPECTED_PATCH7_SOURCE:
+                        errors.append("audit is not bound to the authoritative Patch 7 source hash")
                     if provenance.get("type7_source_documents") != _EXPECTED_TYPE7_SOURCE_DOCUMENTS:
                         errors.append("audit is not bound to all authoritative Type 7 source hashes")
                     if caller.get("snapshot_schema_version") != 8:

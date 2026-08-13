@@ -37,6 +37,10 @@ def _base(triggered: dict[str, bool], veto: dict[str, str] | None = None):
     return {key: _outcome(triggered.get(key, False), veto.get(key)) for key in TYPE_KEYS}
 
 
+def _future_fcf_ledger(*, complete: bool = True, passed: bool = True):
+    return {"decision_gates": {"future_fcf": {"complete": complete, "passed": passed}}}
+
+
 class Patch7RedLinesTest(unittest.TestCase):
     def test_long_term_decline_requires_three_negative_year_over_year_changes(self):
         metric = {
@@ -52,22 +56,40 @@ class Patch7RedLinesTest(unittest.TestCase):
         }
         self.assertFalse(_patch7_long_term_decline(metric))
 
-    def test_missing_revenue_history_never_triggers_the_red_line(self):
-        self.assertFalse(_patch7_long_term_decline({"industry": "医药"}))
+    def test_missing_revenue_history_leaves_the_red_line_unknown(self):
+        self.assertIsNone(_patch7_long_term_decline({"industry": "医药"}))
+
+    def test_gapped_revenue_history_leaves_the_red_line_unknown(self):
+        metric = {
+            "revenue_values": [100, 110, 120, 130],
+            "revenue_years": [2021, 2023, 2024, 2025],
+        }
+        self.assertIsNone(_patch7_long_term_decline(metric))
+
+    def test_missing_latest_revenue_leaves_the_red_line_unknown(self):
+        metric = {
+            "revenue_values": [100, 110, 120, 130, None],
+            "revenue_years": [2021, 2022, 2023, 2024, 2025],
+        }
+        self.assertIsNone(_patch7_long_term_decline(metric))
 
     def test_declining_industry_benchmark_is_a_red_line(self):
         metric = {"industry": "医药"}
-        benchmarks = {"医药": {"median_cagr": -0.03}, "ALL": {}}
+        benchmarks = {"医药": {"median_cagr": -0.03, "median_cagr_count": 12}, "ALL": {}}
         self.assertTrue(_patch7_declining_industry(metric, benchmarks))
 
     def test_growing_industry_is_not_a_red_line(self):
         metric = {"industry": "医药"}
-        benchmarks = {"医药": {"median_cagr": 0.05}, "ALL": {}}
+        benchmarks = {"医药": {"median_cagr": 0.05, "median_cagr_count": 12}, "ALL": {}}
         self.assertFalse(_patch7_declining_industry(metric, benchmarks))
 
-    def test_missing_industry_benchmark_never_triggers_the_red_line(self):
+    def test_industry_median_without_sample_count_is_unknown(self):
         metric = {"industry": "医药"}
-        self.assertFalse(_patch7_declining_industry(metric, {"ALL": {}}))
+        self.assertIsNone(_patch7_declining_industry(metric, {"医药": {"median_cagr": 0.05}}))
+
+    def test_missing_industry_benchmark_leaves_the_red_line_unknown(self):
+        metric = {"industry": "医药"}
+        self.assertIsNone(_patch7_declining_industry(metric, {"ALL": {"median_cagr": 0.20}}))
 
 
 class Patch7TotalGateTest(unittest.TestCase):
@@ -85,21 +107,73 @@ class Patch7TotalGateTest(unittest.TestCase):
 
     def test_type1_alone_with_declining_industry_red_line_is_suppressed(self):
         outcomes = _base({"type1": True})
-        benchmarks = {"医药": {"median_cagr": -0.05}, "ALL": {}}
+        benchmarks = {"医药": {"median_cagr": -0.05, "median_cagr_count": 12}, "ALL": {}}
         gated = _apply_patch7_total_gate(outcomes, {"price": 10.0, "industry": "医药"}, {"zone": "买入区"}, benchmarks)
         self.assertFalse(gated["type1"][0])
         self.assertIn("衰落产业", str(gated["type1"][3].get("_veto")))
+        self.assertTrue(gated["type1"][3]["_patch7_gate"].startswith("否决|行业样本12|"))
+        self.assertLessEqual(len(gated["type1"][3]["_patch7_gate"]), 48)
 
     def test_type1_alone_without_red_lines_is_kept(self):
         outcomes = _base({"type1": True})
-        benchmarks = {"医药": {"median_cagr": 0.05}, "ALL": {}}
+        benchmarks = {"医药": {"median_cagr": 0.05, "median_cagr_count": 12}, "ALL": {}}
         gated = _apply_patch7_total_gate(
             outcomes,
-            {"price": 10.0, "industry": "医药", "revenue_values": [100, 110, 120], "revenue_years": [2023, 2024, 2025]},
+            {
+                "price": 10.0,
+                "industry": "医药",
+                "revenue_values": [100, 110, 120, 130],
+                "revenue_years": [2022, 2023, 2024, 2025],
+            },
             {"zone": "买入区"},
             benchmarks,
+            type7_ledger=_future_fcf_ledger(),
         )
         self.assertTrue(gated["type1"][0])
+        self.assertEqual(gated["type1"][3]["_patch7_gate"], "通过|行业样本12|营收2022/2023/2024/2025")
+        self.assertLessEqual(len(gated["type1"][3]["_patch7_gate"]), 48)
+
+    def test_type1_alone_waits_for_both_unknown_red_line_requirements(self):
+        outcomes = _base({"type1": True})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 10.0, "industry": "医药"},
+            {"zone": "买入区"},
+            {"ALL": {"median_cagr": 0.20}},
+        )
+
+        triggered, total, sub_scores, reasons = gated["type1"]
+        self.assertFalse(triggered)
+        self.assertEqual(total, 7.0)
+        self.assertEqual(sub_scores, {"x": 7.0})
+        self.assertEqual(reasons["_status"], STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(reasons["_evidence"], "incomplete")
+        self.assertEqual(
+            reasons[_DECISION_MISSING_REQUIREMENTS_REASON],
+            ["patch7_declining_industry", "patch7_long_term_operating_trend"],
+        )
+        self.assertIn("行业专属增长基准", reasons["_missing"])
+        self.assertIn("连续四年营业收入", reasons["_missing"])
+        self.assertNotIn("_veto", reasons)
+        self.assertEqual(reasons["_patch7_gate"], "待补|行业样本缺|营收缺")
+
+    def test_type1_alone_with_long_term_operating_decline_is_suppressed(self):
+        outcomes = _base({"type1": True})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {
+                "price": 10.0,
+                "industry": "医药",
+                "revenue_values": [130, 120, 110, 100],
+                "revenue_years": [2022, 2023, 2024, 2025],
+            },
+            {"zone": "买入区"},
+            {"医药": {"median_cagr": 0.05, "median_cagr_count": 12}, "ALL": {}},
+        )
+
+        self.assertFalse(gated["type1"][0])
+        self.assertEqual(gated["type1"][3]["_status"], STATUS_VETOED)
+        self.assertIn("长期经营走下坡路", gated["type1"][3]["_veto"])
 
     def test_type2_alone_in_bubble_is_suppressed(self):
         outcomes = _base({"type2": True})
@@ -108,7 +182,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": True,
             "dcf_points": {"optimistic": {"upper": 20.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertFalse(gated["type2"][0])
         self.assertIn("泡沫线否决", str(gated["type2"][3].get("_veto")))
 
@@ -119,7 +199,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": False,
             "dcf_points": {"optimistic": {"upper": 30.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertTrue(gated["type2"][0])
         self.assertTrue(gated["type3"][0])
 
@@ -151,7 +237,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": False,
             "dcf_points": {"optimistic": {}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
 
         for key in ("type2", "type3", "type4", "type7"):
             with self.subTest(type_key=key):
@@ -284,7 +376,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": True,
             "dcf_points": {"optimistic": {"upper": 20.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertFalse(gated["type2"][0])
         self.assertFalse(gated["type7"][0])
 
@@ -295,7 +393,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": False,
             "dcf_points": {"optimistic": {"upper": 30.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertTrue(gated["type7"][0])
 
     def test_type7_alone_waits_for_complete_price_evidence(self):
@@ -318,7 +422,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": True,
             "dcf_points": {"optimistic": {"upper": 20.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertFalse(gated["type7"][0])
         self.assertIn("价格闸门", str(gated["type7"][3].get("_veto")))
 
@@ -329,7 +439,13 @@ class Patch7TotalGateTest(unittest.TestCase):
             "bubble_warning": True,
             "dcf_points": {"optimistic": {"upper": 20.0}},
         }
-        gated = _apply_patch7_total_gate(outcomes, {"price": 25.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 25.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertTrue(gated["type1"][0])
         self.assertTrue(gated["type2"][0])
 
@@ -341,9 +457,50 @@ class Patch7TotalGateTest(unittest.TestCase):
     def test_type5_type6_are_outside_the_gates(self):
         outcomes = _base({"type5": True, "type6": True})
         dcf = {"zone": "卖出区", "bubble_warning": True, "dcf_points": {"optimistic": {"upper": 1.0}}}
-        gated = _apply_patch7_total_gate(outcomes, {"price": 999.0}, dcf, {"ALL": {}})
+        gated = _apply_patch7_total_gate(
+            outcomes,
+            {"price": 999.0},
+            dcf,
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(),
+        )
         self.assertTrue(gated["type5"][0])
         self.assertTrue(gated["type6"][0])
+
+    def test_shared_future_fcf_unknown_makes_every_remaining_trigger_insufficient(self):
+        gated = _apply_patch7_total_gate(
+            _base({"type5": True, "type6": True}),
+            {"price": 10.0},
+            {"zone": "买入区"},
+            {"ALL": {}},
+            type7_ledger={"applicable": False},
+        )
+
+        for key in ("type5", "type6"):
+            with self.subTest(type_key=key):
+                self.assertFalse(gated[key][0])
+                self.assertEqual(gated[key][3]["_status"], STATUS_INSUFFICIENT_EVIDENCE)
+                self.assertEqual(
+                    gated[key][3][_DECISION_MISSING_REQUIREMENTS_REASON],
+                    ["patch7_future_fcf"],
+                )
+                self.assertNotIn("_veto", gated[key][3])
+
+    def test_shared_future_fcf_explicit_failure_vetoes_every_remaining_trigger(self):
+        gated = _apply_patch7_total_gate(
+            _base({"type5": True, "type6": True}),
+            {"price": 10.0},
+            {"zone": "买入区"},
+            {"ALL": {}},
+            type7_ledger=_future_fcf_ledger(passed=False),
+        )
+
+        for key in ("type5", "type6"):
+            with self.subTest(type_key=key):
+                self.assertFalse(gated[key][0])
+                self.assertEqual(gated[key][3]["_status"], STATUS_VETOED)
+                self.assertIn("未来自由现金流", gated[key][3]["_veto"])
+                self.assertEqual(gated[key][3]["_decision_patch7_veto"], "future_fcf")
 
 
 if __name__ == "__main__":

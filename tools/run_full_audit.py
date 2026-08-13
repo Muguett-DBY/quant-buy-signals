@@ -172,9 +172,14 @@ _DECISION_FIELDS = frozenset(
 )
 _DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
 _DECISION_MISSING_REQUIREMENTS = (
+    "patch7_declining_industry",
+    "patch7_long_term_operating_trend",
+    "patch7_future_fcf",
     "patch7_current_price",
     "patch7_optimistic_upper",
 )
+_DECISION_PATCH7_VETO_REASON = "_decision_patch7_veto"
+_DECISION_PATCH7_VETOES = frozenset({"type1_redline", "bubble_line", "type7_price", "future_fcf"})
 _DECISION_PATCH7_PRICE_GATE_TYPES = frozenset({"type2", "type3", "type4", "type7"})
 _DECISION_FACT_UNSET = object()
 _DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
@@ -1138,15 +1143,50 @@ def _independent_patch7_requirements_match(
     type_key: str,
     requirements: Sequence[str],
     *,
+    reasons: Mapping[str, object],
     company: Mapping[str, object] | None,
     dcf_result: object,
 ) -> bool:
     """Bind Patch 7's private requirement ledger to the audited outer facts."""
 
+    if not requirements:
+        return True
+
+    red_line_requirements = {
+        "patch7_declining_industry",
+        "patch7_long_term_operating_trend",
+    }
+    selected_red_lines = set(requirements).intersection(red_line_requirements)
+    if selected_red_lines:
+        gate = str(reasons.get("_patch7_gate") or "")
+        expected_red_lines: set[str] = set()
+        if "行业样本缺" in gate:
+            expected_red_lines.add("patch7_declining_industry")
+        if "营收缺" in gate:
+            expected_red_lines.add("patch7_long_term_operating_trend")
+        return bool(
+            type_key == "type1"
+            and set(requirements) == selected_red_lines == expected_red_lines
+            and gate.startswith("待补|")
+        )
+
+    if "patch7_future_fcf" in requirements:
+        if list(requirements) != ["patch7_future_fcf"] or not isinstance(company, Mapping):
+            return False
+        type7 = company.get("type7")
+        ledger = type7.get("ledger") if isinstance(type7, Mapping) else None
+        gates = ledger.get("decision_gates") if isinstance(ledger, Mapping) else None
+        future_fcf = gates.get("future_fcf") if isinstance(gates, Mapping) else None
+        return not (
+            isinstance(future_fcf, Mapping)
+            and future_fcf.get("complete") is True
+            and isinstance(future_fcf.get("passed"), bool)
+        )
+
     if type_key not in _DECISION_PATCH7_PRICE_GATE_TYPES:
-        return not requirements
+        return False
     if not isinstance(company, Mapping) or dcf_result is _DECISION_FACT_UNSET:
-        return not requirements
+        return False
 
     expected: list[str] = []
     if _finite_numeric(company.get("price")) is None:
@@ -1157,6 +1197,61 @@ def _independent_patch7_requirements_match(
     if _finite_numeric(optimistic.get("upper")) is None:
         expected.append("patch7_optimistic_upper")
     return list(requirements) == expected
+
+
+def _independent_patch7_veto_match(
+    type_key: str,
+    reasons: Mapping[str, object],
+    *,
+    company: Mapping[str, object] | None,
+    dcf_result: object,
+) -> tuple[bool, str | None]:
+    """Bind a Patch 7 post-gate veto marker to its audited facts."""
+
+    marker = reasons.get(_DECISION_PATCH7_VETO_REASON)
+    if marker is None:
+        return True, None
+    if not isinstance(marker, str) or marker not in _DECISION_PATCH7_VETOES:
+        return False, None
+    veto = str(reasons.get("_veto") or "")
+    if marker == "type1_redline":
+        gate = str(reasons.get("_patch7_gate") or "")
+        return type_key == "type1" and gate.startswith("否决|") and veto.startswith("补丁7红线否决："), marker
+    if not isinstance(company, Mapping):
+        return False, None
+    if marker == "future_fcf":
+        type7 = company.get("type7")
+        ledger = type7.get("ledger") if isinstance(type7, Mapping) else None
+        gates = ledger.get("decision_gates") if isinstance(ledger, Mapping) else None
+        future_fcf = gates.get("future_fcf") if isinstance(gates, Mapping) else None
+        valid = bool(
+            veto == "补丁7未来自由现金流前置条件未通过"
+            and isinstance(future_fcf, Mapping)
+            and future_fcf.get("complete") is True
+            and future_fcf.get("passed") is False
+        )
+        return valid, marker if valid else None
+    if dcf_result is _DECISION_FACT_UNSET or type_key not in _DECISION_PATCH7_PRICE_GATE_TYPES:
+        return False, None
+    price = _finite_numeric(company.get("price"))
+    dcf = dcf_result if isinstance(dcf_result, Mapping) else {}
+    points = dcf.get("dcf_points") if isinstance(dcf.get("dcf_points"), Mapping) else {}
+    optimistic = points.get("optimistic") if isinstance(points.get("optimistic"), Mapping) else {}
+    upper = _finite_numeric(optimistic.get("upper"))
+    if marker == "bubble_line":
+        valid = bool(
+            veto == "补丁7泡沫线否决：价格高于乐观值120%"
+            and (
+                dcf.get("bubble_warning") is True or (price is not None and upper is not None and price >= upper * 1.2)
+            )
+        )
+        return valid, marker if valid else None
+    valid = bool(
+        type_key == "type7"
+        and veto == "补丁7价格闸门：股价未合理或低估"
+        and ((price is not None and upper is not None and price > upper) or dcf.get("zone") == "卖出区")
+    )
+    return valid, marker if valid else None
 
 
 def _independent_decision_replay(
@@ -1214,12 +1309,20 @@ def _independent_decision_replay(
     applicable = applicable_marker == "yes"
     evidence_complete = evidence_marker == "complete"
     requirements_valid, missing_requirements = _independent_decision_missing_requirements(reasons)
+    patch7_veto_valid, patch7_veto = _independent_patch7_veto_match(
+        type_key,
+        reasons,
+        company=company,
+        dcf_result=dcf_result,
+    )
     if (
         not requirements_valid
+        or not patch7_veto_valid
         or (missing_requirements and (not applicable or evidence_complete or status != "insufficient_evidence"))
         or not _independent_patch7_requirements_match(
             type_key,
             missing_requirements,
+            reasons=reasons,
             company=company,
             dcf_result=dcf_result,
         )
@@ -1230,14 +1333,15 @@ def _independent_decision_replay(
     # Type 6's position size is an action input, not company evidence.  It is
     # nevertheless an unresolved decision dimension until the user confirms
     # the actual single-name and portfolio exposure.
-    type6_action_condition = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
+    type6_position_input = bool(type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限")
     type3_condition_failed = bool(
         type_key == "type3"
         and isinstance(reasons.get("_condition"), str)
         and "低于10%高增长门槛" in reasons["_condition"]
     )
-    if type6_action_condition and "6e" not in missing:
+    if type6_position_input and "6e" not in missing:
         missing.append("6e")
+    type6_action_condition = bool(type6_position_input and set(missing) == {"6e"})
 
     lower_scores = dict(clean_scores)
     upper_scores = dict(clean_scores)
@@ -1519,7 +1623,7 @@ def _independent_decision_replay(
     # Patch 7 (2026-08-04) cross-type gates are model post-gates; a veto
     # written by _apply_patch7_total_gate suppresses the trigger and is itself
     # the replay's model basis (a confirmed post-gate veto).
-    if str(reasons.get("_veto") or "").startswith("补丁7"):
+    if patch7_veto is not None:
         expected_potential = False
         expected_complete = True
         expected_basis = "confirmed_veto"
@@ -1649,6 +1753,7 @@ def _analysis_coverage_summary(
                     and (
                         _DECISION_MISSING_REQUIREMENTS_REASON in decision_reasons
                         or str(decision_reasons.get("_missing") or "").startswith("补丁7")
+                        or _DECISION_PATCH7_VETO_REASON in decision_reasons
                     )
                 )
                 replayed_decision = _independent_decision_replay(

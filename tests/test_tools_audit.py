@@ -19,8 +19,59 @@ from data.market_coldness import (
 )
 from engine.dcf import ReportingPeriodContract
 from engine import buy_screener as bs
+from engine import audit as audit_engine
 from engine import quantitative_evidence as qe
 from tools import run_full_audit
+
+
+def test_audit_model_source_contract_pins_the_current_independent_patch6_and_patch7(monkeypatch):
+    expected_patch6 = {
+        "path_at_model_authoring": r"E:\模板汇总MD\补丁6· 公司三属性分类与三维度量化打分机制.md",
+        "sha256": "dfade9961a182bfff67f95e2f8d55fd637cf8a15cedd44c12300b4f9c4c1549b",
+    }
+    expected_patch7 = {
+        "path_at_model_authoring": (
+            r"E:\模板汇总MD\补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
+        ),
+        "sha256": "69b6bbeaa44755b9935518c665bc1ac0cac5c473aaba5b106bdf0f9fc88beb6d",
+    }
+
+    assert audit_engine.AUDIT_SCHEMA_VERSION == 6
+    assert audit_engine.TYPE7_SOURCE_DOCUMENTS["patch6"] == expected_patch6
+    assert audit_engine.TYPE7_SOURCE_DOCUMENTS["patch7"] == expected_patch7
+    assert set(audit_engine.TYPE7_SOURCE_DOCUMENTS) == {
+        "template1",
+        "template5",
+        "patch5",
+        "patch6",
+        "patch7",
+        "subsequent_addenda",
+    }
+
+    monkeypatch.setattr(
+        audit_engine,
+        "audit_state_hashes",
+        lambda: {
+            "code_sha256": "code",
+            "rules_sha256": "rules",
+            "industry_sha256": "industry",
+            "dependency_manifest_sha256": "dependencies",
+        },
+    )
+    monkeypatch.setattr(audit_engine, "_git_metadata", lambda: {"commit": None, "dirty": None})
+    monkeypatch.setattr(audit_engine, "_runtime_versions", lambda: {})
+    provenance = audit_engine._build_provenance(
+        pd.DataFrame([{"code": "600519", "price": 1.0}]),
+        {"600519": {}},
+        ("600519",),
+        snapshot_sha256=None,
+        metadata=None,
+    )
+
+    assert provenance["audit_schema_version"] == 6
+    assert provenance["patch6_source"] == expected_patch6
+    assert provenance["patch7_source"] == expected_patch7
+    assert provenance["type7_source_documents"]["patch7"] == expected_patch7
 
 
 @pytest.fixture(autouse=True)
@@ -501,6 +552,49 @@ def _patch7_fact_context(*, price=25.0, optimistic_upper=None):
     return company, dcf_result
 
 
+def _patch7_future_fcf_pending_payload():
+    outcomes = {type_key: bs._not_applicable(type_key, "补丁7审计夹具不适用") for type_key in bs.TYPE_WEIGHTS}
+    scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type3"]}
+    outcomes["type3"] = bs._finish(
+        "type3",
+        scores,
+        {key: "补丁7前已核验分项" for key in scores},
+    )
+    ledger = {"decision_gates": {"future_fcf": {"complete": False}}}
+    gated = bs._apply_patch7_total_gate(
+        outcomes,
+        {"price": 25.0},
+        {"zone": "观察区", "bubble_warning": False, "dcf_points": {"optimistic": {"upper": 30.0}}},
+        {"ALL": {}},
+        type7_ledger=ledger,
+    )
+    return _outcome_payload("type3", gated["type3"]), ledger
+
+
+def _type6_proxy_and_position_gap_payload():
+    scores = {"6a": 8.0, "6b": 4.0, "6c": 4.0, "6d": 8.0, "6e": 10.0}
+    reasons = {
+        **{key: "可复算公司证据" for key in scores},
+        "_condition": "须确认实际仓位符合建议上限",
+        "_status": bs.STATUS_INSUFFICIENT_EVIDENCE,
+        "_applicable": "yes",
+        "_evidence": "incomplete",
+        "_decision_missing_dimensions": ["6b", "6c"],
+    }
+    return _with_decision(
+        "type6",
+        {
+            "triggered": False,
+            "total": 6.9,
+            "sub_scores": scores,
+            "reasons": reasons,
+            "status": bs.STATUS_INSUFFICIENT_EVIDENCE,
+            "applicable": True,
+            "evidence_complete": False,
+        },
+    )
+
+
 def _complete_framework_row(*, quantitative_evidence=...):
     row = {
         "code": "000001",
@@ -831,6 +925,152 @@ def test_independent_decision_replay_rejects_patch7_requirements_that_disagree_w
             payload,
             company={"price": 25.0},
             dcf_result={"dcf_points": {"optimistic": {"upper": 30.0}}},
+        )
+        is None
+    )
+
+
+def test_independent_decision_replay_binds_the_shared_future_fcf_requirement():
+    payload, ledger = _patch7_future_fcf_pending_payload()
+    company = {"price": 25.0, "type7": {"ledger": ledger}}
+    dcf_result = {"dcf_points": {"optimistic": {"upper": 30.0}}}
+
+    assert payload["reasons"]["_decision_missing_requirements"] == ["patch7_future_fcf"]
+    assert run_full_audit._independent_decision_replay(
+        "type3",
+        payload,
+        company=company,
+        dcf_result=dcf_result,
+    )
+
+    resolved = deepcopy(company)
+    resolved["type7"]["ledger"]["decision_gates"]["future_fcf"] = {
+        "complete": True,
+        "passed": True,
+    }
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company=resolved,
+            dcf_result=dcf_result,
+        )
+        is None
+    )
+
+
+def test_independent_decision_replay_binds_a_patch7_future_fcf_veto():
+    scores = {dimension: 8.0 for dimension in bs.TYPE_WEIGHTS["type3"]}
+    reasons = {
+        **{dimension: "补丁7前已核验分项" for dimension in scores},
+        "_veto": "补丁7未来自由现金流前置条件未通过",
+        "_decision_patch7_veto": "future_fcf",
+        "_status": "vetoed",
+        "_applicable": "yes",
+        "_evidence": "complete",
+        "_decision_missing_dimensions": [],
+    }
+    payload = {
+        "triggered": False,
+        "total": 8.0,
+        "sub_scores": scores,
+        "reasons": reasons,
+        "veto": True,
+        "status": "vetoed",
+        "applicable": True,
+        "evidence_complete": True,
+        "decision_market_context": {"tradable": True, "reference_price": False, "risk_status": ""},
+    }
+    payload["decision"] = bs.replay_buy_decision("type3", payload)
+    company = {
+        "price": 10.0,
+        "type7": {"ledger": {"decision_gates": {"future_fcf": {"complete": True, "passed": False}}}},
+    }
+    dcf_result = {"dcf_points": {"optimistic": {"upper": 30.0}}}
+
+    assert run_full_audit._independent_decision_replay(
+        "type3",
+        payload,
+        company=company,
+        dcf_result=dcf_result,
+    )
+    resolved = deepcopy(company)
+    resolved["type7"]["ledger"]["decision_gates"]["future_fcf"]["passed"] = True
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type3",
+            payload,
+            company=resolved,
+            dcf_result=dcf_result,
+        )
+        is None
+    )
+
+
+def test_independent_type6_replay_keeps_proxy_gaps_as_unresolved_evidence():
+    payload = _type6_proxy_and_position_gap_payload()
+
+    assert set(payload["decision"]["missing_dimensions"]) == {"6b", "6c", "6e"}
+    assert payload["decision"]["decision_basis"] == "unresolved_missing_evidence"
+
+    replayed = run_full_audit._independent_decision_replay("type6", payload)
+    assert replayed is not None
+    assert replayed["decision_basis"] == "unresolved_missing_evidence"
+    assert {key: replayed[key] for key in payload["decision"]} == payload["decision"]
+
+
+def test_independent_decision_replay_binds_type1_red_line_requirements_to_the_gate_audit():
+    outcomes = {type_key: bs._not_applicable(type_key, "补丁7审计夹具不适用") for type_key in bs.TYPE_WEIGHTS}
+    scores = {key: 8.0 for key in bs.TYPE_WEIGHTS["type1"]}
+    outcomes["type1"] = bs._finish(
+        "type1",
+        scores,
+        {key: "补丁7前已核验分项" for key in scores},
+    )
+    gated = bs._apply_patch7_total_gate(
+        outcomes,
+        {"price": 25.0, "industry": "缺少行业", "revenue_values": [], "revenue_years": []},
+        {},
+        {"ALL": {"median_cagr": 0.1, "median_cagr_count": 100}},
+        type7_ledger={"decision_gates": {"future_fcf": {"complete": True, "passed": True}}},
+    )
+    payload = _outcome_payload("type1", gated["type1"])
+
+    assert payload["reasons"]["_decision_missing_requirements"] == [
+        "patch7_declining_industry",
+        "patch7_long_term_operating_trend",
+    ]
+    assert run_full_audit._independent_decision_replay(
+        "type1",
+        payload,
+        company={"price": 25.0},
+        dcf_result={},
+    )
+
+    for removed_requirement in (
+        "patch7_declining_industry",
+        "patch7_long_term_operating_trend",
+    ):
+        forged = deepcopy(payload)
+        forged["reasons"]["_decision_missing_requirements"].remove(removed_requirement)
+        forged["decision"] = bs.replay_buy_decision("type1", forged)
+        assert (
+            run_full_audit._independent_decision_replay(
+                "type1",
+                forged,
+                company={"price": 25.0},
+                dcf_result={},
+            )
+            is None
+        )
+
+    payload["reasons"]["_patch7_gate"] = "通过|行业样本缺|营收缺"
+    assert (
+        run_full_audit._independent_decision_replay(
+            "type1",
+            payload,
+            company={"price": 25.0},
+            dcf_result={},
         )
         is None
     )

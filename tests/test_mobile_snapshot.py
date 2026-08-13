@@ -728,6 +728,78 @@ def test_mobile_snapshot_only_marks_a_live_type6_position_confirmation(
     assert not mobile_snapshot._requires_position_confirmation({"types": {"type6": stale_action}})
 
 
+def test_mobile_snapshot_publishes_the_type1_patch7_red_line_audit_summary():
+    payload = {
+        "status": "insufficient_evidence",
+        "total": 8.0,
+        "sub_scores": {"1a": 8.0, "1b": 8.0, "1c": 8.0, "1d": 8.0},
+        "reasons": {
+            "1a": "买入区证据完整",
+            "1b": "价值陷阱排查完整",
+            "1c": "安全边际证据完整",
+            "1d": "回归动力证据完整",
+            "_missing": "补丁7红线证据待补：行业专属增长基准",
+            "_patch7_gate": "待补|行业样本缺|营收2022/2023/2024/2025",
+        },
+        "applicable": True,
+        "evidence_complete": False,
+        "decision": {
+            "schema_version": 1,
+            "model_id": "buy-decision-bounds-v1",
+            "decision_complete": False,
+            "decision_basis": "unresolved_missing_evidence",
+            "score_lower_bound": 8.0,
+            "score_upper_bound": 8.0,
+            "veto_state": "none",
+            "potentially_triggerable": True,
+            "missing_dimensions": [],
+        },
+    }
+
+    compact = mobile_snapshot._compact_type(payload, "type1")
+
+    assert compact["patch7_gate"] == "待补|行业样本缺|营收2022/2023/2024/2025"
+
+
+@pytest.mark.parametrize(
+    ("summary", "status", "message"),
+    [
+        ("待补|行业样本0|营收2022/2023/2024/2025", "insufficient_evidence", "malformed"),
+        ("待补|行业样本缺|营收2022/2024/2025/2026", "insufficient_evidence", "malformed"),
+        ("否决|行业样本12|营收2022/2023/2024/2025", "insufficient_evidence", "conflicts"),
+    ],
+)
+def test_mobile_snapshot_rejects_invalid_type1_patch7_gate_summaries(summary, status, message):
+    payload = {
+        "status": status,
+        "total": 8.0,
+        "sub_scores": {"1a": 8.0, "1b": 8.0, "1c": 8.0, "1d": 8.0},
+        "reasons": {
+            "1a": "买入区证据完整",
+            "1b": "价值陷阱排查完整",
+            "1c": "安全边际证据完整",
+            "1d": "回归动力证据完整",
+            "_patch7_gate": summary,
+        },
+        "applicable": True,
+        "evidence_complete": False,
+        "decision": {
+            "schema_version": 1,
+            "model_id": "buy-decision-bounds-v1",
+            "decision_complete": False,
+            "decision_basis": "unresolved_missing_evidence",
+            "score_lower_bound": 8.0,
+            "score_upper_bound": 8.0,
+            "veto_state": "none",
+            "potentially_triggerable": True,
+            "missing_dimensions": [],
+        },
+    }
+
+    with pytest.raises(mobile_snapshot.MobileSnapshotError, match=message):
+        mobile_snapshot._compact_type(payload, "type1")
+
+
 def test_mobile_snapshot_does_not_publish_a_known_type7_strict_failure_as_conditional(monkeypatch):
     scores = _scores()
     payload = dict(scores.at[0, "type7"])

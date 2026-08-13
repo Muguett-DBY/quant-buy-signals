@@ -698,6 +698,30 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert all((tmp_path / shard["filename"]).is_file() for shard in manifest["company_details"]["shards"])
     assert manifest["provenance"]["snapshot_source"] == "cache"
     assert manifest["provenance"]["source_commit"] == "a" * 40
+    assert manifest["provenance"]["methodology_version"] == publisher.METHODOLOGY_VERSION
+    model_sources = manifest["provenance"]["model_sources"]
+    assert model_sources["schema_version"] == 1
+    assert model_sources["audit_schema_version"] == publisher.AUDIT_SCHEMA_VERSION
+    assert set(model_sources["documents"]) == {
+        "template1",
+        "template5",
+        "patch5",
+        "patch6",
+        "patch7",
+        "subsequent_addenda",
+    }
+    assert model_sources["documents"]["patch7"] == {
+        "filename": "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md",
+        "sha256": "69b6bbeaa44755b9935518c665bc1ac0cac5c473aaba5b106bdf0f9fc88beb6d",
+    }
+    assert model_sources["scope"] == {
+        "implemented": "prospective_buy_and_add_screening",
+        "excluded": "holder_specific_sell_gate",
+        "no_buy_is_not_sell": True,
+    }
+    assert model_sources["resolutions"]["type6"] == (
+        "five_dimension_quantification_is_the_executable_rule_without_a_hidden_second_score"
+    )
     assert manifest["provenance"]["screening_coverage"]["publication_readiness"]["artifact_integrity_ready"] is True
 
 

@@ -145,9 +145,14 @@ _DECISION_FIELDS = frozenset(
 _DECISION_MISSING_DIMENSIONS_REASON = "_decision_missing_dimensions"
 _DECISION_MISSING_REQUIREMENTS_REASON = "_decision_missing_requirements"
 _DECISION_MISSING_REQUIREMENTS = (
+    "patch7_declining_industry",
+    "patch7_long_term_operating_trend",
+    "patch7_future_fcf",
     "patch7_current_price",
     "patch7_optimistic_upper",
 )
+_DECISION_PATCH7_VETO_REASON = "_decision_patch7_veto"
+_DECISION_PATCH7_VETOES = frozenset({"type1_redline", "bubble_line", "type7_price", "future_fcf"})
 _DECISION_MARKET_BLOCK_REASON = "_decision_market_block"
 _DECISION_MARKET_CONTEXT = "decision_market_context"
 _DECISION_MARKET_CONTEXT_FIELDS = frozenset({"tradable", "reference_price", "risk_status"})
@@ -5686,7 +5691,7 @@ def score_type5_counter_cyclical(
     dcf_result: Optional[Mapping[str, Any]] = None,
     history_evidence: Optional[Mapping[str, Any]] = None,
 ):
-    """Patch6 Type5: strong-cycle bottom overlay, not a generic recovery model.
+    """Patch 7 Type 5: strong-cycle bottom overlay, not a generic recovery model.
 
     The 2026-07-17 appendix requires strong-cycle *attributes* in 5a before
     this framework applies.  It forbids using the current PE as a cycle-value
@@ -6043,41 +6048,77 @@ def _type3_has_local_growth_history(m: Mapping[str, Any]) -> bool:
 
 
 PATCH7_GATE_VERSION = "2026-08-04"
+METHODOLOGY_VERSION = "patch7-seven-types-buy-gate-2026-08-04-v5"
+
+
+def _patch7_industry_growth_evidence(
+    metric: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+) -> tuple[float, int] | None:
+    industry = str(metric.get("industry") or "").strip()
+    if not industry or industry == "DEFAULT":
+        return None
+    industry_bucket = benchmarks.get(industry)
+    if not isinstance(industry_bucket, Mapping):
+        return None
+    value = _safe_float(industry_bucket.get("median_cagr"))
+    sample = _safe_float(industry_bucket.get("median_cagr_count"))
+    if value is None or sample is None or sample < 1 or not sample.is_integer():
+        return None
+    return value, int(sample)
 
 
 def _patch7_declining_industry(
     metric: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
-) -> bool:
+) -> bool | None:
     """Patch 7 red line 1: a declining industry (median industry CAGR < 0).
 
-    Missing industry data never triggers the red line (evidence gaps do not
-    veto), matching the project's missing-value policy.
+    ``None`` means the red line cannot be resolved.  Patch 7 requires an
+    industry-specific conclusion for a Type-1-only signal, so the market-wide
+    ``ALL`` bucket must not stand in for a missing industry benchmark.
     """
-    industry = str(metric.get("industry") or "DEFAULT")
-    median_cagr = _get_bench(benchmarks, industry, "median_cagr")
-    if median_cagr is None:
-        return False
-    value = _safe_float(median_cagr)
-    return value is not None and value < 0
+    evidence = _patch7_industry_growth_evidence(metric, benchmarks)
+    return None if evidence is None else evidence[0] < 0
 
 
-def _patch7_long_term_decline(metric: Mapping[str, Any]) -> bool:
+def _patch7_recent_revenue(metric: Mapping[str, Any]) -> tuple[tuple[int, float], ...] | None:
+    values = metric.get("revenue_values", [])
+    years = metric.get("revenue_years", [])
+    if not isinstance(values, (list, tuple)) or not isinstance(years, (list, tuple)):
+        return None
+    if len(values) != len(years) or len(values) < 4:
+        return None
+    pairs: list[tuple[int, float]] = []
+    parsed_years: list[int] = []
+    for raw_year, raw_value in zip(years, values):
+        if isinstance(raw_year, bool) or not str(raw_year).isdigit():
+            return None
+        year = int(raw_year)
+        parsed_years.append(year)
+        value = _safe_float(raw_value)
+        if value is not None:
+            pairs.append((year, value))
+    pairs.sort()
+    if len(pairs) < 4:
+        return None
+    tail = pairs[-4:]
+    if tail[-1][0] != max(parsed_years) or [year for year, _value in tail] != list(
+        range(tail[-1][0] - 3, tail[-1][0] + 1)
+    ):
+        return None
+    return tuple(tail)
+
+
+def _patch7_long_term_decline(metric: Mapping[str, Any]) -> bool | None:
     """Patch 7 red line 2: long-term operating decline.
 
     The most recent three annual revenue comparisons must all be negative
     (four consecutive annual points with every year-over-year change < 0).
     """
-    values = metric.get("revenue_values", [])
-    years = metric.get("revenue_years", [])
-    if not isinstance(values, (list, tuple)) or not isinstance(years, (list, tuple)):
-        return False
-    if len(values) < 4 or len(years) < 4:
-        return False
-    pairs = sorted((int(year), _safe_float(value)) for year, value in zip(years, values) if value is not None)
-    if len(pairs) < 4:
-        return False
-    tail = pairs[-4:]
+    tail = _patch7_recent_revenue(metric)
+    if tail is None:
+        return None
     return all(tail[i][1] < tail[i - 1][1] for i in range(1, 4))
 
 
@@ -6086,6 +6127,8 @@ def _apply_patch7_total_gate(
     metric: Mapping[str, Any],
     dcf_result: Any,
     benchmarks: Mapping[str, Mapping[str, Any]],
+    *,
+    type7_ledger: Mapping[str, Any] | None = None,
 ) -> dict[str, tuple]:
     """Patch 7 (2026-08-04) cross-type trigger constraints.
 
@@ -6096,8 +6139,9 @@ def _apply_patch7_total_gate(
         price to stay below the bubble line (optimistic value x 120%);
     (3) type7 alone requires the price to be reasonable or undervalued.
 
-    type5/type6 and combinations that include type1 are intentionally outside
-    these gates per the template text.
+    Type5/type6 and combinations that include type1 are intentionally outside
+    those price/red-line combinations.  Every still-triggered type must also
+    clear the shared future-FCF premise from the classified Type 7 ledger.
     """
     qualifiers = [key for key in TYPE_PRIORITY if outcomes[key][0]]
     if not qualifiers:
@@ -6110,10 +6154,11 @@ def _apply_patch7_total_gate(
     zone = str(dcf.get("zone") or "")
     bubble = bool(dcf.get("bubble_warning"))
 
-    def _suppress(key: str, veto_text: str) -> None:
+    def _suppress(key: str, veto_text: str, veto_gate: str) -> None:
         triggered, total, sub_scores, reasons = outcomes[key]
         updated = dict(reasons)
         updated["_veto"] = veto_text
+        updated[_DECISION_PATCH7_VETO_REASON] = veto_gate
         updated["_status"] = STATUS_VETOED
         gated[key] = (False, total, sub_scores, updated)
 
@@ -6135,6 +6180,16 @@ def _apply_patch7_total_gate(
         updated["_evidence"] = "incomplete"
         gated[key] = (False, total, sub_scores, updated)
 
+    def _await_type1_red_line_evidence(missing_requirements: list[str], missing_labels: list[str]) -> None:
+        triggered, total, sub_scores, reasons = outcomes["type1"]
+        updated = dict(reasons)
+        updated.pop("_veto", None)
+        updated["_missing"] = "补丁7红线证据待补：" + "、".join(missing_labels)
+        updated[_DECISION_MISSING_REQUIREMENTS_REASON] = missing_requirements
+        updated["_status"] = STATUS_INSUFFICIENT_EVIDENCE
+        updated["_evidence"] = "incomplete"
+        gated["type1"] = (False, total, sub_scores, updated)
+
     gated = dict(outcomes)
     only_type1 = qualifiers == ["type1"]
     only_type7 = qualifiers == ["type7"]
@@ -6142,6 +6197,8 @@ def _apply_patch7_total_gate(
 
     if only_type1:
         trap_veto = "价值陷阱" in str(outcomes["type1"][3].get("_veto") or "")
+        industry_evidence = _patch7_industry_growth_evidence(metric, benchmarks)
+        revenue_evidence = _patch7_recent_revenue(metric)
         red1 = _patch7_declining_industry(metric, benchmarks)
         red2 = _patch7_long_term_decline(metric)
         blocks = [
@@ -6154,12 +6211,32 @@ def _apply_patch7_total_gate(
             if hit
         ]
         if blocks:
-            _suppress("type1", "补丁7红线否决：" + "/".join(blocks))
+            gate_state = "否决"
+            _suppress("type1", "补丁7红线否决：" + "/".join(blocks), "type1_redline")
+        else:
+            gate_state = "通过"
+            missing_requirements = []
+            missing_labels = []
+            if red1 is None:
+                missing_requirements.append("patch7_declining_industry")
+                missing_labels.append("行业专属增长基准")
+            if red2 is None:
+                missing_requirements.append("patch7_long_term_operating_trend")
+                missing_labels.append("连续四年营业收入")
+            if missing_requirements:
+                gate_state = "待补"
+                _await_type1_red_line_evidence(missing_requirements, missing_labels)
+        _triggered, total, sub_scores, raw_reasons = gated["type1"]
+        updated = dict(raw_reasons)
+        sample_text = str(industry_evidence[1]) if industry_evidence is not None else "缺"
+        years_text = "/".join(str(year) for year, _value in revenue_evidence) if revenue_evidence is not None else "缺"
+        updated["_patch7_gate"] = f"{gate_state}|行业样本{sample_text}|营收{years_text}"
+        gated["type1"] = (_triggered, total, sub_scores, updated)
     elif type2347 and not only_type7:
         in_bubble = bubble or (price is not None and optimistic_upper is not None and price >= optimistic_upper * 1.2)
         if in_bubble:
             for key in qualifiers:
-                _suppress(key, "补丁7泡沫线否决：价格高于乐观值120%")
+                _suppress(key, "补丁7泡沫线否决：价格高于乐观值120%", "bubble_line")
         elif price is None or optimistic_upper is None:
             for key in qualifiers:
                 _await_price_evidence(key, "泡沫线")
@@ -6168,9 +6245,32 @@ def _apply_patch7_total_gate(
             price is not None and optimistic_upper is not None and price > optimistic_upper
         )
         if overvalued:
-            _suppress("type7", "补丁7价格闸门：股价未合理或低估")
+            _suppress("type7", "补丁7价格闸门：股价未合理或低估", "type7_price")
         elif price is None or optimistic_upper is None:
             _await_price_evidence("type7", "价格闸门")
+
+    remaining = [key for key in TYPE_PRIORITY if gated[key][0]]
+    if remaining:
+        decision_gates = type7_ledger.get("decision_gates") if isinstance(type7_ledger, Mapping) else None
+        future_fcf = decision_gates.get("future_fcf") if isinstance(decision_gates, Mapping) else None
+        fcf_complete = isinstance(future_fcf, Mapping) and future_fcf.get("complete") is True
+        fcf_passed = fcf_complete and future_fcf.get("passed") is True
+        fcf_failed = fcf_complete and future_fcf.get("passed") is False
+        for key in remaining:
+            _triggered, total, sub_scores, raw_reasons = gated[key]
+            updated = dict(raw_reasons)
+            if fcf_failed:
+                updated["_veto"] = "补丁7未来自由现金流前置条件未通过"
+                updated[_DECISION_PATCH7_VETO_REASON] = "future_fcf"
+                updated["_status"] = STATUS_VETOED
+                gated[key] = (False, total, sub_scores, updated)
+            elif not fcf_passed:
+                updated.pop("_veto", None)
+                updated["_missing"] = "补丁7未来自由现金流前置证据待补"
+                updated[_DECISION_MISSING_REQUIREMENTS_REASON] = ["patch7_future_fcf"]
+                updated["_status"] = STATUS_INSUFFICIENT_EVIDENCE
+                updated["_evidence"] = "incomplete"
+                gated[key] = (False, total, sub_scores, updated)
     return gated
 
 
@@ -6645,13 +6745,10 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         if score is not None and level == "primary":
             return score, _evidence_reason(m, key, f"{label}原始证据不可追溯"), True
         if score is not None and level == "derived_proxy":
-            # A complete observable proxy is a legitimate, reproducible
-            # quantitative score (same spirit as 6a's 8-point proxy ceiling).
-            # It stays below primary (10) because financial proxies cannot
-            # prove the qualitative claim, but it no longer strands the whole
-            # framework in "资料不足": the final action gate 6e still requires
-            # the user's explicit position confirmation before any buy.
-            return min(score, 6.0), f"{label}模型代理证据，最高6分；有可追溯原始资料可更高", True
+            # Financial proxies remain useful diagnostics, but they do not
+            # prove Patch 7's qualitative 6b/6c claims.  Keep them below the
+            # five-point core-evidence boundary and leave the dimension open.
+            return min(score, 4.0), f"{label}模型代理证据，最高4分；须补可追溯原始资料", False
         return 0.0, f"缺{label}可追溯原始资料", False
 
     technology_score, reasons["6b"], technology_complete = strict_primary_score("technology_score", "技术")
@@ -7274,6 +7371,27 @@ def _decision_missing_requirements(reasons: Mapping[str, Any]) -> list[str]:
     return [key for key in _DECISION_MISSING_REQUIREMENTS if key in raw]
 
 
+def _decision_patch7_veto(reasons: Mapping[str, Any]) -> str | None:
+    """Return a validated Patch 7 post-gate veto identifier."""
+
+    raw = reasons.get(_DECISION_PATCH7_VETO_REASON)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw not in _DECISION_PATCH7_VETOES:
+        raise ValueError("Patch 7 decision veto marker is invalid")
+    veto = str(reasons.get("_veto") or "")
+    gate = str(reasons.get("_patch7_gate") or "")
+    valid = {
+        "type1_redline": gate.startswith("否决|") and veto.startswith("补丁7红线否决："),
+        "bubble_line": veto == "补丁7泡沫线否决：价格高于乐观值120%",
+        "type7_price": veto == "补丁7价格闸门：股价未合理或低估",
+        "future_fcf": veto == "补丁7未来自由现金流前置条件未通过",
+    }[raw]
+    if not valid:
+        raise ValueError("Patch 7 decision veto evidence is inconsistent")
+    return raw
+
+
 def _decision_missing_dimensions(
     type_key: str,
     reasons: Mapping[str, Any],
@@ -7516,7 +7634,7 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
     else:
         veto_state = "possible" if possible_veto else "none"
         action_condition = bool(
-            type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and "6e" in missing
+            type_key == "type6" and reasons.get("_condition") == "须确认实际仓位符合建议上限" and set(missing) == {"6e"}
         )
         type7_action_condition = bool(
             type_key == "type7"
@@ -7574,7 +7692,7 @@ def replay_buy_decision(type_key: str, payload: Mapping[str, Any]) -> dict[str, 
     # Patch 7 (2026-08-04) cross-type gates are model post-gates; a veto
     # written by _apply_patch7_total_gate suppresses the trigger and is itself
     # the replay's model basis (a confirmed post-gate veto).
-    if str(reasons.get("_veto") or "").startswith("补丁7"):
+    if _decision_patch7_veto(reasons) is not None:
         potentially_triggerable = False
         complete = True
         basis = "confirmed_veto"
@@ -7608,7 +7726,7 @@ def _decision_source_hard_veto(type_key: str, payload: Mapping[str, Any]) -> boo
         return False
     # Patch 7 (2026-08-04) cross-type gates are model post-gates written by
     # _apply_patch7_total_gate; their veto text is the replay's model basis.
-    if str(reasons.get("_veto") or "").startswith("补丁7"):
+    if _decision_patch7_veto(reasons) is not None:
         return True
     missing_requirements = _decision_missing_requirements(reasons)
     missing = _decision_missing_dimensions(
@@ -8492,6 +8610,7 @@ def screen_all_types(
 
     def score_one(m: Mapping[str, Any]) -> dict[str, Any]:
         code = str(m["code"])
+        company_benchmarks = _benchmarks_for_code(benchmarks, code)
         outcomes = dict(base_outcomes_by_code[code])
         type7_outcome, type7_ledger = preliminary_type7_by_code[code]
         outcomes["type7"] = type7_outcome
@@ -8540,7 +8659,13 @@ def screen_all_types(
             reasons.setdefault("_evidence", "complete")
             normalized_outcomes[key] = (triggered, total, sub_scores, reasons)
         outcomes = normalized_outcomes
-        outcomes = _apply_patch7_total_gate(outcomes, m, normalized_dcf.get(code), company_benchmarks)
+        outcomes = _apply_patch7_total_gate(
+            outcomes,
+            m,
+            normalized_dcf.get(code),
+            company_benchmarks,
+            type7_ledger=type7_ledger,
+        )
         qualifiers = [key for key in TYPE_PRIORITY if outcomes[key][0]]
         totals = {key: outcome[1] for key, outcome in outcomes.items()}
         diagnostic_keys = [

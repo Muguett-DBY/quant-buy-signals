@@ -50,7 +50,8 @@ from data.mobile_snapshot import (
     write_mobile_snapshot,
 )
 from data.market_coldness import MARKET_COLDNESS_DECISION_READY_TIME, archive_market_coldness_session_snapshot
-from engine.audit import audit_state_hashes
+from engine.audit import AUDIT_SCHEMA_VERSION, TYPE7_SOURCE_DOCUMENTS, audit_state_hashes
+from engine.buy_screener import METHODOLOGY_VERSION
 from engine.pipeline import run_market_analysis
 from tools.run_full_audit import (
     _analysis_coverage_summary,
@@ -79,6 +80,46 @@ _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 6_000
 # Eastmoney's throttled rate, and later runs are cheap because the cache
 # accumulates.
 _TYPE3_GROWTH_NETWORK_TIME_BUDGET_SECONDS = 2700.0
+_MODEL_SOURCE_CONTRACT_SCHEMA_VERSION = 1
+
+
+def _public_model_source_contract() -> dict[str, Any]:
+    """Return the stable, public rule-source contract for one web generation.
+
+    Authoring-machine paths are useful to the internal audit, but the website
+    only needs the immutable document identity.  Keep filenames and hashes in
+    the signed manifest so the methodology page can be checked against the
+    exact rules that produced the generation.
+    """
+
+    documents = {
+        key: {
+            "filename": str(value["path_at_model_authoring"]).replace("\\", "/").rsplit("/", 1)[-1],
+            "sha256": str(value["sha256"]),
+        }
+        for key, value in TYPE7_SOURCE_DOCUMENTS.items()
+    }
+    return {
+        "schema_version": _MODEL_SOURCE_CONTRACT_SCHEMA_VERSION,
+        "audit_schema_version": AUDIT_SCHEMA_VERSION,
+        "documents": documents,
+        "precedence": [
+            "current_independent_patch6_and_patch7",
+            "independent_templates_and_patches_1_to_5",
+            "subsequent_addenda_unique_content",
+            "historical_aggregations",
+        ],
+        "resolutions": {
+            "type5": "later_specialised_appendix_supersedes_early_5c_thresholds",
+            "type6": "five_dimension_quantification_is_the_executable_rule_without_a_hidden_second_score",
+            "missing_evidence": "fail_closed_without_invented_values",
+        },
+        "scope": {
+            "implemented": "prospective_buy_and_add_screening",
+            "excluded": "holder_specific_sell_gate",
+            "no_buy_is_not_sell": True,
+        },
+    }
 
 
 def _refresh_failure_message(snapshot: object) -> str:
@@ -869,6 +910,8 @@ def publish_mobile_snapshot(
             "screening_coverage": screening_coverage,
             "quality_history_backfill": quality_history_backfill,
             "source_state": starting_state,
+            "methodology_version": METHODOLOGY_VERSION,
+            "model_sources": _public_model_source_contract(),
         },
     )
     _require_company_detail_manifest(manifest, len(eligible_codes))

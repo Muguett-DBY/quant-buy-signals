@@ -58,6 +58,7 @@ MAX_UNCOMPRESSED_ASSET_BYTES = 32_000_000
 MAX_DETAIL_COMPRESSED_TOTAL = 48_000_000
 MAX_DETAIL_UNCOMPRESSED_TOTAL = 144_000_000
 MAX_PUBLIC_REASON_UTF16_UNITS = 200
+MAX_PATCH7_GATE_UTF16_UNITS = 48
 CATALOG_FILENAME = "catalog-{generation}.json.gz"
 SIGNALS_FILENAME = "signals-{generation}.json.gz"
 COMPANY_DETAIL_FILENAME = "company-details-{generation}-{shard_id}.json.gz"
@@ -266,6 +267,31 @@ def _public_reason_text(value: Any) -> str:
     return "".join(output).rstrip() + "…"
 
 
+def _public_patch7_gate(value: str, status: str) -> str:
+    """Validate the compact Type 1 Patch 7 red-line audit summary."""
+
+    text = public_reason_text(value)
+    if text != value or len(text.encode("utf-16-le")) // 2 > MAX_PATCH7_GATE_UTF16_UNITS:
+        raise MobileSnapshotError("type1 Patch 7 gate summary is malformed")
+    parts = text.split("|")
+    if len(parts) != 3 or parts[0] not in {"通过", "待补", "否决"}:
+        raise MobileSnapshotError("type1 Patch 7 gate summary is malformed")
+    sample = parts[1].removeprefix("行业样本") if parts[1].startswith("行业样本") else ""
+    years = parts[2].removeprefix("营收") if parts[2].startswith("营收") else ""
+    valid_sample = sample == "缺" or (sample.isdigit() and int(sample) > 0)
+    year_values = years.split("/")
+    valid_years = years == "缺" or (
+        len(year_values) == 4
+        and all(year.isdigit() and len(year) == 4 for year in year_values)
+        and [int(year) for year in year_values] == list(range(int(year_values[0]), int(year_values[0]) + 4))
+    )
+    if not valid_sample or not valid_years:
+        raise MobileSnapshotError("type1 Patch 7 gate summary is malformed")
+    if (parts[0] == "待补" and status != "insufficient_evidence") or (parts[0] == "否决" and status != "vetoed"):
+        raise MobileSnapshotError("type1 Patch 7 gate summary conflicts with status")
+    return text
+
+
 def _public_decision(payload: Any, type_key: str) -> dict[str, Any]:
     """Validate and retain the machine-readable candidate-bound contract."""
 
@@ -469,6 +495,11 @@ def _compact_type(payload: Any, type_key: str) -> dict[str, Any]:
         evidence_gap = _public_reason_text(reasons["_missing"])
         if evidence_gap and evidence_gap != public_reason:
             compact["evidence_gap"] = evidence_gap
+    if type_key == "type1" and isinstance(reasons, Mapping) and "_patch7_gate" in reasons:
+        patch7_gate = reasons.get("_patch7_gate")
+        if not isinstance(patch7_gate, str):
+            raise MobileSnapshotError("type1 Patch 7 gate summary is malformed")
+        compact["patch7_gate"] = _public_patch7_gate(patch7_gate, status)
     # Empty maps are omitted from the all-company catalogue to keep the
     # bounded mobile asset small enough for the Android decompression limit.
     # The detail payload restores both maps as empty objects, so clients have

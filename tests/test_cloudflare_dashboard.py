@@ -211,7 +211,7 @@ assert.equal(helpers.positionConfirmationRequired("type6", {
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
 
-    assert 'const cards=[["纳入分析公司"' in source
+    assert 'const cards=[["模型实际触发候选"' in source
     assert '"全市场公司"' not in source
     assert "m.provenance?.snapshot_validation" not in source
     assert "manifest?.provenance?.snapshot_validation" in source
@@ -307,11 +307,20 @@ const catalogue = {
       code: "300005", name: "已知仓位不合规", industry: "测试行业", diagnostic_score: 6, primary_label: "",
       types: { type6: { status: "conditional", score: 6, applicable: true, evidence_complete: true, decision: knownPositionDecision } },
     },
+    {
+      code: "600001", name: "真实多类型触发", industry: "测试行业", diagnostic_score: 9.9,
+      buy_types: ["type3", "type5"], primary_type: "type3", primary_label: "第三种情况",
+      types: {
+        type3: { status: "triggered", score: 8.5, applicable: true, evidence_complete: true },
+        type5: { status: "triggered", score: 7.3, applicable: true, evidence_complete: true },
+      },
+    },
   ],
 };
 const catalogueRaw = Buffer.from(JSON.stringify(catalogue));
 const catalogueBytes = gzipSync(catalogueRaw);
 const manifest = {
+  provenance: { methodology_version: "patch7-seven-types-buy-gate-2026-08-04-v5" },
   catalogue: {
     filename: "catalog.json.gz",
     size: catalogueBytes.byteLength,
@@ -342,7 +351,7 @@ const env = {
   },
 };
 const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
-const canonicalUrl = legacyUrl + "&index_contract=2";
+const canonicalUrl = legacyUrl + "&index_contract=3";
 cached.set(legacyUrl, new Response(JSON.stringify({ index_contract: 1, generation_id: "0123456789abcdef", summary: { company_count: 1 }, companies: [] })));
 const response = await worker.fetch(
   new Request(canonicalUrl),
@@ -350,8 +359,10 @@ const response = await worker.fetch(
 );
 assert.equal(response.status, 200);
 const payload = await response.json();
-assert.equal(payload.index_contract, 2);
-assert.equal(payload.summary.company_count, 5);
+assert.equal(payload.index_contract, 3);
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-04-v5");
+assert.equal(payload.methodology_current, true);
+assert.equal(payload.summary.company_count, 6);
 assert.ok(cached.has(canonicalUrl));
 assert.deepEqual(payload.summary.type_coverage.type3, {
   evidence_missing: 2,
@@ -378,12 +389,32 @@ assert.equal(payload.companies[2].types.type6.has_evidence_gap, false);
 assert.equal(payload.companies[3].types.type6.has_evidence_gap, false);
 assert.equal(payload.companies[4].types.type6.has_evidence_gap, false);
 assert.equal("investor_action_dimensions" in payload.companies[2].types.type6, false);
+const projectedSignal = payload.companies[5];
+assert.deepEqual(projectedSignal.buy_types, ["type3", "type5"]);
+assert.equal(projectedSignal.primary_type, "type3");
+assert.equal(projectedSignal.primary_label, "第三种情况");
+
+const pageResponse = await worker.fetch(new Request("https://dashboard.test/"), env);
+assert.equal(pageResponse.status, 200);
+const pageHtml = await pageResponse.text();
+const scriptMatch = pageHtml.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const helperStart = script.indexOf("const TYPE_NAMES");
+const helperEnd = script.indexOf("function renderCoverage", helperStart);
+assert.ok(helperStart >= 0 && helperEnd > helperStart, "ranking helper source was not found");
+const helpers = new Function(
+  script.slice(helperStart, helperEnd) + ";return {actualBuyTypes,primaryTriggeredType,primaryTriggeredScore};",
+)();
+assert.deepEqual(helpers.actualBuyTypes(projectedSignal), ["type5", "type3"]);
+assert.equal(helpers.primaryTriggeredType(projectedSignal), "type3");
+assert.equal(helpers.primaryTriggeredScore(projectedSignal), 8.5);
 const reordered = await worker.fetch(
-  new Request("https://dashboard.test/api/catalogue-index?index_contract=2&generation_id=0123456789abcdef"),
+  new Request("https://dashboard.test/api/catalogue-index?index_contract=3&generation_id=0123456789abcdef"),
   env,
 );
 assert.equal(reordered.status, 200);
-assert.equal((await reordered.json()).index_contract, 2);
+assert.equal((await reordered.json()).index_contract, 3);
 const cacheBustedHealth = await worker.fetch(
   new Request("https://dashboard.test/api/health?verify=1"),
   env,
@@ -458,7 +489,7 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
     assert "missingScore=missing.has(dimension)||!hasScore" in source
     assert "function scoreLabel" in source
     assert "参考范围 " in source
-    assert "综合诊断分" in source
+    assert "七类诊断最高分（非买入信号）" in source
     assert "const exact=finiteNumber(typeResult.score)" in source
     assert "if(exact!==null&&!hasMissing)" in source
     assert "沪深股票收盘后数据的只读展示" not in source
@@ -471,13 +502,184 @@ def test_dashboard_contract_contains_dimension_labels_and_sub_score_rendering():
 def test_dashboard_defaults_to_real_triggers_and_explains_a_true_zero_result():
     source = DASHBOARD.read_text(encoding="utf-8")
 
-    assert '<option value="triggered">实际命中</option>' in source
+    assert '<option value="triggered">模型实际触发候选</option>' in source
     assert "typeState?.status===status" in source
     assert 's=q?"":$("status").value' in source
     assert "当前确实为 0 家命中" in source
     assert "没有找到匹配该代码或名称的公司" in source
     assert "displayedScore" in source
     assert "点击查看完整依据" in source
+
+
+def test_dashboard_default_ranking_uses_only_triggered_types_and_the_primary_trigger_score():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the dashboard ranking helpers"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(response.status, 200);
+const html = await response.text();
+const scriptMatch = html.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const start = script.indexOf("const TYPE_NAMES");
+const end = script.indexOf("function renderCoverage", start);
+assert.ok(start >= 0 && end > start, "ranking helper source was not found");
+const helpers = new Function(
+  script.slice(start, end) + ";return {actualBuyTypes,primaryTriggeredType,primaryTriggeredScore,compareRowsByScore,decisionCategoryCounts,rowMatches};",
+)();
+
+const deepDiagnosticOnly = {
+  code: "300001",
+  diagnostic_score: 9.9,
+  types: { type3: { status: "observe", score: 9.9 } },
+};
+const type1Signal = {
+  code: "600001",
+  diagnostic_score: 9.8,
+  types: { type1: { status: "triggered", score: 7.1 }, type3: { status: "vetoed", score: 9.8 } },
+};
+const multiSignal = {
+  code: "600002",
+  diagnostic_score: 9.7,
+  buy_types: ["type3", "type5"],
+  primary_type: "type3",
+  types: { type3: { status: "triggered", score: 8.5 }, type5: { status: "triggered", score: 7.3 } },
+};
+const conditionalOnly = {
+  code: "300002",
+  diagnostic_score: 10,
+  types: { type7: { status: "conditional", score: 10 } },
+};
+
+assert.deepEqual(helpers.actualBuyTypes(deepDiagnosticOnly), []);
+assert.deepEqual(helpers.actualBuyTypes(conditionalOnly), []);
+assert.deepEqual(helpers.actualBuyTypes(type1Signal), ["type1"]);
+assert.deepEqual(helpers.actualBuyTypes(multiSignal), ["type5", "type3"]);
+assert.equal(helpers.primaryTriggeredType(multiSignal), "type3");
+assert.equal(helpers.primaryTriggeredScore(multiSignal), 8.5);
+assert.deepEqual(
+  helpers.actualBuyTypes({ buy_types: [], types: { type1: { status: "triggered", score: 9 } } }),
+  [],
+);
+assert.deepEqual(
+  helpers.actualBuyTypes({ buy_types: ["type7"], types: { type7: { status: "conditional", score: 9 } } }),
+  [],
+);
+assert.equal(
+  helpers.rowMatches(
+    { _search: "stale", _market: "SZ", buy_types: [], types: { type1: { status: "triggered" } } },
+    { q: "", m: "", t: "", s: "triggered", i: "" },
+  ),
+  false,
+);
+assert.equal(
+  helpers.rowMatches(
+    { _search: "live", _market: "SH", buy_types: ["type1"], types: { type1: { status: "triggered" } } },
+    { q: "", m: "", t: "type1", s: "triggered", i: "" },
+  ),
+  true,
+);
+assert.deepEqual(
+  [deepDiagnosticOnly, type1Signal, conditionalOnly, multiSignal]
+    .sort((left, right) => helpers.compareRowsByScore(left, right, ""))
+    .map(row => row.code),
+  ["600002", "600001", "300002", "300001"],
+);
+assert.deepEqual(
+  helpers.decisionCategoryCounts(
+    [type1Signal, conditionalOnly, deepDiagnosticOnly, { code: "300003", types: {} }],
+    { visible_candidate_company_count: 3, pending_company_count: 1 },
+  ),
+  {
+    companyCount: 4,
+    triggeredCompanyCount: 1,
+    conditionalOnlyCompanyCount: 1,
+    pendingOnlyCompanyCount: 1,
+    currentNoBuyCount: 1,
+  },
+);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    assert "七类诊断最高分（非买入信号）" in source
+    assert "综合诊断分" not in source
+    assert "conditional/pending 均不是买入信号" in source
+    assert "首页前四项按“实际触发 → 待行动确认/附加条件 → 资料待补 → 其余当前不买”的顺序互斥归类" in source
+    assert 'td.textContent=primaryType?TYPE_NAMES[primaryType]:"无触发（不买）"' in source
+    assert "function decisionCategoryCounts(rows,summary={})" in source
+    assert "triggeredCompanyCount=rows.filter(row=>actualBuyTypes(row).length>0).length" in source
+    assert (
+        "pendingOnlyCompanyCount=Math.max(0,visibleCandidateCompanyCount-triggeredCompanyCount-conditionalOnlyCompanyCount)"
+        in source
+    )
+    assert (
+        "currentNoBuyCount=Math.max(0,companyCount-triggeredCompanyCount-conditionalOnlyCompanyCount-pendingOnlyCompanyCount)"
+        in source
+    )
+
+
+def test_dashboard_verdict_treats_market_blocks_as_non_signals():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the dashboard verdict helper"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(response.status, 200);
+const html = await response.text();
+const scriptMatch = html.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const start = script.indexOf("const TYPE_NAMES");
+const end = script.indexOf("function renderVerdict", start);
+assert.ok(start >= 0 && end > start, "verdict helper source was not found");
+const { verdictModel } = new Function(script.slice(start, end) + ";return {verdictModel};")();
+
+const blocked = verdictModel({ types: { type2: { status: "blocked" }, type3: { status: "observe" } } });
+assert.equal(blocked.tagText, "市场状态阻断");
+assert.equal(blocked.tone, "blocked");
+assert.match(blocked.note, /不是买入信号/);
+assert.match(blocked.note, /两热一冷/);
+
+const conditional = verdictModel({ types: { type6: { status: "conditional" } } });
+assert.equal(conditional.tagText, "待确认（非买入信号）");
+assert.match(conditional.note, /仍不是买入信号/);
+
+const staleTrigger = verdictModel({ buy_types: [], types: { type1: { status: "triggered" } } });
+assert.equal(staleTrigger.tagText, "当前不买");
+assert.match(staleTrigger.note, /没有买入信号/);
+
+const actualTrigger = verdictModel({ buy_types: ["type1"], types: { type1: { status: "triggered" } } });
+assert.equal(actualTrigger.tagText, "模型实际触发候选");
+assert.match(actualTrigger.note, /已触发/);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
 
 
 def test_dashboard_coverage_cards_separate_signals_conditions_and_unresolved_evidence():
@@ -495,8 +697,8 @@ def test_dashboard_coverage_cards_separate_signals_conditions_and_unresolved_evi
     assert "function conditionalCoverageLabel" in source
     assert "action_confirmation" in source
     for text in (
-        "七类命中、待确认与资料缺口分布",
-        "已触发”才是实际信号",
+        "七类实际触发、待确认与资料缺口分布",
+        "已触发”才是实际买入候选",
         "资料缺口 ",
         "其中结论待定 ",
         "其中补齐后仍可能触发 ",
@@ -711,6 +913,14 @@ const mondayBeforeDeadline = utc("2026-08-03T09:59:00Z");
 const mondayAtDeadline = utc("2026-08-03T10:00:00Z");
 assert.equal(latestExpectedClosedTradingDate(mondayBeforeDeadline), "2026-07-31");
 assert.equal(latestExpectedClosedTradingDate(mondayAtDeadline), "2026-08-03");
+result = tradingDataFreshness("2026-08-03", "2026-08-03T08:19:00Z", mondayBeforeDeadline);
+assert.equal(result.stale, false);
+assert.equal(result.expected_market_as_of, "2026-08-03");
+assert.equal(result.market_date_current, true);
+assert.equal(
+  tradingDataFreshness("2026-08-03", "2026-08-03T06:59:00Z", mondayBeforeDeadline).stale_reason,
+  "市场日期晚于最近已收盘交易日",
+);
 assert.equal(
   tradingDataFreshness("2026-07-31", "2026-07-31T09:00:00Z", mondayAtDeadline).stale_reason,
   "尚未覆盖最近应完成的交易日",
@@ -834,10 +1044,10 @@ def test_dashboard_explains_methodology_and_separates_scope_data_and_action_gaps
         "需要建立相应专属模型后才能评价",
         "action_confirmation_company_count",
         "decision_relevant_gap_company_count",
-        "待满足附加条件",
+        "待行动确认/附加条件（非信号）",
         "其中待确认仓位",
-        "有客观资料缺口",
-        "缺口可能改变结论",
+        "资料待补候选（非信号）",
+        "当前不买（其余公司）",
         "数据覆盖",
         "评分质量",
         "股价透支计算",
@@ -873,7 +1083,7 @@ def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert 'const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）"' in source
-    assert 'const METHODOLOGY_VERSION="patch6-seven-types-2026-08-01-classified-type7-v4"' in source
+    assert 'const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-04-v5"' in source
     assert '" · 量化口径："+METHODOLOGY_LABEL' in source
     assert '" · 量化口径："+METHODOLOGY_VERSION' not in source
     assert '.replace("__QUANT_METHODOLOGY_LABEL__",METHODOLOGY_LABEL)' in source
@@ -886,6 +1096,139 @@ def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail
     assert "公开详情未附该子指标的单独来源链接" in source
     for developer_phrase in ("白名单量化输入", "代理证据最高分", "分类专用评估路径", "分类专用路径"):
         assert developer_phrase not in source
+
+
+def test_dashboard_rule_sources_match_the_signed_manifest_contract():
+    from tools.publish_mobile_snapshot import _public_model_source_contract
+
+    source = DASHBOARD.read_text(encoding="utf-8")
+    worker_sources = {
+        source_id: {"filename": filename, "sha256": sha256.casefold()}
+        for source_id, filename, sha256 in re.findall(
+            r'Object\.freeze\(\{id:"([^"]+)",filename:"([^"]+)",sha256:"([0-9A-F]{64})"\}\)',
+            source,
+        )
+    }
+    published = _public_model_source_contract()
+
+    assert worker_sources == published["documents"]
+    assert f"precedence:Object.freeze({json.dumps(published['precedence'], separators=(',', ':'))})" in source
+    for key, value in published["resolutions"].items():
+        assert f'{key}:"{value}"' in source
+
+
+def test_methodology_api_exposes_patch7_type5_sell_scope_thresholds_and_source_hashes():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to validate the methodology API contract"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/api/methodology"), {});
+assert.equal(response.status, 200);
+const payload = await response.json();
+
+assert.equal(payload.schema_version, 2);
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-04-v5");
+assert.equal(payload.decision_domain, "new_buy_or_add");
+assert.equal(payload.qualify_threshold, 7);
+assert.equal(payload.patch7_total_gate.version, "2026-08-04");
+assert.equal(payload.patch7_total_gate.rules.length, 4);
+assert.match(payload.patch7_total_gate.rules[0].requirement, /价值陷阱/);
+assert.match(payload.patch7_total_gate.rules[1].requirement, /乐观值×120%/);
+assert.match(payload.patch7_total_gate.rules[2].requirement, /合理或低估/);
+assert.equal(payload.patch7_total_gate.rules[3].when, "every_still_triggered_type");
+assert.deepEqual(
+  payload.patch7_total_gate.rules[3].types,
+  ["type1", "type2", "type3", "type4", "type5", "type6", "type7"],
+);
+assert.match(payload.patch7_total_gate.rules[3].requirement, /未来自由现金流前提/);
+assert.match(payload.patch7_total_gate.rules[3].requirement, /明确失败则否决/);
+assert.match(payload.patch7_total_gate.rules[3].requirement, /资料不足则待补/);
+assert.match(payload.patch7_total_gate.outside_extra_gate, /共同未来自由现金流前提/);
+
+assert.equal(payload.type5_appendix.applicability, "5a≥7");
+assert.equal(payload.type5_appendix.trigger, "5b至5e证据完整且五项加权总分≥7");
+assert.match(payload.type5_appendix.no_extra_gate, /5c/);
+
+assert.equal(payload.sell_domain.implemented, false);
+assert.equal(payload.sell_domain.default_state, "持有");
+assert.equal(payload.sell_domain.core_rule, "买入不触发≠卖出");
+assert.match(payload.sell_domain.reason, /持仓成本/);
+assert.equal(payload.sell_domain.hard_triggers.length, 4);
+assert.equal(payload.sell_domain.soft_permission, "短期获利丰厚时可极小减仓，非必须动作");
+
+assert.equal(payload.rule_source_contract.hash_algorithm, "SHA-256");
+assert.equal(payload.rule_source_contract.source_count, 6);
+assert.equal(payload.rule_source_contract.sources.length, 6);
+for (const item of payload.rule_source_contract.sources) assert.match(item.sha256, /^[0-9A-F]{64}$/);
+assert.equal(
+  payload.rule_source_contract.sources.find(item => item.id === "patch6").filename,
+  "补丁6· 公司三属性分类与三维度量化打分机制.md",
+);
+assert.equal(
+  payload.rule_source_contract.sources.find(item => item.id === "patch7").filename,
+  "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md",
+);
+assert.equal(
+  payload.rule_source_contract.sources.find(item => item.id === "patch7").sha256,
+  "69B6BBEAA44755B9935518C665BC1AC0CAC5C473AABA5B106BDF0F9FC88BEB6D",
+);
+assert.equal(
+  payload.rule_source_contract.sources.find(item => item.id === "subsequent_addenda").filename,
+  "后续附加补丁们.md",
+);
+assert.deepEqual(payload.rule_source_contract.precedence, [
+  "current_independent_patch6_and_patch7",
+  "independent_templates_and_patches_1_to_5",
+  "subsequent_addenda_unique_content",
+  "historical_aggregations",
+]);
+assert.match(payload.rule_source_contract.resolutions.type6, /five_dimension_quantification/);
+for (const typeKey of ["type1", "type2", "type3", "type4", "type5", "type6", "type7"]) {
+  assert.ok(Array.isArray(payload.types[typeKey].key_thresholds));
+  assert.ok(payload.types[typeKey].key_thresholds.length > 0);
+  assert.match(payload.types[typeKey].key_thresholds.join("；"), /补丁7共同前提.*自由现金流/);
+}
+assert.match(payload.types.type1.key_thresholds.join("；"), /行业专属中位增长率及样本量/);
+assert.match(payload.types.type1.key_thresholds.join("；"), /最近连续4年收入/);
+assert.match(payload.types.type1.key_thresholds.join("；"), /不默认通过/);
+assert.match(payload.types.type6.key_thresholds.join("；"), /间接代理最多4分/);
+assert.match(payload.types.type6.key_thresholds.join("；"), /不计入核心项达到5分/);
+
+const pageResponse = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(pageResponse.status, 200);
+const pageHtml = await pageResponse.text();
+assert.match(pageHtml, /行业专属增长基准须有中位数和样本量/);
+assert.match(pageHtml, /最近连续4年收入/);
+assert.match(pageHtml, /资料待补、不默认通过/);
+assert.match(pageHtml, /七类共同前提/);
+assert.match(pageHtml, /资料不足则待补，不能发布为实际触发/);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    for text in (
+        "默认仅展示至少一个类型状态为已触发的公司",
+        "待行动/附加确认、资料待补、观察、未触发均不是买入信号",
+        "买入不触发≠卖出",
+        "当前网站不生成卖出信号",
+        "补丁7跨类型总闸门",
+        "七类共同前提",
+        "资料待补、不默认通过",
+        "资料不足则待补，不能发布为实际触发",
+    ):
+        assert text in source
 
 
 def test_dashboard_distinguishes_model_coverage_and_uses_latest_type7_mean_rule():
@@ -961,7 +1304,8 @@ def test_dashboard_focus_pagination_search_and_zero_bar_interactions_are_explici
     assert "function syncSearchStatus()" in source
     assert '$("status").disabled=searching' in source
     assert "代码/名称搜索会跨全部状态，状态筛选暂时停用。" in source
-    assert "typeState&&(q||s?(!s||typeStatusMatches(typeState,s))" in source
+    assert 'selectedTypeMatches=s==="triggered"?actualBuyTypes(r).includes(t):typeStatusMatches(typeState,s)' in source
+    assert 's==="triggered"?actualBuyTypes(r).length>0' in source
     assert "function changePage(delta)" in source
     assert '$("resultsPanel").scrollIntoView({block:"start"})' in source
     assert '$("resultMeta").focus({preventScroll:true})' in source

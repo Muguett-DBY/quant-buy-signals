@@ -4334,7 +4334,7 @@ class TestTypeRules(unittest.TestCase):
         self.assertIn("_condition", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_CONDITIONAL)
 
-    def test_type6_proxy_technology_and_model_scores_cap_at_six_and_can_trigger(self):
+    def test_type6_proxy_technology_and_model_scores_cap_at_four_and_cannot_trigger(self):
         outcome = bs.score_type6_vc(
             base_metrics(
                 market_cap=10e8,
@@ -4350,18 +4350,42 @@ class TestTypeRules(unittest.TestCase):
             benchmarks(median_cagr=0.60, median_cagr_count=20),
         )
 
-        # A complete observable proxy is a reproducible quantitative score
-        # (same spirit as 6a's 8-point ceiling): it caps at 6, below primary,
-        # but counts as complete evidence so the framework can actually
-        # trigger.  The explicit position gate (6e) remains a separate
-        # action-confirmation step before any buy.
-        self.assertTrue(outcome[0])
-        self.assertEqual(outcome[2]["6b"], 6.0)
-        self.assertEqual(outcome[2]["6c"], 6.0)
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[2]["6b"], 4.0)
+        self.assertEqual(outcome[2]["6c"], 4.0)
         self.assertIn("模型代理证据", outcome[3]["6b"])
         self.assertIn("模型代理证据", outcome[3]["6c"])
-        self.assertEqual(outcome[3]["_decision_missing_dimensions"], [])
-        self.assertEqual(outcome[3]["_status"], bs.STATUS_TRIGGERED)
+        self.assertEqual(outcome[3]["_decision_missing_dimensions"], ["6b", "6c"])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(outcome[3]["_evidence"], "incomplete")
+
+    def test_type6_proxy_gaps_are_not_replayed_as_a_position_only_action_condition(self):
+        outcome = bs.score_type6_vc(
+            base_metrics(
+                market_cap=10e8,
+                technology_score=9.0,
+                business_model_score=8.0,
+                trend_growth=0.30,
+                net_profit_history=[-3.0, -1.0, 2.0],
+                net_profit=2.0,
+                net_margin=0.02,
+            ),
+            benchmarks(median_cagr=0.60, median_cagr_count=20),
+        )
+        decision = bs.replay_buy_decision(
+            "type6",
+            {
+                "triggered": outcome[0],
+                "total": outcome[1],
+                "sub_scores": outcome[2],
+                "reasons": outcome[3],
+            },
+        )
+
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(set(decision["missing_dimensions"]), {"6b", "6c", "6e"})
+        self.assertEqual(decision["decision_basis"], "unresolved_missing_evidence")
+        self.assertNotEqual(decision["decision_basis"], "action_condition")
 
     def test_type6_primary_technology_and_model_scores_remain_formal_scores(self):
         outcome = bs.score_type6_vc(
@@ -5441,6 +5465,7 @@ class TestMarketScreen(unittest.TestCase):
                 "applicable": False,
                 "research_request_needed": False,
                 "history_request_needed": False,
+                "decision_gates": {"future_fcf": {"complete": True, "passed": True}},
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
             }
@@ -6211,6 +6236,7 @@ class TestMarketScreen(unittest.TestCase):
             return bs._not_applicable("type7", "测试桩不评价第七类"), {
                 "applicable": False,
                 "history_request_needed": False,
+                "decision_gates": {"future_fcf": {"complete": True, "passed": True}},
                 "scores": {"template1": 40.0, "template5": 40.0, "patch5": 40.0},
                 "triggered": False,
             }
@@ -6502,6 +6528,14 @@ class TestMarketScreen(unittest.TestCase):
             patch.object(bs, "score_type4_long_runway", return_value=score_outcomes["type4"]),
             patch.object(bs, "score_type5_counter_cyclical", return_value=score_outcomes["type5"]),
             patch.object(bs, "score_type6_vc", return_value=score_outcomes["type6"]),
+            patch.object(
+                bs,
+                "score_type7_quality_equity",
+                return_value=(
+                    bs._not_applicable("type7", "测试桩不评价第七类"),
+                    {"applicable": False, "decision_gates": {"future_fcf": {"complete": True, "passed": True}}},
+                ),
+            ),
         ):
             result = bs.screen_all_types(fin_map, quotes)
         self.assertEqual(result["code"].tolist(), ["000001", "000002"])
