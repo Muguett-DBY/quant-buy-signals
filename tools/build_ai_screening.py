@@ -78,11 +78,7 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
         "\u8bc1\u636e",
         "\u5426\u51b3",
     }
-    selected = [
-        chunk
-        for chunk in chunks
-        if any(term in chunk["text"] or term in chunk["heading"] for term in terms)
-    ]
+    selected = [chunk for chunk in chunks if any(term in chunk["text"] or term in chunk["heading"] for term in terms)]
     selected.sort(key=lambda chunk: (chunk["source_id"], int(chunk["line_start"])))
     return [{**chunk, "text": chunk["text"][:1400]} for chunk in selected[:16]]
 
@@ -90,9 +86,21 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
 def _compact_company(company: Mapping[str, Any], selected_type: str) -> dict[str, Any]:
     """Keep the model packet small without hiding deterministic context."""
     fields = (
-        "code", "name", "industry", "industry_code", "market_cap", "price",
-        "pe", "pb", "diagnostic_score", "diagnostic_type", "buy_types",
-        "conditional_types", "pending_types", "primary_type", "primary_label",
+        "code",
+        "name",
+        "industry",
+        "industry_code",
+        "market_cap",
+        "price",
+        "pe",
+        "pb",
+        "diagnostic_score",
+        "diagnostic_type",
+        "buy_types",
+        "conditional_types",
+        "pending_types",
+        "primary_type",
+        "primary_label",
     )
     compact = {key: company.get(key) for key in fields if key in company}
     types = company.get("types") or company.get("type_results") or {}

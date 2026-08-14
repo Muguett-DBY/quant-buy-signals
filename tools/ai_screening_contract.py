@@ -11,9 +11,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 REVIEW_SCHEMA_VERSION = 1
-REVIEW_VERDICTS = frozenset(
-    {"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"}
-)
+REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
 TYPE_KEYS = tuple(f"type{i}" for i in range(1, 8))
 
@@ -102,6 +100,7 @@ def select_candidates(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "company": dict(company),
                 }
             )
+
     def priority(item: Mapping[str, Any]) -> tuple[int, float, str, str]:
         result = item["deterministic"]
         status = str(result.get("status") or "")
