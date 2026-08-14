@@ -225,8 +225,15 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     assert "--keep-vars" in dispatcher["run"]
     assert 'cp cloudflare/quant-dashboard/pages_worker.js "${pages_dir}/_worker.js"' in pages["run"]
     assert "node --check cloudflare-cron/worker.js" in workflow
-    for endpoint in ("/api/methodology", "/api/health", "/api/meta", "https://quant.custard.top/"):
+    for endpoint in (
+        "/api/methodology",
+        "/api/health",
+        "/api/meta",
+        "https://quant.custard.top/",
+        "https://quant.custard.top/ai-screening",
+    ):
         assert endpoint in verify["run"]
+    assert 'grep -qF "AI"' in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
     assert ".integrity_checked == true" in verify["run"]
 

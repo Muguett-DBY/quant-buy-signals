@@ -1,0 +1,29 @@
+# Isolated provider config for the local AI screening pass.
+# The API credential is read from Reasonix's existing global .env.
+config_version = 6
+default_model = "opencode-go/deepseek-v4-flash"
+language = "zh"
+
+[[providers]]
+name = "opencode-go"
+kind = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1"
+models = ["deepseek-v4-flash"]
+api_key_env = "OPENCODE_GO_API_KEY"
+preset_id = "opencode-go"
+preset_version = 1
+context_window = 1000000
+vision_models = []
+web_search = true
+model_overrides = { "deepseek-v4-flash" = { reasoning_protocol = "deepseek", supported_efforts = ["disabled", "high", "max"], default_effort = "max", context_window = 1000000 } }
+
+[permissions]
+mode = "allow"
+
+[network]
+proxy_mode = "auto"
+
+[sandbox]
+bash = "off"
+network = true
+allow_write = ["E:\\DEV\\DS_DCF"]

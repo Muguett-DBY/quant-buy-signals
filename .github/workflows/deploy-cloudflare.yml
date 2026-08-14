@@ -128,7 +128,7 @@ jobs:
           # Same fixed versions as requirements-dev-lock.txt (pytest 9.1.1,
           # pyyaml 6.0.3) so verification never floats either.
           python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
-          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py -q
+          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py -q
 
       - name: Deploy the quant-market-refresh worker
         if: steps.stale.outputs.skip != 'true'
@@ -223,4 +223,9 @@ jobs:
             echo "Deployed homepage does not expose the current methodology version." >&2
             exit 1
           fi
-          echo "Verified /api/methodology, /api/health, /api/meta and the homepage."
+          ai_page="$(curl --fail --silent --show-error https://quant.custard.top/ai-screening)"
+          if ! grep -qF "AI" <<< "${ai_page}"; then
+            echo "Deployed AI screening page is unavailable." >&2
+            exit 1
+          fi
+          echo "Verified /api/methodology, /api/health, /api/meta, /ai-screening and the homepage."

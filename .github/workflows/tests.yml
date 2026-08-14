@@ -156,7 +156,7 @@ jobs:
           node --check cloudflare-cron/worker.js
           node --check cloudflare/quant-dashboard/pages_worker.js
           node --check cloudflare/quant-dashboard/refresh_worker.js
-          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py -q
+          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py -q
 
   data:
     name: Website data-integrity gate

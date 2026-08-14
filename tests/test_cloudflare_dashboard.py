@@ -1954,3 +1954,67 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
     assert config["r2_buckets"] == [{"binding": "DATA_BUCKET", "bucket_name": "quant-market-data"}]
     assert config["vars"] == {"GENERATION_RETENTION_COUNT": "8"}
     assert "REFRESH_KEY" not in config["vars"]
+
+
+def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponse(request);' in source
+    assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
+    assert "value.ai_is_advisory!==true" in source
+    assert "value.auto_buy_promotion!==false" in source
+    node = shutil.which("node")
+    assert node is not None
+    validator = r"""
+import assert from "node:assert/strict";
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const generation = { generation_id: "0123456789abcdef", market_as_of: "2026-08-13" };
+const artifact = {
+  schema_version: 1,
+  artifact_kind: "ai_screening_overlay",
+  ai_is_advisory: true,
+  auto_buy_promotion: false,
+  snapshot_generation: generation.generation_id,
+  market_as_of: "2026-08-13",
+  reviewed_count: 1,
+  packets: [{
+    security_code: "600339",
+    type_key: "type1",
+    deterministic: { status: "triggered", score: 7.8 },
+    ai_review: { verdict: "caution", recommended_action: "manual_review", claims: [] },
+  }],
+};
+const bytes = new TextEncoder().encode(JSON.stringify(artifact));
+const objects = new Map([["ai-screening/0123456789abcdef.json", {
+  size: bytes.byteLength,
+  arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+}]]);
+const env = {
+  DB: { prepare: () => ({ bind() { return this; }, first: async () => generation }) },
+  DATA_BUCKET: { get: async key => objects.get(key) || null },
+};
+let response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env);
+assert.equal(response.status, 200);
+let payload = await response.json();
+assert.equal(payload.snapshot_generation, generation.generation_id);
+assert.equal(payload.ai_is_advisory, true);
+response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening?bad=1"), env);
+assert.equal(response.status, 400);
+response = await worker.fetch(new Request("https://dashboard.test/ai-screening"), env);
+assert.equal(response.status, 200);
+const html = await response.text();
+const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
+assert.ok(nonce);
+assert.ok(html.includes("AI筛查"));
+assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")

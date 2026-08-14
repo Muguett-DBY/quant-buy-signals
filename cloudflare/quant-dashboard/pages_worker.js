@@ -586,6 +586,9 @@ const JSON_HEADERS={...BASE_SECURITY_HEADERS,"content-type":"application/json; c
 const MAX_MANIFEST_BYTES=1024*1024;
 const MAX_COMPRESSED_ASSET_BYTES=8*1024*1024;
 const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;
+const MAX_AI_SCREENING_BYTES=4*1024*1024;
+const AI_SCREENING_SCHEMA_VERSION=1;
+const AI_SCREENING_ARTIFACT_KIND="ai_screening_overlay";
 // Pages advanced mode deploys this Worker as one file, so the official closure
 // periods from tools/china_a_share_trading_calendar.json are embedded here.
 // Add each newly published exchange calendar explicitly; unlisted years fall
@@ -609,9 +612,29 @@ const EXPECTED_TRADING_DAY_LOOKBACK=20;
 function json(value,status=200,headers={}){return new Response(JSON.stringify(value),{status,headers:{...JSON_HEADERS,...headers}})}
 function cspNonce(){const bytes=crypto.getRandomValues(new Uint8Array(16));return Array.from(bytes,value=>value.toString(16).padStart(2,"0")).join("")}
 function dashboardHtmlResponse(request){
-  const nonce=cspNonce(),html=INDEX_HTML.replaceAll("__QUANT_CSP_NONCE__",nonce).replace("<script>","<script nonce=\""+nonce+"\">");
+  const nonce=cspNonce(),html=INDEX_HTML.replaceAll("__QUANT_CSP_NONCE__",nonce).replace("<header id=\"pageHeader\">","<header id=\"pageHeader\"><p><a href=\"/ai-screening\">AI筛查</a></p>").replace("<script>","<script nonce=\""+nonce+"\">");
   const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
   return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
+}
+function aiScreeningPageResponse(request){
+  const nonce=cspNonce();
+  const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI筛查 · 量化买入看板</title><style nonce="${nonce}">:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--bg:#f5f7fb;--panel:#fff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:auto;padding:28px 20px 48px}.hero,.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 8px 24px #19324b0b}.hero{display:flex;justify-content:space-between;gap:24px;align-items:end}.hero h1{margin:0 0 6px;font-size:clamp(28px,4vw,44px)}.hero p{margin:0;color:var(--muted);max-width:720px}.meta{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;color:var(--muted);font-size:12px}.meta span{padding:6px 9px;border-radius:999px;background:#eef4f7}.toolbar{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.toolbar label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}.toolbar select{padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:inherit}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.card strong{display:block}.top{display:flex;justify-content:space-between;gap:12px}.top small{color:var(--muted)}.tag{display:inline-block;margin:12px 0 10px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700;background:#fff0c7;color:#855b00}.tag.confirmed{background:#def4e5;color:#126a38}.tag.misclassified{background:#ffe0e0;color:#982b2b}.tag.missed_candidate{background:#e9e2ff;color:#5540a4}.rule,small,.notice{color:var(--muted);font-size:12px}.card p{min-height:48px}.claim{margin:8px 0 0;padding:8px 10px;border-left:3px solid #bfdbfe;background:#f8fbff;font-size:12px}.claim a{color:#1d4ed8;overflow-wrap:anywhere}.empty{padding:32px;text-align:center;color:var(--muted)}.disclaimer{margin:18px 0;color:var(--muted);font-size:12px}@media(max-width:700px){.hero{display:block}.meta{justify-content:flex-start;margin-top:18px}.wrap{padding:18px 12px 36px}}</style></head><body><main class="wrap"><section class="hero"><div><p>SECOND-PASS RESEARCH</p><h1>AI筛查</h1><p>只在确定性规则达标或接近达标的公司中，复核财报、公告与反证，帮助优中选优。AI不能改写七类评分、总闸门或买入状态。</p></div><div class="meta" id="meta"><span>正在读取…</span></div></section><section class="toolbar"><label>结论<select id="verdict"><option value="all">全部</option><option value="confirmed">AI复核通过</option><option value="caution">谨慎观察</option><option value="misclassified">疑似误判</option><option value="missed_candidate">疑似漏判</option><option value="needs_review">待核验</option></select></label><label>类型<select id="type"><option value="all">全部类型</option><option>type1</option><option>type2</option><option>type3</option><option>type4</option><option>type5</option><option>type6</option><option>type7</option></select></label></section><section class="grid" id="grid"><p class="empty">正在读取 AI 复核结果…</p></section><p class="disclaimer">AI筛查是资料复核和研究排序工具，不是自动买入信号，也不构成收益保证。来源链接仍需人工核对；缺少可核验来源时只能显示待核验。</p></main><script nonce="${nonce}">const esc=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');const labels={confirmed:'AI复核通过',caution:'谨慎观察',misclassified:'疑似误判',missed_candidate:'疑似漏判',needs_review:'待核验'};let payload={packets:[]};function render(){const verdict=document.querySelector('#verdict').value,type=document.querySelector('#type').value;const rows=(payload.packets||[]).filter(p=>(verdict==='all'||p.ai_review?.verdict===verdict)&&(type==='all'||p.type_key===type));document.querySelector('#grid').innerHTML=rows.length?rows.map(p=>{const r=p.ai_review||{},d=p.deterministic||{},v=String(r.verdict||'needs_review');const claims=Array.isArray(r.claims)?r.claims.slice(0,12).map(c=>'<div class="claim">'+esc(c.statement||'')+(c.source_ref?' · <a rel="noreferrer" target="_blank" href="'+esc(c.source_ref)+'">来源</a>':'')+'</div>').join(''):'';return '<article class="card"><div class="top"><strong>'+esc(p.name||p.security_code)+'</strong><small>'+esc(p.security_code)+' · '+esc(p.type_key)+'</small></div><span class="tag '+esc(v)+'">'+esc(labels[v]||v)+'</span><div class="rule">规则状态：'+esc(d.status||'未标注')+' · 分数：'+esc(d.score??d.score_upper_bound??'—')+'</div><p>'+esc(r.summary||'等待本地 AI 复核')+'</p>'+claims+'</article>'}).join(''):'<p class="empty">当前筛选没有已发布的 AI 复核结果。</p>'}async function load(){try{const response=await fetch('/api/ai-screening');payload=await response.json();if(!response.ok)throw new Error(payload.error||'暂无结果');document.querySelector('#meta').innerHTML='<span>数据代际 '+esc(payload.snapshot_generation||'—')+'</span><span>交易日 '+esc(payload.market_as_of||'—')+'</span><span>已复核 '+esc(payload.reviewed_count||0)+' / 候选 '+esc(payload.candidate_total||0)+'</span>';render()}catch(error){document.querySelector('#meta').innerHTML='<span>AI 复核结果暂未发布</span>';document.querySelector('#grid').innerHTML='<p class="empty">'+esc(error.message||'暂无结果')+'。确定性网站结果不受影响。</p>'}}document.querySelector('#verdict').addEventListener('change',render);document.querySelector('#type').addEventListener('change',render);load();</script></body></html>`;
+  const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
+  return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
+}
+function validAiScreeningArtifact(value,generation){
+  if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
+  if(String(value.market_as_of||"")!==String(generation?.market_as_of||"")||!/^\d{4}-\d{2}-\d{2}$/.test(String(value.market_as_of||""))||!Array.isArray(value.packets)||value.packets.length>2000||value.reviewed_count!==value.packets.length)return false;
+  const seen=new Set();
+  for(const packet of value.packets){const code=String(packet?.security_code||""),type=String(packet?.type_key||""),review=packet?.ai_review;if(!/^[036]\d{5}$/.test(code)||!/^type[1-7]$/.test(type)||seen.has(code+"/"+type)||!review||typeof review!=="object"||!["confirmed","caution","misclassified","missed_candidate","needs_review"].includes(String(review.verdict))||!["keep","demote","manual_review"].includes(String(review.recommended_action))||!Array.isArray(review.claims)||review.claims.length>12)return false;seen.add(code+"/"+type)}
+  return true;
+}
+async function aiScreeningArtifact(env,generation){
+  if(!generation)return null;
+  const object=await env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json");
+  if(!object||object.size<1||object.size>MAX_AI_SCREENING_BYTES)return null;
+  let value;try{value=JSON.parse(new TextDecoder().decode(await object["arrayBuffer"]()))}catch{return null}
+  return validAiScreeningArtifact(value,generation)?value:null;
 }
 async function currentGeneration(env,generationId=""){if(generationId)return await env.DB.prepare("SELECT * FROM generations WHERE generation_id=?").bind(generationId).first();return await env.DB.prepare("SELECT g.* FROM current_generation c JOIN generations g ON g.generation_id=c.generation_id WHERE c.singleton=1").first()}
 async function sha256Hex(bytes){const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("")}
@@ -737,11 +760,18 @@ export default{
     const url=new URL(request.url),path=url.pathname;
     try{
       if(path==="/"||path==="/index.html")return dashboardHtmlResponse(request);
+      if(path==="/ai-screening")return aiScreeningPageResponse(request);
       if(path==="/api/methodology")return json({schema_version:2,methodology_version:METHODOLOGY_VERSION,decision_domain:"new_buy_or_add",qualify_threshold:7,patch7_total_gate:PATCH7_TOTAL_GATE,type5_appendix:TYPE5_APPENDIX,sell_domain:SELL_DOMAIN,rule_source_contract:RULE_SOURCE_CONTRACT,types:METHODOLOGY},200,{"cache-control":"public, max-age=86400"});
       const requestedGeneration=url.searchParams.get("generation_id")||"";
+      if(path==="/api/ai-screening"&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"invalid generation query"},400));
       if(path==="/api/catalogue-index"&&!canonicalCatalogueIndexRequest(url))return headSafeResponse(request,json({error:"公司索引请求参数无效，请刷新页面"},400));
       if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
       const generation=await currentGeneration(env,requestedGeneration);
+      if(path==="/api/ai-screening"){
+        const artifact=await aiScreeningArtifact(env,generation);
+        if(!artifact)return headSafeResponse(request,json({available:false,error:"AI复核结果尚未发布，确定性筛选不受影响",generation_id:generation?.generation_id||null},404));
+        return headSafeResponse(request,json(artifact,200,{"cache-control":requestedGeneration?"public, max-age=31536000, immutable":"no-store"}));
+      }
       if(path==="/api/health"){
         const deep=url.searchParams.get("deep")==="1",freshness=tradingDataFreshness(generation?.market_as_of,generation?.data_timestamp_utc),recordOk=generationRecordHealthy(generation),deepState=deep?await deepGenerationHealth(env,generation):{ok:true,...uncheckedDeepHealth()},{ok:integrityOk,...deepFields}=deepState;
         const ok=Boolean(recordOk&&!freshness.stale&&(!deep||integrityOk));
