@@ -2010,6 +2010,9 @@ const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
 assert.ok(nonce);
 assert.ok(html.includes("AI筛查"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
+const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+assert.ok(inlineScript);
+assert.doesNotThrow(() => new Function(inlineScript));
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],
