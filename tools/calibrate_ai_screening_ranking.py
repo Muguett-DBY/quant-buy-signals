@@ -36,8 +36,14 @@ def _deterministic_score(packet: Mapping[str, Any]) -> float:
     return upper if upper is not None else 0.0
 
 
+def _deterministic_status(packet: Mapping[str, Any]) -> str:
+    deterministic = packet.get("deterministic") if isinstance(packet.get("deterministic"), Mapping) else {}
+    return str(deterministic.get("status") or "insufficient_evidence")
+
+
 def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     base = _deterministic_score(packet)
+    status = _deterministic_status(packet)
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     risk_flags = [str(value) for value in (source.get("risk_flags") or [])]
     risk_text = " ".join(risk_flags)
@@ -47,47 +53,43 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
         + sum(term in risk_text for term in ("现金流", "审计", "应收", "商誉", "诉讼", "周期")) * 2.0,
     )
     if verdict == "confirmed":
-        return round(
-            max(
-                70.0,
-                min(99.0, 65.0 + base * 3.5 - penalty),
-            ),
-            1,
-        )
-    if verdict == "caution":
-        return round(
-            max(
-                50.0,
-                min(76.0, 44.0 + base * 3.1 - penalty),
-            ),
-            1,
-        )
-    if verdict == "missed_candidate":
-        return round(
-            max(
-                50.0,
-                min(69.0, 48.0 + base * 2.7 - penalty),
-            ),
-            1,
-        )
-    if verdict == "misclassified":
-        return round(max(8.0, 30.0 - base * 0.8 - penalty), 1)
-    return round(
-        max(
-            20.0,
-            min(58.0, 30.0 + base * 2.4 - penalty),
-        ),
-        1,
-    )
+        score = max(70.0, min(99.0, 65.0 + base * 3.5 - penalty))
+    elif verdict == "caution":
+        score = max(50.0, min(76.0, 44.0 + base * 3.1 - penalty))
+    elif verdict == "missed_candidate":
+        score = max(50.0, min(69.0, 48.0 + base * 2.7 - penalty))
+    elif verdict == "misclassified":
+        score = max(8.0, 30.0 - base * 0.8 - penalty)
+    else:
+        score = max(20.0, min(58.0, 30.0 + base * 2.4 - penalty))
+
+    # A qualitative confirmation cannot turn an unresolved or merely
+    # conditional deterministic result into a buy signal.  Keep the score
+    # useful for ranking, but make its ceiling match the decision state.
+    if status in {"observe", "conditional"}:
+        score = min(score, 78.0)
+    elif status != "triggered":
+        score = min(score, 64.0)
+    return round(score, 1)
 
 
 def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     verdict = str(source.get("verdict") or "needs_review")
+    status = _deterministic_status(packet)
     score = _calibrated_score(packet, verdict)
-    if verdict == "confirmed" and score >= 70:
+    if verdict == "confirmed" and status == "triggered" and score >= 70:
         action = "priority_buy"
-    elif verdict in {"confirmed", "caution", "missed_candidate"} and score >= 50:
+    elif (
+        verdict in {"confirmed", "caution", "missed_candidate"}
+        and status
+        in {
+            "triggered",
+            "observe",
+            "conditional",
+        }
+        and score >= 50
+    ):
         action = "watchlist"
     elif verdict == "misclassified":
         action = "avoid"

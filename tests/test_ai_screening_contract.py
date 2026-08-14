@@ -4,6 +4,7 @@ import json
 
 from tools.ai_screening_contract import select_candidates, validate_review
 from tools.build_ai_screening import build_input, merge_reviews
+from tools.calibrate_ai_screening_ranking import _review
 from tools.publish_ai_screening import build_artifact
 from tools.prepare_ai_screening_overlay import prepare
 
@@ -55,6 +56,31 @@ def test_review_requires_sources_and_keeps_verdict_bounded() -> None:
     assert validate_review(review) == []
     review["claims"] = [{"statement": "no source"}]
     assert "claim_source_ref" in validate_review(review)
+
+
+def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "claims": [],
+            "risk_flags": [],
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    assert _review(source)["ai_action"] == "priority_buy"
+
+    source["deterministic"]["status"] = "observe"
+    observed = _review(source)
+    assert observed["ai_action"] == "watchlist"
+    assert observed["buy_attractiveness_score"] <= 78
+
+    source["deterministic"]["status"] = "insufficient_evidence"
+    unresolved = _review(source)
+    assert unresolved["ai_action"] == "insufficient_evidence"
+    assert unresolved["buy_attractiveness_score"] <= 64
 
 
 def test_build_and_merge_review_artifacts(tmp_path) -> None:
@@ -136,7 +162,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v1"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v2-deterministic-gated"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1

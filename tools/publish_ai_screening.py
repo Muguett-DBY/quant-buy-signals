@@ -198,7 +198,7 @@ def build_artifact(
         "watchlist_count": action_counts["watchlist"],
         "avoid_count": action_counts["avoid"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v1",
+        "ranking_version": "ai-buy-attractiveness-v2-deterministic-gated",
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,
