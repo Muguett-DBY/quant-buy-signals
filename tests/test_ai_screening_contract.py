@@ -5,7 +5,7 @@ import json
 from tools.ai_screening_contract import select_candidates, validate_review
 from tools.build_ai_screening import build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _review
-from tools.publish_ai_screening import build_artifact
+from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
 
 
@@ -63,8 +63,9 @@ def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
         "ai_review": {
             "verdict": "confirmed",
             "recommended_action": "keep",
-            "claims": [],
+            "claims": [{"source_ref": "https://example.test/report"}],
             "risk_flags": [],
+            "web_search_performed": True,
         },
         "security_code": "600339",
         "type_key": "type1",
@@ -81,6 +82,78 @@ def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
     unresolved = _review(source)
     assert unresolved["ai_action"] == "insufficient_evidence"
     assert unresolved["buy_attractiveness_score"] <= 64
+
+
+def test_unsearched_confirmation_cannot_be_priority_and_searched_score_is_used() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "claims": [],
+            "risk_flags": [],
+            "buy_attractiveness_score": 91,
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    unsearched = _review(source)
+    assert unsearched["ai_action"] == "watchlist"
+
+    source["ai_review"].update(
+        {
+            "web_search_performed": True,
+            "claims": [{"source_ref": "https://example.test/report"}],
+        }
+    )
+    searched = _review(source)
+    assert searched["ai_action"] == "priority_buy"
+    assert searched["buy_attractiveness_score"] == 91
+
+
+def test_source_backed_ai_avoid_overrides_a_triggered_rule() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "caution",
+            "recommended_action": "demote",
+            "ai_action": "avoid",
+            "buy_attractiveness_score": 28,
+            "claims": [{"source_ref": "https://example.test/report"}],
+            "risk_flags": ["盈利崩塌"],
+            "web_search_performed": True,
+        },
+        "security_code": "002790",
+        "type_key": "type5",
+        "deterministic": {"status": "triggered", "score": 8.5},
+    }
+    reviewed = _review(source)
+    assert reviewed["ai_action"] == "avoid"
+    assert reviewed["buy_attractiveness_score"] == 28
+
+
+def test_public_review_strips_reasonix_annotation_from_source_url() -> None:
+    review = {
+        "schema_version": 2,
+        "security_code": "600339",
+        "type_key": "type1",
+        "verdict": "caution",
+        "recommended_action": "manual_review",
+        "buy_attractiveness_score": 60,
+        "ai_action": "watchlist",
+        "confidence": "medium",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [
+            {
+                "statement": "官方报告",
+                "source_ref": "https://example.test/report.pdf这是报告说明",
+            }
+        ],
+        "web_search_performed": True,
+    }
+    public = _public_review(review)
+    assert public["claims"][0]["source_ref"] == "https://example.test/report.pdf"
+    assert public["web_search_verified"] is True
 
 
 def test_build_and_merge_review_artifacts(tmp_path) -> None:
@@ -162,7 +235,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v2-deterministic-gated"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v3-web-gated"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1

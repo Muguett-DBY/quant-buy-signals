@@ -41,10 +41,26 @@ def _deterministic_status(packet: Mapping[str, Any]) -> str:
     return str(deterministic.get("status") or "insufficient_evidence")
 
 
+def _web_search_verified(review: Mapping[str, Any]) -> bool:
+    if review.get("web_search_performed") is not True:
+        return False
+    claims = review.get("claims") if isinstance(review.get("claims"), list) else []
+    return any(str(claim.get("source_ref") or "").lower().startswith("https://") for claim in claims if isinstance(claim, Mapping))
+
+
 def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     base = _deterministic_score(packet)
     status = _deterministic_status(packet)
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
+    web_verified = _web_search_verified(source)
+    model_score = _number(source.get("buy_attractiveness_score"))
+    if web_verified and model_score is not None:
+        # A source-backed second pass owns the ranking score.  The fallback
+        # formula below is only for legacy/unsearched reviews and is never
+        # allowed to manufacture a priority signal.
+        if str(source.get("ai_action") or "") == "avoid" or verdict == "misclassified":
+            return round(max(0.0, min(49.0, model_score)), 1)
+        return round(max(0.0, min(100.0, model_score)), 1)
     risk_flags = [str(value) for value in (source.get("risk_flags") or [])]
     risk_text = " ".join(risk_flags)
     penalty = min(
@@ -78,7 +94,11 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     verdict = str(source.get("verdict") or "needs_review")
     status = _deterministic_status(packet)
     score = _calibrated_score(packet, verdict)
-    if verdict == "confirmed" and status == "triggered" and score >= 70:
+    web_verified = _web_search_verified(source)
+    source_action = str(source.get("ai_action") or "")
+    if source_action == "avoid" or verdict == "misclassified":
+        action = "avoid"
+    elif verdict == "confirmed" and status == "triggered" and score >= 70 and web_verified:
         action = "priority_buy"
     elif (
         verdict in {"confirmed", "caution", "missed_candidate"}
@@ -91,12 +111,19 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         and score >= 50
     ):
         action = "watchlist"
-    elif verdict == "misclassified":
-        action = "avoid"
     else:
         action = "insufficient_evidence"
+    if verdict == "confirmed" and status == "triggered" and not web_verified:
+        action = "watchlist"
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
-    claims = source.get("claims") if isinstance(source.get("claims"), list) else []
+    raw_claims = source.get("claims") if isinstance(source.get("claims"), list) else []
+    # Legacy public cards may contain empty placeholder claims.  Do not copy
+    # those into the new contract: a claim without a source is not evidence.
+    claims = [
+        claim
+        for claim in raw_claims
+        if isinstance(claim, Mapping) and str(claim.get("source_ref") or "").strip()
+    ]
     strengths = [
         str(claim.get("statement") or "")[:240]
         for claim in claims
@@ -105,8 +132,27 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
-    summary = str(source.get("summary") or "AI 已完成第一轮候选复核。")[:1200]
-    summary = f"AI买入吸引力 {score:.1f} 分（由已完成的 OpenCode 复核结论校准排序）。{summary}"
+    # Rebuild the prefix from the current provenance state.  This also strips
+    # the prefix emitted by an older calibration run, so replaying a legacy
+    # seed cannot produce nested/double "AI买入吸引力" labels.
+    summary = str(source.get("summary") or "AI 已完成第一轮候选复核。")
+    legacy_prefixes = (
+        "AI买入吸引力 ",
+        "AI 买入吸引力 ",
+    )
+    while summary.startswith(legacy_prefixes):
+        marker = summary.find("）。")
+        if marker < 0:
+            break
+        summary = summary[marker + 2 :].lstrip()
+    summary = summary[:1200]
+    # Make the provenance state visible in every published card.  Legacy
+    # reviews remain useful as context, but they are never presented as a
+    # completed web check.
+    if web_verified:
+        summary = f"AI买入吸引力 {score:.1f} 分（已通过 OpenCode Go 联网资料核验）。{summary}"
+    else:
+        summary = f"AI买入吸引力 {score:.1f} 分（尚未完成本轮联网资料核验，不进入优先候选）。{summary}"
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
@@ -124,6 +170,8 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         "claims": claims[:12],
         "model": str(source.get("model") or "opencode-go/deepseek-v4-flash"),
         "effort": str(source.get("effort") or "max"),
+        "web_search_performed": bool(source.get("web_search_performed") is True),
+        "web_search_verified": web_verified,
     }
 
 
@@ -143,7 +191,7 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
-        "ranking_source": "opencode-go-qualitative-review-calibrated",
+        "ranking_source": "opencode-go-web-search-review-calibrated",
         "packets": output_packets,
     }
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

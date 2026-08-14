@@ -33,6 +33,7 @@ _DETERMINISTIC_FIELDS = (
     "veto_state",
 )
 _URL_RE = re.compile(r"https?://[^\s)）>]+", re.IGNORECASE)
+_ASCII_URL_RE = re.compile(r"[A-Za-z0-9:/?#\[\]@!$&'()*+,;=%._~\-]+")
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -56,7 +57,13 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("AI claim must be an object")
         raw_source = _text(claim.get("source_ref"), 800)
         match = _URL_RE.search(raw_source)
-        source_ref = match.group(0).rstrip(".,;，。；）") if match else ""
+        source_ref = ""
+        if match:
+            # Reasonix sometimes appends a Chinese explanation directly after
+            # an otherwise valid URL.  Keep the URL's ASCII grammar and drop
+            # that annotation so public links remain clickable and auditable.
+            ascii_match = _ASCII_URL_RE.match(match.group(0))
+            source_ref = ascii_match.group(0).rstrip(".,;，。；）") if ascii_match else ""
         claims.append(
             {
                 "statement": _text(claim.get("statement"), 600),
@@ -76,7 +83,22 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "claims": claims[:12],
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),
+        "web_search_performed": review.get("web_search_performed") is True,
+        "web_search_verified": review.get("web_search_verified") is True
+        or _public_web_verified(review),
     }
+
+
+def _public_web_verified(review: Mapping[str, Any]) -> bool:
+    """Return true only when the published review has a usable HTTPS claim."""
+    return bool(
+        review.get("web_search_performed") is True
+        and any(
+            str(claim.get("source_ref") or "").lower().startswith("https://")
+            for claim in review.get("claims", [])
+            if isinstance(claim, Mapping)
+        )
+    )
 
 
 def _public_deterministic(packet: Mapping[str, Any]) -> dict[str, Any]:
@@ -118,6 +140,7 @@ def build_artifact(
     attempted_review_count = 0
     unreviewed_candidate_count = 0
     attempted_needs_review_count = 0
+    web_search_completed_count = 0
     action_counts: Counter[str] = Counter()
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -140,6 +163,8 @@ def build_artifact(
             unreviewed_candidate_count += 1
         else:
             attempted_review_count += 1
+            if _public_web_verified(public_review):
+                web_search_completed_count += 1
             if public_review["verdict"] == "needs_review":
                 attempted_needs_review_count += 1
         public_packets.append(
@@ -172,6 +197,8 @@ def build_artifact(
             "failed": int(audit.get("failed", 0) or 0),
             "blocked": int(audit.get("blocked", 0) or 0),
         }
+    source_audit["web_search_completed"] = web_search_completed_count
+    source_audit["reviewed_without_web_search"] = max(0, attempted_review_count - web_search_completed_count)
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "review_schema_version": REVIEW_SCHEMA_VERSION,
@@ -188,6 +215,8 @@ def build_artifact(
         "attempted_review_count": attempted_review_count,
         "unreviewed_candidate_count": unreviewed_candidate_count,
         "attempted_needs_review_count": attempted_needs_review_count,
+        "web_search_completed_count": web_search_completed_count,
+        "reviewed_without_web_search": max(0, attempted_review_count - web_search_completed_count),
         # Keep the old field names as compatibility aliases.  They now mean
         # attempted versus not-yet-started, rather than verdict quality.
         "completed_review_count": attempted_review_count,
@@ -198,7 +227,7 @@ def build_artifact(
         "watchlist_count": action_counts["watchlist"],
         "avoid_count": action_counts["avoid"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v2-deterministic-gated",
+        "ranking_version": "ai-buy-attractiveness-v3-web-gated",
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,

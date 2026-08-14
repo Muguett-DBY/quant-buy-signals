@@ -55,7 +55,8 @@
     }
   ],
   "model": "opencode-go/deepseek-v4-flash",
-  "effort": "max"
+  "effort": "max",
+  "web_search_performed": true
 }
 ```
 

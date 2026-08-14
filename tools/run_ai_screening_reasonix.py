@@ -37,9 +37,20 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise ValueError("Reasonix did not return a valid JSON object")
 
 
-def _prompt(protocol: str, packet: dict[str, Any]) -> str:
+def _prompt(protocol: str, packet: dict[str, Any], *, require_web_search: bool = False) -> str:
+    search_instruction = ""
+    if require_web_search:
+        search_instruction = (
+            "\nMANDATORY WEB SEARCH: Call the provider web_search tool before reviewing this packet. "
+            "Search the company code and name on CNINFO, SSE/SZSE, HKEX when applicable, and the "
+            "company investor-relations or official filing page. Use only returned URLs. Set "
+            "web_search_performed=true only after searching; include an https source_ref when found. "
+            "If no reliable source is returned, set web_search_performed=false, confidence=low, and "
+            "do not promote the company to priority_buy.\n"
+        )
     return (
         protocol
+        + search_instruction
         + "\n\nReview packet (JSON; deterministic fields are read-only):\n"
         + json.dumps(packet, ensure_ascii=False, sort_keys=True)
         + "\n\nReturn exactly one JSON object using the protocol schema."
@@ -57,6 +68,7 @@ def run_one(
     permission_mode: str,
     allowed_tools: str,
     ablate: str,
+    require_web_search: bool,
     root: Path,
     reasonix_dir: Path | None,
 ) -> dict[str, Any]:
@@ -101,7 +113,7 @@ def run_one(
         command,
         cwd=root,
         check=False,
-        input=_prompt(protocol, packet),
+        input=_prompt(protocol, packet, require_web_search=require_web_search),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -130,6 +142,8 @@ def run_one(
         raise ValueError(f"invalid AI review {expected}: {','.join(errors)}")
     review["model"] = model
     review["effort"] = effort
+    if require_web_search and review.get("web_search_performed") is not True:
+        print(f"warning: web search was unavailable for {expected}; keeping low-confidence review", file=sys.stderr)
     return review
 
 
@@ -151,6 +165,7 @@ def main() -> int:
         help="Optional extra tools. OpenCode Go search is provider-native; leave empty for the safe default.",
     )
     parser.add_argument("--ablate", default="none")
+    parser.add_argument("--require-web-search", action="store_true")
     parser.add_argument(
         "--reasonix-dir",
         type=Path,
@@ -184,6 +199,7 @@ def main() -> int:
                     permission_mode=args.permission_mode,
                     allowed_tools=args.allowed_tools,
                     ablate=args.ablate,
+                    require_web_search=args.require_web_search,
                     root=args.root,
                     reasonix_dir=args.reasonix_dir,
                 )

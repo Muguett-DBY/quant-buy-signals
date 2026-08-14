@@ -147,6 +147,10 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("ai_action")
     if str(review.get("confidence")) not in AI_CONFIDENCE:
         errors.append("confidence")
+    if "web_search_performed" in review and not isinstance(review.get("web_search_performed"), bool):
+        errors.append("web_search_performed")
+    if "web_search_verified" in review and not isinstance(review.get("web_search_verified"), bool):
+        errors.append("web_search_verified")
     for field in ("key_strengths", "risk_flags"):
         values = review.get(field, [])
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):

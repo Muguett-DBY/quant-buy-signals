@@ -68,11 +68,23 @@ def _shared_rules(packets: list[Mapping[str, Any]]) -> dict[str, list[dict[str, 
     return {type_key: list(values.values()) for type_key, values in sorted(grouped.items())}
 
 
-def _prompt(protocol: str, packets: list[Mapping[str, Any]]) -> str:
+def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_search: bool = False) -> str:
     shared = _shared_rules(packets)
     slim = [_batch_packet(packet) for packet in packets]
+    search_instruction = ""
+    if require_web_search:
+        search_instruction = (
+            "\nMANDATORY WEB SEARCH: Before writing each review, call the provider web_search tool "
+            "for that packet. Search the company code and name against CNINFO, SSE/SZSE, HKEX when "
+            "applicable, and the company's investor-relations or official filing page. Use only URLs "
+            "actually returned by web_search. Set web_search_performed=true only after searching; "
+            "include at least one https source_ref when a source is found. If search fails or no "
+            "reliable source is returned, set web_search_performed=false, confidence=low, and do not "
+            "claim that the company is a priority buy.\n"
+        )
     return (
         protocol
+        + search_instruction
         + "\n\nBatch review instructions:\n"
         + "Review every packet independently. The output array must contain exactly one object "
         + "for every packet, preserving security_code and type_key. Do not omit a packet.\n"
@@ -107,6 +119,7 @@ def _run_batch(
     permission_mode: str,
     allowed_tools: str,
     ablate: str,
+    require_web_search: bool,
     root: Path,
     reasonix_dir: Path,
 ) -> list[dict[str, Any]]:
@@ -139,7 +152,7 @@ def _run_batch(
         command,
         cwd=root,
         check=False,
-        input=_prompt(protocol, packets),
+        input=_prompt(protocol, packets, require_web_search=require_web_search),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -167,6 +180,8 @@ def _run_batch(
         if errors:
             raise ValueError(f"invalid AI review {key}: {','.join(errors)}")
         actual[key] = review
+        if require_web_search and review.get("web_search_performed") is not True:
+            print(f"warning: web search was unavailable for {key}; keeping low-confidence review", file=sys.stderr)
     missing = expected - set(actual)
     extra = set(actual) - expected
     if missing or extra or len(actual) != len(expected):
@@ -192,6 +207,7 @@ def main() -> int:
     parser.add_argument("--permission-mode", default="dontAsk", choices=("plan", "dontAsk", "auto"))
     parser.add_argument("--allowed-tools", default="")
     parser.add_argument("--ablate", default="none")
+    parser.add_argument("--require-web-search", action="store_true")
     parser.add_argument("--reasonix-dir", type=Path, default=Path("tools/reasonix-opencode-go"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--fail-fast", action="store_true")
@@ -223,6 +239,7 @@ def main() -> int:
                     permission_mode=args.permission_mode,
                     allowed_tools=args.allowed_tools,
                     ablate=args.ablate,
+                    require_web_search=args.require_web_search,
                     root=args.root,
                     reasonix_dir=args.reasonix_dir,
                 )
