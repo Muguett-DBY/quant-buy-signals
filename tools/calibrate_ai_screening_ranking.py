@@ -41,16 +41,44 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     risk_flags = [str(value) for value in (source.get("risk_flags") or [])]
     risk_text = " ".join(risk_flags)
-    penalty = min(16.0, len(risk_flags) * 1.5 + sum(term in risk_text for term in ("现金流", "审计", "应收", "商誉", "诉讼", "周期")) * 2.0)
+    penalty = min(
+        16.0,
+        len(risk_flags) * 1.5
+        + sum(term in risk_text for term in ("现金流", "审计", "应收", "商誉", "诉讼", "周期")) * 2.0,
+    )
     if verdict == "confirmed":
-        return round(max(70.0, min(99.0, 65.0 + base * 3.5 - penalty),), 1)
+        return round(
+            max(
+                70.0,
+                min(99.0, 65.0 + base * 3.5 - penalty),
+            ),
+            1,
+        )
     if verdict == "caution":
-        return round(max(50.0, min(76.0, 44.0 + base * 3.1 - penalty),), 1)
+        return round(
+            max(
+                50.0,
+                min(76.0, 44.0 + base * 3.1 - penalty),
+            ),
+            1,
+        )
     if verdict == "missed_candidate":
-        return round(max(50.0, min(69.0, 48.0 + base * 2.7 - penalty),), 1)
+        return round(
+            max(
+                50.0,
+                min(69.0, 48.0 + base * 2.7 - penalty),
+            ),
+            1,
+        )
     if verdict == "misclassified":
         return round(max(8.0, 30.0 - base * 0.8 - penalty), 1)
-    return round(max(20.0, min(58.0, 30.0 + base * 2.4 - penalty),), 1)
+    return round(
+        max(
+            20.0,
+            min(58.0, 30.0 + base * 2.4 - penalty),
+        ),
+        1,
+    )
 
 
 def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
@@ -67,7 +95,11 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         action = "insufficient_evidence"
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
     claims = source.get("claims") if isinstance(source.get("claims"), list) else []
-    strengths = [str(claim.get("statement") or "")[:240] for claim in claims if isinstance(claim, Mapping) and claim.get("support") == "supports"][:4]
+    strengths = [
+        str(claim.get("statement") or "")[:240]
+        for claim in claims
+        if isinstance(claim, Mapping) and claim.get("support") == "supports"
+    ][:4]
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
@@ -77,7 +109,9 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
         "type_key": str(packet.get("type_key") or ""),
-        "verdict": verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"} else "needs_review",
+        "verdict": verdict
+        if verdict in {"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"}
+        else "needs_review",
         "recommended_action": str(source.get("recommended_action") or "manual_review"),
         "buy_attractiveness_score": score,
         "ai_action": action,
