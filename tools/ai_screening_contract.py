@@ -10,10 +10,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-REVIEW_SCHEMA_VERSION = 1
+REVIEW_SCHEMA_VERSION = 2
 PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
+AI_ACTIONS = frozenset({"priority_buy", "watchlist", "avoid", "insufficient_evidence"})
+AI_CONFIDENCE = frozenset({"high", "medium", "low"})
 TYPE_KEYS = tuple(f"type{i}" for i in range(1, 8))
 
 
@@ -126,7 +128,7 @@ def select_candidates(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def validate_review(review: Mapping[str, Any]) -> list[str]:
-    """Validate an AI overlay without trusting it to rewrite core decisions."""
+    """Validate the second-pass ranking without trusting it to rewrite rules."""
     errors: list[str] = []
     if review.get("schema_version") != REVIEW_SCHEMA_VERSION:
         errors.append("schema_version")
@@ -138,6 +140,17 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("verdict")
     if str(review.get("recommended_action")) not in REVIEW_ACTIONS:
         errors.append("recommended_action")
+    score = _as_float(review.get("buy_attractiveness_score"))
+    if score is None or score < 0 or score > 100:
+        errors.append("buy_attractiveness_score")
+    if str(review.get("ai_action")) not in AI_ACTIONS:
+        errors.append("ai_action")
+    if str(review.get("confidence")) not in AI_CONFIDENCE:
+        errors.append("confidence")
+    for field in ("key_strengths", "risk_flags"):
+        values = review.get(field, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            errors.append(field)
     claims = review.get("claims", [])
     if not isinstance(claims, list):
         errors.append("claims")

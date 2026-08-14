@@ -1958,7 +1958,7 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponseV2(request);' in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponseV3(request);' in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source
@@ -1973,7 +1973,8 @@ const url = "data:text/javascript;base64," + Buffer.from(source).toString("base6
 const worker = (await import(url)).default;
 const generation = { generation_id: "0123456789abcdef", market_as_of: "2026-08-13" };
 const artifact = {
-  schema_version: 1,
+  schema_version: 2,
+  review_schema_version: 2,
   artifact_kind: "ai_screening_overlay",
   ai_is_advisory: true,
   auto_buy_promotion: false,
@@ -1983,11 +1984,17 @@ const artifact = {
       attempted_review_count: 1,
       unreviewed_candidate_count: 0,
       attempted_needs_review_count: 0,
+      ai_action_counts: { priority_buy: 0, watchlist: 1, avoid: 0, insufficient_evidence: 0 },
+      priority_buy_count: 0,
+      watchlist_count: 1,
+      avoid_count: 0,
+      insufficient_evidence_count: 0,
       packets: [{
+    ai_rank: 1,
     security_code: "600339",
     type_key: "type1",
     deterministic: { status: "triggered", score: 7.8 },
-        ai_review: { verdict: "caution", recommended_action: "manual_review", claims: [], model: "opencode-go/deepseek-v4-flash" },
+        ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));
@@ -2011,7 +2018,7 @@ assert.equal(response.status, 200);
 const html = await response.text();
 const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
 assert.ok(nonce);
-assert.ok(html.includes("AI筛查"));
+assert.ok(html.includes("AI优中选优"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
 const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
 assert.ok(inlineScript);

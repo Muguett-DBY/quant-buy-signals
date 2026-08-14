@@ -20,7 +20,7 @@ from tools.ai_screening_contract import (
     validate_review,
 )
 
-ARTIFACT_SCHEMA_VERSION = 1
+ARTIFACT_SCHEMA_VERSION = 2
 ARTIFACT_KIND = "ai_screening_overlay"
 _DETERMINISTIC_FIELDS = (
     "status",
@@ -67,7 +67,11 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
+        "buy_attractiveness_score": float(review["buy_attractiveness_score"]),
+        "ai_action": _text(review.get("ai_action"), 32),
+        "confidence": _text(review.get("confidence"), 16),
         "summary": _text(review.get("summary"), 1200),
+        "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
         "risk_flags": [_text(item, 240) for item in review.get("risk_flags", [])[:12]],
         "claims": claims[:12],
         "model": _text(review.get("model"), 120),
@@ -114,6 +118,7 @@ def build_artifact(
     attempted_review_count = 0
     unreviewed_candidate_count = 0
     attempted_needs_review_count = 0
+    action_counts: Counter[str] = Counter()
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("candidate packet must be an object")
@@ -130,6 +135,7 @@ def build_artifact(
             raise ValueError(f"AI review is not an object: {key}")
         public_review = _public_review(review)
         verdicts[public_review["verdict"]] += 1
+        action_counts[public_review["ai_action"]] += 1
         if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
             unreviewed_candidate_count += 1
         else:
@@ -145,7 +151,17 @@ def build_artifact(
                 "ai_review": public_review,
             }
         )
-    public_packets.sort(key=lambda value: (value["security_code"], value["type_key"]))
+    action_priority = {"priority_buy": 0, "watchlist": 1, "insufficient_evidence": 2, "avoid": 3}
+    public_packets.sort(
+        key=lambda value: (
+            -float(value["ai_review"]["buy_attractiveness_score"]),
+            action_priority.get(value["ai_review"]["ai_action"], 9),
+            value["security_code"],
+            value["type_key"],
+        )
+    )
+    for rank, packet in enumerate(public_packets, 1):
+        packet["ai_rank"] = rank
     source_audit: dict[str, Any] = {"available": False}
     if source_audit_path:
         audit = _load(source_audit_path)
@@ -177,6 +193,13 @@ def build_artifact(
         "completed_review_count": attempted_review_count,
         "pending_review_count": unreviewed_candidate_count,
         "verdict_counts": dict(sorted(verdicts.items())),
+        "ai_action_counts": dict(sorted(action_counts.items())),
+        "priority_buy_count": action_counts["priority_buy"],
+        "watchlist_count": action_counts["watchlist"],
+        "avoid_count": action_counts["avoid"],
+        "insufficient_evidence_count": action_counts["insufficient_evidence"],
+        "ranking_version": "ai-buy-attractiveness-v1",
+        "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,
     }

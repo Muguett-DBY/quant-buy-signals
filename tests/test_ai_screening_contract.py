@@ -40,11 +40,16 @@ def test_selects_triggered_and_type7_boundary_pairs() -> None:
 
 def test_review_requires_sources_and_keeps_verdict_bounded() -> None:
     review = {
-        "schema_version": 1,
+        "schema_version": 2,
         "security_code": "600000",
         "type_key": "type1",
         "verdict": "caution",
         "recommended_action": "manual_review",
+        "buy_attractiveness_score": 72,
+        "ai_action": "priority_buy",
+        "confidence": "medium",
+        "key_strengths": ["估值有安全边际"],
+        "risk_flags": [],
         "claims": [{"source_ref": "annual_report_2025:p42"}],
     }
     assert validate_review(review) == []
@@ -65,11 +70,16 @@ def test_build_and_merge_review_artifacts(tmp_path) -> None:
     review_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "security_code": "600339",
                 "type_key": "type1",
                 "verdict": "caution",
                 "recommended_action": "manual_review",
+                "buy_attractiveness_score": 72,
+                "ai_action": "priority_buy",
+                "confidence": "medium",
+                "key_strengths": ["估值有安全边际"],
+                "risk_flags": [],
                 "claims": [{"source_ref": "annual_report_2025:p42"}],
             },
             ensure_ascii=False,
@@ -95,13 +105,17 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     review_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "security_code": "600339",
                 "type_key": "type1",
                 "verdict": "caution",
                 "recommended_action": "manual_review",
+                "buy_attractiveness_score": 64,
+                "ai_action": "watchlist",
+                "confidence": "medium",
+                "key_strengths": ["规则分数较高"],
+                "risk_flags": ["现金流需核验", "单期现金流波动"],
                 "summary": "现金流需要人工核验",
-                "risk_flags": ["单期现金流波动"],
                 "claims": [{"statement": "报告披露", "source_ref": "https://example.test/report"}],
                 "model": "opencode-go/deepseek-v4-flash",
                 "effort": "max",
@@ -121,6 +135,8 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     )
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
+    assert artifact["schema_version"] == 2
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v1"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1
@@ -128,6 +144,8 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["attempted_needs_review_count"] == 0
     assert artifact["completed_review_count"] == 1
     assert artifact["pending_review_count"] == 0
+    assert artifact["packets"][0]["ai_rank"] == 1
+    assert artifact["watchlist_count"] == 1
 
 
 def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
@@ -148,11 +166,16 @@ def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
     review_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "security_code": "600339",
                 "type_key": "type1",
                 "verdict": "caution",
                 "recommended_action": "manual_review",
+                "buy_attractiveness_score": 0,
+                "ai_action": "insufficient_evidence",
+                "confidence": "low",
+                "key_strengths": [],
+                "risk_flags": ["等待资料"],
                 "claims": [{"source_ref": "https://example.test/report"}],
             },
             ensure_ascii=False,
@@ -185,11 +208,16 @@ def test_attempted_evidence_shortfall_is_not_counted_as_unreviewed(tmp_path) -> 
     review_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "security_code": "600339",
                 "type_key": "type1",
                 "verdict": "needs_review",
                 "recommended_action": "manual_review",
+                "buy_attractiveness_score": 42,
+                "ai_action": "insufficient_evidence",
+                "confidence": "low",
+                "key_strengths": ["规则结果值得进一步核验"],
+                "risk_flags": ["模型无法确认关键事实"],
                 "summary": "模型已尝试，但证据不足",
                 "claims": [{"source_ref": "https://example.test/report"}],
                 "model": "opencode-go/deepseek-v4-flash",
