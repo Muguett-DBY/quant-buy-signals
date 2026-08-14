@@ -133,6 +133,7 @@ def build_artifact(
             }
         )
     public_packets.sort(key=lambda value: (value["security_code"], value["type_key"]))
+    pending_count = verdicts.get("needs_review", 0)
     source_audit: dict[str, Any] = {"available": False}
     if source_audit_path:
         audit = _load(source_audit_path)
@@ -156,6 +157,8 @@ def build_artifact(
         "candidate_total": int(source.get("candidate_total", 0) or 0),
         "candidate_offset": int(source.get("candidate_offset", 0) or 0),
         "reviewed_count": len(public_packets),
+        "completed_review_count": len(public_packets) - pending_count,
+        "pending_review_count": pending_count,
         "verdict_counts": dict(sorted(verdicts.items())),
         "source_audit": source_audit,
         "packets": public_packets,

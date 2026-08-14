@@ -54,6 +54,29 @@ Sending company data and rule excerpts to the provider is an external data
 transfer.  Run the command only after explicit user authorization.  Keys stay
 in Reasonix configuration and are never written to the packet.
 
+For the complete queue, use the batch runner instead of starting one model
+session per company. It keeps shared rule fragments in the prompt prefix,
+reviews a bounded group, and writes validated JSONL; a failed group remains
+explicitly pending and can be retried later:
+
+```powershell
+python -m tools.run_ai_screening_batch `
+  --candidates build\ai-screening-full\ai-screening-candidates.jsonl `
+  --out build\ai-screening-full\reasonix-reviews.jsonl `
+  --batch-size 10 `
+  --model opencode-go/deepseek-v4-flash `
+  --effort max `
+  --max-steps 3 `
+  --permission-mode dontAsk `
+  --allowed-tools= `
+  --ablate none `
+  --reasonix-dir tools\reasonix-opencode-go
+```
+
+`tools.prepare_ai_screening_overlay` merges completed reviews with every
+selected candidate. A missing review is published as `needs_review`, never
+dropped and never upgraded to `confirmed` by a fallback.
+
 ## Merge and preview
 
 ```powershell

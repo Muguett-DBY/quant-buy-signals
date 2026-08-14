@@ -5,6 +5,7 @@ import json
 from tools.ai_screening_contract import select_candidates, validate_review
 from tools.build_ai_screening import build_input, merge_reviews
 from tools.publish_ai_screening import build_artifact
+from tools.prepare_ai_screening_overlay import prepare
 
 
 def _snapshot() -> dict:
@@ -122,3 +123,42 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["auto_buy_promotion"] is False
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
+    assert artifact["completed_review_count"] == 1
+    assert artifact["pending_review_count"] == 0
+
+
+def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
+    input_path = tmp_path / "input.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "packets": [
+                    {"security_code": "600339", "type_key": "type1"},
+                    {"security_code": "000001", "type_key": "type2"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    review_path = tmp_path / "reviews.jsonl"
+    review_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "security_code": "600339",
+                "type_key": "type1",
+                "verdict": "caution",
+                "recommended_action": "manual_review",
+                "claims": [{"source_ref": "https://example.test/report"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "merged.json"
+    result = prepare(input_path, output_path, [review_path])
+    value = json.loads(output_path.read_text(encoding="utf-8"))
+    assert result == {"candidate_count": 2, "completed": 1, "pending": 1}
+    assert len(value["packets"]) == 2
+    assert value["packets"][1]["ai_review"]["verdict"] == "needs_review"
