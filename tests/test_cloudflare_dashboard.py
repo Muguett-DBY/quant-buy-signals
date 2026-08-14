@@ -1958,7 +1958,7 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponse(request);' in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponseV2(request);' in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source
@@ -1978,13 +1978,16 @@ const artifact = {
   ai_is_advisory: true,
   auto_buy_promotion: false,
   snapshot_generation: generation.generation_id,
-  market_as_of: "2026-08-13",
-  reviewed_count: 1,
-  packets: [{
+      market_as_of: "2026-08-13",
+      reviewed_count: 1,
+      attempted_review_count: 1,
+      unreviewed_candidate_count: 0,
+      attempted_needs_review_count: 0,
+      packets: [{
     security_code: "600339",
     type_key: "type1",
     deterministic: { status: "triggered", score: 7.8 },
-    ai_review: { verdict: "caution", recommended_action: "manual_review", claims: [] },
+        ai_review: { verdict: "caution", recommended_action: "manual_review", claims: [], model: "opencode-go/deepseek-v4-flash" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));

@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 REVIEW_SCHEMA_VERSION = 1
+PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
 TYPE_KEYS = tuple(f"type{i}" for i in range(1, 8))

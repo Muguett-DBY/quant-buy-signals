@@ -12,7 +12,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, validate_review
+from tools.ai_screening_contract import (
+    PLACEHOLDER_REVIEW_MODEL,
+    REVIEW_SCHEMA_VERSION,
+    validate_review,
+)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -43,7 +47,7 @@ def _placeholder(packet: dict[str, Any]) -> dict[str, Any]:
         "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "risk_flags": ["等待官方资料与反证核验"],
         "claims": [],
-        "model": "pending-local-opencode-go",
+        "model": PLACEHOLDER_REVIEW_MODEL,
         "effort": "max",
     }
 
@@ -53,19 +57,28 @@ def prepare(input_path: Path, output_path: Path, review_paths: list[Path]) -> di
     if not isinstance(source, dict) or not isinstance(source.get("packets"), list):
         raise ValueError("AI screening input must contain packets")
     reviews = _review_map(review_paths)
-    completed = 0
+    attempted = 0
     pending = 0
+    attempted_needs_review = 0
     for packet in source["packets"]:
         key = (str(packet.get("security_code")), str(packet.get("type_key")))
         review = reviews.get(key) or _placeholder(packet)
         packet["ai_review"] = review
-        if review["verdict"] == "needs_review":
+        if review.get("model") == PLACEHOLDER_REVIEW_MODEL:
             pending += 1
         else:
-            completed += 1
+            attempted += 1
+            if review["verdict"] == "needs_review":
+                attempted_needs_review += 1
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(source, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"candidate_count": len(source["packets"]), "completed": completed, "pending": pending}
+    return {
+        "candidate_count": len(source["packets"]),
+        "completed": attempted,
+        "pending": pending,
+        "attempted": attempted,
+        "attempted_needs_review": attempted_needs_review,
+    }
 
 
 def main() -> int:

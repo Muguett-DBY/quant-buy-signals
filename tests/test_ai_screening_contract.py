@@ -123,6 +123,9 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["auto_buy_promotion"] is False
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
+    assert artifact["attempted_review_count"] == 1
+    assert artifact["unreviewed_candidate_count"] == 0
+    assert artifact["attempted_needs_review_count"] == 0
     assert artifact["completed_review_count"] == 1
     assert artifact["pending_review_count"] == 0
 
@@ -159,6 +162,52 @@ def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
     output_path = tmp_path / "merged.json"
     result = prepare(input_path, output_path, [review_path])
     value = json.loads(output_path.read_text(encoding="utf-8"))
-    assert result == {"candidate_count": 2, "completed": 1, "pending": 1}
+    assert result == {
+        "candidate_count": 2,
+        "completed": 1,
+        "pending": 1,
+        "attempted": 1,
+        "attempted_needs_review": 0,
+    }
     assert len(value["packets"]) == 2
     assert value["packets"][1]["ai_review"]["verdict"] == "needs_review"
+
+
+def test_attempted_evidence_shortfall_is_not_counted_as_unreviewed(tmp_path) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(_snapshot(), ensure_ascii=False), encoding="utf-8")
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "patch7.md").write_text("# type1\n规则", encoding="utf-8")
+    out = tmp_path / "out"
+    build_input(snapshot_path, rules, out)
+    review_path = tmp_path / "reviews.jsonl"
+    review_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "security_code": "600339",
+                "type_key": "type1",
+                "verdict": "needs_review",
+                "recommended_action": "manual_review",
+                "summary": "模型已尝试，但证据不足",
+                "claims": [{"source_ref": "https://example.test/report"}],
+                "model": "opencode-go/deepseek-v4-flash",
+                "effort": "max",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    merged = out / "ai-screening.json"
+    prepare(out / "ai-screening-input.json", merged, [review_path])
+    artifact = build_artifact(
+        merged,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-13",
+    )
+    assert artifact["attempted_review_count"] == 1
+    assert artifact["unreviewed_candidate_count"] == 1
+    assert artifact["attempted_needs_review_count"] == 1
+    assert artifact["pending_review_count"] == 1

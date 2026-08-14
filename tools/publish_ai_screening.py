@@ -14,7 +14,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, validate_review
+from tools.ai_screening_contract import (
+    PLACEHOLDER_REVIEW_MODEL,
+    REVIEW_SCHEMA_VERSION,
+    validate_review,
+)
 
 ARTIFACT_SCHEMA_VERSION = 1
 ARTIFACT_KIND = "ai_screening_overlay"
@@ -107,6 +111,9 @@ def build_artifact(
     public_packets: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     verdicts: Counter[str] = Counter()
+    attempted_review_count = 0
+    unreviewed_candidate_count = 0
+    attempted_needs_review_count = 0
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("candidate packet must be an object")
@@ -123,6 +130,12 @@ def build_artifact(
             raise ValueError(f"AI review is not an object: {key}")
         public_review = _public_review(review)
         verdicts[public_review["verdict"]] += 1
+        if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
+            unreviewed_candidate_count += 1
+        else:
+            attempted_review_count += 1
+            if public_review["verdict"] == "needs_review":
+                attempted_needs_review_count += 1
         public_packets.append(
             {
                 "security_code": code,
@@ -133,7 +146,6 @@ def build_artifact(
             }
         )
     public_packets.sort(key=lambda value: (value["security_code"], value["type_key"]))
-    pending_count = verdicts.get("needs_review", 0)
     source_audit: dict[str, Any] = {"available": False}
     if source_audit_path:
         audit = _load(source_audit_path)
@@ -157,8 +169,13 @@ def build_artifact(
         "candidate_total": int(source.get("candidate_total", 0) or 0),
         "candidate_offset": int(source.get("candidate_offset", 0) or 0),
         "reviewed_count": len(public_packets),
-        "completed_review_count": len(public_packets) - pending_count,
-        "pending_review_count": pending_count,
+        "attempted_review_count": attempted_review_count,
+        "unreviewed_candidate_count": unreviewed_candidate_count,
+        "attempted_needs_review_count": attempted_needs_review_count,
+        # Keep the old field names as compatibility aliases.  They now mean
+        # attempted versus not-yet-started, rather than verdict quality.
+        "completed_review_count": attempted_review_count,
+        "pending_review_count": unreviewed_candidate_count,
         "verdict_counts": dict(sorted(verdicts.items())),
         "source_audit": source_audit,
         "packets": public_packets,
