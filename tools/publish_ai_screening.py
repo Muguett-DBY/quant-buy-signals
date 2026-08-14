@@ -84,8 +84,7 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),
         "web_search_performed": review.get("web_search_performed") is True,
-        "web_search_verified": review.get("web_search_verified") is True
-        or _public_web_verified(review),
+        "web_search_verified": review.get("web_search_verified") is True or _public_web_verified(review),
     }
 
 

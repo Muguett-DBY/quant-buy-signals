@@ -45,7 +45,11 @@ def _web_search_verified(review: Mapping[str, Any]) -> bool:
     if review.get("web_search_performed") is not True:
         return False
     claims = review.get("claims") if isinstance(review.get("claims"), list) else []
-    return any(str(claim.get("source_ref") or "").lower().startswith("https://") for claim in claims if isinstance(claim, Mapping))
+    return any(
+        str(claim.get("source_ref") or "").lower().startswith("https://")
+        for claim in claims
+        if isinstance(claim, Mapping)
+    )
 
 
 def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
@@ -120,9 +124,7 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     # Legacy public cards may contain empty placeholder claims.  Do not copy
     # those into the new contract: a claim without a source is not evidence.
     claims = [
-        claim
-        for claim in raw_claims
-        if isinstance(claim, Mapping) and str(claim.get("source_ref") or "").strip()
+        claim for claim in raw_claims if isinstance(claim, Mapping) and str(claim.get("source_ref") or "").strip()
     ]
     strengths = [
         str(claim.get("statement") or "")[:240]
