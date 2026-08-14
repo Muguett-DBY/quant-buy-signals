@@ -234,6 +234,17 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     ):
         assert endpoint in verify["run"]
     assert 'grep -qF "AI"' in verify["run"]
+    upload_ai = next(
+        step for step in steps if "Upload the optional generation-bound AI screening overlay" in step["name"]
+    )
+    assert upload_ai["env"] == {
+        "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+        "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+    }
+    assert "r2 object put" in upload_ai["run"]
+    assert "quant-market-data/ai-screening/${generation}.json" in upload_ai["run"]
+    assert "AI screening seed targets" in upload_ai["run"]
+    assert "ai-screening-generation" in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
     assert ".integrity_checked == true" in verify["run"]
 

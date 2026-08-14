@@ -187,6 +187,34 @@ jobs:
             --commit-dirty=false 2>&1 | tee "$RUNNER_TEMP/pages-deploy.log"
           grep -E "Deployment complete" "$RUNNER_TEMP/pages-deploy.log"
 
+      - name: Upload the optional generation-bound AI screening overlay
+        if: steps.stale.outputs.skip != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
+          if [[ ! -f "${seed}" ]]; then
+            echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
+            exit 0
+          fi
+          generation="$(jq -er '.snapshot_generation' "${seed}")"
+          if [[ ! "${generation}" =~ ^[0-9a-f]{16}$ ]]; then
+            echo "AI screening seed has an invalid generation id." >&2
+            exit 1
+          fi
+          live_meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
+          live_generation="$(jq -er '.generation_id' <<< "${live_meta}")"
+          if [[ "${live_generation}" != "${generation}" ]]; then
+            echo "AI screening seed targets ${generation}, while the published site serves ${live_generation}; skipping stale overlay."
+            exit 0
+          fi
+          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "quant-market-data/ai-screening/${generation}.json" \
+            --file "${seed}" --remote --content-type application/json
+          printf '%s' "${generation}" > "$RUNNER_TEMP/ai-screening-generation"
+
       - name: Verify the deployed site
         if: steps.stale.outputs.skip != 'true'
         shell: bash
@@ -227,5 +255,13 @@ jobs:
           if ! grep -qF "AI" <<< "${ai_page}"; then
             echo "Deployed AI screening page is unavailable." >&2
             exit 1
+          fi
+          if [[ -f "$RUNNER_TEMP/ai-screening-generation" ]]; then
+            ai_generation="$(< "$RUNNER_TEMP/ai-screening-generation")"
+            ai_api="$(curl --fail --silent --show-error "https://quant.custard.top/api/ai-screening?generation_id=${ai_generation}")"
+            if ! jq -e --arg generation "${ai_generation}" '.snapshot_generation == $generation and .ai_is_advisory == true and .auto_buy_promotion == false' <<< "${ai_api}" >/dev/null; then
+              echo "Published AI screening overlay failed its generation-bound contract." >&2
+              exit 1
+            fi
           fi
           echo "Verified /api/methodology, /api/health, /api/meta, /ai-screening and the homepage."
