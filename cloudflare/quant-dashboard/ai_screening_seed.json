@@ -3,10 +3,10 @@
   "artifact_kind": "ai_screening_overlay",
   "auto_buy_promotion": false,
   "candidate_offset": 0,
-  "candidate_total": 1134,
-  "completed_review_count": 9,
+  "candidate_total": 1126,
+  "completed_review_count": 10,
   "index_contract": 4,
-  "market_as_of": "2026-08-13",
+  "market_as_of": "2026-08-14",
   "methodology_version": "patch7-seven-types-buy-gate-2026-08-04-v5",
   "packets": [
     {
@@ -98,12 +98,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取方大集团官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -129,9 +129,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "深圳机场",
@@ -145,9 +145,10 @@
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方证据未验证",
+          "水泥价格低迷下亏损幅度及反证事项待核实"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取金隅冀东官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "金隅冀东（水泥，type5触发）未能完成验证：本轮搜索配额在执行中被耗尽，未获得任何可引用的官方年报/公告来源。按fail-closed原则返回needs_review，待搜索能力恢复后复核最新年报盈利/亏损数据及水泥行业周期位置。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -229,18 +230,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取徐工机械官方业绩/产业周期来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.4,
-        "score_lower_bound": 7.4,
-        "score_upper_bound": 7.4,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "triggered"
       },
       "name": "徐工机械",
@@ -400,12 +401,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取江铃汽车官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -574,12 +575,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方证据缺失，触发无法验证"
+          "等待官方资料与反证核验"
         ],
-        "summary": "本批次中未能获取上峰材料（000672）的最新官方年报/业绩公告证据：本轮仅能执行有限次只读网络搜索，配额在覆盖其余标的时已耗尽，未检索到该公司2025年年度报告、审计意见或周期位置信息。按fail-closed原则无法验证type5（强周期底部）触发的官方依据，需人工补充官方披露（上交所/公司IR）后复核。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -605,9 +606,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "山推股份",
@@ -714,8 +715,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.4,
-        "score_upper_bound": 7.4,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "insufficient_evidence"
       },
       "name": "锦龙股份",
@@ -757,28 +758,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
-        "status": "observe"
-      },
-      "name": "美锦能源",
-      "security_code": "000723",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "官方来源未能核验"
-        ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取四川美丰官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score": 7.9,
         "score_lower_bound": 7.9,
         "score_upper_bound": 7.9,
@@ -801,9 +780,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "国海证券",
@@ -866,14 +845,14 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
-      "name": "中航西飞",
-      "security_code": "000768",
-      "type_key": "type2"
+      "name": "新兴铸管",
+      "security_code": "000778",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -888,31 +867,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
-        "status": "observe"
-      },
-      "name": "新兴铸管",
-      "security_code": "000778",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "官方来源未能核验"
-        ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取北新建材官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 7.7,
-        "score_lower_bound": 7.7,
-        "score_upper_bound": 7.7,
+        "score": 7.9,
+        "score_lower_bound": 7.9,
+        "score_upper_bound": 7.9,
         "status": "triggered"
       },
       "name": "北新建材",
@@ -921,14 +878,22 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "无可用来源——内置web搜索配额耗尽，未能访问巨潮资讯/深交所官方披露",
+            "source_ref": "",
+            "statement": "无法取得万年青最新定期报告的官方披露（CNINFO/巨潮等），周期底部触发证据缺失，需人工复核"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方来源无法验证",
+          "水泥行业周期位置待核实",
+          "搜索配额耗尽"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取万年青官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "万年青（水泥，强周期行业，方向合理）未能获取最新定期报告官方来源：内置web搜索配额在验证前5个标的后耗尽，本地只读数据不可用，无法核实2025年中报/三季报业绩与周期位置，按fail-closed原则无法确认触发。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -954,9 +919,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "盐湖股份",
@@ -976,9 +941,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "英洛华",
@@ -1095,12 +1060,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取太钢不锈官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -1117,18 +1082,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取鲁西化工官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.9,
-        "score_lower_bound": 7.9,
-        "score_upper_bound": 7.9,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "triggered"
       },
       "name": "鲁西化工",
@@ -1268,12 +1233,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取天山股份官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -1440,18 +1405,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取中通客车官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.6,
-        "score_lower_bound": 7.6,
-        "score_upper_bound": 7.6,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "triggered"
       },
       "name": "中通客车",
@@ -1462,18 +1427,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取中通客车官方业绩/产业周期来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.6,
-        "score_lower_bound": 7.6,
-        "score_upper_bound": 7.6,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "triggered"
       },
       "name": "中通客车",
@@ -1694,28 +1659,6 @@
       "name": "丽臣实业",
       "security_code": "001218",
       "type_key": "type6"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "青岛食品",
-      "security_code": "001219",
-      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -2219,9 +2162,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "四川黄金",
@@ -2520,9 +2463,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "盾安环境",
@@ -2673,9 +2616,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "中钢天源",
@@ -2815,18 +2758,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取鲁阳节能官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 8.1,
-        "score_lower_bound": 8.1,
-        "score_upper_bound": 8.1,
+        "score": 7.6,
+        "score_lower_bound": 7.6,
+        "score_upper_bound": 7.6,
         "status": "triggered"
       },
       "name": "鲁阳节能",
@@ -2879,18 +2822,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方证据缺失，触发无法验证"
+          "等待官方资料与反证核验"
         ],
-        "summary": "本批次中未能获取易普力（002096）的最新官方年报/业绩公告证据：只读网络搜索配额在本轮已耗尽，未检索到该公司2025年年度报告、审计意见或民爆行业周期位置信息。按fail-closed原则无法验证type5（强周期底部）触发的官方依据，需人工补充官方披露（深交所/公司IR）后复核。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.3,
-        "score_lower_bound": 7.3,
-        "score_upper_bound": 7.3,
+        "score": 7,
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
         "status": "triggered"
       },
       "name": "易普力",
@@ -2973,9 +2916,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "湘潭电化",
@@ -3317,10 +3260,32 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
+      },
+      "name": "福晶科技",
+      "security_code": "002222",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 7.1,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
+        "status": "triggered"
       },
       "name": "江南化工",
       "security_code": "002226",
@@ -3330,42 +3295,26 @@
       "ai_review": {
         "claims": [
           {
-            "source_context": "https://news.qq.com/rain/a/20260810A0D1WT00 读创财经2026-08-10半年报报道/2026-07-28业绩快报",
-            "source_ref": "https://news.qq.com/rain/a/20260810A0D1WT00",
-            "statement": "2026年上半年营业收入17.42亿元(-15.30%),归母净利润2.19亿元(-49.60%),扣非净利润1.50亿元(-37.98%);水泥销量-13.47%、售价-5.72%,综合毛利率回落至23.41%"
-          },
-          {
-            "source_context": "https://www.cls.cn/detail/xk/0197cd5bcf304257adba07a85f5741c9 财联社2026-08-11机构调研纪要",
-            "source_ref": "https://www.cls.cn/detail/xk/0197cd5bcf304257adba07a85f5741c9",
-            "statement": "2026年上半年全国水泥产量7.36亿吨同比下降8%,全行业预计亏损20-30亿元、亏损面约60%,'需求深跌、供给失控、价格探底、效益转亏',行业运行至十七年来最严峻阶段"
-          },
-          {
-            "source_context": "https://news.qq.com/rain/a/20260810A0D1WT00 读创财经/公司投资者关系活动记录2026-08-11",
-            "source_ref": "https://news.qq.com/rain/a/20260810A0D1WT00",
-            "statement": "公司2022-2025年营业收入连续4年同比下滑,7月发货量降幅仅小幅收窄;上半年非经常性损益同比减少1.24亿元(上年同期含资本市场回暖及处置收益)"
-          },
-          {
-            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html?random=KjinAss2&name=new20260728182700vjtcdngc 中证网2026-07-28",
-            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html?random=KjinAss2&name=new20260728182700vjtcdngc",
-            "statement": "以2026-07-28收盘价计算,公司市盈率(TTM)约20.36倍,市净率(LF)约0.73倍,加权平均净资产收益率1.84%"
+            "source_context": "无可用来源——内置web搜索配额耗尽，未能访问巨潮资讯/深交所官方披露",
+            "source_ref": "",
+            "statement": "无法取得塔牌集团最新定期报告的官方披露（CNINFO/深交所等），周期底部触发证据缺失，需人工复核"
           }
         ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "周期拐点未确认,需求仍单边下行",
-          "营业收入2022-2025连续4年下滑",
-          "扣非净利仅1.5亿元,依赖非经常性损益基数",
-          "PE(TTM)约20倍,盈利下滑中估值不便宜"
+          "官方来源无法验证",
+          "水泥行业周期位置待核实",
+          "搜索配额耗尽"
         ],
-        "summary": "水泥行业2026上半年运行至十七年最严峻阶段、全行业亏损面约60%,支持'强周期底部'触发;但塔牌2026H1净利2.19亿元(-49.6%)、营收连续4年下滑,拐点未确认,价值陷阱需排查。",
-        "verdict": "caution"
+        "summary": "塔牌集团（水泥，强周期行业，方向合理）未能获取最新定期报告官方来源：内置web搜索配额耗尽、本地只读数据不可用，无法核实2025年业绩与周期拐点证据，按fail-closed原则无法确认触发。",
+        "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 8.7,
-        "score_lower_bound": 8.7,
-        "score_upper_bound": 8.7,
+        "score": 8.3,
+        "score_lower_bound": 8.3,
+        "score_upper_bound": 8.3,
         "status": "triggered"
       },
       "name": "塔牌集团",
@@ -3463,12 +3412,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方证据缺失，触发无法验证"
+          "等待官方资料与反证核验"
         ],
-        "summary": "本批次中未能获取东方雨虹（002271）的最新官方年报/业绩公告证据：只读网络搜索配额在本轮已耗尽，未检索到该公司2025年年度报告、审计意见或防水行业周期位置信息。按fail-closed原则无法验证type5（强周期底部）触发的官方依据，需人工补充官方披露（深交所/公司IR）后复核。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -3480,6 +3429,28 @@
       "name": "东方雨虹",
       "security_code": "002271",
       "type_key": "type5"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
+        "status": "observe"
+      },
+      "name": "水晶光电",
+      "security_code": "002273",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -3788,12 +3759,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取伟星新材官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -3841,9 +3812,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "新北洋",
@@ -3928,9 +3899,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "梦洁股份",
@@ -3962,12 +3933,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取垒知集团官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -4058,8 +4029,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.3,
-        "score_upper_bound": 8.3,
+        "score_lower_bound": 5.4,
+        "score_upper_bound": 8.4,
         "status": "insufficient_evidence"
       },
       "name": "中粮资本",
@@ -4100,9 +4071,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "杭氧股份",
@@ -4231,9 +4202,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "珠江啤酒",
@@ -4244,12 +4215,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取嘉事堂官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -4318,9 +4289,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "申通快递",
@@ -4329,15 +4300,27 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://stock.stockstar.com/IG2025032600030044.shtml 2024年年度报告（2025-03-26披露）",
+            "source_ref": "https://stock.stockstar.com/IG2025032600030044.shtml",
+            "statement": "三维化学2024年营业收入25.54亿元（-3.88%），归母净利润2.63亿元（-6.92%），扣非净利2.67亿元（-2.40%）"
+          },
+          {
+            "source_context": "https://finance.eastmoney.com/a/202503263356858658.html 2024年年报（2025-03-26披露）",
+            "source_ref": "https://finance.eastmoney.com/a/202503263356858658.html",
+            "statement": "2024Q4公司营收8.61亿元（+29.5%）、归母净利1.17亿元（+39.3%），经营现金流净额2.85亿元（-43.7%）"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "盈利波动小、周期底部形态不明显",
+          "经营现金流净额同比降43.7%，需关注现金流质量"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取三维化学官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
+        "summary": "三维化学2024年年报：营收25.54亿元（-3.88%）、归母净利2.63亿元（-6.92%），2024Q4净利同比+39.3%。近三年净利（2.74/2.82/2.63亿元）基本平稳，无显著周期深跌形态，公司以化工工程设计+精细化工为主，强周期属性弱于典型周期股；「强周期底部」触发虽未被事实否定，但底部信号依据薄弱，建议人工复核。",
+        "verdict": "caution"
       },
       "deterministic": {
         "score": 8.1,
@@ -4362,9 +4345,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "双环传动",
@@ -4436,6 +4419,28 @@
       "name": "润邦股份",
       "security_code": "002483",
       "type_key": "type1"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "大金重工",
+      "security_code": "002487",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -4556,9 +4561,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "科士达",
@@ -4621,9 +4626,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "天山铝业",
@@ -4966,6 +4971,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
+      },
+      "name": "日上集团",
+      "security_code": "002593",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score_lower_bound": 2.2,
         "score_upper_bound": 7.2,
         "status": "insufficient_evidence"
@@ -5052,10 +5079,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7,
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "triggered"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "道明光学",
       "security_code": "002632",
@@ -5106,14 +5133,22 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "无可用来源——内置web搜索配额耗尽，未能访问巨潮资讯/深交所官方披露",
+            "source_ref": "",
+            "statement": "无法取得德联集团最新定期报告的官方披露（CNINFO/深交所等），type5触发证据缺失，需人工复核"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方来源无法验证",
+          "周期属性与业绩待核实",
+          "搜索配额耗尽"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取德联集团官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "德联集团（汽车精细化学品）未能获取最新定期报告官方来源：内置web搜索配额耗尽、本地只读数据不可用，无法核实2025年业绩与'强周期底部'判断，按fail-closed原则无法确认触发。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5130,12 +5165,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取TCL智家官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5161,9 +5196,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "TCL智家",
@@ -5191,6 +5226,50 @@
       "name": "TCL智家",
       "security_code": "002668",
       "type_key": "type4"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "国盛证券",
+      "security_code": "002670",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "西部证券",
+      "security_code": "002673",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -5248,6 +5327,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "红旗连锁",
+      "security_code": "002697",
+      "type_key": "type1"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score_lower_bound": 2,
         "score_upper_bound": 7,
         "status": "insufficient_evidence"
@@ -5260,12 +5361,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方证据缺失，触发无法验证"
+          "等待官方资料与反证核验"
         ],
-        "summary": "本批次中未能获取一心堂（002727）的最新官方年报/业绩公告证据：只读网络搜索配额在本轮已耗尽，未检索到该公司2025年年度报告、审计意见或估值位置信息。按fail-closed原则无法验证type1（估值买入区）触发的官方依据，需人工补充官方披露（深交所/公司IR）后复核。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5282,12 +5383,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方证据缺失，触发无法验证"
+          "等待官方资料与反证核验"
         ],
-        "summary": "本批次中未能获取中矿资源（002738）的最新官方年报/业绩公告证据：只读网络搜索配额在本轮已耗尽，未检索到该公司2025年年度报告、审计意见或锂/稀有金属周期位置信息。按fail-closed原则无法验证type5（强周期底部）触发的官方依据，需人工补充官方披露（深交所/公司IR）后复核。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5298,28 +5399,6 @@
       },
       "name": "中矿资源",
       "security_code": "002738",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "富煌钢构",
-      "security_code": "002743",
       "type_key": "type5"
     },
     {
@@ -5391,12 +5470,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取永东股份官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5530,9 +5609,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "凯龙股份",
@@ -5564,31 +5643,31 @@
       "ai_review": {
         "claims": [
           {
-            "source_context": "https://data.eastmoney.com/notices/detail/002790/AN202607141826963483.html 公司2026年半年度业绩预告(2026-07-15)",
-            "source_ref": "https://data.eastmoney.com/notices/detail/002790/AN202607141826963483.html",
-            "statement": "2026年上半年预计归母净利润亏损1600-1100万元,上年同期盈利5166.62万元;扣非亏损1950-1450万元,上年同期盈利4024.12万元"
+            "source_context": "https://epaper.cs.com.cn/zgzqb/html/2025-08/27/nw.D110000zgzqb_20250827_1-B046.htm#1 深交所/中国证券报 2025年半年度报告摘要 2025-08-27",
+            "source_ref": "https://epaper.cs.com.cn/zgzqb/html/2025-08/27/nw.D110000zgzqb_20250827_1-B046.htm#1",
+            "statement": "2025年上半年营收9.20亿元同比-19.49%，归母净利5166.62万元同比-43.20%，扣非净利4024.12万元同比-49.89%"
           },
           {
-            "source_context": "http://basic.10jqka.com.cn/mobile/002790/trade.html 同花顺大事提醒(业绩披露2026-04-28)",
-            "source_ref": "http://basic.10jqka.com.cn/mobile/002790/trade.html",
-            "statement": "2025年全年净利润1830.67万元同比下降89.89%;2026年一季度净利润89.12万元同比下降95.85%,业绩连续大幅下滑至亏损"
+            "source_context": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_ProfitStatement/stockid/002790/ctrl/part/displaytype/4.phtml 新浪财经利润表 2025年报/2026一季报",
+            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_ProfitStatement/stockid/002790/ctrl/part/displaytype/4.phtml",
+            "statement": "2025年全年归母净利润约1830.67万元，2026年一季度归母净利润仅约89.12万元，利润持续大幅下滑"
           },
           {
-            "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80362497&gather=1&id=12446698 公司2026年半年度业绩预告全文(2026-07-15)",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80362497&gather=1&id=12446698",
-            "statement": "家居卫浴行业整体需求偏弱,行业竞争日趋激烈,市场有效需求相对不足,产品单价有所下滑"
+            "source_context": "https://u.95579.com.cn/cjscweb/web/app/informationDetail.html 中证财讯 2025年半年度报告 2025-08-27",
+            "source_ref": "https://u.95579.com.cn/cjscweb/web/app/informationDetail.html",
+            "statement": "公司主要从事卫浴空间和家庭水系统解决方案产品（智能马桶等），属于家居消费品，不具强周期商品价格驱动特征"
           }
         ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
+        "recommended_action": "demote",
         "risk_flags": [
-          "2026H1由盈转亏(归母-1600~-1100万元),扣非-1950~-1450万元",
-          "2025全年净利1830.67万元同比-89.89%,2026Q1净利89.12万元同比-95.85%",
-          "家居卫浴需求偏弱属弱周期消费萎缩,非典型大宗商品强周期",
-          "产品单价下滑、刚性费用挤压利润空间,盈利探底未见拐点"
+          "行业属性归类存疑（卫浴家居非典型强周期）",
+          "业绩持续下滑未见拐点",
+          "2025全年净利大幅缩水、2026Q1近盈亏平衡",
+          "经营现金流虽正但利润端恶化"
         ],
-        "summary": "卫浴行业需求偏弱支持周期低迷特征,但瑞尔特已由盈转亏(2026H1预计亏损1100-1600万元),2025全年净利同比-89.9%,盈利连续两年大幅恶化、拐点证据缺失,'强周期底部反转'逻辑存疑。",
+        "summary": "瑞尔特被归为type5强周期底部（8.5分触发），但公司主营智能卫浴/马桶等家居消费品，并非典型强周期行业，归类本身存疑；2025H1营收-19.49%、归母净利-43.20%、扣非-49.89%，2025全年归母仅约1830万元、2026Q1仅约89万元，利润持续恶化且未见拐点证据，强周期底部触发逻辑缺乏支撑。",
         "verdict": "caution"
       },
       "deterministic": {
@@ -5605,12 +5684,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取坚朗五金官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -5700,9 +5779,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "红墙股份",
@@ -5730,6 +5809,28 @@
       "name": "山东赫达",
       "security_code": "002810",
       "type_key": "type5"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
+        "status": "observe"
+      },
+      "name": "郑中设计",
+      "security_code": "002811",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -5978,9 +6079,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "京泉华",
@@ -6007,6 +6108,28 @@
       "name": "京泉华",
       "security_code": "002885",
       "type_key": "type6"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "沃特股份",
+      "security_code": "002886",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -6141,12 +6264,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取蒙娜丽莎官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -6193,8 +6316,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.5,
-        "score_upper_bound": 7.5,
+        "score_lower_bound": 7.4,
+        "score_upper_bound": 7.4,
         "status": "insufficient_evidence"
       },
       "name": "华夏航空",
@@ -6257,9 +6380,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "新农股份",
@@ -6322,9 +6445,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "新乳业",
@@ -6493,50 +6616,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
-        "status": "observe"
-      },
-      "name": "森麒麟",
-      "security_code": "002984",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "顺博合金",
-      "security_code": "002996",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 2,
         "score_upper_bound": 7,
         "status": "insufficient_evidence"
@@ -6635,37 +6714,30 @@
       "ai_review": {
         "claims": [
           {
-            "source_context": "https://www.cnfin.com/announ/detail/index.html?id=837377507607&code=003012 公司2026年半年度业绩预告(公告编号2026-038,2026-07-15,深交所披露)",
-            "source_ref": "https://www.cnfin.com/announ/detail/index.html?id=837377507607&code=003012",
-            "statement": "2026年上半年预计营业收入23.80-24.80亿元,归母净利润2600-3200万元,同比下降85.36%-88.11%;扣非净利润1500-1900万元,同比下降90.52%-92.52%"
+            "source_context": "https://finance.eastmoney.com/a/202504193381653834.html 2024年年度报告（2025-04-18/19披露）",
+            "source_ref": "https://finance.eastmoney.com/a/202504193381653834.html",
+            "statement": "东鹏控股2024年营业收入64.69亿元（-16.77%），归母净利润3.28亿元（-54.41%），扣非净利润3.0亿元（-55.88%）"
           },
           {
-            "source_context": "https://paper.cnstock.com/html/2026-07/15/content_2244766.htm 上海证券报2026-07-15业绩预告刊载",
-            "source_ref": "https://paper.cnstock.com/html/2026-07/15/content_2244766.htm",
-            "statement": "国内建筑卫生陶瓷行业仍处于深度调整期,市场需求承压、存量竞争加剧,叠加去年同期家装领域国补政策高对比基数"
-          },
-          {
-            "source_context": "https://www.stcn.com/article/detail/4021425.html 证券时报2026-07-15",
-            "source_ref": "https://www.stcn.com/article/detail/4021425.html",
-            "statement": "上半年经营活动现金流量净额预计1.90-2.10亿元,国际业务销售收入同比增长41.41%,净增门店50家"
+            "source_context": "https://finance.eastmoney.com/a/202504203382037053.html 2024年年报（2025-04-18披露）",
+            "source_ref": "https://finance.eastmoney.com/a/202504203382037053.html",
+            "statement": "2024Q4营业收入17.9亿元（-12.5%），归母净利润1988万元（-78.2%），扣非356万元（-96.2%）"
           }
         ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
+        "recommended_action": "keep",
         "risk_flags": [
-          "归母净利润同比预降85%-88%,盈利近零",
-          "行业深度调整未见底、存量竞争加剧",
-          "去年家装国补高基数致同比失真,需看环比",
-          "经营现金流仍为正(1.9-2.1亿),基本面尚存韧性"
+          "地产竣工持续下行，瓷砖需求未见拐点",
+          "2024Q4盈利同比-78.2%，底部反转尚未确认"
         ],
-        "summary": "建筑卫生陶瓷行业深度调整、需求承压,支持周期底部判定;但东鹏2026H1归母净利预计仅2600-3200万元(-85%~-88%),盈利接近盈亏平衡,拐点未现,触发虽成立但风险突出。",
-        "verdict": "caution"
+        "summary": "东鹏控股为瓷砖（地产链建材）强周期标的，2024年年报确认营收64.69亿元（-16.77%）、归母净利3.28亿元（-54.41%）、扣非-55.88%，2024Q4归母净利同比-78.2%仍在恶化，处于地产下行周期底部，与触发一致；未发现审计异常、会计重述等反证。",
+        "verdict": "confirmed"
       },
       "deterministic": {
-        "score": 8.7,
-        "score_lower_bound": 8.7,
-        "score_upper_bound": 8.7,
+        "score": 8.1,
+        "score_lower_bound": 8.1,
+        "score_upper_bound": 8.1,
         "status": "triggered"
       },
       "name": "东鹏控股",
@@ -6706,9 +6778,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "大洋生物",
@@ -6771,30 +6843,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
-        "status": "observe"
-      },
-      "name": "中瓷电子",
-      "security_code": "003031",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score_lower_bound": 7.5,
-        "score_upper_bound": 7.5,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
         "status": "insufficient_evidence"
       },
       "name": "天海防务",
@@ -6857,9 +6907,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "华测检测",
@@ -6945,9 +6995,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "同花顺",
@@ -7096,28 +7146,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
-        "status": "observe"
-      },
-      "name": "东方财富",
-      "security_code": "300059",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 2,
         "score_upper_bound": 7,
         "status": "insufficient_evidence"
@@ -7160,8 +7188,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.4,
-        "score_upper_bound": 7.4,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "insufficient_evidence"
       },
       "name": "国民技术",
@@ -7255,15 +7283,34 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html 中国证券报·中证网 2025年半年度报告 2025-08-28",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html",
+            "statement": "2025年上半年营收17.22亿元同比+2.09%，归母净利1.27亿元同比-8.43%，扣非-0.11%，经营现金流+56.18%"
+          },
+          {
+            "source_context": "http://www.eeo.com.cn/2025/0827/748744.shtml 经济观察网/国海证券研报 2025-08-27",
+            "source_ref": "http://www.eeo.com.cn/2025/0827/748744.shtml",
+            "statement": "2025Q2归母净利6451.75万元同比+12.06%、环比+3.09%，单季盈利同比转正"
+          },
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html 中国证券报·中证网 2025年半年度报告 2025-08-28",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html",
+            "statement": "以2025年8月27日收盘价计算市盈率(TTM)约35.4倍，市净率约1.77倍"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方业绩来源未能核验"
+          "PE(TTM)约35倍估值不低",
+          "行业景气未现明确反转",
+          "产品价格同比下滑",
+          "周期底部触发需估值配合"
         ],
-        "summary": "未能核验:provider 内置搜索本轮未返回阳谷华泰的官方业绩来源,按 fail-closed 原则返回 needs_review,待补充公司定期报告/交易所公告后复核。",
-        "verdict": "needs_review"
+        "summary": "阳谷华泰（橡胶助剂）2025H1营收+2.09%、归母净利-8.43%（降幅收窄）、扣非仅-0.11%，Q2归母+12.06%环比改善、经营现金流+56.18%，底部企稳迹象较扎实；但8月27日PE(TTM)约35.4倍，对周期底部标的估值不低，且行业景气未见明显反转，买入性价比存疑。",
+        "verdict": "caution"
       },
       "deterministic": {
         "score": 8.4,
@@ -7458,28 +7505,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "永清环保",
-      "security_code": "300187",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 0,
         "score_upper_bound": 10,
         "status": "insufficient_evidence"
@@ -7630,10 +7655,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7,
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "triggered"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "安利股份",
       "security_code": "300218",
@@ -7707,12 +7732,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取富瑞特装官方业绩/产业周期来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -7991,28 +8016,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "海达股份",
-      "security_code": "300320",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 5.2,
         "score_upper_bound": 7.2,
         "status": "insufficient_evidence"
@@ -8055,9 +8058,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "东华测试",
@@ -8175,12 +8178,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取富邦科技官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -8228,9 +8231,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "天和防务",
@@ -8420,8 +8423,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.2,
-        "score_upper_bound": 7.2,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
         "status": "insufficient_evidence"
       },
       "name": "富临精工",
@@ -8463,9 +8466,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "insufficient_evidence"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "润泽科技",
       "security_code": "300442",
@@ -8505,9 +8509,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.1,
-        "score_lower_bound": 7.1,
-        "score_upper_bound": 7.1,
+        "score": 7,
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
         "status": "conditional"
       },
       "name": "全志科技",
@@ -8570,9 +8574,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "胜宏科技",
@@ -8657,9 +8661,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "恒锋工具",
@@ -8894,9 +8898,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "广信材料",
@@ -8916,9 +8920,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "理工光科",
@@ -8938,9 +8942,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "兴齐眼药",
@@ -9004,9 +9008,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "中旗股份",
@@ -9218,28 +9222,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "飞荣达",
-      "security_code": "300602",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score": 6.8,
         "score_lower_bound": 6.8,
         "score_upper_bound": 6.8,
@@ -9313,28 +9295,6 @@
       },
       "name": "捷捷微电",
       "security_code": "300623",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "华测导航",
-      "security_code": "300627",
       "type_key": "type2"
     },
     {
@@ -9460,9 +9420,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "金陵体育",
@@ -9823,6 +9783,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "森霸传感",
+      "security_code": "300701",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score_lower_bound": 3.2,
         "score_upper_bound": 8.2,
         "status": "insufficient_evidence"
@@ -9909,14 +9891,36 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "润禾材料",
       "security_code": "300727",
       "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
+      },
+      "name": "润禾材料",
+      "security_code": "300727",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -9952,9 +9956,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "天地数码",
@@ -9974,9 +9978,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "金力永磁",
@@ -10039,9 +10043,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.4,
-        "score_lower_bound": 7.4,
-        "score_upper_bound": 7.4,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "conditional"
       },
       "name": "迈瑞医疗",
@@ -10090,6 +10094,28 @@
       "name": "每日互动",
       "security_code": "300766",
       "type_key": "type6"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "震安科技",
+      "security_code": "300767",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -10169,8 +10195,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.2,
-        "score_upper_bound": 7.2,
+        "score_lower_bound": 7.4,
+        "score_upper_bound": 7.4,
         "status": "insufficient_evidence"
       },
       "name": "宇瞳光学",
@@ -10427,28 +10453,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "大宏立",
-      "security_code": "300865",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 3.5,
         "score_upper_bound": 8.5,
         "status": "insufficient_evidence"
@@ -10492,9 +10496,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "圣元环保",
@@ -10640,9 +10644,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "天秦装备",
@@ -10662,9 +10666,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "insufficient_evidence"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "博俊科技",
       "security_code": "300926",
@@ -10746,8 +10751,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 4.4,
-        "score_upper_bound": 7.4,
+        "score_lower_bound": 4.3,
+        "score_upper_bound": 7.3,
         "status": "insufficient_evidence"
       },
       "name": "恒宇信通",
@@ -11000,8 +11005,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.7,
-        "score_upper_bound": 7.7,
+        "score_lower_bound": 5.9,
+        "score_upper_bound": 7.9,
         "status": "insufficient_evidence"
       },
       "name": "双乐股份",
@@ -11106,10 +11111,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.2,
-        "score_lower_bound": 7.2,
-        "score_upper_bound": 7.2,
-        "status": "triggered"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "本立科技",
       "security_code": "301065",
@@ -11214,6 +11219,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "星华新材",
+      "security_code": "301077",
+      "type_key": "type5"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score_lower_bound": 3.8,
         "score_upper_bound": 7.3,
         "status": "insufficient_evidence"
@@ -11257,12 +11284,13 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.7,
-        "score_upper_bound": 7.7,
-        "status": "insufficient_evidence"
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
+        "status": "observe"
       },
-      "name": "雅艺科技",
-      "security_code": "301113",
+      "name": "风光股份",
+      "security_code": "301100",
       "type_key": "type5"
     },
     {
@@ -11278,13 +11306,12 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
-        "status": "observe"
+        "score_lower_bound": 5.7,
+        "score_upper_bound": 7.7,
+        "status": "insufficient_evidence"
       },
-      "name": "恒光股份",
-      "security_code": "301118",
+      "name": "雅艺科技",
+      "security_code": "301113",
       "type_key": "type5"
     },
     {
@@ -11343,35 +11370,13 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.4,
-        "score_upper_bound": 7.4,
+        "score_lower_bound": 7.3,
+        "score_upper_bound": 7.3,
         "status": "insufficient_evidence"
       },
       "name": "国能日新",
       "security_code": "301162",
       "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.593,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "锐捷网络",
-      "security_code": "301165",
-      "type_key": "type7"
     },
     {
       "ai_review": {
@@ -11500,28 +11505,6 @@
       "name": "喜悦智行",
       "security_code": "301198",
       "type_key": "type6"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "联合化学",
-      "security_code": "301209",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -12137,9 +12120,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "丰茂股份",
@@ -12883,7 +12866,7 @@
         "score_upper_bound": 8.2,
         "status": "insufficient_evidence"
       },
-      "name": "C展芯",
+      "name": "展芯股份",
       "security_code": "301707",
       "type_key": "type2"
     },
@@ -12904,7 +12887,7 @@
         "score_upper_bound": 7.5,
         "status": "insufficient_evidence"
       },
-      "name": "C展芯",
+      "name": "展芯股份",
       "security_code": "301707",
       "type_key": "type3"
     },
@@ -12925,7 +12908,7 @@
         "score_upper_bound": 10,
         "status": "insufficient_evidence"
       },
-      "name": "C展芯",
+      "name": "展芯股份",
       "security_code": "301707",
       "type_key": "type7"
     },
@@ -13155,53 +13138,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "中国联通",
-      "security_code": "600050",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [
-          {
-            "source_context": "https://finance.eastmoney.com/a/202604243717341417.html（厦门象屿2025年年度报告，2026-04-24披露）",
-            "source_ref": "https://finance.eastmoney.com/a/202604243717341417.html（厦门象屿2025年年度报告，2026-04-24披露",
-            "statement": "2025年公司营收4102.91亿元(+11.90%)，归母净利润12.93亿元(-8.87%)，扣非归母净利润17.85亿元(+339.13%)；Q4单季归母净利-3.40亿元，因期货套保期货端亏损计入当期、现货利润未确认"
-          },
-          {
-            "source_context": "https://stcn.com/article/detail/3792434.html（证券时报，2026-04-23，2025年年报解读）",
-            "source_ref": "https://stcn.com/article/detail/3792434.html（证券时报，2026-04-23，2025年年报解读",
-            "statement": "扣除永续债利息5.07亿元后，2025年归属普通股股东净利润仅7.86亿元，盈利承压；大宗商品期现毛利率降至1.08%，新能源供应链期现毛利-18.03亿元"
-          },
-          {
-            "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600057&id=12161395（厦门象屿2025年年度报告摘要，2026-04-24）",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600057&id=12161395（厦门象屿2025年年度报告摘要，2026-04-24",
-            "statement": "容诚会计师事务所（特殊普通合伙）出具标准无保留意见审计报告；2025年度拟10派1.2元，含中期分红合计10派2.2元，现金红利总额6.25亿元，占净利约48.3%"
-          },
-          {
-            "source_context": "https://finance.eastmoney.com/a/202604243717671490.html（2025年年报财务指标，2026-04-24）",
-            "source_ref": "https://finance.eastmoney.com/a/202604243717671490.html（2025年年报财务指标，2026-04-24",
-            "statement": "2025年经营活动现金流净额100.97亿元(+80.17%)，但加权ROE仅5.01%、资产负债率70.43%、流动比率1.24"
-          }
-        ],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "归母净利下滑且Q4亏损（期货套保错配）",
-          "扣非+339%为会计噪音非真实盈利改善",
-          "ROE仅5.01%、资产负债率70.43%",
-          "新能源供应链期现毛利为负",
-          "永续债利息5.07亿元侵蚀普通股股东利润"
-        ],
-        "summary": "触发逻辑（股价进入买入区）有低位股价与分红支撑，但盈利质量存在重大瑕疵：2025年归母净利12.93亿元(-8.87%)，Q4单季亏损3.40亿元，扣非+339%系期货套保损益错配的会计噪音（期货端亏损计入当期、现货利润未确认），扣除永续债利息5.07亿元后归属普通股股东净利仅7.86亿元；ROE仅5.01%、资产负债率70.43%、大宗期现毛利率仅1.08%、新能源供应链期现毛利-18.03亿元。容诚出具标准无保留审计意见，排除造假与审计非标，但'价值陷阱'排查未通过，需人工复核后再决策。",
-        "verdict": "caution"
-      },
-      "deterministic": {
         "score": 7.4,
         "score_lower_bound": 7.4,
         "score_upper_bound": 7.4,
@@ -13224,8 +13160,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.1,
-        "score_upper_bound": 8.1,
+        "score_lower_bound": 5.3,
+        "score_upper_bound": 8.3,
         "status": "insufficient_evidence"
       },
       "name": "国投资本",
@@ -13267,6 +13203,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "新疆天业",
+      "security_code": "600075",
+      "type_key": "type5"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score_lower_bound": 0,
         "score_upper_bound": 10,
         "status": "insufficient_evidence"
@@ -13288,8 +13246,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.3,
-        "score_upper_bound": 8.3,
+        "score_lower_bound": 5.5,
+        "score_upper_bound": 8.5,
         "status": "insufficient_evidence"
       },
       "name": "湘财股份",
@@ -13298,14 +13256,22 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "无可用来源——内置web搜索配额耗尽，未能访问上交所官方披露",
+            "source_ref": "",
+            "statement": "无法取得上汽集团最新定期报告的官方披露（上交所等），type1买入区触发证据缺失，需人工复核"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方来源无法验证",
+          "估值分位待核实",
+          "搜索配额耗尽"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取上汽集团官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "上汽集团未能获取最新定期报告官方来源：内置web搜索配额耗尽、本地只读数据不可用，无法核实2025年三季报/估值分位与'股价明显进入买入区'判断，按fail-closed原则无法确认触发。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -13395,9 +13361,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "杭钢股份",
@@ -13439,8 +13405,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 4.8,
-        "score_upper_bound": 7.8,
+        "score_lower_bound": 4.9,
+        "score_upper_bound": 7.9,
         "status": "insufficient_evidence"
       },
       "name": "华创云信",
@@ -13674,14 +13640,13 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
+        "score_lower_bound": 0,
+        "score_upper_bound": 10,
+        "status": "insufficient_evidence"
       },
-      "name": "广汇能源",
-      "security_code": "600256",
-      "type_key": "type5"
+      "name": "开开实业",
+      "security_code": "600272",
+      "type_key": "type7"
     },
     {
       "ai_review": {
@@ -13696,30 +13661,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 0,
-        "score_upper_bound": 10,
-        "status": "insufficient_evidence"
-      },
-      "name": "开开实业",
-      "security_code": "600272",
-      "type_key": "type7"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "官方来源未能核验"
-        ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取嘉化能源官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 7.8,
-        "score_lower_bound": 7.8,
-        "score_upper_bound": 7.8,
+        "score": 7,
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
         "status": "triggered"
       },
       "name": "嘉化能源",
@@ -13892,8 +13836,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.1,
-        "score_upper_bound": 7.1,
+        "score_lower_bound": 5.2,
+        "score_upper_bound": 7.2,
         "status": "insufficient_evidence"
       },
       "name": "宏达股份",
@@ -13902,14 +13846,22 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "无可用来源——内置web搜索配额耗尽，未能访问上交所官方披露",
+            "source_ref": "",
+            "statement": "无法取得国机汽车最新定期报告的官方披露（上交所等），type1买入区触发证据缺失，需人工复核"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方来源无法验证",
+          "估值分位待核实",
+          "搜索配额耗尽"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取国机汽车官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "国机汽车未能获取最新定期报告官方来源：内置web搜索配额耗尽、本地只读数据不可用，无法核实2025年三季报/估值分位与'股价明显进入买入区'判断，按fail-closed原则无法确认触发。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -13948,12 +13900,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取中油工程官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -14066,9 +14018,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "联创光电",
@@ -14093,9 +14045,9 @@
         "score_upper_bound": 6.7,
         "status": "observe"
       },
-      "name": "宁波韵升",
-      "security_code": "600366",
-      "type_key": "type2"
+      "name": "红星发展",
+      "security_code": "600367",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -14115,9 +14067,9 @@
         "score_upper_bound": 6.7,
         "status": "observe"
       },
-      "name": "红星发展",
-      "security_code": "600367",
-      "type_key": "type5"
+      "name": "西南证券",
+      "security_code": "600369",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -14160,28 +14112,6 @@
       "name": "健康元",
       "security_code": "600380",
       "type_key": "type7"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "盘江股份",
-      "security_code": "600395",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -14296,12 +14226,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取宁夏建材官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -14447,12 +14377,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取精工钢构官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -14493,9 +14423,10 @@
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方证据未验证",
+          "钢铁行业整体亏损背景下盈利下滑幅度及审计意见待核实"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取方大特钢官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "方大特钢（钢铁特钢，type5触发）未能完成验证：本轮搜索配额在执行中被耗尽，未获得任何可引用的官方年报/公告来源（CNINFO/上交所或权威媒体转载）。按fail-closed原则，官方证据无法验证时返回needs_review，待搜索能力恢复后复核2024/2025年年报数据。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -14628,8 +14559,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.1,
-        "score_upper_bound": 7.1,
+        "score_lower_bound": 7.2,
+        "score_upper_bound": 7.2,
         "status": "insufficient_evidence"
       },
       "name": "山东黄金",
@@ -14671,9 +14602,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "大西洋",
@@ -14725,15 +14656,27 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://www.jwview.com/jingwei/html/03-25/619323.shtml 2024年年报（2025-03-24披露）",
+            "source_ref": "https://www.jwview.com/jingwei/html/03-25/619323.shtml",
+            "statement": "海螺水泥2024年营业收入910.30亿元，同比下降35.51%；归母净利润76.96亿元，同比下降26.19%，主因产品销价下降"
+          },
+          {
+            "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/796245416369/index.phtml 东吴证券2024年报点评（2025-03-25）",
+            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/796245416369/index.phtml",
+            "statement": "2024Q4单季归母净利润24.98亿元，同比+42.3%，盈利出现底部反弹迹象"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
+        "recommended_action": "keep",
         "risk_flags": [
-          "官方来源未能核验"
+          "水泥需求受地产开工拖累持续走弱",
+          "行业供给过剩、价格底部是否企稳待观察"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取海螺水泥官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
+        "summary": "海螺水泥为典型水泥强周期标的，2024年年报确认营收910.30亿元（-35.51%）、归母净利76.96亿元（-26.19%），连续下滑且2024Q4单季净利同比+42.3%呈底部反弹迹象，与「强周期底部」触发一致；未发现审计异常、重述等反证报道。",
+        "verdict": "confirmed"
       },
       "deterministic": {
         "score": 8.2,
@@ -14752,9 +14695,10 @@
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方证据未验证",
+          "光伏玻璃行业价格/盈利水平待核实"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取金晶科技官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "金晶科技（玻璃建材，type5触发）未能完成验证：本轮搜索配额在执行中被耗尽，未获得任何可引用的官方年报/公告来源。按fail-closed原则返回needs_review，待搜索能力恢复后复核浮法/光伏玻璃业务的最新年度业绩与周期位置。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -14888,9 +14832,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "海立股份",
@@ -14931,8 +14875,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.5,
-        "score_upper_bound": 8.5,
+        "score_lower_bound": 5.6,
+        "score_upper_bound": 8.6,
         "status": "insufficient_evidence"
       },
       "name": "华鑫股份",
@@ -14974,9 +14918,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "龙头股份",
@@ -15063,7 +15007,7 @@
         "score_upper_bound": 7.7,
         "status": "insufficient_evidence"
       },
-      "name": "外服控股",
+      "name": "XD外服控",
       "security_code": "600662",
       "type_key": "type1"
     },
@@ -15084,7 +15028,7 @@
         "score_upper_bound": 8.3,
         "status": "insufficient_evidence"
       },
-      "name": "外服控股",
+      "name": "XD外服控",
       "security_code": "600662",
       "type_key": "type3"
     },
@@ -15101,11 +15045,11 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 2.3,
-        "score_upper_bound": 7.6,
+        "score_lower_bound": 2.4,
+        "score_upper_bound": 7.7,
         "status": "insufficient_evidence"
       },
-      "name": "外服控股",
+      "name": "XD外服控",
       "security_code": "600662",
       "type_key": "type4"
     },
@@ -15126,7 +15070,7 @@
         "score_upper_bound": 10,
         "status": "insufficient_evidence"
       },
-      "name": "外服控股",
+      "name": "XD外服控",
       "security_code": "600662",
       "type_key": "type6"
     },
@@ -15147,7 +15091,7 @@
         "score_upper_bound": 7.9,
         "status": "insufficient_evidence"
       },
-      "name": "外服控股",
+      "name": "XD外服控",
       "security_code": "600662",
       "type_key": "type7"
     },
@@ -15206,8 +15150,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.1,
-        "score_upper_bound": 7.1,
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
         "status": "insufficient_evidence"
       },
       "name": "中船防务",
@@ -15259,40 +15203,15 @@
     },
     {
       "ai_review": {
-        "claims": [
-          {
-            "source_context": "https://finance.eastmoney.com/a/202603303688802940.html（湖南海利2025年年度报告，2026-03-30披露）",
-            "source_ref": "https://finance.eastmoney.com/a/202603303688802940.html（湖南海利2025年年度报告，2026-03-30披露",
-            "statement": "2025年营收18.10亿元(-26.74%)，归母净利润2.44亿元(-8.20%)，扣非净利润1.83亿元(-25.94%)；农药行业处于周期底部、产能过剩（行业产能利用率仅约60%）"
-          },
-          {
-            "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年度报告全文，2026-03-31）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年度报告全文，2026-03-31",
-            "statement": "大华会计师事务所出具标准无保留意见审计报告；报告期无控股股东及关联方非经营性占用资金、无违规担保，毛利率提升7.09个百分点至35.44%"
-          },
-          {
-            "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年报·产销量情况，2026-03-31）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年报·产销量情况，2026-03-31",
-            "statement": "2025年农药原药生产量21599吨(+23.43%)但销售量17052吨(-2.32%)，库存量7097吨(+178.32%)，公司解释为增大库存备货"
-          },
-          {
-            "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年报·可能面对的风险，2026-03-31）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=10000538&gather=1&id=12036419（湖南海利2025年年报·可能面对的风险，2026-03-31",
-            "statement": "公司核心产品以氨基甲酸酯类杀虫剂为主，克百威、灭多威等产品在国内外被禁限用，全球氨基甲酸酯类农药市场容量逐渐下降，面临产品替代风险"
-          }
-        ],
+        "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "核心产品克百威、灭多威国内外禁限用（产品替代风险）",
-          "扣非净利-25.94%、经营现金流-33.51%",
-          "农药原药库存+178.32%",
-          "周期拐点未获后续数据验证",
-          "出口占比约56%，海外政策风险"
+          "等待官方资料与反证核验"
         ],
-        "summary": "强周期底部触发有证据支持：农药行业2025年处于周期性底部（行业产能利用率仅约60%、价格止跌回稳），公司营收-26.74%但归母净利仅-8.20%、毛利率升至35.44%，大华出具标准无保留审计意见，无关联方资金占用与违规担保。但扣非净利-25.94%、经营现金流-33.51%、农药原药库存大增178%，且核心产品克百威/灭多威面临国内外禁限用替代风险，'周期拐点初期'尚未获2026年数据验证，重要风险仍在，建议人工复核。",
-        "verdict": "caution"
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
       },
       "deterministic": {
         "score": 7.4,
@@ -15328,15 +15247,39 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://stcn.com/article/detail/3268645.html 证券时报/上交所2025年半年度报告 2025-08-26",
+            "source_ref": "https://stcn.com/article/detail/3268645.html",
+            "statement": "2025年上半年营收93.01亿元同比-0.19%，归母净利2.65亿元同比+0.90%，扣非净利2.45亿元同比+13.33%"
+          },
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html 中国证券报·中证网 2025年半年度报告 2025-08-27",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html",
+            "statement": "以2025年8月26日收盘价计算，市盈率(TTM)约15.51倍、市净率约0.93倍（破净）"
+          },
+          {
+            "source_context": "https://www.stcn.com/article/detail/3354631.html 证券时报 2025-09-24",
+            "source_ref": "https://www.stcn.com/article/detail/3354631.html",
+            "statement": "2025年中期拟每10股派现2.80元，派现总额2.08亿元、占净利润比例78.44%"
+          },
+          {
+            "source_context": "http://stock.stockstar.com/AN2025082600046713.shtml 上交所2025年半年度报告摘要 2025-08-26",
+            "source_ref": "http://stock.stockstar.com/AN2025082600046713.shtml",
+            "statement": "2025年上半年经营活动现金流净额5.25亿元，同比-37.11%"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
+        "recommended_action": "keep",
         "risk_flags": [
-          "官方来源未能核验"
+          "经营现金流-37.11%",
+          "客户集中度高（一汽体系）",
+          "汽车行业价格战与降价压力",
+          "低估值需排除价值陷阱"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取富维股份官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
+        "summary": "富维股份2025H1营收-0.19%、归母净利+0.90%、扣非+13.33%，业绩平稳；PE(TTM)约15.5倍、PB约0.93倍破净，中期10派2.8元、分红率78.44%，'股价明显进入买入区'的type1触发得到官方半年报支持；但经营现金流-37.11%、对一汽体系客户集中、汽车行业价格战，价值陷阱风险需持续跟踪。",
+        "verdict": "caution"
       },
       "deterministic": {
         "score": 8.4,
@@ -15383,9 +15326,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "辽宁能源",
@@ -15449,8 +15392,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 4.5,
-        "score_upper_bound": 7,
+        "score_lower_bound": 4.6,
+        "score_upper_bound": 7.1,
         "status": "insufficient_evidence"
       },
       "name": "悦达投资",
@@ -15512,14 +15455,14 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
+        "score": 7.332,
+        "score_lower_bound": 7.3,
+        "score_upper_bound": 7.3,
+        "status": "conditional"
       },
-      "name": "马钢股份",
-      "security_code": "600808",
-      "type_key": "type5"
+      "name": "山西汾酒",
+      "security_code": "600809",
+      "type_key": "type7"
     },
     {
       "ai_review": {
@@ -15534,14 +15477,14 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.332,
-        "score_lower_bound": 7.3,
-        "score_upper_bound": 7.3,
-        "status": "conditional"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
-      "name": "山西汾酒",
-      "security_code": "600809",
-      "type_key": "type7"
+      "name": "神马股份",
+      "security_code": "600810",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -15683,9 +15626,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "动力新科",
@@ -15831,8 +15774,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 4.9,
-        "score_upper_bound": 7.9,
+        "score_lower_bound": 5.1,
+        "score_upper_bound": 8.1,
         "status": "insufficient_evidence"
       },
       "name": "哈投股份",
@@ -15852,9 +15795,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "insufficient_evidence"
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
+        "status": "observe"
       },
       "name": "杉杉股份",
       "security_code": "600884",
@@ -15980,8 +15924,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.3,
-        "score_upper_bound": 8.3,
+        "score_lower_bound": 5.4,
+        "score_upper_bound": 8.4,
         "status": "insufficient_evidence"
       },
       "name": "永安期货",
@@ -16022,10 +15966,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
-        "status": "observe"
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
+        "status": "insufficient_evidence"
       },
       "name": "西安银行",
       "security_code": "600928",
@@ -16066,9 +16009,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "爱柯迪",
@@ -16283,50 +16226,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
-        "status": "observe"
-      },
-      "name": "淮北矿业",
-      "security_code": "600985",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "赤峰黄金",
-      "security_code": "600988",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score": 6.562,
         "score_lower_bound": 6.6,
         "score_upper_bound": 6.6,
@@ -16434,9 +16333,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "春秋航空",
@@ -16447,31 +16346,26 @@
       "ai_review": {
         "claims": [
           {
-            "source_context": "https://stock.stockstar.com/notice/SN2026071300028087.shtml 公司2026年半年度业绩预减公告(公告编号2026-038,2026-07-13)",
-            "source_ref": "https://stock.stockstar.com/notice/SN2026071300028087.shtml",
-            "statement": "2026年上半年预计归母净利润3814-4814万元,同比下降67.40%-74.18%;扣非净利润3244-4244万元,同比下降68.55%-75.96%"
+            "source_context": "https://finance.sina.cn/2025-08-26/detail-infnfyar8602186.d.html 上交所2025年半年度报告摘要 2025-08-26",
+            "source_ref": "https://finance.sina.cn/2025-08-26/detail-infnfyar8602186.d.html",
+            "statement": "2025年上半年营收11.42亿元同比-18.98%，归母净利1.48亿元同比-45.36%，扣非净利-48.47%，经营现金流-30.09%"
           },
           {
-            "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80331700&gather=1&id=12442520 公司2026年半年度业绩预减公告全文(2026-07-14)",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80331700&gather=1&id=12442520",
-            "statement": "行业产能进一步释放叠加下游行业需求疲软,公司盐和纯碱等主要产品售价持续下滑,较同期减利明显"
-          },
-          {
-            "source_context": "https://m.sohu.com/a/1049722497_122021998 2026-07-13报道引公司公告",
-            "source_ref": "https://m.sohu.com/a/1049722497_122021998",
-            "statement": "2026年一季度公司实现营业收入5.26亿元,归母净利润2629万元"
+            "source_context": "https://www.cnstock.com/commonDetail/498152 上海证券报 2025-08-26",
+            "source_ref": "https://www.cnstock.com/commonDetail/498152",
+            "statement": "纯碱市场整体供大于求、价格波动较大且持续下滑；公司盐产品增产13.68%、出口同比增长22.9%"
           }
         ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "归母净利润同比预降67.4%-74.2%",
-          "纯碱行业产能进一步释放,供给出清未完成",
-          "盐、纯碱售价持续下滑,减利明显",
-          "盈利仍在下行通道,周期拐点尚未出现"
+          "纯碱价格持续下滑未现拐点",
+          "归母净利同比-45.36%",
+          "经营现金流-30.09%走弱",
+          "周期底部判断缺拐点确认"
         ],
-        "summary": "盐和纯碱售价持续下滑、行业产能过剩未出清,支持强周期底部特征;但江盐2026H1归母净利预计3814-4814万元(-67%~-74%),盈利仍在探底、拐点未确认。",
+        "summary": "江盐集团主营盐+纯碱+盐化工，纯碱确为强周期品，周期底部方向成立；但2025H1营收-18.98%、归母净利-45.36%、扣非-48.47%，纯碱市场供大于求、价格持续下滑，处于周期下行中段而非'低迷后期/拐点初期'，未见明确触底回升证据。",
         "verdict": "caution"
       },
       "deterministic": {
@@ -16679,15 +16573,34 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://www.cnfin.com/announ/detail/index.html?announ=lc&code=601127 上交所2025年第三季度报告 2025-10-31",
+            "source_ref": "https://www.cnfin.com/announ/detail/index.html?announ=lc&code=601127",
+            "statement": "2025年前三季度营收1105.34亿元同比+3.67%，归母净利53.12亿元同比+31.56%，毛利率29.9%"
+          },
+          {
+            "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/816773607231/index.phtml 国泰海通证券三季报点评 2025-11-18",
+            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/816773607231/index.phtml",
+            "statement": "2025Q3单季归母净利23.71亿元，同比-1.74%、环比+8.1%；销售费用率14.6%同比+3.5pct"
+          },
+          {
+            "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/816773607231/index.phtml 国泰海通证券研报 2025-11-18",
+            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/816773607231/index.phtml",
+            "statement": "券商按2026年24倍PE给出目标价166.19元，隐含当前估值并非深度低估"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "股价'明显进入买入区'缺估值分位证据",
+          "Q3单季归母净利同比-1.74%",
+          "销售费用率高企（14.6%）",
+          "高成长股估值敏感"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取赛力斯官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
+        "summary": "赛力斯基本面强（2025前三季归母53.12亿元+31.56%、毛利率29.9%），但type1要求'股价已明显进入买入区'；券商2025年11月研报按2026年24倍PE给出目标价166元，未见股价处于历史低估区证据，且Q3单季归母同比-1.74%、销售费用率升至14.6%，'明显低估'这一触发前提未获验证，缺失的估值分位事实可能改变确定性结论。",
+        "verdict": "caution"
       },
       "deterministic": {
         "score": 8.4,
@@ -16733,31 +16646,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "博威合金",
-      "security_code": "601137",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "天风证券",
@@ -16862,14 +16753,14 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
-        "status": "observe"
+        "score": 7.1,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
+        "status": "triggered"
       },
-      "name": "东兴证券",
-      "security_code": "601198",
-      "type_key": "type2"
+      "name": "君正集团",
+      "security_code": "601216",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -16882,45 +16773,6 @@
         ],
         "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 7.1,
-        "score_lower_bound": 7.1,
-        "score_upper_bound": 7.1,
-        "status": "triggered"
-      },
-      "name": "君正集团",
-      "security_code": "601216",
-      "type_key": "type5"
-    },
-    {
-      "ai_review": {
-        "claims": [
-          {
-            "source_context": "https://newzzbcx.cs.com.cn/cxnews_m.html?random=f79SOqVX&name=new20260425100840zhnrxbrb#1（陕西煤业2025年年度报告，2026-04-25披露）",
-            "source_ref": "https://newzzbcx.cs.com.cn/cxnews_m.html?random=f79SOqVX&name=new20260425100840zhnrxbrb#1（陕西煤业2025年年度报告，2026-04-25披露",
-            "statement": "2025年营收1581.79亿元(-14.10%)，归母净利润167.65亿元(-25.02%)，扣非153.45亿元(-27.49%)，主因煤炭价格中枢下行"
-          },
-          {
-            "source_context": "https://fund.eastmoney.com/a/202604253718932034.html（2025年年报财务数据，2026-04-25）",
-            "source_ref": "https://fund.eastmoney.com/a/202604253718932034.html（2025年年报财务数据，2026-04-25",
-            "statement": "自产煤毛利率46.86%，加权ROE 17.88%，经营活动现金流净额352.69亿元，2025年煤炭产量17488.90万吨(+2.58%)"
-          },
-          {
-            "source_context": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm?div=-1#1（陕西煤业2025年年度报告摘要，证券日报2026-04-25）",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm?div=-1#1（陕西煤业2025年年度报告摘要，证券日报2026-04-25",
-            "statement": "经立信会计师事务所审计；2025年度拟10派9.09元，年度与中期分红合计91.89亿元，占归母净利润54.81%"
-          }
-        ],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "keep",
-        "risk_flags": [
-          "2026年煤价拐点时点未获后续数据验证",
-          "业绩同比-25%反映行业下行未止"
-        ],
-        "summary": "强周期底部触发获充分支持：2025年煤炭价格中枢下行、公司营收-14.10%、归母净利-25.02%，处于明确周期下行期；但公司为煤炭行业成本曲线领先者（自产煤毛利率46.86%），ROE仍达17.88%、经营现金流352.69亿元，立信出具标准无保留审计意见，2025年度合计分红91.89亿元占归母净利54.81%，符合'周期底部买入优质强周期龙头'的触发条件。主要反证（审计非标、盈利崩塌、现金流恶化）均已排查排除；剩余风险仅为2026年煤价拐点时点未获进一步数据验证。",
-        "verdict": "confirmed"
       },
       "deterministic": {
         "score": 7.4,
@@ -16988,8 +16840,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 8.2,
-        "score_upper_bound": 8.2,
+        "score_lower_bound": 8.3,
+        "score_upper_bound": 8.3,
         "status": "insufficient_evidence"
       },
       "name": "红塔证券",
@@ -17030,8 +16882,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.6,
-        "score_upper_bound": 8.6,
+        "score_lower_bound": 5.8,
+        "score_upper_bound": 8.8,
         "status": "insufficient_evidence"
       },
       "name": "中国人保",
@@ -17126,12 +16978,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取北元化工官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -17199,12 +17051,12 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
-        "status": "observe"
+        "score": 7.1,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
+        "status": "triggered"
       },
-      "name": "中国铝业",
+      "name": "XD中国铝",
       "security_code": "601600",
       "type_key": "type2"
     },
@@ -17226,7 +17078,7 @@
         "score_upper_bound": 6.7,
         "status": "observe"
       },
-      "name": "中国铝业",
+      "name": "XD中国铝",
       "security_code": "601600",
       "type_key": "type5"
     },
@@ -17264,8 +17116,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 8.7,
-        "score_upper_bound": 8.7,
+        "score_lower_bound": 8.8,
+        "score_upper_bound": 8.8,
         "status": "insufficient_evidence"
       },
       "name": "中国太保",
@@ -17285,35 +17137,13 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.7,
-        "score_upper_bound": 7.7,
+        "score_lower_bound": 7.8,
+        "score_upper_bound": 7.8,
         "status": "insufficient_evidence"
       },
       "name": "中国人寿",
       "security_code": "601628",
       "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "旗滨集团",
-      "security_code": "601636",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -17392,10 +17222,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
-        "status": "observe"
+        "score": 7,
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
+        "status": "triggered"
       },
       "name": "明泰铝业",
       "security_code": "601677",
@@ -17434,48 +17264,6 @@
         ],
         "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
-        "status": "observe"
-      },
-      "name": "中银证券",
-      "security_code": "601696",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [
-          {
-            "source_context": "http://stock.stockstar.com/RB2026042600018006.shtml（证券之星，2025年年报点评，2026-04-27）",
-            "source_ref": "http://stock.stockstar.com/RB2026042600018006.shtml（证券之星，2025年年报点评，2026-04-27",
-            "statement": "2025年营收278.2亿元(-22.40%)，归母净利润11.15亿元(-54.47%)，扣非8.66亿元(-63.68%)，主因煤价下行、煤炭业务毛利率降5.10个百分点至34.38%、焦炭业务亏损"
-          },
-          {
-            "source_context": "https://stock.finance.sina.com.cn/stock/view/paper.php?symbol=sh000001&reportid=830676320041&autocallup=no&isfromsina=no（中泰证券2025年报点评，2026-04-28）",
-            "source_ref": "https://stock.finance.sina.com.cn/stock/view/paper.php?symbol=sh000001&reportid=830676320041&autocallup=no&isfromsina=no（中泰证券2025年报点评，2026-04-28",
-            "statement": "2025年加权ROE仅2.44%（同比-2.76pct），Q4单季归母净利润-4.39亿元环比转亏；商品煤综合售价529.21元/吨"
-          },
-          {
-            "source_context": "https://www.jiemian.com/article/14347024.html（界面新闻，2025年年报及2026年一季报，2026-04-28）",
-            "source_ref": "https://www.jiemian.com/article/14347024.html（界面新闻，2025年年报及2026年一季报，2026-04-28",
-            "statement": "2025年经营活动现金流净额50.01亿元(+0.75%)，拟10派1.87元，现金分红占归母净利润50.16%"
-          }
-        ],
-        "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "ROE仅2.44%，盈利质量弱",
-          "Q4单季归母净利-4.39亿元",
-          "扣非净利-63.68%",
-          "焦炭业务亏损（毛利率-3.99%）",
-          "煤价拐点未验证"
-        ],
-        "summary": "周期底部触发有证据（2025年营收-22.40%、归母净利-54.47%，煤炭行业供需宽松、煤价下行），经营现金流50.01亿元保持为正、分红占净利50.16%。但公司盈利质地明显弱于行业龙头：加权ROE仅2.44%、Q4单季归母净利-4.39亿元、扣非-63.68%、焦炭业务毛利率-3.99%亏损，商品煤综合售价降至529.21元/吨，'周期底部买入'的安全边际取决于行业拐点能否如期到来，若低迷持续其盈利将进一步承压，重要风险未排除，建议人工复核。",
-        "verdict": "caution"
       },
       "deterministic": {
         "score": 7.4,
@@ -17521,9 +17309,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "中创智领",
@@ -17565,9 +17353,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "光大证券",
@@ -17602,9 +17390,10 @@
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方证据未验证",
+          "非典型周期股，type2触发依据需人工确认"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取星宇股份官方业绩/产业周期来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "星宇股份（汽车车灯，type2「两热一冷」触发）未能完成验证：本轮搜索配额在执行中被耗尽，未获得任何可引用的官方来源。该标的属汽车零部件成长属性、非典型周期股，其type2触发依据（热/冷维度）与最新年报数据均需待搜索能力恢复后复核。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -17716,9 +17505,31 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "正泰电器",
+      "security_code": "601877",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "中国银河",
@@ -17823,14 +17634,36 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "中国汽研",
       "security_code": "601965",
       "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "玲珑轮胎",
+      "security_code": "601966",
+      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -18038,9 +17871,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "天鹅股份",
@@ -18209,9 +18042,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "热威股份",
@@ -18253,8 +18086,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.2,
-        "score_upper_bound": 8.2,
+        "score_lower_bound": 5.3,
+        "score_upper_bound": 8.3,
         "status": "insufficient_evidence"
       },
       "name": "南华期货",
@@ -18537,28 +18370,6 @@
       "name": "亚通精工",
       "security_code": "603190",
       "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "汇得科技",
-      "security_code": "603192",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -19066,9 +18877,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "杭叉集团",
@@ -19427,8 +19238,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.2,
-        "score_upper_bound": 7.7,
+        "score_lower_bound": 5,
+        "score_upper_bound": 7.5,
         "status": "insufficient_evidence"
       },
       "name": "海阳科技",
@@ -19442,9 +19253,10 @@
         "model": "opencode-go/deepseek-v4-flash",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "官方证据未验证",
+          "地产链需求下行幅度及是否亏损待核实"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取惠达卫浴官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "惠达卫浴（卫浴/地产链建材，type5触发）未能完成验证：本轮搜索配额在执行中被耗尽，未获得任何可引用的官方年报/公告来源。按fail-closed原则返回needs_review，待搜索能力恢复后复核2024/2025年盈利数据及审计意见。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -19639,9 +19451,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "信捷电气",
@@ -19767,10 +19579,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7,
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "triggered"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "吉比特",
       "security_code": "603444",
@@ -19939,9 +19751,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "豪威集团",
@@ -19974,13 +19786,47 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取广信股份官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "伯特利",
+      "security_code": "603596",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html?random=RgFgvlkc&name=new20250428105026slbonsvd#1 2024年年度报告（2025-04-28披露）",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html?random=RgFgvlkc&name=new20250428105026slbonsvd#1",
+            "statement": "广信股份2024年营业收入46.43亿元（-20.88%），归母净利润7.79亿元（-45.88%）"
+          },
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html?random=si76IwEn&name=new20260426174612olfackra#1 2025年年度报告（2026-04-27披露）",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html?random=si76IwEn&name=new20260426174612olfackra#1",
+            "statement": "广信股份2025年营业收入35.32亿元（-23.92%），归母净利润6.57亿元（-15.64%），降幅较2024年收窄"
+          }
+        ],
+        "effort": "max",
+        "model": "opencode-go/deepseek-v4-flash",
+        "recommended_action": "keep",
+        "risk_flags": [
+          "农药价格低迷延续，2025年盈利仍在下滑",
+          "行业产能过剩，底部持续时间不确定"
+        ],
+        "summary": "广信股份为农药化工强周期标的，2024年年报营收46.43亿元（-20.88%）、归母净利7.79亿元（-45.88%）；2025年年报净利6.57亿元（-15.64%）、ROE降至6.66%，盈利自2022年高点（23.16亿元）连续三年下滑且降幅收窄，处于周期底部区域，与触发一致；未发现审计异常等反证。",
+        "verdict": "confirmed"
       },
       "deterministic": {
         "score": 8.1,
@@ -20061,12 +19907,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取海利尔官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -20227,6 +20073,28 @@
       "name": "永安行",
       "security_code": "603776",
       "type_key": "type6"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
+        "status": "observe"
+      },
+      "name": "宁波高发",
+      "security_code": "603788",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -20404,15 +20272,27 @@
     },
     {
       "ai_review": {
-        "claims": [],
+        "claims": [
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html?random=yELiAyj3&name=new20250428105328mmxmlrwk#1 2024年年度报告（2025-04-28披露）；http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/799250133418/index.phtml 华泰证券点评",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html?random=yELiAyj3&name=new20250428105328mmxmlrwk#1",
+            "statement": "武进不锈2024年营业收入26.52亿元（-24.57%），归母净利润1.26亿元（-64.25%），2024Q4归母净利-4488.44万元"
+          },
+          {
+            "source_context": "https://newzzbcx.cs.com.cn/cxnews.html?random=OSlkmXMT&name=new20260422192757tqyunehp#1 2025年年度报告（2026-04-23披露）；https://www.9fzt.com/detail/sh_603878_10_799352310537.html 民生证券点评",
+            "source_ref": "https://newzzbcx.cs.com.cn/cxnews.html?random=OSlkmXMT&name=new20260422192757tqyunehp#1",
+            "statement": "武进不锈2025年归母净利润7961.89万元（-36.67%），降幅收窄；2025Q1业绩有所修复、火电锅炉维持高景气"
+          }
+        ],
         "effort": "max",
         "model": "opencode-go/deepseek-v4-flash",
-        "recommended_action": "manual_review",
+        "recommended_action": "keep",
         "risk_flags": [
-          "官方来源未能核验"
+          "2024Q4单季亏损，底部反转未完全确认",
+          "2025年盈利仍同比下降36.67%，石化景气度低于预期"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取武进不锈官方业绩来源,按 fail-closed 原则返回 needs_review。",
-        "verdict": "needs_review"
+        "summary": "武进不锈为不锈钢管（钢铁/石化产业链）强周期标的，2024年年报营收26.52亿元（-24.57%）、归母净利1.26亿元（-64.25%）、2024Q4单季亏损4488万元；2025年年报净利7961.89万元（-36.67%）降幅收窄，2025Q1业绩修复、火电锅炉维持高景气，处于周期底部区域，与触发一致；未发现审计异常等反证。",
+        "verdict": "confirmed"
       },
       "deterministic": {
         "score": 8.1,
@@ -20428,12 +20308,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取老百姓官方业绩/估值来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -20459,10 +20339,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
-        "status": "observe"
+        "score_lower_bound": 7,
+        "score_upper_bound": 7,
+        "status": "insufficient_evidence"
       },
       "name": "吉祥航空",
       "security_code": "603885",
@@ -20481,12 +20360,12 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.7,
-        "score_lower_bound": 6.7,
-        "score_upper_bound": 6.7,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
-      "name": "瑞芯微",
+      "name": "XD瑞芯微",
       "security_code": "603893",
       "type_key": "type2"
     },
@@ -20507,7 +20386,7 @@
         "score_upper_bound": 7,
         "status": "insufficient_evidence"
       },
-      "name": "瑞芯微",
+      "name": "XD瑞芯微",
       "security_code": "603893",
       "type_key": "type3"
     },
@@ -20529,7 +20408,7 @@
         "score_upper_bound": 6.8,
         "status": "observe"
       },
-      "name": "瑞芯微",
+      "name": "XD瑞芯微",
       "security_code": "603893",
       "type_key": "type7"
     },
@@ -20728,34 +20607,15 @@
     },
     {
       "ai_review": {
-        "claims": [
-          {
-            "source_context": "http://stock.stockstar.com/RB2026042400026770.shtml（证券之星，2025年年报，2026-04-24）",
-            "source_ref": "http://stock.stockstar.com/RB2026042400026770.shtml（证券之星，2025年年报，2026-04-24",
-            "statement": "2025年营收20.57亿元(-14.07%)，归母净利润2.30亿元(+10.00%)，扣非2.13亿元(+7.65%)，经营现金流3.85亿元(+31.73%)，净利增长源于原材料降价、利息收入增加及费用管控"
-          },
-          {
-            "source_context": "https://www.cnstock.com/commonDetail/684865（上海证券报，2025年年报，2026-04-24）",
-            "source_ref": "https://www.cnstock.com/commonDetail/684865（上海证券报，2025年年报，2026-04-24",
-            "statement": "货币资金期末13.55亿元占总资产51.47%，资产负债率18.02%；拟每股派现1.00元，分红率70.66%"
-          },
-          {
-            "source_context": "http://stock.stockstar.com/RB2026042400026770.shtml（证券之星，2025年年报·分产品数据，2026-04-24）",
-            "source_ref": "http://stock.stockstar.com/RB2026042400026770.shtml（证券之星，2025年年报·分产品数据，2026-04-24",
-            "statement": "电子化学品（超纯氨、电子级氨水等）2025年产量7286.82吨(-33.49%)、销量7135.24吨(-31.65%)"
-          }
-        ],
+        "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "电子化学品产销量-33%（下游需求疲软）",
-          "营收连续下滑（-14.07%）",
-          "周期拐点未获验证",
-          "精细化工周期属性偏弱，归类存疑"
+          "等待官方资料与反证核验"
         ],
-        "summary": "周期下行触发有证据（2025年营收-14.07%），公司盈利韧性突出（归母净利+10.00%、扣非+7.65%、经营现金流+31.73%），财务极健康（货币资金占总资产51.47%、资产负债率18.02%、分红率70.66%、ROE 10.91%），属财务面优秀的底部候选。但电子化学品（超纯氨等）产销量同比大降约33%，反映下游需求疲软，且'周期拐点初期'尚未获2026年数据验证（2026Q1净利5294万元与2025Q4基本持平），若行业低迷延续则营收继续收缩，重要风险未排除，建议人工复核。",
-        "verdict": "caution"
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
       },
       "deterministic": {
         "score": 7.4,
@@ -20780,8 +20640,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.3,
-        "score_upper_bound": 7.3,
+        "score_lower_bound": 7.2,
+        "score_upper_bound": 7.2,
         "status": "insufficient_evidence"
       },
       "name": "雪龙集团",
@@ -20886,9 +20746,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "insufficient_evidence"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "泉峰汽车",
       "security_code": "603982",
@@ -21123,6 +20984,28 @@
         "verdict": "needs_review"
       },
       "deterministic": {
+        "score": 7.1,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
+        "status": "conditional"
+      },
+      "name": "力鼎光电",
+      "security_code": "605118",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
         "score": 6.5,
         "score_lower_bound": 6.5,
         "score_upper_bound": 6.5,
@@ -21152,28 +21035,6 @@
       "name": "西上海",
       "security_code": "605151",
       "type_key": "type6"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
-        "status": "observe"
-      },
-      "name": "华达新材",
-      "security_code": "605158",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -21266,12 +21127,12 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取福莱蒽特官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
@@ -21304,6 +21165,28 @@
       "name": "冠石科技",
       "security_code": "605588",
       "type_key": "type6"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
+        "status": "observe"
+      },
+      "name": "澜起科技",
+      "security_code": "688008",
+      "type_key": "type2"
     },
     {
       "ai_review": {
@@ -21576,10 +21459,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.1,
-        "score_lower_bound": 7.1,
-        "score_upper_bound": 7.1,
-        "status": "conditional"
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
+        "status": "observe"
       },
       "name": "东芯股份",
       "security_code": "688110",
@@ -21770,9 +21653,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "希荻微",
@@ -21920,9 +21803,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
         "status": "observe"
       },
       "name": "佰仁医疗",
@@ -22092,8 +21975,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 7.2,
-        "score_upper_bound": 7.2,
+        "score_lower_bound": 7.1,
+        "score_upper_bound": 7.1,
         "status": "insufficient_evidence"
       },
       "name": "瑞晟智能",
@@ -22457,7 +22340,7 @@
         "score_upper_bound": 7.3,
         "status": "insufficient_evidence"
       },
-      "name": "高铁电气",
+      "name": "XD高铁电",
       "security_code": "688285",
       "type_key": "type6"
     },
@@ -22643,9 +22526,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "华盛锂电",
@@ -22709,9 +22592,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.9,
-        "score_lower_bound": 6.9,
-        "score_upper_bound": 6.9,
+        "score": 6.8,
+        "score_lower_bound": 6.8,
+        "score_upper_bound": 6.8,
         "status": "observe"
       },
       "name": "伟测科技",
@@ -22815,28 +22698,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
-        "status": "observe"
-      },
-      "name": "恒烁股份",
-      "security_code": "688416",
-      "type_key": "type2"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 4,
         "score_upper_bound": 9,
         "status": "insufficient_evidence"
@@ -22921,8 +22782,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 6.1,
-        "score_upper_bound": 8.1,
+        "score_lower_bound": 5.9,
+        "score_upper_bound": 7.9,
         "status": "insufficient_evidence"
       },
       "name": "联芸科技",
@@ -23089,9 +22950,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.6,
-        "score_lower_bound": 6.6,
-        "score_upper_bound": 6.6,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "裕太微",
@@ -23123,18 +22984,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取科前生物官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.6,
-        "score_lower_bound": 7.6,
-        "score_upper_bound": 7.6,
+        "score": 7.5,
+        "score_lower_bound": 7.5,
+        "score_upper_bound": 7.5,
         "status": "triggered"
       },
       "name": "科前生物",
@@ -23175,9 +23036,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.5,
+        "score_lower_bound": 6.5,
+        "score_upper_bound": 6.5,
         "status": "observe"
       },
       "name": "思瑞浦",
@@ -23204,27 +23065,6 @@
       "name": "和辉光电",
       "security_code": "688538",
       "type_key": "type7"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
-        "score_lower_bound": 5,
-        "score_upper_bound": 7,
-        "status": "insufficient_evidence"
-      },
-      "name": "瑞联新材",
-      "security_code": "688550",
-      "type_key": "type5"
     },
     {
       "ai_review": {
@@ -23337,18 +23177,18 @@
       "ai_review": {
         "claims": [],
         "effort": "max",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "pending-local-opencode-go",
         "recommended_action": "manual_review",
         "risk_flags": [
-          "官方来源未能核验"
+          "等待官方资料与反证核验"
         ],
-        "summary": "未能核验:provider 搜索配额在本轮耗尽,未获取康鹏科技官方业绩来源,按 fail-closed 原则返回 needs_review。",
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7.6,
-        "score_lower_bound": 7.6,
-        "score_upper_bound": 7.6,
+        "score": 7.2,
+        "score_lower_bound": 7.2,
+        "score_upper_bound": 7.2,
         "status": "triggered"
       },
       "name": "康鹏科技",
@@ -23389,8 +23229,8 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 5.7,
-        "score_upper_bound": 7.7,
+        "score_lower_bound": 5.5,
+        "score_upper_bound": 7.5,
         "status": "insufficient_evidence"
       },
       "name": "合合信息",
@@ -23432,10 +23272,10 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 7,
-        "score_lower_bound": 7,
-        "score_upper_bound": 7,
-        "status": "triggered"
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
       },
       "name": "惠泰医疗",
       "security_code": "688617",
@@ -23665,9 +23505,31 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.9,
+        "score_lower_bound": 6.9,
+        "score_upper_bound": 6.9,
+        "status": "observe"
+      },
+      "name": "科汇股份",
+      "security_code": "688681",
+      "type_key": "type2"
+    },
+    {
+      "ai_review": {
+        "claims": [],
+        "effort": "max",
+        "model": "pending-local-opencode-go",
+        "recommended_action": "manual_review",
+        "risk_flags": [
+          "等待官方资料与反证核验"
+        ],
+        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
+        "verdict": "needs_review"
+      },
+      "deterministic": {
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "莱尔科技",
@@ -23856,9 +23718,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.5,
-        "score_lower_bound": 6.5,
-        "score_upper_bound": 6.5,
+        "score": 6.6,
+        "score_lower_bound": 6.6,
+        "score_upper_bound": 6.6,
         "status": "observe"
       },
       "name": "唯赛勃",
@@ -24070,27 +23932,6 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score_lower_bound": 4.1,
-        "score_upper_bound": 7.6,
-        "status": "insufficient_evidence"
-      },
-      "name": "昂瑞微",
-      "security_code": "688790",
-      "type_key": "type6"
-    },
-    {
-      "ai_review": {
-        "claims": [],
-        "effort": "max",
-        "model": "pending-local-opencode-go",
-        "recommended_action": "manual_review",
-        "risk_flags": [
-          "等待官方资料与反证核验"
-        ],
-        "summary": "尚未完成本地 OpenCode Go 复核，确定性规则结果保持不变。",
-        "verdict": "needs_review"
-      },
-      "deterministic": {
         "score_lower_bound": 0,
         "score_upper_bound": 10,
         "status": "insufficient_evidence"
@@ -24196,9 +24037,9 @@
         "verdict": "needs_review"
       },
       "deterministic": {
-        "score": 6.8,
-        "score_lower_bound": 6.8,
-        "score_upper_bound": 6.8,
+        "score": 6.7,
+        "score_lower_bound": 6.7,
+        "score_upper_bound": 6.7,
         "status": "observe"
       },
       "name": "艾为电子",
@@ -24543,17 +24384,17 @@
       "type_key": "type7"
     }
   ],
-  "pending_review_count": 1125,
+  "pending_review_count": 1116,
   "review_schema_version": 1,
-  "reviewed_count": 1134,
+  "reviewed_count": 1126,
   "schema_version": 1,
-  "snapshot_generation": "886d55082c7ace8c",
+  "snapshot_generation": "0e02d3e62cfa3162",
   "source_audit": {
     "available": false
   },
   "verdict_counts": {
-    "caution": 8,
-    "confirmed": 1,
-    "needs_review": 1125
+    "caution": 6,
+    "confirmed": 4,
+    "needs_review": 1116
   }
 }
