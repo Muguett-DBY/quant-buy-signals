@@ -156,6 +156,27 @@ def test_public_review_strips_reasonix_annotation_from_source_url() -> None:
     assert public["web_search_verified"] is True
 
 
+def test_public_review_drops_http_sources_and_cannot_claim_web_verification() -> None:
+    review = {
+        "schema_version": 2,
+        "security_code": "600339",
+        "type_key": "type1",
+        "verdict": "caution",
+        "recommended_action": "manual_review",
+        "buy_attractiveness_score": 60,
+        "ai_action": "watchlist",
+        "confidence": "medium",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [{"statement": "报告", "source_ref": "http://example.test/report"}],
+        "web_search_performed": True,
+        "web_search_verified": True,
+    }
+    public = _public_review(review)
+    assert public["claims"][0]["source_ref"] == ""
+    assert public["web_search_verified"] is False
+
+
 def test_build_and_merge_review_artifacts(tmp_path) -> None:
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(json.dumps(_snapshot(), ensure_ascii=False), encoding="utf-8")

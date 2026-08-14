@@ -320,7 +320,7 @@
         "claims": [
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=000858&id=11001222",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=000858&id=11001222",
+            "source_ref": "",
             "statement": "五粮液2024年营收891.75亿元(+7.09%)、归母净利润318.53亿元(+5.44%)，审计意见为标准无保留，利润分配预案10派31.69元。"
           }
         ],
@@ -639,7 +639,7 @@
         "claims": [
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20260415000303.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20260415000303.html",
+            "source_ref": "",
             "statement": "德冠新材2025年年度报告摘要显示非标准审计意见提示不适用，2025年营收14.78亿元（-2.83%），归母净利8258万元（-11.25%）。"
           },
           {
@@ -780,7 +780,7 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/notice/SN2026042400007403.shtml",
-            "source_ref": "http://stock.stockstar.com/notice/SN2026042400007403.shtml",
+            "source_ref": "",
             "statement": "沙钢股份2025年营收131.21亿元（-8.98%），归母净利2.67亿元（+64.48%），扣非净利1.68亿元（+619%）。"
           },
           {
@@ -890,7 +890,7 @@
         "claims": [
           {
             "source_context": "http://www.163.com/dy/article/KR5GI8LB05568W0A.html",
-            "source_ref": "http://www.163.com/dy/article/KR5GI8LB05568W0A.html",
+            "source_ref": "",
             "statement": "海南发展2025年营收35亿元（-10.52%），归母净利-4.72亿元，2024年净利-4.67亿元，连续两年亏损，审计意见为标准无保留。"
           },
           {
@@ -1361,7 +1361,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/IG2025040200035950.shtml",
-            "source_ref": "http://stock.stockstar.com/IG2025040200035950.shtml",
+            "source_ref": "",
             "statement": "业绩下滑主因：铝消费见顶、产能过剩、地产竣工减少、海外反倾销及铝型材出口退税取消"
           }
         ],
@@ -1961,7 +1961,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20250402/c667196186.shtml",
-            "source_ref": "http://stock.10jqka.com.cn/20250402/c667196186.shtml",
+            "source_ref": "",
             "statement": "2024年储能业务收入8.57亿元同比下降6%,电动汽车充换电设备收入12.16亿元同比增长43.04%"
           }
         ],
@@ -3442,7 +3442,7 @@
           },
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-03-08/1222744437.PDF（2024年度财务报表及审计报告，审计报告正文",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-03-08/1222744437.PDF",
+            "source_ref": "",
             "statement": "审计将经销商模式下销售商品收入确认列为关键审计事项，属固有风险提示而非负面结论"
           }
         ],
@@ -4025,12 +4025,12 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/839990671691/index.phtml（华源证券2026-08-13研报）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/839990671691/index.phtml",
+            "source_ref": "",
             "statement": "2026年上半年公司营业收入141.67亿元、同比+16.73%，归母净利润19.83亿元、同比+101.64%，其中二季度归母净利润13.14亿元、同比+174.36%，Q2毛利率24.90%创近四年新高。"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/839990671691/index.phtml（华源证券2026-08-13研报，引百川盈孚数据）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/839990671691/index.phtml",
+            "source_ref": "",
             "statement": "截至2026年8月11日，氨纶40D价格约28200元/吨、价差约15090元/吨，较二季度进一步提升；己二酸价格约8066元/吨，较Q1均值有所下滑。"
           },
           {
@@ -4078,12 +4078,12 @@
         "claims": [
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/831237720219/index.phtml（华创证券2025年报点评，2026-05-04）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/831237720219/index.phtml",
+            "source_ref": "",
             "statement": "徐工机械2025年实现营收1008.2亿元(+8.4%)、归母净利65.7亿元(+9.0%)、扣非65.5亿元(+13.7%)，毛利率22.61%"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/831292294013/index.phtml（招商证券点评，2026-05-05）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/831292294013/index.phtml",
+            "source_ref": "",
             "statement": "2026Q1挖机行业总销量7.33万台(+19.49%)，其中出口+36.06%；公司海外收入486.0亿(+16.6%)占比48.2%"
           },
           {
@@ -4130,7 +4130,7 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/notice/SN2026042700046341.shtml（2025 年年度报告摘要，2026-04-27）",
-            "source_ref": "http://stock.stockstar.com/notice/SN2026042700046341.shtml",
+            "source_ref": "",
             "statement": "晋控煤业 2025 年实现营业收入 131.09 亿元（-12.80%）、归母净利润 18.31 亿元（-34.78%），拟每 10 股派 5.47 元，现金分红比例约 50%，合计派现 9.16 亿元"
           },
           {
@@ -4192,12 +4192,12 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828404980634/index.phtml（中泰证券2025年报点评，2026-04-01）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828404980634/index.phtml",
+            "source_ref": "",
             "statement": "2025年经营性净现金流42.04亿元，资产负债率21.6%，2025年现金分红比例40.12%，上市以来累计分红107.28亿元"
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/827837522582/index.phtml（国金证券2025年报点评，2026-03-26）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/827837522582/index.phtml",
+            "source_ref": "",
             "statement": "2025年石膏板销量21.47亿平（-1.1%），测算市占率70.0%（+1.1pct）；涂料业务收入50.93亿元（+22.99%），境外收入6.15亿元（+47.3%），泰国产线当年投产当年盈利"
           }
         ],
@@ -4296,12 +4296,12 @@
         "claims": [
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828018692531/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828018692531/index.phtml",
+            "source_ref": "",
             "statement": "2025年海螺水泥营收825.32亿元同比-9.33%，归母净利润81.13亿元同比+5.42%，扣非75.88亿元同比+3.03%"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/828285084517/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/828285084517/index.phtml",
+            "source_ref": "",
             "statement": "2025年公司现金分红比例55.29%，同比+6.6pct，为上市以来最高，按当时股价股息率约3.6%"
           },
           {
@@ -4311,7 +4311,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828018692531/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828018692531/index.phtml",
+            "source_ref": "",
             "statement": "2025年经营活动现金流净额166.44亿元，资产负债率20.4%（同比-0.9pct），资本开支110.32亿元同比-29.4%"
           }
         ],
@@ -4475,12 +4475,12 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=601799&id=12004126（2025年年度报告摘要）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=601799&id=12004126",
+            "source_ref": "",
             "statement": "2025年经营活动现金流量净额24.37亿元，同比增长168.00%，高于同期归母净利润"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/827410920252/index.phtml（2026-03-21年报点评）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/827410920252/index.phtml",
+            "source_ref": "",
             "statement": "东吴证券预测2026-2028年归母净利润18.53/22.15/25.39亿元，对应PE 19.55/16.35/14.26倍"
           }
         ],
@@ -4537,7 +4537,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828138735429/index.phtml（国金证券研报，2026-03-29，引中爆协数据）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828138735429/index.phtml",
+            "source_ref": "",
             "statement": "2025年国内民爆生产企业累计实现主营业务收入同比-4.50%、利润总额同比-3.32%，行业景气承压。"
           }
         ],
@@ -4585,7 +4585,7 @@
           },
           {
             "source_context": "http://bgimg.ce.cn/cysc/fdc/fc/202604/t20260422_2921797.shtml（中国经济网，2026-04-22）",
-            "source_ref": "http://bgimg.ce.cn/cysc/fdc/fc/202604/t20260422_2921797.shtml",
+            "source_ref": "",
             "statement": "东方雨虹2026年一季度营业收入71.90亿元（+20.74%），归母净利润4.02亿元（+108.89%），毛利率27.03%，单季收入增速V型回升"
           },
           {
@@ -4636,7 +4636,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/829427757935/index.phtml（华泰证券研报）及 http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/829434621062/index.phtml（中银国际研报，2026-04-13）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/829427757935/index.phtml",
+            "source_ref": "",
             "statement": "据百川盈孚，截至 2026-04-10 国内分散染料均价 23 万元/吨、活性染料 32 万元/吨，较 2025 年均价分别上升 38.63% 与 48.60%；2025 年公司染料业务毛利率 34.38%（+2.71pct），销量 24.22 万吨（+1.56%）创历史新高"
           },
           {
@@ -4688,12 +4688,12 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830879918450/index.phtml（国盛证券研报，2026-04-30）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830879918450/index.phtml",
+            "source_ref": "",
             "statement": "2026年一季度归母净利润22.25亿元同比-8.61%，同期钢铁行业利润总额-33.4亿元由盈转亏，公司业绩韧性优于行业"
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260430/c676430695.shtml（同花顺·2025年度暨2026Q1业绩说明会速递，2026-04-30）",
-            "source_ref": "http://stock.10jqka.com.cn/20260430/c676430695.shtml",
+            "source_ref": "",
             "statement": "2025年2+2+N产品销量3416万吨同比+11.7%，出口销量647.9万吨创历史新高，现金分红总额64.13亿元占归母净利61.99%"
           }
         ],
@@ -4735,12 +4735,12 @@
         "claims": [
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/831907938548/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/831907938548/index.phtml",
+            "source_ref": "",
             "statement": "科前生物2025年营业收入9.5亿元，同比+0.83%；归母净利润4.19亿元，同比+9.51%；全年毛利率66.97%，同比+3.21pct"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/831224580243/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/831224580243/index.phtml",
+            "source_ref": "",
             "statement": "2026年一季度营收2.28亿元，同比-7.20%；归母净利润7923.6万元，同比-26.79%；生猪现货均价已跌破10元/公斤，养殖户亏损抑制疫苗需求"
           },
           {
@@ -4803,7 +4803,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830767537985/index.phtml（中金公司2026-04-29研报）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830767537985/index.phtml",
+            "source_ref": "",
             "statement": "海油发展2026年一季度营收97.5亿元同比-3.2%，归母净利润6.4亿元同比+7.3%，扣非归母净利润6.33亿元同比+14.9%，毛利率15.2%同比+2.25个百分点"
           },
           {
@@ -4813,7 +4813,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830767537985/index.phtml（中金公司2026-04-29研报）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830767537985/index.phtml",
+            "source_ref": "",
             "statement": "中金公司维持海油发展跑赢行业评级，目标价4.9元，对应2026/27年市盈率约10.2倍/9.7倍，并预计2026年分红比例和额度不低于2025年标准"
           }
         ],
@@ -4860,12 +4860,12 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/826983780361/index.phtml（山西证券研报，2026-03-16）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/826983780361/index.phtml",
+            "source_ref": "",
             "statement": "2025年外销收入144.05亿元同比+6.74%占比77.73%，内销41.26亿元同比-15.20%；奥马冰箱净利率15.07%同比+1.05pct"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/826554660204/index.phtml（国盛证券2025年报点评，2026-03-11）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/826554660204/index.phtml",
+            "source_ref": "",
             "statement": "公司发布2026-2028年股东回报规划，现金分红最低比例分别不低于20%、40%、80%；2025年度累计分红2.2亿元，分红率19.67%"
           }
         ],
@@ -4917,12 +4917,12 @@
           },
           {
             "source_context": "http://stock.quote.stockstar.com/corp/rating_600273.shtml（证券之星转载国信证券研报，2026-04）",
-            "source_ref": "http://stock.quote.stockstar.com/corp/rating_600273.shtml",
+            "source_ref": "",
             "statement": "2025年度利润分配预案为每10股派2.50元（含税），叠加年中分红与4.00亿元股份回购，2025年度合计分红及回购金额约9.88亿元、占归母净利润约100%，其中现金分红和回购注销金额合计8.57亿元、约占归母净利润87%，按当时股价测算对应股息率约7.20%"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/833316797935/index.phtml（国泰海通证券2026-05-28跟踪报告《依托园区循环经济 稳步推进重点项目》）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/833316797935/index.phtml",
+            "source_ref": "",
             "statement": "公司2026年脂肪醇（酸）系列产品、聚氯乙烯、蒸汽总量、烧碱（折百）计划销售量分别为40/45/820/40万吨；2026年脂肪醇（酸）新增产能将全面达产，PVC二期30万吨乙烯法项目新增700、800、1300三个牌号"
           }
         ],
@@ -4990,7 +4990,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/831295465630/index.phtml（国盛证券 2026-05-05 研报）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/831295465630/index.phtml",
+            "source_ref": "",
             "statement": "2025 年自产煤售价 526 元/吨（同比 -18.6%）、成本 272 元/吨、吨煤毛利 254 元/吨；2026Q1 自产煤售价 557 元/吨、吨煤毛利 282 元/吨，2026 年 1-4 月秦皇岛 5500 大卡动力煤价格同比逐月转好"
           }
         ],
@@ -5035,7 +5035,7 @@
         "claims": [
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600496&id=12111272（2025年年度报告摘要，2026-04-18披露）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600496&id=12111272",
+            "source_ref": "",
             "statement": "精工钢构2025年营业收入208.38亿元(+12.69%)，归母净利润6.05亿元(+18.23%)，扣非净利润4.20亿元(-5.06%)，经营现金流7.89亿元，拟10派2.2元(分红率72.37%)"
           },
           {
@@ -5153,7 +5153,7 @@
           },
           {
             "source_context": "http://dianzibao.cb.com.cn/html/2026-04/06/content_339813.htm?div=-1#1",
-            "source_ref": "http://dianzibao.cb.com.cn/html/2026-04/06/content_339813.htm?div=-1#1",
+            "source_ref": "",
             "statement": "2025年第四季度营收17.19亿元、环比下滑12.65%，扣非净利润环比下滑7.71%，主因《杖剑传说（大陆版）》流水下降"
           }
         ],
@@ -5280,7 +5280,7 @@
           },
           {
             "source_context": "http://m.epaper.zqrb.cn/html/2025-03/28/content_1131323.htm",
-            "source_ref": "http://m.epaper.zqrb.cn/html/2025-03/28/content_1131323.htm",
+            "source_ref": "",
             "statement": "中审亚太会计师事务所对2024年度财务报告出具审计意见，公司正常分红(10派1.22元)，未发现审计保留意见。"
           }
         ],
@@ -5315,7 +5315,7 @@
         "claims": [
           {
             "source_context": "http://www.szse.cn/www/aboutus/trends/news/t20260331_619772.html（深交所新闻，2026-03-31",
-            "source_ref": "http://www.szse.cn/www/aboutus/trends/news/t20260331_619772.html",
+            "source_ref": "",
             "statement": "2024年度营收28.64亿元，净利润7.57亿元；公司主营钼相关产品生产加工销售，于2026年3月31日登陆深交所主板"
           },
           {
@@ -5325,7 +5325,7 @@
           },
           {
             "source_context": "http://bochk.etnet.com.hk/content/bochkweb/asharecontent/sc/ashare_quote_ci_pl.php?code=001257（审计意见列示，2023-2025年报",
-            "source_ref": "http://bochk.etnet.com.hk/content/bochkweb/asharecontent/sc/ashare_quote_ci_pl.php?code=001257",
+            "source_ref": "",
             "statement": "2023-2025年度审计意见均为标准无保留意见"
           }
         ],
@@ -5453,7 +5453,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=002079&id=10872243",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=002079&id=10872243",
+            "source_ref": "",
             "statement": "2024年工业板块收入5,596,441,032.32元同比+37.65%，其中新能源材料收入4,608,792,637.95元同比+50.42%，半导体收入987,648,394.37元"
           },
           {
@@ -5503,7 +5503,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_BalanceSheet/stockid/002462/ctrl/2024/displaytype/4.phtml",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_BalanceSheet/stockid/002462/ctrl/2024/displaytype/4.phtml",
+            "source_ref": "",
             "statement": "公司应收账款约68.78亿元(占总资产比重高)，医药流通业务垫资特征明显，存在回收与减值风险。"
           }
         ],
@@ -5550,7 +5550,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=002513&id=11055889",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=002513&id=11055889",
+            "source_ref": "",
             "statement": "2024年财务报表经公证天业审计出具标准无保留意见"
           }
         ],
@@ -5959,7 +5959,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250422004454.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250422004454.html",
+            "source_ref": "",
             "statement": "2024年度财务报告经中汇会计师事务所审计,出具标准无保留意见"
           }
         ],
@@ -5996,7 +5996,7 @@
         "claims": [
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202505/t20250514_2184727.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202505/t20250514_2184727.shtml",
+            "source_ref": "",
             "statement": "致远新能2024年归母净利润-1.92亿元,上年同期+5624万元,同比下降441.22%;扣非净利润-2.10亿元"
           },
           {
@@ -6091,7 +6091,7 @@
         "claims": [
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250421003121.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250421003121.html",
+            "source_ref": "",
             "statement": "2024年报披露营业收入2.91亿元（+10.24%），归母净利润-6934.08万元，同比减亏42.13%，仍为亏损"
           },
           {
@@ -6136,12 +6136,12 @@
           },
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202506/t20250611_2323970.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202506/t20250611_2323970.shtml",
+            "source_ref": "",
             "statement": "2024年营业收入16.87亿元,同比下降2.72%;经营活动现金流量净额-9009.48万元,上年同期+1.26亿元"
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_AchievementNotice/stockid/301051.phtml",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/go.php/vFD_AchievementNotice/stockid/301051.phtml",
+            "source_ref": "",
             "statement": "受光伏行业深度调整、客户合力泰重整回款逾期影响,2024年度计提存货及信用减值较多,业绩预告预亏2.9亿-3.55亿元"
           }
         ],
@@ -6621,7 +6621,7 @@
           },
           {
             "source_context": "http://m.epaper.zqrb.cn/html/2025-01/22/content_1118056.htm",
-            "source_ref": "http://m.epaper.zqrb.cn/html/2025-01/22/content_1118056.htm",
+            "source_ref": "",
             "statement": "2024年净利润为负且扣除与主营业务无关收入后的营业收入低于3亿元，年报披露后股票可能被实施退市风险警示（*ST）"
           },
           {
@@ -6933,12 +6933,12 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-28/601111_20250328_3IM2.pdf",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-28/601111_20250328_3IM2.pdf",
+            "source_ref": "",
             "statement": "中国国航2024年年度报告于2025年3月28日在上交所披露，德勤华永出具标准无保留意见审计报告。"
           },
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-28/601111_20250328_3IM2.pdf",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-28/601111_20250328_3IM2.pdf",
+            "source_ref": "",
             "statement": "2024年营业收入1,666.99亿元（同比+18.14%），归母净利润-2.37亿元（减亏77.32%），扣非归母净利-25.40亿元，仍处亏损。"
           },
           {
@@ -6980,7 +6980,7 @@
         "claims": [
           {
             "source_context": "http://app.cnstock.com/zzb/zgzqb/html/2026-03/31/nw.D110000zgzqb_20260331_1-B075.htm",
-            "source_ref": "http://app.cnstock.com/zzb/zgzqb/html/2026-03/31/nw.D110000zgzqb_20260331_1-B075.htm",
+            "source_ref": "",
             "statement": "浙江振石新材料2026年1月完成IPO上市（601112），2026年3月31日披露2025年年度报告，中汇会计师事务所出具标准无保留意见。"
           },
           {
@@ -7037,7 +7037,7 @@
           },
           {
             "source_context": "http://finance1.ce.cn/bank12/scroll/202503/28/t20250328_39333768.shtml（经济日报·中国经济网转澎湃新闻，2025-03-28",
-            "source_ref": "http://finance1.ce.cn/bank12/scroll/202503/28/t20250328_39333768.shtml",
+            "source_ref": "",
             "statement": "2024年净息差1.82%（-11bp），利息净收入1481.07亿元（+1.09%），手续费及佣金净收入240.96亿元（-13.18%）"
           },
           {
@@ -7080,12 +7080,12 @@
         "claims": [
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-04-22/1223190044.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-04-22/1223190044.PDF",
+            "source_ref": "",
             "statement": "上海电影2024年度实现营收6.90亿元（-13.19%），归母净利润9,004.71万元（-29.08%），扣非归母净利1,736.07万元（-72.32%）。"
           },
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-04-22/1223190044.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-04-22/1223190044.PDF",
+            "source_ref": "",
             "statement": "因前三季度已分红4,302.72万元（占归母净利47.78%），2024年度拟不进行利润分配、不转增股本。"
           },
           {
@@ -7390,7 +7390,7 @@
         "claims": [
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603321&id=11028998",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603321&id=11028998",
+            "source_ref": "",
             "statement": "2024年营业收入8.12亿元同比下降15.03%，归母净利润1.34亿元同比+64.26%，扣非归母净利润5481万元同比-19.56%"
           },
           {
@@ -7430,7 +7430,7 @@
         "claims": [
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-04-24/1223241090.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-04-24/1223241090.PDF",
+            "source_ref": "",
             "statement": "中汇会计师事务所（特殊普通合伙）为盛剑科技2024年度财务报告出具标准无保留意见的审计报告"
           },
           {
@@ -7469,7 +7469,7 @@
         "claims": [
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/822586920276/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/822586920276/index.phtml",
+            "source_ref": "",
             "statement": "陕西旅游2024年营业收入12.63亿元(+16.03%)、归母净利润5.12亿元(+19.72%)，华山西峰索道收入3.9亿元、乘索率104%"
           }
         ],
@@ -7642,7 +7642,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250623000901.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250623000901.html",
+            "source_ref": "",
             "statement": "上交所对公司2024年年报发出信息披露监管问询,会计师就收入与价格波动、资产减值等作出回复;针对收入现金流比偏低的质疑,公司回应营业收入真实、准确、完整"
           }
         ],
@@ -7730,7 +7730,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250419004425.html（天健会计师事务所关于2024年度财务报表发表非标准审计意见的专项说明，2025-04-19",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250419004425.html",
+            "source_ref": "",
             "statement": "天健会计师事务所对晶华微2024年度财务报表出具带强调事项段的无保留意见审计报告，强调事项为2024年11月15日公司收到证监会《立案告知书》，因涉嫌信息披露违法违规被立案调查。"
           }
         ],
@@ -7860,7 +7860,7 @@
         "claims": [
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250326001692.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250326001692.html",
+            "source_ref": "",
             "statement": "2024年归母净利润-3.79亿元（上年-14.83亿元），扣非净利润-4.41亿元，营业收入8.46亿元"
           },
           {
@@ -7916,7 +7916,7 @@
           },
           {
             "source_context": "http://paper.cnstock.com/html/2025-01/17/content_2019148.htm",
-            "source_ref": "http://paper.cnstock.com/html/2025-01/17/content_2019148.htm",
+            "source_ref": "",
             "statement": "2024年为公司实现产品销售收入的第一个完整会计年度，产品销售收入3.60亿元"
           }
         ],
@@ -7963,7 +7963,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/AN2025022700033772.shtml",
-            "source_ref": "http://stock.stockstar.com/AN2025022700033772.shtml",
+            "source_ref": "",
             "statement": "2024年度业绩快报：加权平均净资产收益率-14.86%，归母所有者权益6.52亿元（同比-12.53%）"
           }
         ],
@@ -8082,7 +8082,7 @@
         "claims": [
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/26/content_1141969.htm（2024年年度报告摘要，证券日报，2025-04-26",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/26/content_1141969.htm",
+            "source_ref": "",
             "statement": "超卓航科2024年营业收入4.04亿元(+49.38%)，归母净利润1298.60万元扭亏为盈，扣非净利润933.21万元(-51.65%)，上会会计师事务所出具标准无保留意见审计报告。"
           },
           {
@@ -8174,7 +8174,7 @@
           },
           {
             "source_context": "http://finance1.ce.cn/stock/gsgdbd/202503/12/t20250312_39317491.shtml",
-            "source_ref": "http://finance1.ce.cn/stock/gsgdbd/202503/12/t20250312_39317491.shtml",
+            "source_ref": "",
             "statement": "2025年3月公司两名高管披露减持计划，2024年度亏损1.57亿元"
           }
         ],
@@ -8291,12 +8291,12 @@
         "claims": [
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250329002013.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250329002013.html",
+            "source_ref": "",
             "statement": "和辉光电2024年年度报告由立信会计师事务所出具标准无保留意见审计报告"
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250329002020.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250329002020.html",
+            "source_ref": "",
             "statement": "2024年度审计报告（信会师报字[2025]第ZA10203号）为无保留意见，营业收入扣除情况表鉴证无保留"
           }
         ],
@@ -8341,7 +8341,7 @@
           },
           {
             "source_context": "http://finance1.ce.cn/stock/gsgdbd/202505/t20250507_2114049.shtml",
-            "source_ref": "http://finance1.ce.cn/stock/gsgdbd/202505/t20250507_2114049.shtml",
+            "source_ref": "",
             "statement": "2024年经营活动现金流量净额-5998.89万元,同比下降428.78%"
           }
         ],
@@ -8430,7 +8430,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20260318000400.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20260318000400.html",
+            "source_ref": "",
             "statement": "2025年营业收入19.72亿元（+53.46%），归母净利润5521.17万元（+1.26%），盈利改善有限"
           }
         ],
@@ -8467,7 +8467,7 @@
         "claims": [
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202504/t20250415_2021874.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202504/t20250415_2021874.shtml",
+            "source_ref": "",
             "statement": "宏微科技2024年营业收入13.31亿元，同比下降11.52%，归母净利润-1446.73万元（上年盈利1.16亿元，由盈转亏），扣非净利润-3399.02万元，为上市后首次年度净利亏损"
           }
         ],
@@ -8630,12 +8630,12 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-29/600000_20250329_E752.pdf#10#1（上交所2024年年度报告摘要，2025-03-29",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-29/600000_20250329_E752.pdf#10#1",
+            "source_ref": "",
             "statement": "浦发银行2024年度归母净利润452.57亿元，同比增长23.31%；2024年度拟每10股派4.1元，现金分红比例30.16%"
           },
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-29/600000_20250329_E752.pdf#10#1（上交所2024年年度报告摘要",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-29/600000_20250329_E752.pdf#10#1",
+            "source_ref": "",
             "statement": "浦发银行2024年度财务报表经毕马威华振会计师事务所审计并出具标准无保留意见，不触及风险警示情形"
           },
           {
@@ -8723,7 +8723,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=10717388&stockid=600478",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=10717388&stockid=600478",
+            "source_ref": "",
             "statement": "预计2024年归母净利润6000万-8000万元实现扭亏为盈，但扣非净利润仅400万-600万元，主要因孙公司技术使用费及政府补助增加。"
           }
         ],
@@ -8797,7 +8797,7 @@
         "claims": [
           {
             "source_context": "http://www.szse.cn/aboutus/trends/news/t20260410_619898.html（深交所，2026-04-10",
-            "source_ref": "http://www.szse.cn/aboutus/trends/news/t20260410_619898.html",
+            "source_ref": "",
             "statement": "三瑞智能2024年度营业收入8.31亿元、净利润3.33亿元（归母净利同比+92.96%），2025年度营业收入10.75亿元、净利润4.21亿元；公司于2026年4月10日在深交所创业板上市，主营无人机电动动力系统与机器人动力系统。"
           }
         ],
@@ -8874,7 +8874,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830184802063/index.phtml（中国银河证券研报，2026-04-22）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830184802063/index.phtml",
+            "source_ref": "",
             "statement": "子公司国光农资、国光园林需缴纳前期享受的西部大开发企业所得税优惠税款及滞纳金约6000万元，计入2025年当期损益；2025年起所得税率由15%调整为25%。"
           },
           {
@@ -8937,7 +8937,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/831920507794/index.phtml（东方证券研报2026-05-12）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/831920507794/index.phtml",
+            "source_ref": "",
             "statement": "恒宁子公司2025年全年亏损约0.94亿元（上年亏损1.63亿元），下半年亏损收窄至0.29亿元；2026Q1归母净利润同比下滑28.22%至0.75亿元"
           }
         ],
@@ -8984,7 +8984,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/go.php/vFD_FinancialGuideLine/stockid/301683/ctrl/2024/displaytype/4.phtml",
-            "source_ref": "http://money.finance.sina.com.cn/corp/go.php/vFD_FinancialGuideLine/stockid/301683/ctrl/2024/displaytype/4.phtml",
+            "source_ref": "",
             "statement": "2024年度加权净资产收益率15.44%、净利润同比+38.01%、营业收入同比+13.87%"
           },
           {
@@ -9122,7 +9122,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/26/content_1141473.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/26/content_1141473.htm",
+            "source_ref": "",
             "statement": "2024年AC发泡剂、烧碱、氯化亚砜等产品销售价格较上年均有小幅下跌，氯碱市场供需矛盾依然明显"
           }
         ],
@@ -9211,7 +9211,7 @@
         "claims": [
           {
             "source_context": "http://m.epaper.zqrb.cn/html/2025-04/22/content_1138785.htm",
-            "source_ref": "http://m.epaper.zqrb.cn/html/2025-04/22/content_1138785.htm",
+            "source_ref": "",
             "statement": "达实智能2024年年度报告摘要显示非标准审计意见提示不适用；2024年归母净利润2588.12万元较上年同期1.15亿元下降77.45%"
           },
           {
@@ -9339,7 +9339,7 @@
         "claims": [
           {
             "source_context": "http://stockfinance.sina.cn/stock/go.php/paper/reportid/831204465982/index.phtml（国海证券2025年报及2026一季报点评）",
-            "source_ref": "http://stockfinance.sina.cn/stock/go.php/paper/reportid/831204465982/index.phtml",
+            "source_ref": "",
             "statement": "山西焦煤2025年营业收入371.55亿元、同比下降17.96%，归母净利润12.01亿元、同比下降61.37%，扣非归母净利润12.99亿元、同比下降56.92%；2026年一季度归母净利润8.08亿元、同比+18.62%"
           },
           {
@@ -9354,7 +9354,7 @@
           },
           {
             "source_context": "http://stockfinance.sina.cn/stock/go.php/paper/reportid/831204465982/index.phtml（国海证券研报）",
-            "source_ref": "http://stockfinance.sina.cn/stock/go.php/paper/reportid/831204465982/index.phtml",
+            "source_ref": "",
             "statement": "2026Q1京唐港主焦煤均价1681元/吨、同比+17%，焦煤价格回暖助力一季度业绩显著提升"
           }
         ],
@@ -9466,7 +9466,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/809457298884/index.phtml（长江证券2025半年报点评）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/809457298884/index.phtml",
+            "source_ref": "",
             "statement": "公司是国内设计、总承包硫磺回收装置最多的公司，截至2025年6月累计完成245套装置、总规模1316.6万吨/年"
           }
         ],
@@ -9512,12 +9512,12 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/833941446436/index.phtml（光大证券26Q1点评，2026-06-04）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/833941446436/index.phtml",
+            "source_ref": "",
             "statement": "2025年公司实现经营现金流8.8亿元、自由现金流3.5亿元，经营现金流创2018年以来最好水平；2025年碳纤维产量388吨同比增长26.82%"
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/833941446436/index.phtml（光大证券26Q1点评，2026-06-04）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/833941446436/index.phtml",
+            "source_ref": "",
             "statement": "2025年5月公司宣布投资14亿元建设高性能碳纤维四期项目，形成2000吨/年产能，建设期3年、第4年起逐步投产"
           },
           {
@@ -9576,7 +9576,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830769522874/index.phtml（国联民生证券研报，2026-04-29）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/830769522874/index.phtml",
+            "source_ref": "",
             "statement": "2026Q1公司营业收入72.63亿元（+4.24%），归母净利润7.19亿元（+9.40%），商品煤综合售价550.69元/吨（+1.45%），量价齐升"
           }
         ],
@@ -9739,7 +9739,7 @@
         "claims": [
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/798217980307/index.phtml",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/798217980307/index.phtml",
+            "source_ref": "",
             "statement": "2024年报营收7.83亿(+16.54%)，归母净利2.69亿(+22.39%)"
           },
           {
@@ -9749,7 +9749,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/798090180526/index.phtml",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/798090180526/index.phtml",
+            "source_ref": "",
             "statement": "2024年末合同负债10.80亿元(+12.70%)，全年分红率99.5%"
           }
         ],
@@ -9923,7 +9923,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/798746559220/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/798746559220/index.phtml",
+            "source_ref": "",
             "statement": "2024年累计分红9.43亿元，分红率99%，对应股息率约4.2%-4.7%"
           }
         ],
@@ -10006,7 +10006,7 @@
         "claims": [
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-03-21/1222855472.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-03-21/1222855472.PDF",
+            "source_ref": "",
             "statement": "2024年营业收入21.34亿元,同比下降14.08%;归母净利润5.16亿元,同比下降11.90%"
           },
           {
@@ -10016,7 +10016,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/801855093532/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/801855093532/index.phtml",
+            "source_ref": "",
             "statement": "核心产品伊可新市占率60%以上,适用年龄由0-6岁扩展至0-18岁"
           }
         ],
@@ -10063,7 +10063,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20250328/c667077433.shtml（2024年报报道",
-            "source_ref": "http://stock.10jqka.com.cn/20250328/c667077433.shtml",
+            "source_ref": "",
             "statement": "广东宏大2025年2月完成对雪峰科技21%股权收购（耗资22.06亿元）成为其控股股东，并2025年1月收购秘鲁EXSUR公司51%股权"
           }
         ],
@@ -10109,7 +10109,7 @@
           },
           {
             "source_context": "http://www.zqrb.cn/gscy/gongsi/2025-05-28/A1748411420681.html",
-            "source_ref": "http://www.zqrb.cn/gscy/gongsi/2025-05-28/A1748411420681.html",
+            "source_ref": "",
             "statement": "截至2025年一季度末在手订单16.81亿元,多项债务重组方案落地"
           }
         ],
@@ -10156,7 +10156,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20260318000395.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20260318000395.html",
+            "source_ref": "",
             "statement": "2025年归母净利润6661.14万元,同比增长19.02%,盈利回升"
           }
         ],
@@ -10203,7 +10203,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/25/content_1140482.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/25/content_1140482.htm",
+            "source_ref": "",
             "statement": "2024年度利润分配预案为不派发现金红利、不送红股、不以公积金转增股本"
           },
           {
@@ -10255,7 +10255,7 @@
           },
           {
             "source_context": "http://m.hibor.net/wap_detail.aspx?id=9674fa6e7511635f1bcb62d00a8a84ff（光大证券跟踪报告，2026-04-27）",
-            "source_ref": "http://m.hibor.net/wap_detail.aspx?id=9674fa6e7511635f1bcb62d00a8a84ff",
+            "source_ref": "",
             "statement": "公司己内酰胺产能70万吨(利用率102.29%)、尼龙6产能70万吨(利用率97.36%)，中国中化直接及间接持股37.30%，拟投72亿建设大型煤气化炉原料自供项目"
           }
         ],
@@ -10307,7 +10307,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260609/c677317570.shtml",
-            "source_ref": "http://stock.10jqka.com.cn/20260609/c677317570.shtml",
+            "source_ref": "",
             "statement": "开源证券预测中通客车 2026-2028 年归母净利润分别为 5.50/7.55/9.41 亿元，对应 PE 10.6/7.7/6.2 倍"
           },
           {
@@ -10359,7 +10359,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/RB2026042400026770.shtml（证券之星，2026-04-24）",
-            "source_ref": "http://stock.stockstar.com/RB2026042400026770.shtml",
+            "source_ref": "",
             "statement": "2025年经营活动现金流净额3.85亿元（+31.73%），加权平均ROE 10.91%，资产负债率18.02%，货币资金13.55亿元占总资产51.47%，总资产26.32亿元、归母净资产21.58亿元"
           },
           {
@@ -10411,7 +10411,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-03/21/content_1129318.htm?div=-1",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-03/21/content_1129318.htm?div=-1",
+            "source_ref": "",
             "statement": "截至2024年末母公司未分配利润-1,871,391,164.78元为负，公司拟定2024年度不派发现金红利、不送红股、不转增"
           },
           {
@@ -10604,7 +10604,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/21/content_1138048.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/21/content_1138048.htm",
+            "source_ref": "",
             "statement": "2024年营业收入1,880,165,215.37元同比+14.15%，归母净利润38,562,941.99元同比-40.02%"
           },
           {
@@ -10614,7 +10614,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/21/content_1138048.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/21/content_1138048.htm",
+            "source_ref": "",
             "statement": "2024年研发投入21,357.36万元，费用扩张但利润未同步增长"
           }
         ],
@@ -10707,7 +10707,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/AN2026030500038129.shtml",
-            "source_ref": "http://stock.stockstar.com/AN2026030500038129.shtml",
+            "source_ref": "",
             "statement": "年报摘要显示非标准审计意见提示不适用；审计委员会报告确认北京德皓国际对财务报告及内部控制发表标准无保留意见"
           }
         ],
@@ -10743,7 +10743,7 @@
         "claims": [
           {
             "source_context": "http://disc.static.szse.cn/disc/disk03/finalpage/2025-04-08/cdd55f4c-b636-4256-a02b-f3fb38731304.PDF",
-            "source_ref": "http://disc.static.szse.cn/disc/disk03/finalpage/2025-04-08/cdd55f4c-b636-4256-a02b-f3fb38731304.PDF",
+            "source_ref": "",
             "statement": "朗科科技2024年年度报告于2025年4月9日在巨潮资讯网披露，鹏盛会计师事务所出具标准无保留审计意见。"
           },
           {
@@ -10789,17 +10789,17 @@
         "claims": [
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-04-26/1223326227.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-04-26/1223326227.PDF",
+            "source_ref": "",
             "statement": "航宇微2024年年度报告于2025年4月26日在巨潮资讯网披露。"
           },
           {
             "source_context": "http://static.cninfo.com.cn/finalpage/2025-04-26/1223326227.PDF",
-            "source_ref": "http://static.cninfo.com.cn/finalpage/2025-04-26/1223326227.PDF",
+            "source_ref": "",
             "statement": "2024年度归属于上市公司股东的净利润为负，主因审慎评估应收账款回款风险计提坏账准备，并对存货、长期股权投资、固定资产、无形资产等进行减值。"
           },
           {
             "source_context": "http://m.epaper.zqrb.cn/html/2025-04/26/content_1141935.htm?div=-1#1",
-            "source_ref": "http://m.epaper.zqrb.cn/html/2025-04/26/content_1141935.htm?div=-1#1",
+            "source_ref": "",
             "statement": "审计意见为标准无保留意见，但本年度会计师事务所变更为中兴财光华会计师事务所（特殊普通合伙）。"
           }
         ],
@@ -10840,12 +10840,12 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300226&id=10845713",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300226&id=10845713",
+            "source_ref": "",
             "statement": "2024年营业收入813,354.60万元同比下降5.77%，归母净利润16,135.15万元同比下降32.87%。"
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300226&id=10845713",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300226&id=10845713",
+            "source_ref": "",
             "statement": "2024年经营活动现金流量净额188,587.12万元，同比增长1577.47%，与营收/利润走势背离，具营运资本释放特征。"
           }
         ],
@@ -10886,7 +10886,7 @@
           },
           {
             "source_context": "http://www.shaoxing.com.cn/p/3235611.html",
-            "source_ref": "http://www.shaoxing.com.cn/p/3235611.html",
+            "source_ref": "",
             "statement": "2024年8月29日晚民生银行公告拟解聘普华永道中天及其香港所（基于审慎性原则），改由毕马威执行2024年度审计，属审计师变更事项。"
           }
         ],
@@ -10937,7 +10937,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260420/c676133054.shtml（2025年年报报道，2026-04-20）",
-            "source_ref": "http://stock.10jqka.com.cn/20260420/c676133054.shtml",
+            "source_ref": "",
             "statement": "2025年12月公司完成同一控制下美特新材41%股权收购并持股61%成为控股股东，新增钴酸锂业务，2025年新能源（钴酸锂）营收8.32亿元同比+42.39%"
           }
         ],
@@ -10996,12 +10996,12 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830612810412/index.phtml（国海证券2025年报及2026一季报点评，2026-04-27）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830612810412/index.phtml",
+            "source_ref": "",
             "statement": "2026Q2（截至2026-04-24）PVC均价4935.58元/吨，同比+7.86%、环比+4.90%，价差同比+62.22%，券商据此看好Q2业绩"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830612810412/index.phtml（国海证券点评）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830612810412/index.phtml",
+            "source_ref": "",
             "statement": "2025Q4单季归母净利润5.19亿元，同比-7.94%、环比-40.87%；2026Q1聚氯乙烯销售均价4275元/吨同比-9.34%、硅铁4792元/吨同比-11.47%"
           }
         ],
@@ -11045,7 +11045,7 @@
         "claims": [
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202604/t20260423_2925132.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202604/t20260423_2925132.shtml",
+            "source_ref": "",
             "statement": "老百姓 2025 年实现营业收入 222.37 亿元（-0.54%），归母净利润 3.82 亿元（-26.44%），主因计提商誉及土地减值损失 2.4 亿元"
           },
           {
@@ -11060,7 +11060,7 @@
           },
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202604/t20260423_2925132.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202604/t20260423_2925132.shtml",
+            "source_ref": "",
             "statement": "媒体走访发现包括老百姓在内的多家连锁药店存在违规套取医保基金行为，湖南等地 4 家涉事药店已被中止医保服务协议"
           }
         ],
@@ -11107,7 +11107,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603375&id=11230513",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603375&id=11230513",
+            "source_ref": "",
             "statement": "2024年电子雷管产量首次下降5.02%，公司市场占有率由2022年40.41%降至2024年21.98%，电子控制模块销量同比下降18.37%"
           }
         ],
@@ -11232,12 +11232,12 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-31/603155_20250331_8RTY.pdf",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-03-31/603155_20250331_8RTY.pdf",
+            "source_ref": "",
             "statement": "新亚强2024年报：营收72053.97万元(+6.71%)、归母净利润11436.06万元(-7.36%)、扣非9098.11万元(+3.85%)、加权ROE 5.09%"
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250330000218.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250330000218.html",
+            "source_ref": "",
             "statement": "Q4单季扣非净利润1232万元，较上年同期亏损1678万元扭亏，边际改善"
           }
         ],
@@ -11273,12 +11273,12 @@
         "claims": [
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202601/t20260128_2735035.shtml（中国经济网，2026-01-28",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202601/t20260128_2735035.shtml",
+            "source_ref": "",
             "statement": "恒运昌2026年1月28日于科创板上市，发行价92.18元，首日收盘371.30元(+302.80%)，总市值251.38亿元"
           },
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202601/t20260128_2735035.shtml#2（招股说明书财务数据，报告期2022-2025H1",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202601/t20260128_2735035.shtml#2",
+            "source_ref": "",
             "statement": "招股书：2022/2023/2024年营收1.58亿/3.25亿/5.41亿元，扣非归母净利1961.17万/6853.38万/1.29亿元；2025年1-6月营收3.04亿元、归母净利6934.76万元"
           },
           {
@@ -11383,7 +11383,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11090518&stockid=688553",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11090518&stockid=688553",
+            "source_ref": "",
             "statement": "截至2024年12月31日公司总资产516,562.68万元（+10.24%）；扣除非经常性损益归属上市公司股东净利润约9,211.71万元（+39.55%）。"
           }
         ],
@@ -11435,7 +11435,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/25/content_1140774.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/25/content_1140774.htm",
+            "source_ref": "",
             "statement": "公司未触及《上海证券交易所科创板股票上市规则（2024年4月修订）》第12.9.1条第一款第（八）项规定的可能被实施其他风险警示的情形。"
           }
         ],
@@ -11514,7 +11514,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/notice/IG2025022400032016.shtml",
-            "source_ref": "http://stock.stockstar.com/notice/IG2025022400032016.shtml",
+            "source_ref": "",
             "statement": "2024年扣非归母净利润1.30亿元，同比增长仅1.76%，显著低于营收增速"
           },
           {
@@ -11685,7 +11685,7 @@
         "claims": [
           {
             "source_context": "http://www.zqrb.cn/gscy/gongsi/2025-05-14/A1747215761748.html",
-            "source_ref": "http://www.zqrb.cn/gscy/gongsi/2025-05-14/A1747215761748.html",
+            "source_ref": "",
             "statement": "2024年营收-14.08%、归母净利-11.90%,连续五年正增长后首次下滑"
           },
           {
@@ -11695,7 +11695,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/JC2025033000003961.shtml",
-            "source_ref": "http://stock.stockstar.com/JC2025033000003961.shtml",
+            "source_ref": "",
             "statement": "2025Q1营收6.16亿(+7.78%)、归母净利1.82亿(+8.13%),恢复增长"
           }
         ],
@@ -11742,7 +11742,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20250611/c668826293.shtml",
-            "source_ref": "http://stock.10jqka.com.cn/20250611/c668826293.shtml",
+            "source_ref": "",
             "statement": "2024年度利润分配为每10股派0.5元(含税)"
           }
         ],
@@ -11789,7 +11789,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20250416006326.html",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20250416006326.html",
+            "source_ref": "",
             "statement": "2024年扣非归母净利润-1.96亿元,主营盈利尚未恢复"
           }
         ],
@@ -11831,7 +11831,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/23/content_1139374.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/23/content_1139374.htm",
+            "source_ref": "",
             "statement": "2024年确认股权激励费用5561.21万元,剔除后归母净利11607.28万元"
           },
           {
@@ -11972,7 +11972,7 @@
           },
           {
             "source_context": "http://money.finance.sina.com.cn/corp/go.php/vFD_BalanceSheet/stockid/603293/ctrl/part/displaytype/4.phtml",
-            "source_ref": "http://money.finance.sina.com.cn/corp/go.php/vFD_BalanceSheet/stockid/603293/ctrl/part/displaytype/4.phtml",
+            "source_ref": "",
             "statement": "2024年末应收账款约11.02亿元、存货6.58亿元，合并资产负债率62.53%，应收账款无法收回风险被招股书列为风险因素"
           }
         ],
@@ -12009,7 +12009,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-04-19/688213_20250419_37Q1.pdf（2024年年度报告摘要，2025-04-19",
-            "source_ref": "http://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-04-19/688213_20250419_37Q1.pdf",
+            "source_ref": "",
             "statement": "思特威2024年营业收入59.68亿元(+108.87%)，归母净利润3.93亿元(+2662.76%)，安永华明出具标准无保留意见审计报告；实际控制人徐辰通过特别表决权控制48.16%表决权。"
           },
           {
@@ -12103,7 +12103,7 @@
           },
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202602/t20260203_2749287.shtml",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202602/t20260203_2749287.shtml",
+            "source_ref": "",
             "statement": "四川证监局现场检查发现：个别委外加工物资错计收入、部分出口业务次年跨期确认收入、存货跌价未考虑合理税费等，导致2024年年报收入错报1,245万元（占比0.15%）、利润错报100万元（占比0.25%），公司被责令改正；实控人安治富2025年共套现4.88亿元"
           }
         ],
@@ -12274,7 +12274,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/29/content_1143880.htm#2",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/29/content_1143880.htm#2",
+            "source_ref": "",
             "statement": "业绩下滑主要因功能性硅烷产品市场价格回落，产销量同比增长13.01%/12.19%，呈量增价跌特征"
           }
         ],
@@ -12310,7 +12310,7 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/AN2026042500023732.shtml（2025 年年度报告摘要）",
-            "source_ref": "http://stock.stockstar.com/AN2026042500023732.shtml",
+            "source_ref": "",
             "statement": "2025 年中通客车营业收入 73.29 亿元，同比增长 27.82%；归母净利润 3.60 亿元，同比增长 44.18%；扣非净利润 3.31 亿元，同比增长 54.82%"
           },
           {
@@ -12372,7 +12372,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/829670175762/index.phtml（中泰证券2025年报点评，2026-04-16）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/829670175762/index.phtml",
+            "source_ref": "",
             "statement": "2025年经营活动现金流净额11.78亿元同比+2.70%，全年累计现金分红约7.07亿元占归母净利润95.49%，资产负债率23.06%"
           },
           {
@@ -12424,7 +12424,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/830347587315/index.phtml（国盛证券研报，2026-04-24）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/830347587315/index.phtml",
+            "source_ref": "",
             "statement": "2026年一季度营业收入13.30亿元(+9.88%)，归母净利润0.67亿元(-39.84%)，主要受汇兑损失及毛利率下滑影响。"
           },
           {
@@ -12434,7 +12434,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/notice/SN2026042400007056.shtml（2025年年度报告摘要，2026-04-24）",
-            "source_ref": "http://stock.stockstar.com/notice/SN2026042400007056.shtml",
+            "source_ref": "",
             "statement": "公司拟每10股派发现金红利2.0元（含税），预计派发现金总额约1.79亿元。"
           }
         ],
@@ -12639,7 +12639,7 @@
           },
           {
             "source_context": "http://ashares.etnet.com.hk/www/sc/ashares/quote_ci_bs.php?code=688808",
-            "source_ref": "http://ashares.etnet.com.hk/www/sc/ashares/quote_ci_bs.php?code=688808",
+            "source_ref": "",
             "statement": "应收账款从2023年1.19亿增至2024年2.31亿、存货从1.71亿增至3.34亿,2025年继续翻倍"
           }
         ],
@@ -12781,7 +12781,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260326/c675555342.shtml（同花顺财经，2026-03-26）；https://paper.cnstock.com/html/2026-03/26/content_2192073.htm",
-            "source_ref": "http://stock.10jqka.com.cn/20260326/c675555342.shtml",
+            "source_ref": "",
             "statement": "公司拟每10股派现1.60元（含税），合计派发7650.90万元，占2025年度归母净利润的42.01%；2025年水泥销量1066.90万吨同比+10.27%，骨料销量646.98万吨同比+40.30%"
           }
         ],
@@ -12828,7 +12828,7 @@
           },
           {
             "source_context": "http://m.dzzq.com.cn/bond/53255116.html",
-            "source_ref": "http://m.dzzq.com.cn/bond/53255116.html",
+            "source_ref": "",
             "statement": "2026年一季度营收6.96亿元（+2.04%），归母净利润3018.70万元（+24.08%），扣非净利润2630.38万元（+20.37%），业绩重回正增长轨道"
           },
           {
@@ -12838,7 +12838,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/832950695269/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/832950695269/index.phtml",
+            "source_ref": "",
             "statement": "公司营收从2021年的45.22亿元下降至2024年的35.55亿元，归母净利润从5.33亿元下降至0.96亿元，2025年出现业绩拐点"
           }
         ],
@@ -12880,22 +12880,22 @@
         "claims": [
           {
             "source_context": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm",
+            "source_ref": "",
             "statement": "2025年营收1581.79亿元同比-14.10%，归母净利167.65亿元同比-25.02%，扣非归母净利153.45亿元同比-27.49%"
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/25/content_1236076.htm",
+            "source_ref": "",
             "statement": "2025年自产煤售价459.27元/吨同比-18.18%，原选煤单位完全成本288.58元/吨同比-0.46%；2025年度现金分红合计91.89亿元，占可分配利润60%、占归母净利54.81%"
           },
           {
             "source_context": "http://zx.upchina.com/report/details/7000870774",
-            "source_ref": "http://zx.upchina.com/report/details/7000870774",
+            "source_ref": "",
             "statement": "2026Q1归母净利42.10亿元同比-12.38%，经营现金流净额96.8亿元同比+37%；2025年加权ROE 17.9%，分红率约55%"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830762750408/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830762750408/index.phtml",
+            "source_ref": "",
             "statement": "2025年发电量418亿千瓦时同比+11.25%，售电量393亿千瓦时同比+11.87%；截至2025年末在运火电装机10860MW、在建9320MW"
           }
         ],
@@ -12997,7 +12997,7 @@
         "claims": [
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-04/24/content_1139873.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-04/24/content_1139873.htm",
+            "source_ref": "",
             "statement": "岱勒新材2024年年度报告审计意见为标准无保留意见（天职国际会计师事务所）"
           },
           {
@@ -13050,7 +13050,7 @@
         "claims": [
           {
             "source_context": "http://disc.static.szse.cn/disc/disk03/finalpage/2025-04-17/1367b0ce-6b82-4a05-b496-e9c716b5e3f1.PDF",
-            "source_ref": "http://disc.static.szse.cn/disc/disk03/finalpage/2025-04-17/1367b0ce-6b82-4a05-b496-e9c716b5e3f1.PDF",
+            "source_ref": "",
             "statement": "东杰智能2024年年度报告于2025年4月18日在巨潮资讯网披露，天健会计师事务所出具标准无保留意见（本年度变更事务所）。"
           },
           {
@@ -13281,7 +13281,7 @@
           },
           {
             "source_context": "http://m.hibor.net/wap_detail11.aspx?id=60c16a79741a1446b8f46b405aae988a",
-            "source_ref": "http://m.hibor.net/wap_detail11.aspx?id=60c16a79741a1446b8f46b405aae988a",
+            "source_ref": "",
             "statement": "年报披露本年度会计师事务所由原机构变更为立信会计师事务所。"
           }
         ],
@@ -13323,12 +13323,12 @@
           },
           {
             "source_context": "http://stock.stockstar.com/AN2025071200000677.shtml",
-            "source_ref": "http://stock.stockstar.com/AN2025071200000677.shtml",
+            "source_ref": "",
             "statement": "2024年度实现营业收入24.74亿元（+26.42%），归母净利润-0.85亿元，由盈转亏；期末存货20.08亿元，计提跌价准备3.05亿元（+47.68%）。"
           },
           {
             "source_context": "http://stock.stockstar.com/AN2025071200000677.shtml",
-            "source_ref": "http://stock.stockstar.com/AN2025071200000677.shtml",
+            "source_ref": "",
             "statement": "公司2024年报收到上交所信息披露监管问询函，涉及收入波动、存货跌价及与诚优股份大额预付应收交易的核查；公司回复称价格公允、不存在未披露关联关系。"
           },
           {
@@ -13371,7 +13371,7 @@
         "claims": [
           {
             "source_context": "http://www.cninfo.com.cn/new/disclosure/detail?stockCode=688619&announcementId=1223221325&orgId=9900041860&announcementTime=2025-04-23",
-            "source_ref": "http://www.cninfo.com.cn/new/disclosure/detail?stockCode=688619&announcementId=1223221325&orgId=9900041860&announcementTime=2025-04-23",
+            "source_ref": "",
             "statement": "大华会计师事务所对罗普特2024年度财务报表出具标准无保留意见审计报告。"
           },
           {
@@ -13548,7 +13548,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830697180447/index.phtml（华泰证券研报，2026-04-28）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830697180447/index.phtml",
+            "source_ref": "",
             "statement": "2026年一季度实现营收9.1亿元（同比-7%）、归母净利润1.6亿元（同比-2%）；截至2026年4月24日，敌草隆/草甘膦/对硝基氯化苯价格较年初分别+50%/+45%/+217%"
           }
         ],
@@ -13641,7 +13641,7 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260724/c678414391.shtml",
-            "source_ref": "http://stock.10jqka.com.cn/20260724/c678414391.shtml",
+            "source_ref": "",
             "statement": "应收账款账面价值2023/2024/2025年末分别为33,973.53万/43,629.25万/60,325.22万元，占营收比例72.94%/105.75%/94.38%，客户以军工集团下属研究所为主"
           },
           {
@@ -13688,12 +13688,12 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830551380322/index.phtml（华安证券研报，2026-04-26）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/830551380322/index.phtml",
+            "source_ref": "",
             "statement": "据百川盈孚，2026 年一季度氯化亚砜市场均价 3045 元/吨，同比 +96.47%、环比 +49.23%；公司电池级氯化亚砜为 LiFSI 等下游核心供应商"
           },
           {
             "source_context": "http://m.zqrb.cn/gscy/gongsi/2026-04-11/A1775836896719.html（证券日报网）",
-            "source_ref": "http://m.zqrb.cn/gscy/gongsi/2026-04-11/A1775836896719.html",
+            "source_ref": "",
             "statement": "公司芳纶聚合单体年产能达 5.2 万吨，潍坊基地 2 万吨 2025 年 8 月投产；PEKK 首期 1000 吨/年装置已达预定可使用状态"
           }
         ],
@@ -13797,12 +13797,12 @@
           },
           {
             "source_context": "http://m.zqrb.cn/gscy/gongsi/2026-04-28/A1777308122121.html（证券日报网，2026-04-28）",
-            "source_ref": "http://m.zqrb.cn/gscy/gongsi/2026-04-28/A1777308122121.html",
+            "source_ref": "",
             "statement": "2025年全国水泥产量16.93亿吨、同比下降6.9%，创2010年以来新低；公司综合毛利率28.89%（+2.73pct），熟料毛利率30.42%（+8.45pct）"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/834859073312/index.phtml（天风证券研报，2026-06-15）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/834859073312/index.phtml",
+            "source_ref": "",
             "statement": "2025年公司股权投资收益9541.39万元，截至2025年末新经济股权投资额累计19.75亿元，连续5年正盈利、累计盈利5.3亿元；公司拟更名\"上峰材料\"并布局半导体封装基板业务"
           }
         ],
@@ -13907,12 +13907,12 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2026-04/22/content_1234097.htm（2025年年度报告摘要，公告编号2026-005）",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/22/content_1234097.htm",
+            "source_ref": "",
             "statement": "2025年度拟以剔除回购后总股本303,541,602股为基数每10股派发现金红利2元（含税）"
           },
           {
             "source_context": "http://m.zqrb.cn/gscy/gongsi/2026-04-22/A1776844930270.html（证券日报，2026-04-22）",
-            "source_ref": "http://m.zqrb.cn/gscy/gongsi/2026-04-22/A1776844930270.html",
+            "source_ref": "",
             "statement": "拟投资约4亿元建设年产1600万平方米功能性遮阳新材料项目，达产后预计年增营业收入1.84亿元、净利润4667万元，税后内部收益率18.85%，投资回收期7.24年"
           }
         ],
@@ -14063,12 +14063,12 @@
           },
           {
             "source_context": "http://m.caijing.com.cn/article/202604/411105#1",
-            "source_ref": "http://m.caijing.com.cn/article/202604/411105#1",
+            "source_ref": "",
             "statement": "2025年度拟实施4.53亿元分红，分红金额占净利润的48.04%；期末货币资金56.26亿元，占总资产比重近30%，资产负债率46.32%。"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/827570640615/index.phtml",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/827570640615/index.phtml",
+            "source_ref": "",
             "statement": "2025年弹簧扁钢收入20.42亿元，同比增长29.61%，毛利率17.67%、同比提升5.50个百分点；螺纹钢收入73.77亿元，同比下降12.16%，毛利率4.65%、同比提升3.39个百分点。"
           }
         ],
@@ -14119,7 +14119,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/RB2026042800055866.shtml（证券之星引2025年年度报告）",
-            "source_ref": "http://stock.stockstar.com/RB2026042800055866.shtml",
+            "source_ref": "",
             "statement": "2025年末公司轮胎库存量298.70万条，同比大幅增加95.10%；天然橡胶采购均价同比上涨8.24%，炭黑采购均价同比下降18.50%"
           },
           {
@@ -14129,7 +14129,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/RB2026042800055866.shtml（证券之星引2025年年度报告）",
-            "source_ref": "http://stock.stockstar.com/RB2026042800055866.shtml",
+            "source_ref": "",
             "statement": "2025年公司研发费用从2024年的1.54亿元增至4.65亿元，同比激增202.52%，研发费用率4.74%，主要投向新能源配套轮胎、高端耐磨轮胎领域"
           }
         ],
@@ -14183,7 +14183,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2025-07/19/content_1166576.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2025-07/19/content_1166576.htm",
+            "source_ref": "",
             "statement": "公司于2025年7月19日公告更正2024年年度报告及审计报告部分内容,并声明更正不影响报告期财务状况、经营成果和现金流"
           }
         ],
@@ -14222,7 +14222,7 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/RB2026042300062024.shtml",
-            "source_ref": "http://stock.stockstar.com/RB2026042300062024.shtml",
+            "source_ref": "",
             "statement": "江盐集团2025年营收22.61亿元（-15.73%），归母净利2.51亿元（-45.60%），扣非净利1.81亿元（-58.26%），经营现金流5.87亿元（+8.21%）"
           },
           {
@@ -15631,7 +15631,7 @@
           },
           {
             "source_context": "http://www.chaguwang.cn/report/600339/202509280011.html（光大证券研报2025-09-28）",
-            "source_ref": "http://www.chaguwang.cn/report/600339/202509280011.html",
+            "source_ref": "",
             "statement": "2025年公司签署伊拉克海水管道项目合同25.24亿美元（约180.32亿元）及阿联酋LNG输送管线项目5.13亿美元（约36.88亿元），合计约占2024年营收25%"
           }
         ],
@@ -15934,7 +15934,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600662",
-            "source_ref": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600662",
+            "source_ref": "",
             "statement": "本次评审无法核验外服控股(600662)官方定期报告，type6触发条件与反证均无法确认。"
           }
         ],
@@ -16327,7 +16327,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/notice/SN2026032700003435.shtml（2025年年度报告摘要）",
-            "source_ref": "http://stock.stockstar.com/notice/SN2026032700003435.shtml",
+            "source_ref": "",
             "statement": "公司2025年经营活动现金净流入33.51亿元（同比+5.34%），带息债务余额192.56亿元同比减少9.56亿元，财务费用同比-18.43%"
           }
         ],
@@ -16374,7 +16374,7 @@
           },
           {
             "source_context": "http://vipwt1.cfi.net.cn/p20260326004294.html（2025年年度报告摘要，2026-03-26）",
-            "source_ref": "http://vipwt1.cfi.net.cn/p20260326004294.html",
+            "source_ref": "",
             "statement": "万年青2025年非经常性损益合计1.97亿元，其中非流动性资产处置损益2.54亿元（万年厂异地搬迁及粉磨站退城进园补偿），是归母净利为正的主要原因"
           },
           {
@@ -16437,7 +16437,7 @@
           },
           {
             "source_context": "http://www.zqrb.cn/gscy/gongsi/2026-05-17/A1779011680124.html（证券日报，2026-05-17）",
-            "source_ref": "http://www.zqrb.cn/gscy/gongsi/2026-05-17/A1779011680124.html",
+            "source_ref": "",
             "statement": "2025年经营现金流31.19亿(+28.1%)、资产负债率43.53%、分红占归母净利润99.49%"
           }
         ],
@@ -16489,7 +16489,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/829014848157/index.phtml（长江证券）；http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828375076927/index.phtml（西部证券）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/829014848157/index.phtml",
+            "source_ref": "",
             "statement": "长江证券2026年4月研报预计公司2026/2027年归母净利润4亿/15亿元，对应PE为97/24倍，评级买入；2025年海外业务收入16.47亿元同比+95.93%，毛利率40.30%"
           }
         ],
@@ -16531,7 +16531,7 @@
         "claims": [
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/829479522133/index.phtml（中国银河证券2025年报点评，2026-04-14）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/company/rptid/829479522133/index.phtml",
+            "source_ref": "",
             "statement": "中矿资源2025年营业收入65.45亿元（+22.02%），归母净利润4.58亿元（-39.54%），扣非净利润4.14亿元（-31.26%），净利润连续三年下滑；2026Q1预告归母净利润5-5.5亿元（+270.97%-308.07%）"
           },
           {
@@ -16768,12 +16768,12 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/11/rptid/838262875505/index.phtml（苏豪弘业期货2026-07-24浮法玻璃周报）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/11/rptid/838262875505/index.phtml",
+            "source_ref": "",
             "statement": "2026年1-6月房地产竣工面积同比下跌23.7%，深加工订单天数均值仅8.3天，玻璃需求端持续走弱"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828276912724/index.phtml（国盛证券2026-03-31耀皮玻璃2025年报点评）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/828276912724/index.phtml",
+            "source_ref": "",
             "statement": "2025年末公司净现金合计7.3亿元（较2024年底增加5.7亿元），带息债务7.7亿元，资本性支出6.4亿元"
           }
         ],
@@ -16868,7 +16868,7 @@
         "claims": [
           {
             "source_context": "http://app.cnstock.com/zzb/zgzqb/html/2026-07/17/nw.D110000zgzqb_20260717_1-A19.htm（关于2025年年度报告的信息披露监管问询函的回复公告，临2026-073）",
-            "source_ref": "http://app.cnstock.com/zzb/zgzqb/html/2026-07/17/nw.D110000zgzqb_20260717_1-A19.htm",
+            "source_ref": "",
             "statement": "再升科技2025年营业收入12.75亿元（-13.63%，连续两年下滑），归母净利润0.56亿元（-38.16%），扣非净利润0.15亿元（-73.27%），Q4单季亏损2513.65万元"
           },
           {
@@ -16942,7 +16942,7 @@
           },
           {
             "source_context": "http://jiweidev.jiweinet.com:18801/n/871599（公司投资者互动平台回复及公告转述）",
-            "source_ref": "http://jiweidev.jiweinet.com:18801/n/871599",
+            "source_ref": "",
             "statement": "控股股东及其一致行动人2.59亿股首发限售股（占总股本50.02%）于2026年7月20日解除限售上市流通，截至公告披露日暂未减持，减持价格有特别承诺"
           },
           {
@@ -17037,7 +17037,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600358",
-            "source_ref": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600358",
+            "source_ref": "",
             "statement": "本次评审无法核验国旅联合(600358)的官方定期报告内容，type7触发条件与反证均无法确认。"
           }
         ],
@@ -17073,7 +17073,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600589",
-            "source_ref": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600589",
+            "source_ref": "",
             "statement": "本次评审无法核验大位科技(600589)官方定期报告，type7触发条件与反证均无法确认；公司系原广东榕泰更名而来，需以官方文件核实最新经营与监管状态。"
           }
         ],
@@ -17109,7 +17109,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600620",
-            "source_ref": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600620",
+            "source_ref": "",
             "statement": "本次评审无法核验天宸股份(600620)官方定期报告，type6触发条件与反证均无法确认。"
           }
         ],
@@ -19904,7 +19904,7 @@
         "claims": [
           {
             "source_context": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600593",
-            "source_ref": "http://www.sse.com.cn/assortment/stock/list/info/announcement/index.shtml?productId=600593",
+            "source_ref": "",
             "statement": "本次评审无法核验大连圣亚(600593)官方定期报告，type7触发条件与反证均无法确认。"
           }
         ],
@@ -21232,7 +21232,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600822&id=11253737（关于回复上交所",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600822&id=11253737",
+            "source_ref": "",
             "statement": "公司收到上交所对 2024 年年度报告的信息披露监管问询函并已回复，回复中提及非经常性损益占比 83.7%。"
           }
         ],
@@ -21270,7 +21270,7 @@
         "claims": [
           {
             "source_context": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600996&id=10996067（2024",
-            "source_ref": "http://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600996&id=10996067",
+            "source_ref": "",
             "statement": "贵广网络 2024 年年度报告由中审众环会计师事务所出具标准无保留意见，2024 年归母净利润 -1,084,247,001.94 元（2023 年 -1,384,860,290.99 元），营收 15.96 亿元（-13.83%）。"
           },
           {
@@ -22025,7 +22025,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80069666&gather=1&id=12004991（2025年年度报告摘要）与 http://epaper.zqrb.cn/html/2025-04/24/content_1139655.htm（2024年年度报告摘要）",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?CompanyCode=80069666&gather=1&id=12004991",
+            "source_ref": "",
             "statement": "2025年度利润分配预案为每10股派发现金红利0.36元（含税），2024年度为每10股派1.00元，同比大幅下降"
           },
           {
@@ -25960,7 +25960,7 @@
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600831&id=11255336（ST广网：关于对上交所",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=600831&id=11255336",
+            "source_ref": "",
             "statement": "公司收到上交所 2024 年年度报告信息披露监管问询函并已回复。"
           }
         ],
@@ -35202,7 +35202,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/RB2026071400037128.shtml （证券之星，转引《坚朗五金:2026年半年度业绩预告》）",
-            "source_ref": "http://stock.stockstar.com/RB2026071400037128.shtml",
+            "source_ref": "",
             "statement": "公司预计2026年1-6月归母净利润亏损6000万元至7000万元，主因国内建筑行业弱复苏、市场需求减少，2026年半年度累计营收同比下降约14%-15%。"
           },
           {
@@ -36054,7 +36054,7 @@
         "claims": [
           {
             "source_context": "http://money.finance.sina.com.cn/corp/go.php/vFD_ProfitStatement/stockid/688807/ctrl/2024/displaytype/4.phtml",
-            "source_ref": "http://money.finance.sina.com.cn/corp/go.php/vFD_ProfitStatement/stockid/688807/ctrl/2024/displaytype/4.phtml",
+            "source_ref": "",
             "statement": "优迅股份2024年营业收入41,055.91万元(+31.11%),归母净利润7,786.64万元(+8.02%),扣非净利润6,857.10万元(+24.87%)"
           },
           {
@@ -36064,7 +36064,7 @@
           },
           {
             "source_context": "http://etf.etnet.com.hk/www/sc/ashares/quote_ci_pl.php?code=688807",
-            "source_ref": "http://etf.etnet.com.hk/www/sc/ashares/quote_ci_pl.php?code=688807",
+            "source_ref": "",
             "statement": "2022-2024年度会计师事务所审计意见均为标准无保留意见"
           }
         ],
@@ -37299,7 +37299,7 @@
         "claims": [
           {
             "source_context": "http://m.epaper.zqrb.cn/html/2026-04/29/content_1238178.htm（证券日报·2025年年度报告摘要，2026-04-29）",
-            "source_ref": "http://m.epaper.zqrb.cn/html/2026-04/29/content_1238178.htm",
+            "source_ref": "",
             "statement": "2025年公司营业总收入12.06亿元同比下降11.84%，归母净利润9946.10万元同比增长98.52%，扣非归母净利润1.03亿元同比增长87.42%，经营活动现金流净额2.57亿元同比下降31.55%"
           },
           {
@@ -37541,12 +37541,12 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/RB2026042300055714.shtml（证券之星引述公司2025年年报，2026-04-23）",
-            "source_ref": "http://stock.stockstar.com/RB2026042300055714.shtml",
+            "source_ref": "",
             "statement": "2025年富邦科技营业收入13.82亿元同比+11.87%，归母净利润0.59亿元同比-36.71%，扣非归母净利润1.01亿元同比+15.36%；经营活动现金流净额3791.94万元同比-74.28%"
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/833127363989/index.phtml（长城证券2025年报点评，2026-05-26）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/lastest/rptid/833127363989/index.phtml",
+            "source_ref": "",
             "statement": "2025年第四季度归母净利润-0.21亿元，同比-1408.92%，单季亏损；商誉总额5.11亿元占净资产比例较高存在潜在减值风险"
           },
           {
@@ -37603,7 +37603,7 @@
           },
           {
             "source_context": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/832076091462/index.phtml（国投证券研报，2026-05-14）；https://quoteimg.cfi.cn/600201.html（中财网行情，2026-07-07）",
-            "source_ref": "http://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/832076091462/index.phtml",
+            "source_ref": "",
             "statement": "2026年4月子企业金宇生物获准生产紧急免疫用口蹄疫南非1型亚单位疫苗和灭活疫苗，预计26Q2起提供业务增量；2026年7月公司PE约134.66倍、PB约2.52倍"
           }
         ],
@@ -37670,17 +37670,17 @@
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260506/c676462844.shtml（同花顺，2025 年报对比）",
-            "source_ref": "http://stock.10jqka.com.cn/20260506/c676462844.shtml",
+            "source_ref": "",
             "statement": "2025 年马可波罗归母净利润 12.10 亿元、毛利率 39.35%；东鹏控股营收 60.62 亿元、归母净利润 3.52 亿元，蒙娜丽莎净利仅为马可波罗的 4.3%、东鹏的 14.8%"
           },
           {
             "source_context": "http://stock.10jqka.com.cn/20260506/c676462844.shtml（同花顺，2025 年报分析）",
-            "source_ref": "http://stock.10jqka.com.cn/20260506/c676462844.shtml",
+            "source_ref": "",
             "statement": "公司累计签订的 13.25 亿元工抵房处置不及预期，加快工抵房去化是 2026 年重点工作"
           },
           {
             "source_context": "http://finance.ce.cn/stock/gsgdbd/202509/t20250922_2483902.shtml（中国经济网，2025-09-22）",
-            "source_ref": "http://finance.ce.cn/stock/gsgdbd/202509/t20250922_2483902.shtml",
+            "source_ref": "",
             "statement": "2025 年 9 月蒙娜丽莎实控人之一兼董秘拟减持公司股份"
           },
           {
@@ -37739,7 +37739,7 @@
           },
           {
             "source_context": "http://www.163.com/dy/article/KRI17B8L05568W0A.html（网易财经，2026-04-27）",
-            "source_ref": "http://www.163.com/dy/article/KRI17B8L05568W0A.html",
+            "source_ref": "",
             "statement": "以2026年4月27日收盘价计算，垒知集团PE(TTM)约69.14倍、PB(LF)约0.96倍，毛利率22.96%、净利率2.28%"
           }
         ],
@@ -37781,7 +37781,7 @@
         "claims": [
           {
             "source_context": "http://www.fangchan.com/news/9/2026-04-13/7449261932609344083.html",
-            "source_ref": "http://www.fangchan.com/news/9/2026-04-13/7449261932609344083.html",
+            "source_ref": "",
             "statement": "方大集团 2025 年营业收入 33.77 亿元（-23.66%），归母净利润 -5.15 亿元（-455.95%），为 2005 年以来首次亏损、上市以来最大单年亏损"
           },
           {
@@ -37791,7 +37791,7 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2026-04/08/content_1230199.htm",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/08/content_1230199.htm",
+            "source_ref": "",
             "statement": "期末订单储备 66.10 亿元，其中海外订单储备 25.37 亿元（+12.31%）；2025 年度不派发现金红利"
           },
           {
@@ -37839,7 +37839,7 @@
         "claims": [
           {
             "source_context": "http://www.163.com/dy/article/KRAN1L0J0519QIKK.html（据公司2025年年度报告）",
-            "source_ref": "http://www.163.com/dy/article/KRAN1L0J0519QIKK.html",
+            "source_ref": "",
             "statement": "康普顿2025年营业总收入9.51亿元、同比下降10.84%，归母净利润5103.46万元、同比下降6.60%，扣非归母净利润4200.17万元、同比下降10.45%，经营现金流净额1.59亿元、同比下降9.73%"
           },
           {
@@ -37849,7 +37849,7 @@
           },
           {
             "source_context": "http://www.163.com/dy/article/KRAN1L0J0519QIKK.html（据公司2025年年度报告）",
-            "source_ref": "http://www.163.com/dy/article/KRAN1L0J0519QIKK.html",
+            "source_ref": "",
             "statement": "近五年公司营收复合增长率为-3.01%、归母净利复合增长率为-13.54%"
           },
           {
@@ -37950,7 +37950,7 @@
         "claims": [
           {
             "source_context": "http://stock.stockstar.com/RB2026042800027550.shtml（2025年年度报告速读，数据摘自公司年报）",
-            "source_ref": "http://stock.stockstar.com/RB2026042800027550.shtml",
+            "source_ref": "",
             "statement": "百傲化学2025年营业收入17.24亿元、同比增35.66%，归母净利润2.10亿元、同比降46.45%，扣非净利润2.01亿元、降35.94%，经营现金流净额5.47亿元、同比增235.44%"
           },
           {
@@ -38230,12 +38230,12 @@
           },
           {
             "source_context": "http://epaper.zqrb.cn/html/2026-04/24/content_1235242.htm?div=-1#1",
-            "source_ref": "http://epaper.zqrb.cn/html/2026-04/24/content_1235242.htm?div=-1#1",
+            "source_ref": "",
             "statement": "2025年我国新能源汽车产销量均超1600万辆、占新车销量超50%，全国加油站数量较2021年高点减少超7%，成品油行业量价齐跌、毛利收缩"
           },
           {
             "source_context": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603353&id=12170873",
-            "source_ref": "http://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=603353&id=12170873",
+            "source_ref": "",
             "statement": "2025年公司经营活动现金流量净额18,187.34万元（同比-10.91%），期末归母股东权益158,511.13万元"
           }
         ],
@@ -38343,7 +38343,7 @@
           },
           {
             "source_context": "http://stock.stockstar.com/notice/SN2026042800057490.shtml（云维股份2025年年度报告摘要）",
-            "source_ref": "http://stock.stockstar.com/notice/SN2026042800057490.shtml",
+            "source_ref": "",
             "statement": "截至报告期末母公司累计未弥补亏损27.96亿元，尚不具备利润分配条件，2025年度不进行利润分配"
           },
           {
@@ -38396,17 +38396,17 @@
           },
           {
             "source_context": "http://www.cb.com.cn/index/show/gs10/cv/cv135472042034（中国经营网，2026-04-23）",
-            "source_ref": "http://www.cb.com.cn/index/show/gs10/cv/cv135472042034",
+            "source_ref": "",
             "statement": "2022年至2025年清水源连续四年亏损累计约2亿元，营业收入四年累计降幅超过50%"
           },
           {
             "source_context": "http://stock.stockstar.com/RB2026042300022626.shtml（财报快递，基于2025年年度报告）",
-            "source_ref": "http://stock.stockstar.com/RB2026042300022626.shtml",
+            "source_ref": "",
             "statement": "公司于2025年1月收到中国证监会河南监管局的行政监管措施决定书及中国证监会的立案告知书，报告期内董事及高级管理人员发生变动"
           },
           {
             "source_context": "http://www.cb.com.cn/index/show/gs10/cv/cv135472042034（中国经营网，2026-04-23）",
-            "source_ref": "http://www.cb.com.cn/index/show/gs10/cv/cv135472042034",
+            "source_ref": "",
             "statement": "截至2025年末应收账款账面余额4.20亿元，坏账准备余额9833.59万元，前五大客户应收账款占应收账款总额的51.89%"
           }
         ],

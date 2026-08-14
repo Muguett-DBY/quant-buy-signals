@@ -58,7 +58,7 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         raw_source = _text(claim.get("source_ref"), 800)
         match = _URL_RE.search(raw_source)
         source_ref = ""
-        if match:
+        if match and match.group(0).lower().startswith("https://"):
             # Reasonix sometimes appends a Chinese explanation directly after
             # an otherwise valid URL.  Keep the URL's ASCII grammar and drop
             # that annotation so public links remain clickable and auditable.
@@ -71,6 +71,15 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
                 "source_context": raw_source[:240],
             }
         )
+    web_search_performed = review.get("web_search_performed") is True
+    web_search_verified = bool(
+        web_search_performed
+        and any(
+            str(claim.get("source_ref") or "").lower().startswith("https://")
+            for claim in claims
+            if isinstance(claim, Mapping)
+        )
+    )
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
@@ -83,8 +92,8 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "claims": claims[:12],
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),
-        "web_search_performed": review.get("web_search_performed") is True,
-        "web_search_verified": review.get("web_search_verified") is True or _public_web_verified(review),
+        "web_search_performed": web_search_performed,
+        "web_search_verified": web_search_verified,
     }
 
 
