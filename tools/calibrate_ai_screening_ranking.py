@@ -2,9 +2,10 @@
 
 The first AI pass already contains a model-written summary, risks, and source
 claims for every candidate.  This small calibration layer adds the numeric
-ranking requested by the website without inventing new company facts: it uses
-the model verdict plus the deterministic score/bounds only.  A later research
-pass can replace these calibrated fields packet by packet.
+ranking requested by the website without inventing new company facts.  The AI
+opinion and the deterministic seven-type result are intentionally separate:
+the latter adjusts confidence and score, but does not hard-block a strong AI
+opinion on a near-threshold candidate.
 """
 
 from __future__ import annotations
@@ -49,6 +50,19 @@ def _web_search_verified(review: Mapping[str, Any]) -> bool:
     return any(_claim_url(claim).lower().startswith("https://") for claim in claims if isinstance(claim, Mapping))
 
 
+def _source_quality(review: Mapping[str, Any]) -> str:
+    """Classify provenance without turning transport into a verdict gate."""
+    claims = review.get("claims") if isinstance(review.get("claims"), list) else []
+    urls = [_claim_url(claim) for claim in claims if isinstance(claim, Mapping)]
+    if any(url.lower().startswith("https://") for url in urls):
+        return "verified_https"
+    if any(url for url in urls):
+        return "source_found"
+    if review.get("web_search_performed") is True:
+        return "searched_no_source"
+    return "not_searched"
+
+
 def _claim_url(claim: Mapping[str, Any]) -> str:
     for field in ("source_ref", "source_context"):
         raw = str(claim.get(field) or "")
@@ -72,15 +86,29 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     base = _deterministic_score(packet)
     status = _deterministic_status(packet)
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
-    web_verified = _web_search_verified(source)
+    source_quality = _source_quality(source)
     model_score = _number(source.get("buy_attractiveness_score"))
-    if web_verified and model_score is not None:
-        # A source-backed second pass owns the ranking score.  The fallback
-        # formula below is only for legacy/unsearched reviews and is never
-        # allowed to manufacture a priority signal.
+    source_penalty = {
+        "verified_https": 0.0,
+        "source_found": 2.0,
+        "searched_no_source": 5.0,
+        "not_searched": 8.0,
+    }[source_quality]
+    status_penalty = {
+        "triggered": 0.0,
+        "conditional": 2.0,
+        "observe": 4.0,
+        "pending": 5.0,
+        "insufficient_evidence": 6.0,
+    }.get(status, 6.0)
+    if model_score is not None:
+        # The model score remains the ranking source.  Deterministic status
+        # and provenance lower confidence in small, visible increments; they
+        # do not turn a near-threshold AI buy opinion into an automatic avoid.
+        score = model_score - source_penalty - status_penalty
         if str(source.get("ai_action") or "") == "avoid" or verdict == "misclassified":
-            return round(max(0.0, min(49.0, model_score)), 1)
-        return round(max(0.0, min(100.0, model_score)), 1)
+            return round(max(0.0, min(49.0, score)), 1)
+        return round(max(0.0, min(100.0, score)), 1)
     risk_flags = [str(value) for value in (source.get("risk_flags") or [])]
     risk_text = " ".join(risk_flags)
     penalty = min(
@@ -99,18 +127,7 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     else:
         score = max(20.0, min(58.0, 30.0 + base * 2.4 - penalty))
 
-    # A qualitative confirmation cannot turn an unresolved or merely
-    # conditional deterministic result into a buy signal.  Keep the score
-    # useful for ranking, but make its ceiling match the decision state.
-    if status in {"observe", "conditional"}:
-        score = min(score, 78.0)
-    elif status != "triggered":
-        score = min(score, 64.0)
-    if not web_verified:
-        # A model-only legacy review is useful for a conservative watch/avoid
-        # decision, but it must not outrank source-backed recommendations.
-        score = min(score, 64.0)
-    return round(score, 1)
+    return round(max(0.0, min(100.0, score - source_penalty - status_penalty)), 1)
 
 
 def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
@@ -129,7 +146,7 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         action = "watchlist"
     elif source_action == "avoid" or verdict == "misclassified":
         action = "avoid"
-    elif verdict == "confirmed" and status == "triggered" and score >= 70 and web_verified:
+    elif verdict == "confirmed" and source_action == "priority_buy" and score >= 60:
         action = "priority_buy"
     elif (
         verdict in {"confirmed", "caution", "missed_candidate"}
@@ -148,10 +165,8 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         # answer: attractive but unverified packets stay on the watchlist,
         # while weak or contradictory packets are marked avoid.
         action = "watchlist" if score >= 50 else "avoid"
-    if verdict == "confirmed" and status == "triggered" and not web_verified:
-        action = "watchlist"
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
-    if not web_verified:
+    if _source_quality(source) not in {"verified_https", "source_found"}:
         confidence = "low"
     raw_claims = source.get("claims") if isinstance(source.get("claims"), list) else []
     # Legacy public cards may contain empty placeholder claims.  Do not copy
@@ -186,27 +201,31 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
             break
         summary = summary[marker + 2 :].lstrip()
     summary = summary[:1200]
-    # Make the provenance state visible in every published card.  Legacy
-    # reviews remain useful as context, but they are never presented as a
-    # completed web check.
-    if web_verified:
-        summary = f"AI买入吸引力 {score:.1f} 分（已通过 OpenCode Go 联网资料核验）。{summary}"
-    else:
-        summary = f"AI买入吸引力 {score:.1f} 分（尚未完成本轮联网资料核验，不进入优先候选）。{summary}"
-    no_web_reason = "\u672a\u5b8c\u6210\u672c\u8f6e\u8054\u7f51\u8d44\u6599\u6838\u9a8c\uff0c\u6682\u4e0d\u63a8\u8350\u76f4\u63a5\u4e70\u5165"
-    if not web_verified and no_web_reason not in risk_flags:
-        risk_flags.insert(0, no_web_reason)
+    # Make the provenance and deterministic state visible in every card.  A
+    # missing HTTPS link lowers the score; it no longer suppresses an AI buy
+    # opinion when the model itself has a confirmed view.
+    source_quality = _source_quality(source)
+    source_note = {
+        "verified_https": "已完成联网搜索并找到 HTTPS 来源",
+        "source_found": "已完成联网搜索并找到来源（未按 HTTPS 加分）",
+        "searched_no_source": "已完成联网搜索但未找到可引用来源，分数已下调",
+        "not_searched": "尚未完成联网搜索，分数已下调",
+    }[source_quality]
+    status_note = "确定性规则已触发" if status == "triggered" else f"确定性规则状态为 {status}，按接近达标口径扣分"
+    summary = f"AI买入吸引力 {score:.1f} 分（{status_note}；{source_note}）。{summary}"
+    if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
+        risk_flags.insert(0, source_note)
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
     recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     recommendation_label = (
-        "\u63a8\u8350\u4e70\u5165\u5019\u9009"
+        "建议买"
+        if recommendation == "recommend_buy" and status == "triggered"
+        else "建议买·接近达标"
         if recommendation == "recommend_buy"
-        else "\u4e0d\u63a8\u8350\u73b0\u5728\u4e70\u5165"
+        else "观察"
+        if action == "watchlist"
+        else "不建议"
     )
-    # Keep the older summary text as context, but make the final decision and
-    # the provenance limitation explicit to a normal reader.
-    if not web_verified:
-        summary = summary + " " + no_web_reason + "。"
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),

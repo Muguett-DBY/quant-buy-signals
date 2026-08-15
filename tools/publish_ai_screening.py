@@ -71,10 +71,11 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
             raw_source = _text(claim.get("source_context"), 800)
         match = _URL_RE.search(raw_source)
         source_ref = ""
-        if match and match.group(0).lower().startswith("https://"):
+        if match and match.group(0).lower().startswith(("http://", "https://")):
             # Reasonix sometimes appends a Chinese explanation directly after
             # an otherwise valid URL.  Keep the URL's ASCII grammar and drop
-            # that annotation so public links remain clickable and auditable.
+            # that annotation so public links remain clickable.  HTTPS remains
+            # a score bonus, not a hard requirement for an AI opinion.
             ascii_match = _ASCII_URL_RE.match(match.group(0))
             source_ref = ascii_match.group(0).rstrip(".,;，。；）") if ascii_match else ""
         claims.append(
@@ -102,7 +103,7 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     label = _text(review.get("recommendation_label"), 64)
     if not label:
-        label = "推荐买入候选" if recommendation == "recommend_buy" else "不推荐现在买入"
+        label = "建议买" if recommendation == "recommend_buy" else "观察" if action == "watchlist" else "不建议"
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
@@ -299,7 +300,7 @@ def build_artifact(
         + action_counts["avoid"]
         + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v4-three-outcomes",
+        "ranking_version": "ai-buy-attractiveness-v5-ai-first-near-threshold",
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,

@@ -1958,7 +1958,11 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponseSimple(request);' in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponseSimpleV5(request);' in source
+    assert "接近达标候选硬性排除" in source
+    assert "来源质量会扣分" in source
+    assert "HTTPS 是来源质量加分项，不是硬门槛" in source
+    assert "只要 AI 复核认为值得关注，也会进入三类结论" in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source

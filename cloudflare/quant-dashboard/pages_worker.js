@@ -810,13 +810,28 @@ function aiScreeningPageResponseSimple(request){
   const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
   return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
 }
+async function aiScreeningPageResponseSimpleV5(request){
+  const response=aiScreeningPageResponseSimple(request);
+  const html=await response.text();
+  const renderedHtml=html
+    .replace("资料未完成联网核验时，结论仍会给出，但按保守口径归入不推荐现在买入。","即使确定性规则尚未完全触发，只要 AI 复核认为值得关注，也会进入三类结论；规则状态与来源质量只影响分数和置信度。")
+    .replace(/<div class="notice">[\s\S]*?<\/div>/,"<div class=\"notice\">页面只展示三类结论：建议买、观察、不建议。建议买由 AI 的明确买入意见和吸引力分决定；确定性规则状态和来源质量会扣分，但不会把接近达标候选硬性排除。HTTPS 是来源质量加分项，不是硬门槛。</div>")
+    .replaceAll("推荐买入候选","建议买")
+    .replaceAll("不推荐现在买入（观察）","观察")
+    .replaceAll("不建议买入","不建议")
+    .replaceAll("已联网核验","搜索尝试")
+    .replaceAll("已联网且有 HTTPS 来源","已联网且有可用来源（HTTPS加分）")
+    .replaceAll("已联网但没有可用来源","已搜索但没有可引用来源")
+    .replaceAll("未完成联网核验","未完成联网搜索");
+  return new Response(renderedHtml,{status:response.status,statusText:response.statusText,headers:response.headers});
+}
 export default{
   async fetch(request,env){
     if(request.method!=="GET"&&request.method!=="HEAD")return json({error:"只读接口不接受写请求"},405,{allow:"GET, HEAD"});
     const url=new URL(request.url),path=url.pathname;
     try{
       if(path==="/"||path==="/index.html")return dashboardHtmlResponse(request);
-      if(path==="/ai-screening")return aiScreeningPageResponseSimple(request);
+      if(path==="/ai-screening")return aiScreeningPageResponseSimpleV5(request);
       if(path==="/api/methodology")return json({schema_version:2,methodology_version:METHODOLOGY_VERSION,decision_domain:"new_buy_or_add",qualify_threshold:7,patch7_total_gate:PATCH7_TOTAL_GATE,type5_appendix:TYPE5_APPENDIX,sell_domain:SELL_DOMAIN,rule_source_contract:RULE_SOURCE_CONTRACT,types:METHODOLOGY},200,{"cache-control":"public, max-age=86400"});
       const requestedGeneration=url.searchParams.get("generation_id")||"";
       if(path==="/api/ai-screening"&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"invalid generation query"},400));

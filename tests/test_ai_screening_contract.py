@@ -78,11 +78,13 @@ def test_batch_parser_skips_intermediate_json_arrays() -> None:
     assert _extract_array(intermediate + "\n" + final)[0]["security_code"] == "600339"
 
 
-def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
+def test_calibrated_priority_can_include_near_threshold_rule() -> None:
     source = {
         "ai_review": {
             "verdict": "confirmed",
             "recommended_action": "keep",
+            "ai_action": "priority_buy",
+            "buy_attractiveness_score": 72,
             "claims": [{"source_ref": "https://example.test/report"}],
             "risk_flags": [],
             "web_search_performed": True,
@@ -96,23 +98,24 @@ def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
 
     source["deterministic"]["status"] = "observe"
     observed = _review(source)
-    assert observed["ai_action"] == "watchlist"
-    assert observed["final_category"] == "observe"
-    assert observed["buy_attractiveness_score"] <= 78
+    assert observed["ai_action"] == "priority_buy"
+    assert observed["final_category"] == "recommend_buy"
+    assert observed["buy_attractiveness_score"] < 72
 
     source["deterministic"]["status"] = "insufficient_evidence"
     unresolved = _review(source)
-    assert unresolved["ai_action"] == "watchlist"
-    assert unresolved["final_recommendation"] == "do_not_recommend_buy"
-    assert unresolved["final_category"] == "observe"
-    assert unresolved["buy_attractiveness_score"] <= 64
+    assert unresolved["ai_action"] == "priority_buy"
+    assert unresolved["final_recommendation"] == "recommend_buy"
+    assert unresolved["final_category"] == "recommend_buy"
+    assert unresolved["buy_attractiveness_score"] < observed["buy_attractiveness_score"]
 
 
-def test_unsearched_confirmation_cannot_be_priority_and_searched_score_is_used() -> None:
+def test_unsearched_confirmation_is_ranked_with_a_source_penalty() -> None:
     source = {
         "ai_review": {
             "verdict": "confirmed",
             "recommended_action": "keep",
+            "ai_action": "priority_buy",
             "claims": [],
             "risk_flags": [],
             "buy_attractiveness_score": 91,
@@ -122,7 +125,8 @@ def test_unsearched_confirmation_cannot_be_priority_and_searched_score_is_used()
         "deterministic": {"status": "triggered", "score": 8.0},
     }
     unsearched = _review(source)
-    assert unsearched["ai_action"] == "watchlist"
+    assert unsearched["ai_action"] == "priority_buy"
+    assert unsearched["buy_attractiveness_score"] == 83
 
     source["ai_review"].update(
         {
@@ -247,7 +251,7 @@ def test_public_review_drops_http_sources_and_cannot_claim_web_verification() ->
         "web_search_verified": True,
     }
     public = _public_review(review)
-    assert public["claims"][0]["source_ref"] == ""
+    assert public["claims"][0]["source_ref"] == "http://example.test/report"
     assert public["web_search_verified"] is False
 
 
@@ -333,7 +337,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v4-three-outcomes"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v5-ai-first-near-threshold"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1
