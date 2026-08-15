@@ -155,6 +155,31 @@ def test_source_backed_ai_avoid_overrides_a_triggered_rule() -> None:
     assert reviewed["buy_attractiveness_score"] == 28
 
 
+def test_insufficient_or_watchlist_never_becomes_do_not_recommend() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "needs_review",
+            "recommended_action": "manual_review",
+            "ai_action": "insufficient_evidence",
+            "buy_attractiveness_score": 38,
+            "claims": [],
+            "risk_flags": ["资料未闭环"],
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 7.8},
+    }
+    unresolved = _review(source)
+    assert unresolved["ai_action"] == "watchlist"
+    assert unresolved["final_category"] == "observe"
+
+    source["ai_review"]["ai_action"] = "watchlist"
+    source["ai_review"]["buy_attractiveness_score"] = 42
+    observed = _review(source)
+    assert observed["ai_action"] == "watchlist"
+    assert observed["final_category"] == "observe"
+
+
 def test_public_review_strips_reasonix_annotation_from_source_url() -> None:
     review = {
         "schema_version": 2,
@@ -308,7 +333,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v3-web-gated"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v4-three-outcomes"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1

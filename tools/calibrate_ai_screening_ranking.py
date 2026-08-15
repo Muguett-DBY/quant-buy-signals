@@ -120,7 +120,14 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     score = _calibrated_score(packet, verdict)
     web_verified = _web_search_verified(source)
     source_action = str(source.get("ai_action") or "")
-    if source_action == "avoid" or verdict == "misclassified":
+    if source_action == "insufficient_evidence":
+        # Unknown is not a negative investment conclusion.  Keep it in the
+        # user-facing observe bucket even when the calibrated score is below
+        # 50; otherwise the dashboard turns "资料不足" into "不建议".
+        action = "watchlist"
+    elif source_action == "watchlist":
+        action = "watchlist"
+    elif source_action == "avoid" or verdict == "misclassified":
         action = "avoid"
     elif verdict == "confirmed" and status == "triggered" and score >= 70 and web_verified:
         action = "priority_buy"

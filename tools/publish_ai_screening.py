@@ -299,7 +299,7 @@ def build_artifact(
         + action_counts["avoid"]
         + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v3-web-gated",
+        "ranking_version": "ai-buy-attractiveness-v4-three-outcomes",
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,
