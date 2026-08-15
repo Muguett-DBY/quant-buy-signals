@@ -112,6 +112,7 @@ def test_calibrated_priority_can_include_near_threshold_rule() -> None:
     observed = _review(source)
     assert observed["ai_action"] == "priority_buy"
     assert observed["final_category"] == "recommend_buy"
+    assert observed["ai_independent"] is True
     assert observed["buy_attractiveness_score"] < 72
 
     source["deterministic"]["status"] = "insufficient_evidence"
@@ -141,6 +142,7 @@ def test_historical_claims_are_visible_and_cannot_remain_a_buy_recommendation() 
     assert reviewed["freshness_status"] == "historical"
     assert reviewed["freshness_years"] == [2024]
     assert reviewed["ai_action"] == "watchlist"
+    assert reviewed["ai_independent"] is False
     assert reviewed["final_category"] == "observe"
     assert "2024" in reviewed["freshness_note"]
     assert "资料时效" in reviewed["risk_flags"][0]

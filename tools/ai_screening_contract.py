@@ -151,6 +151,8 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("final_recommendation")
     if "recommendation_label" in review and not isinstance(review.get("recommendation_label"), str):
         errors.append("recommendation_label")
+    if "ai_independent" in review and not isinstance(review.get("ai_independent"), bool):
+        errors.append("ai_independent")
     if str(review.get("confidence")) not in AI_CONFIDENCE:
         errors.append("confidence")
     if "web_search_performed" in review and not isinstance(review.get("web_search_performed"), bool):

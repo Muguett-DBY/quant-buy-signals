@@ -112,6 +112,7 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "final_category": final_category,
         "final_recommendation": recommendation,
         "recommendation_label": label,
+        "ai_independent": bool(review.get("ai_independent", False)),
         "confidence": _text(review.get("confidence"), 16),
         "summary": _text(review.get("summary"), 1200),
         "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],

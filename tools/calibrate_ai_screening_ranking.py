@@ -321,6 +321,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "final_category": _final_category(action),
         "final_recommendation": recommendation,
         "recommendation_label": recommendation_label,
+        "ai_independent": bool(action == "priority_buy" and status != "triggered"),
         "confidence": confidence,
         "summary": summary,
         "key_strengths": strengths,
