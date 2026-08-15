@@ -123,10 +123,7 @@ def _freshness(review: Mapping[str, Any], market_as_of: str | None) -> dict[str,
     if max(years) >= recent_floor:
         latest = max(years)
         if latest == current_year:
-            note = (
-                f"最新可识别实际报告期为 {latest} 年；更早年份仅作历史背景，"
-                "仍应以最新正式报告为准"
-            )
+            note = f"最新可识别实际报告期为 {latest} 年；更早年份仅作历史背景，仍应以最新正式报告为准"
         else:
             note = (
                 f"最新可识别实际报告期为 {latest} 年，尚未确认 {current_year} 年实际报告期；"
