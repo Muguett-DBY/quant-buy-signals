@@ -52,6 +52,15 @@ def _web_search_verified(review: Mapping[str, Any]) -> bool:
     )
 
 
+def _final_category(action: str) -> str:
+    """Collapse the internal four-state action into the three user outcomes."""
+    if action == "priority_buy":
+        return "recommend_buy"
+    if action in {"watchlist", "insufficient_evidence"}:
+        return "observe"
+    return "do_not_recommend"
+
+
 def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     base = _deterministic_score(packet)
     status = _deterministic_status(packet)
@@ -189,6 +198,7 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         else "manual_review",
         "buy_attractiveness_score": score,
         "ai_action": action,
+        "final_category": _final_category(action),
         "final_recommendation": recommendation,
         "recommendation_label": recommendation_label,
         "confidence": confidence,

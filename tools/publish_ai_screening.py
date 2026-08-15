@@ -36,6 +36,14 @@ _URL_RE = re.compile(r"https?://[^\s)）>]+", re.IGNORECASE)
 _ASCII_URL_RE = re.compile(r"[A-Za-z0-9:/?#\[\]@!$&'()*+,;=%._~\-]+")
 
 
+def _final_category(action: str) -> str:
+    if action == "priority_buy":
+        return "recommend_buy"
+    if action in {"watchlist", "insufficient_evidence"}:
+        return "observe"
+    return "do_not_recommend"
+
+
 def _load(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -81,6 +89,9 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         )
     )
     action = _text(review.get("ai_action"), 32)
+    final_category = _text(review.get("final_category"), 32) or _final_category(action)
+    if final_category not in {"recommend_buy", "observe", "do_not_recommend"}:
+        raise ValueError("AI final_category is invalid")
     recommendation = _text(review.get("final_recommendation"), 32)
     if recommendation not in {"recommend_buy", "do_not_recommend_buy"}:
         recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
@@ -92,6 +103,7 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "recommended_action": _text(review.get("recommended_action"), 32),
         "buy_attractiveness_score": float(review["buy_attractiveness_score"]),
         "ai_action": action,
+        "final_category": final_category,
         "final_recommendation": recommendation,
         "recommendation_label": label,
         "confidence": _text(review.get("confidence"), 16),
@@ -157,8 +169,10 @@ def build_artifact(
     attempted_review_count = 0
     unreviewed_candidate_count = 0
     attempted_needs_review_count = 0
+    web_search_attempted_count = 0
     web_search_completed_count = 0
     action_counts: Counter[str] = Counter()
+    final_category_counts: Counter[str] = Counter()
     full_coverage = source.get("full_coverage_final_recommendation") is True
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -181,10 +195,13 @@ def build_artifact(
             raise ValueError(f"full-coverage candidate has no final decision: {key}")
         verdicts[public_review["verdict"]] += 1
         action_counts[public_review["ai_action"]] += 1
+        final_category_counts[public_review["final_category"]] += 1
         if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
             unreviewed_candidate_count += 1
         else:
             attempted_review_count += 1
+            if public_review["web_search_performed"]:
+                web_search_attempted_count += 1
             if _public_web_verified(public_review):
                 web_search_completed_count += 1
             if public_review["verdict"] == "needs_review":
@@ -220,7 +237,8 @@ def build_artifact(
             "blocked": int(audit.get("blocked", 0) or 0),
         }
     source_audit["web_search_completed"] = web_search_completed_count
-    source_audit["reviewed_without_web_search"] = max(0, attempted_review_count - web_search_completed_count)
+    source_audit["web_search_attempted"] = web_search_attempted_count
+    source_audit["reviewed_without_web_search"] = max(0, attempted_review_count - web_search_attempted_count)
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "review_schema_version": REVIEW_SCHEMA_VERSION,
@@ -228,6 +246,12 @@ def build_artifact(
         "ai_is_advisory": True,
         "auto_buy_promotion": False,
         "full_coverage_final_recommendation": full_coverage,
+        "full_coverage_web_search": bool(
+            full_coverage
+            and unreviewed_candidate_count == 0
+            and attempted_review_count == len(public_packets)
+            and web_search_attempted_count == len(public_packets)
+        ),
         "snapshot_generation": generation,
         "market_as_of": market_as_of,
         "methodology_version": source.get("methodology_version"),
@@ -238,14 +262,17 @@ def build_artifact(
         "attempted_review_count": attempted_review_count,
         "unreviewed_candidate_count": unreviewed_candidate_count,
         "attempted_needs_review_count": attempted_needs_review_count,
+        "web_search_attempted_count": web_search_attempted_count,
+        "web_source_verified_count": web_search_completed_count,
         "web_search_completed_count": web_search_completed_count,
-        "reviewed_without_web_search": max(0, attempted_review_count - web_search_completed_count),
+        "reviewed_without_web_search": max(0, attempted_review_count - web_search_attempted_count),
         # Keep the old field names as compatibility aliases.  They now mean
         # attempted versus not-yet-started, rather than verdict quality.
         "completed_review_count": attempted_review_count,
         "pending_review_count": unreviewed_candidate_count,
         "verdict_counts": dict(sorted(verdicts.items())),
         "ai_action_counts": dict(sorted(action_counts.items())),
+        "final_category_counts": dict(sorted(final_category_counts.items())),
         "priority_buy_count": action_counts["priority_buy"],
         "recommend_buy_count": action_counts["priority_buy"],
         "watchlist_count": action_counts["watchlist"],

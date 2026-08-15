@@ -7,9 +7,9 @@
 ## 研究顺序
 
 1. 先读 packet 中的确定性结果和规则片段，理解它为什么达标或接近达标。
-2. 这是一轮大批量排序。不要调用 shell、MCP、skill、security-review、GitHub 工具或任何写入工具，也不要因为搜索不可用而停止。优先使用 packet 已提供的估值、现金流、行业、规则分数和来源摘要；如果 OpenCode Go 在当前会话明确提供了内置只读搜索能力，可以查 CNINFO、上交所、深交所、港交所、公司投资者关系网站和正式年报/季报/公告，但搜索是可选项，不是返回 JSON 的前置条件。
+2. 这是一轮大批量排序。不要调用 shell、MCP、skill、security-review、GitHub 工具或任何写入工具。对每家公司都必须调用当前会话提供的只读 web_search，至少搜索公司代码/名称 + 最新年报或公告，并优先查 CNINFO、上交所、深交所、港交所、公司投资者关系网站和正式年报/季报/公告。搜索成功但没有可靠来源时，仍将 `web_search_performed` 设为 `true`，并明确写“未找到可核验来源”；程序会把这种公司归入“观察”，不会伪装成建议买。
 3. 对每个候选同时写“为什么值得买”和“为什么可能不该买”。不能只因为确定性分数高就给高分；也不能只因为一个 PE/单季现金流就否定 DCF。要说明口径差异。
-4. 若没有外部来源，仍然必须根据 packet 给出分数和排序；将 `confidence` 设为 `low`，在 risk_flags 中写明“未做外部文件复核”。只有 packet 本身缺少决定排序所需的核心信息时才使用 `insufficient_evidence`。不要返回“没有结果”或省略 packet。
+4. 即使没有找到可靠外部来源，也必须返回该 packet，并将 `confidence` 设为 `low`、`web_search_performed=true`，在 risk_flags 中写明“已搜索但未找到可核验来源”。不要返回“没有结果”或省略 packet。
 
 ## 分数口径
 
@@ -43,6 +43,7 @@
   "recommended_action": "keep|demote|manual_review",
   "buy_attractiveness_score": 0,
   "ai_action": "priority_buy|watchlist|avoid|insufficient_evidence",
+  "final_category": "recommend_buy|observe|do_not_recommend",
   "confidence": "high|medium|low",
   "summary": "用中文说明为什么排在这个分数，以及最关键的买入逻辑和限制",
   "key_strengths": ["最重要的优势", "第二个优势"],
@@ -60,6 +61,6 @@
 }
 ```
 
-每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明。不要把搜索摘要当成正式证据。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。
+每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明。不要把搜索摘要当成正式证据。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。最终页面只显示三类：`recommend_buy=建议买`、`observe=观察`、`do_not_recommend=不建议`；`insufficient_evidence` 只能作为内部原因，发布时归入 `observe`。
 
 确定性筛选仍然是第一道门，AI 只负责在候选池内排序和指出反证；任何 AI 分数都不能修改七类规则、买入区、总闸门、卖出域或公司原始数据。

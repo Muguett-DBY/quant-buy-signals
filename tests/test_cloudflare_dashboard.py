@@ -1958,7 +1958,7 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponseFinal2(request);' in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponseSimple(request);' in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source
@@ -2021,7 +2021,11 @@ assert.equal(response.status, 200);
 const html = await response.text();
 const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
 assert.ok(nonce);
-assert.ok(html.includes("AI优中选优"));
+assert.ok(html.includes("AI筛查"));
+assert.ok(html.includes("建议买"));
+assert.ok(html.includes("观察"));
+assert.ok(html.includes("不建议"));
+assert.ok(!html.includes("待核验（未形成买入结论）"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
 const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
 assert.ok(inlineScript);

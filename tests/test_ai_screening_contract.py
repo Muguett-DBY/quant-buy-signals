@@ -7,6 +7,7 @@ from tools.build_ai_screening import build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _review
 from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
+from tools.run_ai_screening_batch import _extract_array
 
 
 def _snapshot() -> dict:
@@ -58,6 +59,25 @@ def test_review_requires_sources_and_keeps_verdict_bounded() -> None:
     assert "claim_source_ref" in validate_review(review)
 
 
+def test_batch_parser_skips_intermediate_json_arrays() -> None:
+    intermediate = '[{"tool": "web_search", "queries": ["600339"]}]'
+    final = json.dumps(
+        [
+            {
+                "schema_version": 2,
+                "security_code": "600339",
+                "type_key": "type1",
+                "verdict": "confirmed",
+                "recommended_action": "keep",
+                "buy_attractiveness_score": 82,
+                "ai_action": "priority_buy",
+                "confidence": "medium",
+            }
+        ]
+    )
+    assert _extract_array(intermediate + "\n" + final)[0]["security_code"] == "600339"
+
+
 def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
     source = {
         "ai_review": {
@@ -72,16 +92,19 @@ def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
         "deterministic": {"status": "triggered", "score": 8.0},
     }
     assert _review(source)["ai_action"] == "priority_buy"
+    assert _review(source)["final_category"] == "recommend_buy"
 
     source["deterministic"]["status"] = "observe"
     observed = _review(source)
     assert observed["ai_action"] == "watchlist"
+    assert observed["final_category"] == "observe"
     assert observed["buy_attractiveness_score"] <= 78
 
     source["deterministic"]["status"] = "insufficient_evidence"
     unresolved = _review(source)
     assert unresolved["ai_action"] == "watchlist"
     assert unresolved["final_recommendation"] == "do_not_recommend_buy"
+    assert unresolved["final_category"] == "observe"
     assert unresolved["buy_attractiveness_score"] <= 64
 
 
@@ -267,6 +290,8 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["pending_review_count"] == 0
     assert artifact["packets"][0]["ai_rank"] == 1
     assert artifact["watchlist_count"] == 1
+    assert artifact["final_category_counts"] == {"observe": 1}
+    assert artifact["packets"][0]["ai_review"]["final_category"] == "observe"
     assert artifact["packets"][0]["ai_review"]["final_recommendation"] == "do_not_recommend_buy"
     assert artifact["do_not_recommend_buy_count"] == 1
 

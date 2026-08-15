@@ -22,6 +22,35 @@ from typing import Any, Mapping
 from tools.ai_screening_contract import validate_review
 
 
+_REVIEW_KEYS = frozenset(
+    {
+        "schema_version",
+        "security_code",
+        "type_key",
+        "verdict",
+        "recommended_action",
+        "buy_attractiveness_score",
+        "ai_action",
+        "confidence",
+    }
+)
+
+
+def _review_array(value: Any) -> list[dict[str, Any]] | None:
+    """Return only arrays that look like the final review payload.
+
+    Reasonix text mode can include JSON from intermediate tool messages.  A
+    generic list-of-objects parser may mistake one of those lists for the
+    final answer, so require the stable review identity/decision keys before
+    accepting a candidate array.
+    """
+    if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
+        return None
+    if not all(_REVIEW_KEYS.issubset(item) for item in value):
+        return None
+    return value
+
+
 def _extract_array(text: str) -> list[dict[str, Any]]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -35,8 +64,9 @@ def _extract_array(text: str) -> list[dict[str, Any]]:
             value, _ = decoder.raw_decode(cleaned[start:])
         except json.JSONDecodeError:
             continue
-        if isinstance(value, list) and all(isinstance(item, dict) for item in value):
-            return value
+        candidate = _review_array(value)
+        if candidate is not None:
+            return candidate
     for start, char in enumerate(cleaned):
         if char != "{":
             continue
@@ -46,8 +76,9 @@ def _extract_array(text: str) -> list[dict[str, Any]]:
             continue
         if isinstance(value, dict) and isinstance(value.get("reviews"), list):
             reviews = value["reviews"]
-            if all(isinstance(item, dict) for item in reviews):
-                return reviews
+            candidate = _review_array(reviews)
+            if candidate is not None:
+                return candidate
     raise ValueError("Reasonix did not return a JSON review array")
 
 
@@ -78,9 +109,9 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
             "for that packet. Search the company code and name against CNINFO, SSE/SZSE, HKEX when "
             "applicable, and the company's investor-relations or official filing page. Use only URLs "
             "actually returned by web_search. Set web_search_performed=true only after searching; "
-            "include at least one https source_ref when a source is found. If search fails or no "
-            "reliable source is returned, set web_search_performed=false, confidence=low, and do not "
-            "claim that the company is a priority buy.\n"
+            "set web_search_performed=true immediately after the search attempt, even when no reliable "
+            "source is returned; set confidence=low in that case and do not claim that the company is "
+            "a priority buy without a usable HTTPS source.\n"
         )
     return (
         protocol
@@ -93,7 +124,9 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
         + "\nPackets (JSON array):\n"
         + json.dumps(slim, ensure_ascii=False, sort_keys=True)
         + "\nIMPORTANT: for this batch, override the protocol's single-packet output example: "
-        + "return exactly one JSON array containing one review object per packet, and no Markdown."
+        + "return exactly one JSON array containing one review object per packet, and no Markdown. "
+        + "Keep every object compact: summary <= 280 Chinese characters, at most 2 strengths, "
+        + "3 risks, and 3 source claims; do not repeat facts."
     )
 
 
@@ -181,7 +214,7 @@ def _run_batch(
             raise ValueError(f"invalid AI review {key}: {','.join(errors)}")
         actual[key] = review
         if require_web_search and review.get("web_search_performed") is not True:
-            print(f"warning: web search was unavailable for {key}; keeping low-confidence review", file=sys.stderr)
+            raise ValueError(f"required web search was not completed for {key}")
     missing = expected - set(actual)
     extra = set(actual) - expected
     if missing or extra or len(actual) != len(expected):
@@ -207,7 +240,17 @@ def main() -> int:
     parser.add_argument("--permission-mode", default="dontAsk", choices=("plan", "dontAsk", "auto"))
     parser.add_argument("--allowed-tools", default="")
     parser.add_argument("--ablate", default="none")
-    parser.add_argument("--require-web-search", action="store_true")
+    parser.add_argument(
+        "--require-web-search",
+        action="store_true",
+        default=True,
+        help="Require a completed provider search for every packet (the default).",
+    )
+    parser.add_argument(
+        "--allow-unsearched",
+        action="store_true",
+        help="Explicitly opt out of the full-search gate for offline development only.",
+    )
     parser.add_argument("--reasonix-dir", type=Path, default=Path("tools/reasonix-opencode-go"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--fail-fast", action="store_true")
@@ -225,6 +268,8 @@ def main() -> int:
     protocol = args.protocol.read_text(encoding="utf-8")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     error_path = args.out.with_name(args.out.stem + "-errors.jsonl")
+    failed_batches = 0
+    require_web_search = not args.allow_unsearched
     with args.out.open("w", encoding="utf-8") as output, error_path.open("w", encoding="utf-8") as errors:
         for start in range(0, len(selected), args.batch_size):
             batch = selected[start : start + args.batch_size]
@@ -239,11 +284,12 @@ def main() -> int:
                     permission_mode=args.permission_mode,
                     allowed_tools=args.allowed_tools,
                     ablate=args.ablate,
-                    require_web_search=args.require_web_search,
+                    require_web_search=require_web_search,
                     root=args.root,
                     reasonix_dir=args.reasonix_dir,
                 )
             except Exception as error:
+                failed_batches += 1
                 record = {
                     "offset": args.offset + start,
                     "count": len(batch),
@@ -260,6 +306,10 @@ def main() -> int:
                 output.write(json.dumps(review, ensure_ascii=False, sort_keys=True) + "\n")
             output.flush()
             print(json.dumps({"offset": args.offset + start, "count": len(reviews), "status": "ok"}))
+    if require_web_search and failed_batches:
+        raise SystemExit(
+            f"required web search failed for {failed_batches} batch(es); no complete AI artifact is publishable"
+        )
     return 0
 
 

@@ -44,9 +44,9 @@ def _prompt(protocol: str, packet: dict[str, Any], *, require_web_search: bool =
             "\nMANDATORY WEB SEARCH: Call the provider web_search tool before reviewing this packet. "
             "Search the company code and name on CNINFO, SSE/SZSE, HKEX when applicable, and the "
             "company investor-relations or official filing page. Use only returned URLs. Set "
-            "web_search_performed=true only after searching; include an https source_ref when found. "
-            "If no reliable source is returned, set web_search_performed=false, confidence=low, and "
-            "do not promote the company to priority_buy.\n"
+            "web_search_performed=true immediately after the search attempt, even when the provider "
+            "returns no reliable source; set confidence=low in that case and never promote the company "
+            "to priority_buy without a usable HTTPS source.\n"
         )
     return (
         protocol
@@ -54,6 +54,8 @@ def _prompt(protocol: str, packet: dict[str, Any], *, require_web_search: bool =
         + "\n\nReview packet (JSON; deterministic fields are read-only):\n"
         + json.dumps(packet, ensure_ascii=False, sort_keys=True)
         + "\n\nReturn exactly one JSON object using the protocol schema."
+        + " Keep it compact: summary <= 280 Chinese characters, at most 2 strengths, "
+        + "3 risks, and 3 source claims; do not repeat facts."
     )
 
 
@@ -143,7 +145,7 @@ def run_one(
     review["model"] = model
     review["effort"] = effort
     if require_web_search and review.get("web_search_performed") is not True:
-        print(f"warning: web search was unavailable for {expected}; keeping low-confidence review", file=sys.stderr)
+        raise ValueError(f"required web search was not completed for {expected}")
     return review
 
 
@@ -165,7 +167,17 @@ def main() -> int:
         help="Optional extra tools. OpenCode Go search is provider-native; leave empty for the safe default.",
     )
     parser.add_argument("--ablate", default="none")
-    parser.add_argument("--require-web-search", action="store_true")
+    parser.add_argument(
+        "--require-web-search",
+        action="store_true",
+        default=True,
+        help="Require a completed provider search for every packet (the default).",
+    )
+    parser.add_argument(
+        "--allow-unsearched",
+        action="store_true",
+        help="Explicitly opt out of the full-search gate for offline development only.",
+    )
     parser.add_argument(
         "--reasonix-dir",
         type=Path,
@@ -186,6 +198,8 @@ def main() -> int:
     protocol = args.protocol.read_text(encoding="utf-8")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     error_path = args.out.with_name(args.out.stem + "-errors.jsonl")
+    require_web_search = not args.allow_unsearched
+    failed_reviews = 0
     with args.out.open("w", encoding="utf-8") as handle, error_path.open("w", encoding="utf-8") as errors:
         for packet in packets:
             try:
@@ -199,11 +213,12 @@ def main() -> int:
                     permission_mode=args.permission_mode,
                     allowed_tools=args.allowed_tools,
                     ablate=args.ablate,
-                    require_web_search=args.require_web_search,
+                    require_web_search=require_web_search,
                     root=args.root,
                     reasonix_dir=args.reasonix_dir,
                 )
             except Exception as error:
+                failed_reviews += 1
                 error_record = {
                     "security_code": packet.get("security_code"),
                     "type_key": packet.get("type_key"),
@@ -227,6 +242,10 @@ def main() -> int:
                     ensure_ascii=False,
                 )
             )
+    if require_web_search and failed_reviews:
+        raise SystemExit(
+            f"required web search failed for {failed_reviews} packet(s); no complete AI artifact is publishable"
+        )
     return 0
 
 
