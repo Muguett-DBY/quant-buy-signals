@@ -155,6 +155,7 @@ def test_recent_claim_keeps_a_confirmed_buy_opinion_eligible() -> None:
     assert reviewed["freshness_status"] == "current_or_recent"
     assert reviewed["ai_action"] == "priority_buy"
     assert reviewed["final_category"] == "recommend_buy"
+    assert "最新可识别实际报告期为 2026 年" in reviewed["freshness_note"]
 
 
 def test_forecast_year_does_not_count_as_current_report_evidence() -> None:
