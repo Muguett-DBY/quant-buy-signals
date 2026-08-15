@@ -90,6 +90,10 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
         score = min(score, 78.0)
     elif status != "triggered":
         score = min(score, 64.0)
+    if not web_verified:
+        # A model-only legacy review is useful for a conservative watch/avoid
+        # decision, but it must not outrank source-backed recommendations.
+        score = min(score, 64.0)
     return round(score, 1)
 
 
@@ -124,6 +128,8 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     if verdict == "confirmed" and status == "triggered" and not web_verified:
         action = "watchlist"
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
+    if not web_verified:
+        confidence = "low"
     raw_claims = source.get("claims") if isinstance(source.get("claims"), list) else []
     # Legacy public cards may contain empty placeholder claims.  Do not copy
     # those into the new contract: a claim without a source is not evidence.
