@@ -110,6 +110,95 @@ def test_calibrated_priority_can_include_near_threshold_rule() -> None:
     assert unresolved["buy_attractiveness_score"] < observed["buy_attractiveness_score"]
 
 
+def test_historical_claims_are_visible_and_cannot_remain_a_buy_recommendation() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "ai_action": "priority_buy",
+            "buy_attractiveness_score": 80,
+            "claims": [{"statement": "2024年年报净利润和现金流保持增长", "source_ref": "https://example.test/report"}],
+            "risk_flags": [],
+            "web_search_performed": True,
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    reviewed = _review(source, "2026-08-14")
+    assert reviewed["freshness_status"] == "historical"
+    assert reviewed["freshness_years"] == [2024]
+    assert reviewed["ai_action"] == "watchlist"
+    assert reviewed["final_category"] == "observe"
+    assert "2024" in reviewed["freshness_note"]
+    assert "资料时效" in reviewed["risk_flags"][0]
+
+
+def test_recent_claim_keeps_a_confirmed_buy_opinion_eligible() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "ai_action": "priority_buy",
+            "buy_attractiveness_score": 80,
+            "claims": [
+                {"statement": "2025年年报及2026年一季报均支持盈利质量", "source_ref": "https://example.test/report"}
+            ],
+            "risk_flags": [],
+            "web_search_performed": True,
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    reviewed = _review(source, "2026-08-14")
+    assert reviewed["freshness_status"] == "current_or_recent"
+    assert reviewed["ai_action"] == "priority_buy"
+    assert reviewed["final_category"] == "recommend_buy"
+
+
+def test_forecast_year_does_not_count_as_current_report_evidence() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "ai_action": "priority_buy",
+            "buy_attractiveness_score": 80,
+            "claims": [{"statement": "2025—2027年盈利预测目标为增长", "source_ref": "https://example.test/forecast"}],
+            "risk_flags": [],
+            "web_search_performed": True,
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    reviewed = _review(source, "2026-08-14")
+    assert reviewed["freshness_status"] == "undated"
+    assert reviewed["ai_action"] == "watchlist"
+    assert reviewed["final_category"] == "observe"
+
+
+def test_contract_rejects_stale_buy_fields() -> None:
+    source = {
+        "schema_version": 2,
+        "security_code": "600339",
+        "type_key": "type1",
+        "verdict": "confirmed",
+        "recommended_action": "keep",
+        "buy_attractiveness_score": 80,
+        "ai_action": "priority_buy",
+        "final_category": "recommend_buy",
+        "final_recommendation": "recommend_buy",
+        "confidence": "high",
+        "web_search_performed": True,
+        "freshness_status": "historical",
+        "freshness_years": [2024],
+        "claims": [{"statement": "2024年年报", "source_ref": "https://example.test/report"}],
+    }
+    errors = validate_review(source)
+    assert {"stale_priority_buy", "stale_recommend_buy", "stale_final_recommendation"}.issubset(errors)
+
+
 def test_unsearched_confirmation_is_ranked_with_a_source_penalty() -> None:
     source = {
         "ai_review": {
@@ -337,7 +426,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v5-ai-first-near-threshold"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v6-freshness-audited"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1

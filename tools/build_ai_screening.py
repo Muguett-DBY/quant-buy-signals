@@ -154,6 +154,8 @@ def build_input(
         packets.append(
             {
                 **candidate,
+                "generation": snapshot_generation,
+                "market_as_of": snapshot_market_as_of,
                 "rule_context": _relevant_rules(chunks, candidate["type_key"]),
                 "company_context": _compact_company(company, candidate["type_key"]),
                 "ai_review": None,

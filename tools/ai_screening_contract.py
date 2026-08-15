@@ -17,6 +17,7 @@ REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
 AI_ACTIONS = frozenset({"priority_buy", "watchlist", "avoid", "insufficient_evidence"})
 FINAL_RECOMMENDATIONS = frozenset({"recommend_buy", "do_not_recommend_buy"})
 AI_CONFIDENCE = frozenset({"high", "medium", "low"})
+FRESHNESS_STATUSES = frozenset({"current_or_recent", "historical", "undated"})
 TYPE_KEYS = tuple(f"type{i}" for i in range(1, 8))
 
 
@@ -156,6 +157,31 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("web_search_performed")
     if "web_search_verified" in review and not isinstance(review.get("web_search_verified"), bool):
         errors.append("web_search_verified")
+    if "freshness_status" in review and str(review.get("freshness_status")) not in FRESHNESS_STATUSES:
+        errors.append("freshness_status")
+    if "freshness_years" in review:
+        years = review.get("freshness_years")
+        if (
+            not isinstance(years, list)
+            or len(years) > 12
+            or any(not isinstance(year, int) or year < 1900 or year > 2100 for year in years)
+            or len(set(years)) != len(years)
+        ):
+            errors.append("freshness_years")
+    if "freshness_penalty" in review:
+        penalty = _as_float(review.get("freshness_penalty"))
+        if penalty is None or penalty < 0 or penalty > 20:
+            errors.append("freshness_penalty")
+    if "freshness_note" in review and not isinstance(review.get("freshness_note"), str):
+        errors.append("freshness_note")
+    freshness_status = str(review.get("freshness_status") or "")
+    if freshness_status in {"historical", "undated"}:
+        if str(review.get("ai_action") or "") == "priority_buy":
+            errors.append("stale_priority_buy")
+        if str(review.get("final_category") or "") == "recommend_buy":
+            errors.append("stale_recommend_buy")
+        if str(review.get("final_recommendation") or "") == "recommend_buy":
+            errors.append("stale_final_recommendation")
     for field in ("key_strengths", "risk_flags"):
         values = review.get(field, [])
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):

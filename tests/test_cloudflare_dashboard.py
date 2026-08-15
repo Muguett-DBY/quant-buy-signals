@@ -1995,13 +1995,14 @@ const artifact = {
       priority_buy_count: 0,
       watchlist_count: 1,
       avoid_count: 0,
-      insufficient_evidence_count: 0,
-      packets: [{
+       insufficient_evidence_count: 0,
+       freshness_counts: { current_or_recent: 0, historical: 1, undated: 0 },
+       packets: [{
     ai_rank: 1,
     security_code: "600339",
     type_key: "type1",
     deterministic: { status: "triggered", score: 7.8 },
-            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_recommendation: "do_not_recommend_buy", recommendation_label: "不推荐现在买入", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash" },
+            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_recommendation: "do_not_recommend_buy", recommendation_label: "不推荐现在买入", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash", freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));
@@ -2029,11 +2030,13 @@ assert.ok(html.includes("AI筛查"));
 assert.ok(html.includes("建议买"));
 assert.ok(html.includes("观察"));
 assert.ok(html.includes("不建议"));
+assert.ok(html.includes("资料时效"));
 assert.ok(!html.includes("待核验（未形成买入结论）"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
-const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
-assert.ok(inlineScript);
-assert.doesNotThrow(() => new Function(inlineScript));
+ const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(inlineScript);
+ assert.ok(inlineScript.includes("freshness_counts"));
+ assert.doesNotThrow(() => new Function(inlineScript));
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],

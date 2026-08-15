@@ -121,6 +121,10 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         "effort": _text(review.get("effort"), 32),
         "web_search_performed": web_search_performed,
         "web_search_verified": web_search_verified,
+        "freshness_status": _text(review.get("freshness_status"), 32) or "undated",
+        "freshness_years": [int(year) for year in review.get("freshness_years", [])[:12]],
+        "freshness_penalty": float(review.get("freshness_penalty", 0.0) or 0.0),
+        "freshness_note": _text(review.get("freshness_note"), 180),
     }
 
 
@@ -179,6 +183,7 @@ def build_artifact(
     web_search_completed_count = 0
     action_counts: Counter[str] = Counter()
     final_category_counts: Counter[str] = Counter()
+    freshness_counts: Counter[str] = Counter()
     full_coverage = source.get("full_coverage_final_recommendation") is True
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -202,6 +207,7 @@ def build_artifact(
         verdicts[public_review["verdict"]] += 1
         action_counts[public_review["ai_action"]] += 1
         final_category_counts[public_review["final_category"]] += 1
+        freshness_counts[str(public_review.get("freshness_status") or "undated")] += 1
         if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
             unreviewed_candidate_count += 1
         else:
@@ -300,7 +306,8 @@ def build_artifact(
         + action_counts["avoid"]
         + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v5-ai-first-near-threshold",
+        "ranking_version": "ai-buy-attractiveness-v6-freshness-audited",
+        "freshness_counts": dict(sorted(freshness_counts.items())),
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,
         "packets": public_packets,

@@ -111,7 +111,10 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
             "actually returned by web_search. Set web_search_performed=true only after searching; "
             "set web_search_performed=true immediately after the search attempt, even when no reliable "
             "source is returned; set confidence=low in that case and do not claim that the company is "
-            "a priority buy without a usable HTTPS source.\n"
+            "a priority buy without a usable HTTPS source. The packet's market_as_of is the cutoff: "
+            "report periods 2025/2026 are current/recent for this snapshot, while 2024 or earlier "
+            "must be called historical and cannot justify priority_buy. Do not treat a URL publication "
+            "date, forecast/target year, or stock code as an actual report period.\n"
         )
     return (
         protocol

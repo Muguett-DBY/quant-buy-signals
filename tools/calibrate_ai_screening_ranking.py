@@ -73,6 +73,69 @@ def _claim_url(claim: Mapping[str, Any]) -> str:
     return ""
 
 
+def _claim_data_years(claim: Mapping[str, Any]) -> list[int]:
+    """Extract report/data years from the claim text, not URL path or stock code."""
+    statement = str(claim.get("statement") or "")
+    years: set[int] = set()
+    # Forecasts and management targets are useful risk context, but they are
+    # not an actual report period.  Keep actual years from the same claim when
+    # a sentence contains both (for example, "2025 annual ... 2026 target").
+    forecast_markers = re.compile(
+        r"预测|预期|预计|目标|规划|指引|未来|将|拟|展望|一致预期|forecast|guidance|target|expected",
+        re.IGNORECASE,
+    )
+    for match in re.finditer(r"(?<!\d)(20(?:1[5-9]|2[0-9]))(?!\d)", statement):
+        start = max(0, match.start() - 18)
+        end = min(len(statement), match.end() + 18)
+        context = statement[start:end]
+        if forecast_markers.search(context):
+            continue
+        years.add(int(match.group(1)))
+    return sorted(years)
+
+
+def _freshness(review: Mapping[str, Any], market_as_of: str | None) -> dict[str, Any]:
+    """Describe whether the AI's cited facts cover the current review date.
+
+    A 2024 annual report can remain useful historical context, but it must not
+    silently look like current evidence for a 2026 snapshot.  This is a
+    presentation/ranking signal, not a fabricated replacement for a new filing.
+    """
+    as_of_year_match = re.match(r"^(20\d{2})-\d{2}-\d{2}$", str(market_as_of or ""))
+    if not as_of_year_match:
+        return {
+            "status": "current_or_recent",
+            "years": [],
+            "penalty": 0.0,
+            "note": "未指定快照日期，保留原始排序",
+        }
+    current_year = int(as_of_year_match.group(1))
+    recent_floor = current_year - 1
+    claims = review.get("claims") if isinstance(review.get("claims"), list) else []
+    years = sorted({year for claim in claims if isinstance(claim, Mapping) for year in _claim_data_years(claim)})
+    if not years:
+        return {
+            "status": "undated",
+            "years": [],
+            "penalty": 5.0,
+            "note": f"未能确认覆盖 {current_year - 1}—{current_year} 年的实际报告期",
+        }
+    if max(years) >= recent_floor:
+        return {
+            "status": "current_or_recent",
+            "years": years,
+            "penalty": 0.0,
+            "note": f"事实陈述包含 {recent_floor}—{current_year} 年期间信息；仍应以最新正式报告为准",
+        }
+    latest = max(years)
+    return {
+        "status": "historical",
+        "years": years,
+        "penalty": 8.0,
+        "note": f"主要事实只到 {latest} 年或更早，不能直接代表当前交易日状态",
+    }
+
+
 def _final_category(action: str) -> str:
     """Collapse the internal four-state action into the three user outcomes."""
     if action == "priority_buy":
@@ -82,11 +145,12 @@ def _final_category(action: str) -> str:
     return "do_not_recommend"
 
 
-def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
+def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str | None = None) -> float:
     base = _deterministic_score(packet)
     status = _deterministic_status(packet)
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     source_quality = _source_quality(source)
+    freshness = _freshness(source, market_as_of)
     model_score = _number(source.get("buy_attractiveness_score"))
     source_penalty = {
         "verified_https": 0.0,
@@ -105,7 +169,7 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
         # The model score remains the ranking source.  Deterministic status
         # and provenance lower confidence in small, visible increments; they
         # do not turn a near-threshold AI buy opinion into an automatic avoid.
-        score = model_score - source_penalty - status_penalty
+        score = model_score - source_penalty - status_penalty - float(freshness["penalty"])
         if str(source.get("ai_action") or "") == "avoid" or verdict == "misclassified":
             return round(max(0.0, min(49.0, score)), 1)
         return round(max(0.0, min(100.0, score)), 1)
@@ -127,14 +191,15 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str) -> float:
     else:
         score = max(20.0, min(58.0, 30.0 + base * 2.4 - penalty))
 
-    return round(max(0.0, min(100.0, score - source_penalty - status_penalty)), 1)
+    return round(max(0.0, min(100.0, score - source_penalty - status_penalty - float(freshness["penalty"]))), 1)
 
 
-def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
+def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[str, Any]:
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     verdict = str(source.get("verdict") or "needs_review")
     status = _deterministic_status(packet)
-    score = _calibrated_score(packet, verdict)
+    freshness = _freshness(source, market_as_of)
+    score = _calibrated_score(packet, verdict, market_as_of)
     web_verified = _web_search_verified(source)
     source_action = str(source.get("ai_action") or "")
     if source_action == "insufficient_evidence":
@@ -146,7 +211,12 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         action = "watchlist"
     elif source_action == "avoid" or verdict == "misclassified":
         action = "avoid"
-    elif verdict == "confirmed" and source_action == "priority_buy" and score >= 60:
+    elif (
+        verdict == "confirmed"
+        and source_action == "priority_buy"
+        and score >= 60
+        and freshness["status"] == "current_or_recent"
+    ):
         action = "priority_buy"
     elif (
         verdict in {"confirmed", "caution", "missed_candidate"}
@@ -187,6 +257,8 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
+    if freshness["status"] != "current_or_recent":
+        risk_flags.insert(0, f"资料时效：{freshness['note']}")
     # Rebuild the prefix from the current provenance state.  This also strips
     # the prefix emitted by an older calibration run, so replaying a legacy
     # seed cannot produce nested/double "AI买入吸引力" labels.
@@ -212,7 +284,7 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         "not_searched": "尚未完成联网搜索，分数已下调",
     }[source_quality]
     status_note = "确定性规则已触发" if status == "triggered" else f"确定性规则状态为 {status}，按接近达标口径扣分"
-    summary = f"AI买入吸引力 {score:.1f} 分（{status_note}；{source_note}）。{summary}"
+    summary = f"AI买入吸引力 {score:.1f} 分（{status_note}；{source_note}；{freshness['note']}）。{summary}"
     if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
         risk_flags.insert(0, source_note)
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
@@ -222,6 +294,8 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         if recommendation == "recommend_buy" and status == "triggered"
         else "建议买·接近达标"
         if recommendation == "recommend_buy"
+        else "观察·需更新资料"
+        if action == "watchlist" and freshness["status"] != "current_or_recent"
         else "观察"
         if action == "watchlist"
         else "不建议"
@@ -248,6 +322,10 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         "effort": str(source.get("effort") or "max"),
         "web_search_performed": bool(source.get("web_search_performed") is True),
         "web_search_verified": web_verified,
+        "freshness_status": freshness["status"],
+        "freshness_years": freshness["years"],
+        "freshness_penalty": freshness["penalty"],
+        "freshness_note": freshness["note"],
     }
 
 
@@ -260,14 +338,14 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("packet is not an object")
-        review = _review(packet)
+        review = _review(packet, str(source.get("market_as_of") or ""))
         if validate_review(review):
             raise ValueError(f"calibrated review is invalid: {review['security_code']}/{review['type_key']}")
         output_packets.append({**packet, "ai_review": review})
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
-        "ranking_source": "opencode-go-web-search-review-calibrated",
+        "ranking_source": "opencode-go-web-search-review-calibrated-freshness-v6",
         "full_coverage_final_recommendation": True,
         "packets": output_packets,
     }

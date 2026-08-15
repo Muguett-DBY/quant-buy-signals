@@ -1,5 +1,14 @@
 # Local AI screening
 
+## 资料时效门禁
+
+AI 事实陈述必须区分“报告期”与“网页发布时间”。对 `market_as_of=2026` 的快照，
+陈述中只有 2025/2026 期间信息才算 current/recent；只引用 2024 年或更早事实的
+卡片会自动扣分并降为“观察·需更新资料”，不会继续显示为当前建议买入。历史年报仍
+保留为背景证据，但页面会明确标注其时效，不能把旧资料冒充当前状态。重新运行本地
+批次时，必须要求模型搜索最新年报/季报并在 `claims[].statement` 中写明报告期；
+URL 路径中的发布日期或股票代码不算数据年份。
+
 AI screening is an optional second-pass research overlay.  The seven
 deterministic buy rules remain authoritative; the model can only attach an
 auditable review (`confirmed`, `caution`, `misclassified`, `missed_candidate`,
