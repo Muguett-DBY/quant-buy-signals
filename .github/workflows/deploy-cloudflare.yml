@@ -259,7 +259,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/ai-screening-generation" ]]; then
             ai_generation="$(< "$RUNNER_TEMP/ai-screening-generation")"
             ai_api="$(curl --fail --silent --show-error "https://quant.custard.top/api/ai-screening?generation_id=${ai_generation}")"
-            if ! jq -e --arg generation "${ai_generation}" '.snapshot_generation == $generation and .ai_is_advisory == true and .auto_buy_promotion == false' <<< "${ai_api}" >/dev/null; then
+            if ! jq -e --arg generation "${ai_generation}" '.snapshot_generation == $generation and .ai_is_advisory == true and .auto_buy_promotion == false and .full_coverage_final_recommendation == true and .reviewed_count == .candidate_total and .insufficient_evidence_count == 0 and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)' <<< "${ai_api}" >/dev/null; then
               echo "Published AI screening overlay failed its generation-bound contract." >&2
               exit 1
             fi

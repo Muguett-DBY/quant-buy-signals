@@ -80,11 +80,20 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(claim, Mapping)
         )
     )
+    action = _text(review.get("ai_action"), 32)
+    recommendation = _text(review.get("final_recommendation"), 32)
+    if recommendation not in {"recommend_buy", "do_not_recommend_buy"}:
+        recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
+    label = _text(review.get("recommendation_label"), 64)
+    if not label:
+        label = "推荐买入候选" if recommendation == "recommend_buy" else "不推荐现在买入"
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
         "buy_attractiveness_score": float(review["buy_attractiveness_score"]),
-        "ai_action": _text(review.get("ai_action"), 32),
+        "ai_action": action,
+        "final_recommendation": recommendation,
+        "recommendation_label": label,
         "confidence": _text(review.get("confidence"), 16),
         "summary": _text(review.get("summary"), 1200),
         "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
@@ -150,6 +159,7 @@ def build_artifact(
     attempted_needs_review_count = 0
     web_search_completed_count = 0
     action_counts: Counter[str] = Counter()
+    full_coverage = source.get("full_coverage_final_recommendation") is True
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("candidate packet must be an object")
@@ -161,10 +171,14 @@ def build_artifact(
         seen.add(key)
         review = packet.get("ai_review")
         if review is None:
+            if full_coverage:
+                raise ValueError(f"full-coverage candidate has no AI review: {key}")
             continue
         if not isinstance(review, Mapping):
             raise ValueError(f"AI review is not an object: {key}")
         public_review = _public_review(review)
+        if full_coverage and public_review["ai_action"] == "insufficient_evidence":
+            raise ValueError(f"full-coverage candidate has no final decision: {key}")
         verdicts[public_review["verdict"]] += 1
         action_counts[public_review["ai_action"]] += 1
         if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
@@ -184,7 +198,7 @@ def build_artifact(
                 "ai_review": public_review,
             }
         )
-    action_priority = {"priority_buy": 0, "watchlist": 1, "insufficient_evidence": 2, "avoid": 3}
+    action_priority = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
     public_packets.sort(
         key=lambda value: (
             -float(value["ai_review"]["buy_attractiveness_score"]),
@@ -213,6 +227,7 @@ def build_artifact(
         "artifact_kind": ARTIFACT_KIND,
         "ai_is_advisory": True,
         "auto_buy_promotion": False,
+        "full_coverage_final_recommendation": full_coverage,
         "snapshot_generation": generation,
         "market_as_of": market_as_of,
         "methodology_version": source.get("methodology_version"),
@@ -232,8 +247,10 @@ def build_artifact(
         "verdict_counts": dict(sorted(verdicts.items())),
         "ai_action_counts": dict(sorted(action_counts.items())),
         "priority_buy_count": action_counts["priority_buy"],
+        "recommend_buy_count": action_counts["priority_buy"],
         "watchlist_count": action_counts["watchlist"],
         "avoid_count": action_counts["avoid"],
+        "do_not_recommend_buy_count": action_counts["watchlist"] + action_counts["avoid"] + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
         "ranking_version": "ai-buy-attractiveness-v3-web-gated",
         "ranking_source": _text(source.get("ranking_source"), 120),

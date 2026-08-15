@@ -116,7 +116,11 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     ):
         action = "watchlist"
     else:
-        action = "insufficient_evidence"
+        # Every candidate gets a final conservative decision. Missing web
+        # provenance is not a third outcome that leaves the user without an
+        # answer: attractive but unverified packets stay on the watchlist,
+        # while weak or contradictory packets are marked avoid.
+        action = "watchlist" if score >= 50 else "avoid"
     if verdict == "confirmed" and status == "triggered" and not web_verified:
         action = "watchlist"
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
@@ -155,16 +159,28 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         summary = f"AI买入吸引力 {score:.1f} 分（已通过 OpenCode Go 联网资料核验）。{summary}"
     else:
         summary = f"AI买入吸引力 {score:.1f} 分（尚未完成本轮联网资料核验，不进入优先候选）。{summary}"
+    no_web_reason = "\u672a\u5b8c\u6210\u672c\u8f6e\u8054\u7f51\u8d44\u6599\u6838\u9a8c\uff0c\u6682\u4e0d\u63a8\u8350\u76f4\u63a5\u4e70\u5165"
+    if not web_verified and no_web_reason not in risk_flags:
+        risk_flags.insert(0, no_web_reason)
+    public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
+    recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
+    recommendation_label = "\u63a8\u8350\u4e70\u5165\u5019\u9009" if recommendation == "recommend_buy" else "\u4e0d\u63a8\u8350\u73b0\u5728\u4e70\u5165"
+    # Keep the older summary text as context, but make the final decision and
+    # the provenance limitation explicit to a normal reader.
+    if not web_verified:
+        summary = summary + " " + no_web_reason + "。"
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
         "type_key": str(packet.get("type_key") or ""),
-        "verdict": verdict
-        if verdict in {"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"}
-        else "needs_review",
-        "recommended_action": str(source.get("recommended_action") or "manual_review"),
+        "verdict": public_verdict,
+        "recommended_action": str(source.get("recommended_action") or "manual_review")
+        if str(source.get("recommended_action") or "manual_review") in {"keep", "demote", "manual_review"}
+        else "manual_review",
         "buy_attractiveness_score": score,
         "ai_action": action,
+        "final_recommendation": recommendation,
+        "recommendation_label": recommendation_label,
         "confidence": confidence,
         "summary": summary,
         "key_strengths": strengths,
@@ -194,6 +210,7 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
         "ranking_source": "opencode-go-web-search-review-calibrated",
+        "full_coverage_final_recommendation": True,
         "packets": output_packets,
     }
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

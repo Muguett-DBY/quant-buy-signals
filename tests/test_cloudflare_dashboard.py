@@ -1958,7 +1958,7 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponseV3(request);' in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponseFinal2(request);' in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source
@@ -1977,7 +1977,8 @@ const artifact = {
   review_schema_version: 2,
   artifact_kind: "ai_screening_overlay",
   ai_is_advisory: true,
-  auto_buy_promotion: false,
+      auto_buy_promotion: false,
+      full_coverage_final_recommendation: true,
   snapshot_generation: generation.generation_id,
       market_as_of: "2026-08-13",
       reviewed_count: 1,
@@ -1985,6 +1986,8 @@ const artifact = {
       unreviewed_candidate_count: 0,
       attempted_needs_review_count: 0,
       ai_action_counts: { priority_buy: 0, watchlist: 1, avoid: 0, insufficient_evidence: 0 },
+      recommend_buy_count: 0,
+      do_not_recommend_buy_count: 1,
       priority_buy_count: 0,
       watchlist_count: 1,
       avoid_count: 0,
@@ -1994,7 +1997,7 @@ const artifact = {
     security_code: "600339",
     type_key: "type1",
     deterministic: { status: "triggered", score: 7.8 },
-        ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash" },
+            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_recommendation: "do_not_recommend_buy", recommendation_label: "不推荐现在买入", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));

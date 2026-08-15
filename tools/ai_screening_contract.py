@@ -15,6 +15,7 @@ PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
 AI_ACTIONS = frozenset({"priority_buy", "watchlist", "avoid", "insufficient_evidence"})
+FINAL_RECOMMENDATIONS = frozenset({"recommend_buy", "do_not_recommend_buy"})
 AI_CONFIDENCE = frozenset({"high", "medium", "low"})
 TYPE_KEYS = tuple(f"type{i}" for i in range(1, 8))
 
@@ -145,6 +146,10 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("buy_attractiveness_score")
     if str(review.get("ai_action")) not in AI_ACTIONS:
         errors.append("ai_action")
+    if "final_recommendation" in review and str(review.get("final_recommendation")) not in FINAL_RECOMMENDATIONS:
+        errors.append("final_recommendation")
+    if "recommendation_label" in review and not isinstance(review.get("recommendation_label"), str):
+        errors.append("recommendation_label")
     if str(review.get("confidence")) not in AI_CONFIDENCE:
         errors.append("confidence")
     if "web_search_performed" in review and not isinstance(review.get("web_search_performed"), bool):

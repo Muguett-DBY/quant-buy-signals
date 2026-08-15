@@ -80,7 +80,8 @@ def test_calibrated_priority_requires_a_deterministic_trigger() -> None:
 
     source["deterministic"]["status"] = "insufficient_evidence"
     unresolved = _review(source)
-    assert unresolved["ai_action"] == "insufficient_evidence"
+    assert unresolved["ai_action"] == "watchlist"
+    assert unresolved["final_recommendation"] == "do_not_recommend_buy"
     assert unresolved["buy_attractiveness_score"] <= 64
 
 
@@ -266,6 +267,8 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["pending_review_count"] == 0
     assert artifact["packets"][0]["ai_rank"] == 1
     assert artifact["watchlist_count"] == 1
+    assert artifact["packets"][0]["ai_review"]["final_recommendation"] == "do_not_recommend_buy"
+    assert artifact["do_not_recommend_buy_count"] == 1
 
 
 def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
