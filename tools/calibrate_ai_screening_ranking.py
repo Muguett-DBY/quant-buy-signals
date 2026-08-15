@@ -13,6 +13,7 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any, Mapping
+import re
 
 from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, validate_review
 
@@ -45,11 +46,17 @@ def _web_search_verified(review: Mapping[str, Any]) -> bool:
     if review.get("web_search_performed") is not True:
         return False
     claims = review.get("claims") if isinstance(review.get("claims"), list) else []
-    return any(
-        str(claim.get("source_ref") or "").lower().startswith("https://")
-        for claim in claims
-        if isinstance(claim, Mapping)
-    )
+    return any(_claim_url(claim).lower().startswith("https://") for claim in claims if isinstance(claim, Mapping))
+
+
+def _claim_url(claim: Mapping[str, Any]) -> str:
+    for field in ("source_ref", "source_context"):
+        raw = str(claim.get(field) or "")
+        match = re.search(r"https?://[^\s)]+", raw, re.IGNORECASE)
+        if match:
+            ascii_url = re.match(r"[A-Za-z0-9:/?#\[\]@!$&'()*+,;=%._~\-]+", match.group(0))
+            return (ascii_url.group(0) if ascii_url else "").rstrip(".,;")
+    return ""
 
 
 def _final_category(action: str) -> str:
@@ -142,9 +149,14 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
     raw_claims = source.get("claims") if isinstance(source.get("claims"), list) else []
     # Legacy public cards may contain empty placeholder claims.  Do not copy
     # those into the new contract: a claim without a source is not evidence.
-    claims = [
-        claim for claim in raw_claims if isinstance(claim, Mapping) and str(claim.get("source_ref") or "").strip()
-    ]
+    claims = []
+    for claim in raw_claims:
+        if not isinstance(claim, Mapping):
+            continue
+        source_ref = _claim_url(claim)
+        if not source_ref:
+            continue
+        claims.append({**claim, "source_ref": source_ref})
     strengths = [
         str(claim.get("statement") or "")[:240]
         for claim in claims

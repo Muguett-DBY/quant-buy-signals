@@ -64,6 +64,11 @@ def _public_review(review: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(claim, Mapping):
             raise ValueError("AI claim must be an object")
         raw_source = _text(claim.get("source_ref"), 800)
+        if not raw_source:
+            # Some OpenCode tool responses put the returned URL in a separate
+            # source_context field.  Reuse it only when it is an actual URL;
+            # never manufacture a link from a search summary.
+            raw_source = _text(claim.get("source_context"), 800)
         match = _URL_RE.search(raw_source)
         source_ref = ""
         if match and match.group(0).lower().startswith("https://"):
@@ -238,7 +243,20 @@ def build_artifact(
         }
     source_audit["web_search_completed"] = web_search_completed_count
     source_audit["web_search_attempted"] = web_search_attempted_count
+    source_audit["web_source_verified"] = web_search_completed_count
     source_audit["reviewed_without_web_search"] = max(0, attempted_review_count - web_search_attempted_count)
+    rule_file_count = source.get("rule_file_count")
+    rule_source_sha256 = source.get("rule_source_sha256")
+    rules_root = _text(source.get("rules_root"), 240)
+    if rule_file_count is not None and (not isinstance(rule_file_count, int) or rule_file_count < 1):
+        raise ValueError("AI screening knowledge-base file count is invalid")
+    if rule_source_sha256 is not None:
+        if (
+            not isinstance(rule_file_count, int)
+            or not isinstance(rule_source_sha256, Mapping)
+            or len(rule_source_sha256) != rule_file_count
+        ):
+            raise ValueError("AI screening knowledge-base manifest is incomplete")
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "review_schema_version": REVIEW_SCHEMA_VERSION,
@@ -286,6 +304,12 @@ def build_artifact(
         "source_audit": source_audit,
         "packets": public_packets,
     }
+    if isinstance(rule_file_count, int) and isinstance(rule_source_sha256, Mapping):
+        artifact["rules_root"] = rules_root
+        artifact["rule_file_count"] = rule_file_count
+        artifact["rule_source_sha256"] = dict(
+            sorted((str(key), str(value)) for key, value in rule_source_sha256.items())
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return artifact

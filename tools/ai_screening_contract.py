@@ -165,7 +165,7 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("claims")
     else:
         for claim in claims:
-            if not isinstance(claim, Mapping) or not claim.get("source_ref"):
+            if not isinstance(claim, Mapping) or not (claim.get("source_ref") or claim.get("source_context")):
                 errors.append("claim_source_ref")
                 break
     return errors

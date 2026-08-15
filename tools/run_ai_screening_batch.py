@@ -119,12 +119,16 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
         + "\n\nBatch review instructions:\n"
         + "Review every packet independently. The output array must contain exactly one object "
         + "for every packet, preserving security_code and type_key. Do not omit a packet.\n"
+        + "The rule_context fragments come from the local 模板汇总MD knowledge base; use them as the "
+        + "authoritative interpretation of the seven-type rules, never as company facts.\n"
         + "Shared rule fragments are keyed by type_key; use the matching fragments when useful:\n"
         + json.dumps(shared, ensure_ascii=False, sort_keys=True)
         + "\nPackets (JSON array):\n"
         + json.dumps(slim, ensure_ascii=False, sort_keys=True)
         + "\nIMPORTANT: for this batch, override the protocol's single-packet output example: "
         + "return exactly one JSON array containing one review object per packet, and no Markdown. "
+        + "For every packet, actually search the company code/name and prefer a returned HTTPS official source. "
+        + "If a usable source is returned, put its exact URL in claims[].source_ref; never invent or rewrite a URL. "
         + "Keep every object compact: summary <= 280 Chinese characters, at most 2 strengths, "
         + "3 risks, and 3 source claims; do not repeat facts."
     )

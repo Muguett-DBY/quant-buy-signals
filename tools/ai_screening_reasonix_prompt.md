@@ -61,6 +61,6 @@
 }
 ```
 
-每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明。不要把搜索摘要当成正式证据。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。最终页面只显示三类：`recommend_buy=建议买`、`observe=观察`、`do_not_recommend=不建议`；`insufficient_evidence` 只能作为内部原因，发布时归入 `observe`。
+每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；优先使用联网工具实际返回的 HTTPS 正式公告、年报、交易所页面或公司投资者关系页面。`rule_context` 是本地《模板汇总MD》知识库的规则片段，只能用于理解评分口径，不能冒充公司事实。没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明；不要把搜索摘要当成正式证据，也不要编造 URL。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。最终页面只显示三类：`recommend_buy=建议买`、`observe=观察`、`do_not_recommend=不建议`；`insufficient_evidence` 只能作为内部原因，发布时归入 `observe`。
 
 确定性筛选仍然是第一道门，AI 只负责在候选池内排序和指出反证；任何 AI 分数都不能修改七类规则、买入区、总闸门、卖出域或公司原始数据。

@@ -31,6 +31,8 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _rule_chunks(root: Path) -> list[dict[str, str]]:
+    if not root.exists() or not root.is_dir():
+        raise ValueError(f"rules root does not exist or is not a directory: {root}")
     chunks: list[dict[str, str]] = []
     for path in sorted(root.rglob("*.md")):
         raw = path.read_bytes()
@@ -67,6 +69,8 @@ def _rule_chunks(root: Path) -> list[dict[str, str]]:
                         "text": body,
                     }
                 )
+    if not chunks:
+        raise ValueError(f"rules root contains no Markdown knowledge: {root}")
     return chunks
 
 

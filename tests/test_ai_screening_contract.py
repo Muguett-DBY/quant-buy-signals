@@ -4,7 +4,7 @@ import json
 
 from tools.ai_screening_contract import select_candidates, validate_review
 from tools.build_ai_screening import build_input, merge_reviews
-from tools.calibrate_ai_screening_ranking import _review
+from tools.calibrate_ai_screening_ranking import _claim_url, _review
 from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
 from tools.run_ai_screening_batch import _extract_array
@@ -180,6 +180,31 @@ def test_public_review_strips_reasonix_annotation_from_source_url() -> None:
     assert public["web_search_verified"] is True
 
 
+def test_source_context_url_is_recovered_without_inventing_a_source() -> None:
+    review = {
+        "schema_version": 2,
+        "security_code": "600339",
+        "type_key": "type1",
+        "verdict": "caution",
+        "recommended_action": "manual_review",
+        "buy_attractiveness_score": 60,
+        "ai_action": "watchlist",
+        "confidence": "medium",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [
+            {
+                "statement": "报告",
+                "source_ref": "",
+                "source_context": "https://example.test/report.pdf（年报）",
+            }
+        ],
+        "web_search_performed": True,
+    }
+    assert _claim_url(review["claims"][0]) == "https://example.test/report.pdf"
+    assert _public_review(review)["web_search_verified"] is True
+
+
 def test_public_review_drops_http_sources_and_cannot_claim_web_verification() -> None:
     review = {
         "schema_version": 2,
@@ -210,6 +235,9 @@ def test_build_and_merge_review_artifacts(tmp_path) -> None:
     out = tmp_path / "out"
     manifest = build_input(snapshot_path, rules, out)
     assert manifest["candidate_count"] == 2
+    assert manifest["rule_file_count"] == 1
+    enriched = json.loads((out / "ai-screening-input.json").read_text(encoding="utf-8"))
+    assert enriched["packets"][0]["rule_context"]
     review_path = tmp_path / "reviews.jsonl"
     review_path.write_text(
         json.dumps(
