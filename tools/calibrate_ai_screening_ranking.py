@@ -164,7 +164,11 @@ def _review(packet: Mapping[str, Any]) -> dict[str, Any]:
         risk_flags.insert(0, no_web_reason)
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
     recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
-    recommendation_label = "\u63a8\u8350\u4e70\u5165\u5019\u9009" if recommendation == "recommend_buy" else "\u4e0d\u63a8\u8350\u73b0\u5728\u4e70\u5165"
+    recommendation_label = (
+        "\u63a8\u8350\u4e70\u5165\u5019\u9009"
+        if recommendation == "recommend_buy"
+        else "\u4e0d\u63a8\u8350\u73b0\u5728\u4e70\u5165"
+    )
     # Keep the older summary text as context, but make the final decision and
     # the provenance limitation explicit to a normal reader.
     if not web_verified:

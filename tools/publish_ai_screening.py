@@ -250,7 +250,9 @@ def build_artifact(
         "recommend_buy_count": action_counts["priority_buy"],
         "watchlist_count": action_counts["watchlist"],
         "avoid_count": action_counts["avoid"],
-        "do_not_recommend_buy_count": action_counts["watchlist"] + action_counts["avoid"] + action_counts["insufficient_evidence"],
+        "do_not_recommend_buy_count": action_counts["watchlist"]
+        + action_counts["avoid"]
+        + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
         "ranking_version": "ai-buy-attractiveness-v3-web-gated",
         "ranking_source": _text(source.get("ranking_source"), 120),
