@@ -306,7 +306,7 @@ def build_artifact(
         + action_counts["avoid"]
         + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v6-freshness-audited",
+        "ranking_version": "ai-buy-attractiveness-v7-independent-buy-freshness-audited",
         "freshness_counts": dict(sorted(freshness_counts.items())),
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,

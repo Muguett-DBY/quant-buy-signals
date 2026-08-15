@@ -10,9 +10,12 @@ AI 事实陈述必须区分“报告期”与“网页发布时间”。对 `mar
 URL 路径中的发布日期或股票代码不算数据年份。
 
 AI screening is an optional second-pass research overlay.  The seven
-deterministic buy rules remain authoritative; the model can only attach an
-auditable review (`confirmed`, `caution`, `misclassified`, `missed_candidate`,
-or `needs_review`).  It cannot change scores, bounds, vetoes, or buy types.
+deterministic buy rules remain the factual baseline, but they are not a hard
+gate on the AI opinion: a current, well-supported near-qualified company may
+receive an independent `priority_buy` recommendation even when its
+deterministic status is `conditional` or `observe`.  The page shows both
+states separately.  The model cannot change deterministic scores, bounds,
+vetoes, or buy types.
 
 ## Candidate packet
 

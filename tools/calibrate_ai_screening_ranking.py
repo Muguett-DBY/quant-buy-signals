@@ -353,7 +353,7 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
-        "ranking_source": "opencode-go-web-search-review-calibrated-freshness-v6",
+        "ranking_source": "opencode-go-web-search-review-calibrated-independent-buy-v7",
         "full_coverage_final_recommendation": True,
         "packets": output_packets,
     }

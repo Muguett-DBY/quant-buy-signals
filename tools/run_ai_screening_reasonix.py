@@ -45,8 +45,8 @@ def _prompt(protocol: str, packet: dict[str, Any], *, require_web_search: bool =
             "Search the company code and name on CNINFO, SSE/SZSE, HKEX when applicable, and the "
             "company investor-relations or official filing page. Use only returned URLs. Set "
             "web_search_performed=true immediately after the search attempt, even when the provider "
-            "returns no reliable source; set confidence=low in that case and never promote the company "
-            "to priority_buy without a usable HTTPS source.\n"
+            "returns no reliable source; set confidence=low in that case. HTTPS is preferred but is not "
+            "a hard gate when a returned official HTTP source is identifiable.\n"
         )
     return (
         protocol

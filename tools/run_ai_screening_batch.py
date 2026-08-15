@@ -110,11 +110,14 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
             "applicable, and the company's investor-relations or official filing page. Use only URLs "
             "actually returned by web_search. Set web_search_performed=true only after searching; "
             "set web_search_performed=true immediately after the search attempt, even when no reliable "
-            "source is returned; set confidence=low in that case and do not claim that the company is "
-            "a priority buy without a usable HTTPS source. The packet's market_as_of is the cutoff: "
+            "source is returned; set confidence=low in that case. HTTPS is preferred for source quality "
+            "but is not a hard gate for an AI opinion when a returned official HTTP source is identifiable. "
+            "The packet's market_as_of is the cutoff: "
             "report periods 2025/2026 are current/recent for this snapshot, while 2024 or earlier "
             "must be called historical and cannot justify priority_buy. Do not treat a URL publication "
-            "date, forecast/target year, or stock code as an actual report period.\n"
+            "date, forecast/target year, or stock code as an actual report period. Deterministic status "
+            "is context, not a hard gate: if current evidence supports buying a near-qualified candidate, "
+            "return priority_buy and explain the independent AI judgment.\n"
         )
     return (
         protocol
@@ -130,7 +133,7 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
         + json.dumps(slim, ensure_ascii=False, sort_keys=True)
         + "\nIMPORTANT: for this batch, override the protocol's single-packet output example: "
         + "return exactly one JSON array containing one review object per packet, and no Markdown. "
-        + "For every packet, actually search the company code/name and prefer a returned HTTPS official source. "
+        + "For every packet, actually search the company code/name and prefer a returned official source. "
         + "If a usable source is returned, put its exact URL in claims[].source_ref; never invent or rewrite a URL. "
         + "Keep every object compact: summary <= 280 Chinese characters, at most 2 strengths, "
         + "3 risks, and 3 source claims; do not repeat facts."
