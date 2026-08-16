@@ -545,6 +545,83 @@ def test_attempted_evidence_shortfall_is_not_counted_as_unreviewed(tmp_path) -> 
         expected_market_as_of="2026-08-13",
     )
     assert artifact["attempted_review_count"] == 1
-    assert artifact["unreviewed_candidate_count"] == 1
+    # The public artifact is one row per company.  The pending type7 pair is
+    # retained in the pair audit, but it must not create a second company card.
+    assert artifact["candidate_total"] == 1
+    assert artifact["unreviewed_candidate_count"] == 0
+    assert artifact["type_pair_candidate_total"] == 2
+    assert artifact["type_pair_unreviewed_count"] == 1
     assert artifact["attempted_needs_review_count"] == 1
-    assert artifact["pending_review_count"] == 1
+    assert artifact["pending_review_count"] == 0
+
+
+def test_publish_artifact_deduplicates_company_but_retains_type_pair_audit(tmp_path) -> None:
+    merged = tmp_path / "merged.json"
+    merged.write_text(
+        json.dumps(
+            {
+                "snapshot_generation": "g1",
+                "market_as_of": "2026-08-13",
+                "candidate_total": 2,
+                "packets": [
+                    {
+                        "security_code": "600339",
+                        "name": "中油工程",
+                        "type_key": "type1",
+                        "deterministic": {"status": "triggered", "score": 7.8},
+                        "ai_review": {
+                            "schema_version": 2,
+                            "security_code": "600339",
+                            "type_key": "type1",
+                            "verdict": "caution",
+                            "recommended_action": "manual_review",
+                            "buy_attractiveness_score": 65,
+                            "ai_action": "watchlist",
+                            "confidence": "medium",
+                            "key_strengths": ["现金流仍需核验"],
+                            "risk_flags": [],
+                            "claims": [{"source_ref": "https://example.test/type1"}],
+                            "model": "opencode-go/deepseek-v4-flash",
+                        },
+                    },
+                    {
+                        "security_code": "600339",
+                        "name": "中油工程",
+                        "type_key": "type7",
+                        "deterministic": {"status": "triggered", "score": 8.1},
+                        "ai_review": {
+                            "schema_version": 2,
+                            "security_code": "600339",
+                            "type_key": "type7",
+                            "verdict": "confirmed",
+                            "recommended_action": "keep",
+                            "buy_attractiveness_score": 82,
+                            "ai_action": "priority_buy",
+                            "confidence": "high",
+                            "key_strengths": ["估值与增长匹配"],
+                            "risk_flags": [],
+                            "claims": [{"source_ref": "https://example.test/type7"}],
+                            "model": "opencode-go/deepseek-v4-flash",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    artifact = build_artifact(
+        merged,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-13",
+    )
+    assert artifact["candidate_total"] == 1
+    assert artifact["reviewed_count"] == 1
+    assert artifact["type_pair_candidate_total"] == 2
+    assert artifact["type_pair_reviewed_count"] == 2
+    packet = artifact["packets"][0]
+    assert packet["type_key"] == "type7"
+    assert packet["type_keys"] == ["type1", "type7"]
+    assert packet["type_pair_count"] == 2
+    assert packet["ai_review"]["ai_action"] == "priority_buy"

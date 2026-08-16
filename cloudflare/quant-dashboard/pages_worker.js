@@ -826,6 +826,8 @@ async function aiScreeningPageResponseSimpleV5(request){
     .replaceAll("已联网且有 HTTPS 来源","已联网且有可用来源（HTTPS加分）")
     .replaceAll("已联网但没有可用来源","已搜索但没有可引用来源")
     .replaceAll("未完成联网核验","未完成联网搜索")
+    .replace("type==='all'||packet.type_key===type", "type==='all'||(Array.isArray(packet.type_keys)?packet.type_keys.includes(type):packet.type_key===type)")
+    .replace("esc(packet.type_key)", "esc(Array.isArray(packet.type_keys)?packet.type_keys.join(' / '):packet.type_key)")
     .replace("<div class=\"stat\"><b>'+esc(value.web_search_attempted_count||0)+' / '+esc(value.candidate_total||value.packets?.length||0)+'</b><small>联网搜索尝试</small></div>'", "<div class=\"stat\"><b>'+esc(value.web_search_attempted_count||0)+' / '+esc(value.candidate_total||value.packets?.length||0)+'</b><small>联网搜索尝试</small></div><div class=\"stat\"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+'</b><small>非当前/未标注资料</small></div>'")
     .replace("</script>",freshnessScript+independentScript+"</script>");
   return new Response(renderedHtml,{status:response.status,statusText:response.statusText,headers:response.headers});

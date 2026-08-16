@@ -1964,6 +1964,8 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     assert "HTTPS 是来源质量加分项，不是硬门槛" in source
     assert "只要 AI 复核认为值得关注，也会进入三类结论" in source
     assert "AI独立建议·接近达标" in source
+    assert "Array.isArray(packet.type_keys)" in source
+    assert "packet.type_keys.join(' / ')" in source
     assert "MAX_AI_SCREENING_BYTES=8*1024*1024" in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source

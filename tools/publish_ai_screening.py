@@ -34,6 +34,8 @@ _DETERMINISTIC_FIELDS = (
 )
 _URL_RE = re.compile(r"https?://[^\s)）>]+", re.IGNORECASE)
 _ASCII_URL_RE = re.compile(r"[A-Za-z0-9:/?#\[\]@!$&'()*+,;=%._~\-]+")
+_ACTION_PRIORITY = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
+_FRESHNESS_PRIORITY = {"current_or_recent": 0, "historical": 1, "undated": 2}
 
 
 def _final_category(action: str) -> str:
@@ -156,6 +158,43 @@ def _public_deterministic(packet: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _type_key_sort(value: str) -> tuple[int, str]:
+    match = re.fullmatch(r"type([1-7])", value)
+    return (int(match.group(1)) if match else 99, value)
+
+
+def _deduplicate_company_packets(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Choose one best AI opinion per company while retaining type coverage."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        grouped.setdefault(record["security_code"], []).append(record)
+    public_packets: list[dict[str, Any]] = []
+    for code, candidates in grouped.items():
+        winner = min(
+            candidates,
+            key=lambda record: (
+                _ACTION_PRIORITY.get(record["ai_review"]["ai_action"], 9),
+                -float(record["ai_review"]["buy_attractiveness_score"]),
+                -int(bool(record["ai_review"].get("web_search_verified"))),
+                _FRESHNESS_PRIORITY.get(record["ai_review"].get("freshness_status"), 9),
+                record["type_key"],
+            ),
+        )
+        type_keys = sorted((record["type_key"] for record in candidates), key=_type_key_sort)
+        public_packets.append(
+            {
+                "security_code": code,
+                "name": winner["name"],
+                "type_key": winner["type_key"],
+                "type_keys": type_keys,
+                "type_pair_count": len(type_keys),
+                "deterministic": winner["deterministic"],
+                "ai_review": winner["ai_review"],
+            }
+        )
+    return public_packets
+
+
 def build_artifact(
     merged_path: Path,
     output_path: Path,
@@ -174,17 +213,14 @@ def build_artifact(
     packets = source.get("packets")
     if not isinstance(packets, list):
         raise ValueError("merged AI screening packets are missing")
-    public_packets: list[dict[str, Any]] = []
+    company_records: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    verdicts: Counter[str] = Counter()
-    attempted_review_count = 0
-    unreviewed_candidate_count = 0
-    attempted_needs_review_count = 0
-    web_search_attempted_count = 0
-    web_search_completed_count = 0
-    action_counts: Counter[str] = Counter()
-    final_category_counts: Counter[str] = Counter()
-    freshness_counts: Counter[str] = Counter()
+    pair_verdicts: Counter[str] = Counter()
+    pair_attempted_review_count = 0
+    pair_unreviewed_candidate_count = 0
+    pair_attempted_needs_review_count = 0
+    pair_web_search_attempted_count = 0
+    pair_web_search_completed_count = 0
     full_coverage = source.get("full_coverage_final_recommendation") is True
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -202,24 +238,28 @@ def build_artifact(
             continue
         if not isinstance(review, Mapping):
             raise ValueError(f"AI review is not an object: {key}")
-        public_review = _public_review(review)
+        # A prior public artifact is also a valid re-publish source.  Its
+        # compact reviews intentionally omit the identity envelope; restore
+        # that envelope from the packet before applying the same validator.
+        review_for_validation = dict(review)
+        review_for_validation.setdefault("schema_version", REVIEW_SCHEMA_VERSION)
+        review_for_validation.setdefault("security_code", code)
+        review_for_validation.setdefault("type_key", type_key)
+        public_review = _public_review(review_for_validation)
         if full_coverage and public_review["ai_action"] == "insufficient_evidence":
             raise ValueError(f"full-coverage candidate has no final decision: {key}")
-        verdicts[public_review["verdict"]] += 1
-        action_counts[public_review["ai_action"]] += 1
-        final_category_counts[public_review["final_category"]] += 1
-        freshness_counts[str(public_review.get("freshness_status") or "undated")] += 1
+        pair_verdicts[public_review["verdict"]] += 1
         if public_review["model"] == PLACEHOLDER_REVIEW_MODEL:
-            unreviewed_candidate_count += 1
+            pair_unreviewed_candidate_count += 1
         else:
-            attempted_review_count += 1
+            pair_attempted_review_count += 1
             if public_review["web_search_performed"]:
-                web_search_attempted_count += 1
+                pair_web_search_attempted_count += 1
             if _public_web_verified(public_review):
-                web_search_completed_count += 1
+                pair_web_search_completed_count += 1
             if public_review["verdict"] == "needs_review":
-                attempted_needs_review_count += 1
-        public_packets.append(
+                pair_attempted_needs_review_count += 1
+        company_records.append(
             {
                 "security_code": code,
                 "name": _text(packet.get("name"), 160),
@@ -228,7 +268,33 @@ def build_artifact(
                 "ai_review": public_review,
             }
         )
-    action_priority = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
+    public_packets = _deduplicate_company_packets(company_records)
+    verdicts: Counter[str] = Counter()
+    attempted_review_count = 0
+    unreviewed_candidate_count = 0
+    attempted_needs_review_count = 0
+    web_search_attempted_count = 0
+    web_search_completed_count = 0
+    action_counts: Counter[str] = Counter()
+    final_category_counts: Counter[str] = Counter()
+    freshness_counts: Counter[str] = Counter()
+    for packet in public_packets:
+        review = packet["ai_review"]
+        verdicts[review["verdict"]] += 1
+        action_counts[review["ai_action"]] += 1
+        final_category_counts[review["final_category"]] += 1
+        freshness_counts[str(review.get("freshness_status") or "undated")] += 1
+        if review["model"] == PLACEHOLDER_REVIEW_MODEL:
+            unreviewed_candidate_count += 1
+        else:
+            attempted_review_count += 1
+            if review["web_search_performed"]:
+                web_search_attempted_count += 1
+            if _public_web_verified(review):
+                web_search_completed_count += 1
+            if review["verdict"] == "needs_review":
+                attempted_needs_review_count += 1
+    action_priority = _ACTION_PRIORITY
     public_packets.sort(
         key=lambda value: (
             -float(value["ai_review"]["buy_attractiveness_score"]),
@@ -253,6 +319,8 @@ def build_artifact(
     source_audit["web_search_attempted"] = web_search_attempted_count
     source_audit["web_source_verified"] = web_search_completed_count
     source_audit["reviewed_without_web_search"] = max(0, attempted_review_count - web_search_attempted_count)
+    source_audit["type_pair_web_search_completed"] = pair_web_search_completed_count
+    source_audit["type_pair_web_search_attempted"] = pair_web_search_attempted_count
     rule_file_count = source.get("rule_file_count")
     rule_source_sha256 = source.get("rule_source_sha256")
     rules_root = _text(source.get("rules_root"), 240)
@@ -282,7 +350,19 @@ def build_artifact(
         "market_as_of": market_as_of,
         "methodology_version": source.get("methodology_version"),
         "index_contract": source.get("index_contract"),
-        "candidate_total": int(source.get("candidate_total", 0) or 0),
+        # The AI reviews each company/type pair, but the public ranking is a
+        # company list.  Keep both counts explicit so one company cannot be
+        # shown several times while the audit still proves every pair ran.
+        "candidate_total": len(public_packets),
+        "company_deduplication": "best_action_then_score",
+        "type_pair_candidate_total": len(packets),
+        "type_pair_unique_company_count": len(public_packets),
+        "type_pair_reviewed_count": pair_attempted_review_count,
+        "type_pair_unreviewed_count": pair_unreviewed_candidate_count,
+        "type_pair_needs_review_count": pair_attempted_needs_review_count,
+        "type_pair_verdict_counts": dict(sorted(pair_verdicts.items())),
+        "type_pair_web_search_attempted_count": pair_web_search_attempted_count,
+        "type_pair_web_search_completed_count": pair_web_search_completed_count,
         "candidate_offset": int(source.get("candidate_offset", 0) or 0),
         "reviewed_count": len(public_packets),
         "attempted_review_count": attempted_review_count,
