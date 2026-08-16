@@ -824,7 +824,7 @@ async function aiScreeningPageResponseSimpleV5(request){
     .replaceAll("不推荐现在买入（观察）","观察")
     .replaceAll("不建议买入","不建议")
     .replaceAll("已联网核验","搜索尝试")
-    .replaceAll("已联网且有 HTTPS 来源","已联网且有可用来源（HTTPS加分）")
+    .replaceAll("已联网且有 HTTPS 来源","已联网且含 HTTPS 来源（质量加分）")
     .replaceAll("已联网但没有可用来源","已搜索但没有可引用来源")
     .replaceAll("未完成联网核验","未完成联网搜索")
     .replace("type==='all'||packet.type_key===type", "type==='all'||(Array.isArray(packet.type_keys)?packet.type_keys.includes(type):packet.type_key===type)")

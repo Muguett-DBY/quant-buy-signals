@@ -1962,6 +1962,7 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     assert "接近达标候选硬性排除" in source
     assert "来源质量会扣分" in source
     assert "HTTPS 是来源质量加分项，不是硬门槛" in source
+    assert "已联网且含 HTTPS 来源（质量加分）" in source
     assert "已联网但找到来源（非 HTTPS）" in source
     assert "只要 AI 复核认为值得关注，也会进入三类结论" in source
     assert "AI独立建议·接近达标" in source
@@ -2036,6 +2037,7 @@ assert.ok(html.includes("建议买"));
 assert.ok(html.includes("观察"));
 assert.ok(html.includes("不建议"));
 assert.ok(html.includes("已联网但找到来源（非 HTTPS）"));
+assert.ok(html.includes("已联网且含 HTTPS 来源（质量加分）"));
 assert.ok(html.includes("资料时效"));
 assert.ok(!html.includes("待核验（未形成买入结论）"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
