@@ -112,7 +112,19 @@ def _freshness(review: Mapping[str, Any], market_as_of: str | None) -> dict[str,
     current_year = int(as_of_year_match.group(1))
     recent_floor = current_year - 1
     claims = review.get("claims") if isinstance(review.get("claims"), list) else []
-    years = sorted({year for claim in claims if isinstance(claim, Mapping) for year in _claim_data_years(claim)})
+    # A future year can only be a forecast/target in a snapshot that has
+    # already been published.  Keep it out of the public "actual report
+    # period" field even when the surrounding Chinese text did not contain a
+    # forecast marker that the lightweight parser recognised.
+    years = sorted(
+        {
+            year
+            for claim in claims
+            if isinstance(claim, Mapping)
+            for year in _claim_data_years(claim)
+            if year <= current_year
+        }
+    )
     if not years:
         return {
             "status": "undated",

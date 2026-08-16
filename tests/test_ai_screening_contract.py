@@ -193,6 +193,32 @@ def test_forecast_year_does_not_count_as_current_report_evidence() -> None:
     assert reviewed["final_category"] == "observe"
 
 
+def test_future_years_are_not_published_as_actual_report_periods() -> None:
+    source = {
+        "ai_review": {
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "ai_action": "priority_buy",
+            "buy_attractiveness_score": 80,
+            "claims": [
+                {
+                    "statement": "2025年年报披露营业收入和现金流均改善。公司计划在2027年扩大产能",
+                    "source_ref": "https://example.test/forecast",
+                }
+            ],
+            "risk_flags": [],
+            "web_search_performed": True,
+        },
+        "security_code": "600339",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+    }
+    reviewed = _review(source, "2026-08-14")
+    assert reviewed["freshness_status"] == "current_or_recent"
+    assert reviewed["freshness_years"] == [2025]
+    assert "2027" not in reviewed["freshness_note"]
+
+
 def test_contract_rejects_stale_buy_fields() -> None:
     source = {
         "schema_version": 2,
