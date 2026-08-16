@@ -586,7 +586,7 @@ const JSON_HEADERS={...BASE_SECURITY_HEADERS,"content-type":"application/json; c
 const MAX_MANIFEST_BYTES=1024*1024;
 const MAX_COMPRESSED_ASSET_BYTES=8*1024*1024;
 const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;
-const MAX_AI_SCREENING_BYTES=4*1024*1024;
+const MAX_AI_SCREENING_BYTES=8*1024*1024;
 const AI_SCREENING_SCHEMA_VERSION=2;
 const AI_SCREENING_ARTIFACT_KIND="ai_screening_overlay";
 // Pages advanced mode deploys this Worker as one file, so the official closure
