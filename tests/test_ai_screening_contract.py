@@ -7,7 +7,12 @@ from tools.build_ai_screening import build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _claim_url, _review
 from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
-from tools.run_ai_screening_batch import _extract_array, _prompt as batch_prompt
+from tools.run_ai_screening_batch import (
+    _extract_array,
+    _extract_opencode_text,
+    _normalise_model_review,
+    _prompt as batch_prompt,
+)
 
 
 def _snapshot() -> dict:
@@ -76,6 +81,19 @@ def test_batch_parser_skips_intermediate_json_arrays() -> None:
         ]
     )
     assert _extract_array(intermediate + "\n" + final)[0]["security_code"] == "600339"
+
+
+def test_opencode_events_extract_final_text_and_normalise_action_verdict() -> None:
+    events = "\n".join(
+        [
+            json.dumps({"type": "tool_use", "part": {"tool": "websearch"}}),
+            json.dumps({"type": "text", "part": {"text": "[{}]"}}),
+        ]
+    )
+    assert _extract_opencode_text(events) == "[{}]"
+    review = {"verdict": "insufficient_evidence", "claims": [{"statement": "无来源"}]}
+    assert _normalise_model_review(review)["verdict"] == "needs_review"
+    assert review["claims"] == []
 
 
 def test_batch_protocol_allows_independent_near_qualified_buy() -> None:

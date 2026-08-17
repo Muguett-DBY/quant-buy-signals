@@ -33,34 +33,29 @@ pending rows that can still cross the threshold, and the relevant rule excerpts.
 The packet is compact: the selected type is complete, while other types are a
 summary only.  The full queue is local and is not uploaded by this command.
 
-## OpenCode Go Plan / DeepSeek V4 Flash Max
+## OpenCode Go Plan / MiMo v2.5
 
-The configured Reasonix provider is `opencode-go/deepseek-v4-flash`.  A bounded
-pilot can be run as follows:
+The production-friendly local runner uses the OpenCode CLI with the OpenCode Go
+Plan model `opencode-go/mimo-v2.5` and `--variant max`.  Its isolated project
+config allows only the harness `websearch` tool; shell, file writes, reads and
+other MCP tools are denied.  A bounded pilot can be run as follows:
 
 ```powershell
-python -m tools.run_ai_screening_reasonix `
+python -m tools.run_ai_screening_batch `
   --candidates build\ai-screening-pilot\ai-screening-candidates.jsonl `
-  --protocol tools\ai_screening_reasonix_prompt.md `
-  --out build\ai-screening-pilot\reasonix-reviews.jsonl `
+  --out build\ai-screening-pilot\opencode-reviews.jsonl `
+  --backend opencode `
+  --batch-size 10 `
   --limit 12 `
-  --model opencode-go/deepseek-v4-flash `
+  --model opencode-go/mimo-v2.5 `
   --effort max `
-  --max-steps 6 `
-  --permission-mode dontAsk `
-  --allowed-tools= `
-  --ablate none `
-  --preset balanced `
-  --reasonix-dir tools\reasonix-opencode-go
+  --root .
 ```
 
-The isolated project config pins the working OpenCode Go endpoint
-(`https://opencode.ai/zen/go/v1`) and enables the provider-native read-only
-web search.  Do not add MCP or writer tools to this pass: they are a separate
-capability surface and can make the provider reject the request.  The model
-may propose sources, but a URL is not authoritative merely because it is
-syntactically valid; the bounded source-audit step must check it before a
-strong verdict is published.
+`tools/opencode-screening/opencode.json` is the trust boundary for this pass.
+The model may propose sources, but a URL is not authoritative merely because it
+is syntactically valid; the source fields remain advisory claims and should be
+reviewed before a strong verdict is published.
 
 Sending company data and rule excerpts to the provider is an external data
 transfer.  Run the command only after explicit user authorization.  Keys stay
@@ -74,15 +69,12 @@ explicitly pending and can be retried later:
 ```powershell
 python -m tools.run_ai_screening_batch `
   --candidates build\ai-screening-full\ai-screening-candidates.jsonl `
-  --out build\ai-screening-full\reasonix-reviews.jsonl `
+  --out build\ai-screening-full\opencode-reviews.jsonl `
+  --backend opencode `
   --batch-size 10 `
-  --model opencode-go/deepseek-v4-flash `
+  --model opencode-go/mimo-v2.5 `
   --effort max `
-  --max-steps 3 `
-  --permission-mode dontAsk `
-  --allowed-tools= `
-  --ablate none `
-  --reasonix-dir tools\reasonix-opencode-go
+  --root .
 ```
 
 `tools.prepare_ai_screening_overlay` merges completed reviews with every
@@ -96,7 +88,7 @@ python -m tools.build_ai_screening `
   --snapshot <validated-snapshot.json.gz> `
   --rules-root 'E:\模板汇总MD' `
   --out build\ai-screening `
-  --review-jsonl build\ai-screening\reasonix-reviews.jsonl
+  --review-jsonl build\ai-screening\opencode-reviews.jsonl
 
 python -m tools.render_ai_screening_preview `
   build\ai-screening\ai-screening.json `
