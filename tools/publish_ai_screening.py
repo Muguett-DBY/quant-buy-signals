@@ -22,6 +22,7 @@ from tools.ai_screening_contract import (
 
 ARTIFACT_SCHEMA_VERSION = 2
 ARTIFACT_KIND = "ai_screening_overlay"
+RANKING_VERSION = "ai-buy-attractiveness-v8-category-first-action-banded"
 _DETERMINISTIC_FIELDS = (
     "status",
     "score",
@@ -298,8 +299,8 @@ def build_artifact(
     action_priority = _ACTION_PRIORITY
     public_packets.sort(
         key=lambda value: (
-            -float(value["ai_review"]["buy_attractiveness_score"]),
             action_priority.get(value["ai_review"]["ai_action"], 9),
+            -float(value["ai_review"]["buy_attractiveness_score"]),
             value["security_code"],
             value["type_key"],
         )
@@ -389,7 +390,7 @@ def build_artifact(
         + action_counts["avoid"]
         + action_counts["insufficient_evidence"],
         "insufficient_evidence_count": action_counts["insufficient_evidence"],
-        "ranking_version": "ai-buy-attractiveness-v7-independent-buy-freshness-audited",
+        "ranking_version": RANKING_VERSION,
         "freshness_counts": dict(sorted(freshness_counts.items())),
         "ranking_source": _text(source.get("ranking_source"), 120),
         "source_audit": source_audit,

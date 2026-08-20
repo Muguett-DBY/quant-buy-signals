@@ -12,6 +12,7 @@ from typing import Any
 
 REVIEW_SCHEMA_VERSION = 2
 PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
+LOCAL_REVIEW_MODEL = "codex-local-review-v1"
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
 AI_ACTIONS = frozenset({"priority_buy", "watchlist", "avoid", "insufficient_evidence"})
@@ -149,6 +150,29 @@ def validate_review(review: Mapping[str, Any]) -> list[str]:
         errors.append("ai_action")
     if "final_recommendation" in review and str(review.get("final_recommendation")) not in FINAL_RECOMMENDATIONS:
         errors.append("final_recommendation")
+    action = str(review.get("ai_action") or "")
+    expected_category = {
+        "priority_buy": "recommend_buy",
+        "watchlist": "observe",
+        "avoid": "do_not_recommend",
+        "insufficient_evidence": "observe",
+    }.get(action)
+    if "final_category" in review:
+        if str(review.get("final_category")) not in {"recommend_buy", "observe", "do_not_recommend"}:
+            errors.append("final_category")
+        elif expected_category and str(review.get("final_category")) != expected_category:
+            errors.append("final_category_action_mismatch")
+    if "final_recommendation" in review and expected_category:
+        expected_recommendation = "recommend_buy" if expected_category == "recommend_buy" else "do_not_recommend_buy"
+        if str(review.get("final_recommendation")) != expected_recommendation:
+            errors.append("final_recommendation_action_mismatch")
+    if str(review.get("model") or "") == LOCAL_REVIEW_MODEL:
+        if action == "priority_buy" and score is not None and score < 60:
+            errors.append("local_priority_score_band")
+        if action == "watchlist" and score is not None and score >= 70:
+            errors.append("local_watchlist_score_band")
+        if action in {"avoid", "insufficient_evidence"} and score is not None and score >= 50:
+            errors.append("local_negative_score_band")
     if "recommendation_label" in review and not isinstance(review.get("recommendation_label"), str):
         errors.append("recommendation_label")
     if "ai_independent" in review and not isinstance(review.get("ai_independent"), bool):

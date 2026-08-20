@@ -485,7 +485,7 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
     assert artifact["schema_version"] == 2
-    assert artifact["ranking_version"] == "ai-buy-attractiveness-v7-independent-buy-freshness-audited"
+    assert artifact["ranking_version"] == "ai-buy-attractiveness-v8-category-first-action-banded"
     assert artifact["reviewed_count"] == 1
     assert artifact["packets"][0]["deterministic"]["status"] == "triggered"
     assert artifact["attempted_review_count"] == 1
@@ -499,6 +499,72 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["packets"][0]["ai_review"]["final_category"] == "observe"
     assert artifact["packets"][0]["ai_review"]["final_recommendation"] == "do_not_recommend_buy"
     assert artifact["do_not_recommend_buy_count"] == 1
+
+
+def test_publish_ranks_buy_category_before_higher_raw_negative_score(tmp_path) -> None:
+    merged = tmp_path / "merged.json"
+    base = {
+        "schema_version": 2,
+        "verdict": "confirmed",
+        "recommended_action": "keep",
+        "confidence": "medium",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [],
+        "model": "opencode-go/test",
+    }
+    merged.write_text(
+        json.dumps(
+            {
+                "snapshot_generation": "g1",
+                "market_as_of": "2026-08-13",
+                "packets": [
+                    {
+                        "security_code": "600001",
+                        "name": "不建议但原始分很高",
+                        "type_key": "type1",
+                        "deterministic": {"status": "observe", "score": 10},
+                        "ai_review": {
+                            **base,
+                            "schema_version": 2,
+                            "security_code": "600001",
+                            "type_key": "type1",
+                            "buy_attractiveness_score": 69,
+                            "ai_action": "avoid",
+                            "final_category": "do_not_recommend",
+                            "final_recommendation": "do_not_recommend_buy",
+                        },
+                    },
+                    {
+                        "security_code": "600002",
+                        "name": "建议买",
+                        "type_key": "type1",
+                        "deterministic": {"status": "triggered", "score": 7.8},
+                        "ai_review": {
+                            **base,
+                            "schema_version": 2,
+                            "security_code": "600002",
+                            "type_key": "type1",
+                            "buy_attractiveness_score": 70,
+                            "ai_action": "priority_buy",
+                            "final_category": "recommend_buy",
+                            "final_recommendation": "recommend_buy",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    artifact = build_artifact(
+        merged,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-13",
+    )
+    assert artifact["packets"][0]["security_code"] == "600002"
+    assert artifact["packets"][0]["ai_review"]["final_category"] == "recommend_buy"
 
 
 def test_local_codex_review_mode_is_full_pair_coverage_without_fake_web_search(tmp_path) -> None:

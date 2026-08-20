@@ -14,10 +14,27 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION
+from tools.ai_screening_contract import LOCAL_REVIEW_MODEL, REVIEW_SCHEMA_VERSION
 
 
 _WARNING_WORDS = ("负", "下降", "高", "不足", "缺", "不完整", "待", "风险", "否决")
+
+
+def _buy_score_for_action(raw_score: float, action: str) -> float:
+    """Keep the displayed score meaningful as a *buy* attractiveness score.
+
+    The deterministic rule upper bound is not an AI buy recommendation.  A
+    veto, unresolved evidence, or a cautionary result must not inherit a
+    100-point rule upper bound and appear above an actual buy candidate.
+    """
+    raw = max(0.0, min(100.0, raw_score))
+    if action == "priority_buy":
+        return raw
+    if action == "watchlist":
+        return min(69.0, raw * 0.70)
+    if action == "avoid":
+        return min(49.0, raw * 0.40)
+    return min(49.0, raw * 0.30)
 
 
 def _number(value: Any) -> float | None:
@@ -76,7 +93,8 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
         action, verdict, label, rec_action = "avoid", "confirmed", "不建议", "demote"
 
     rule_score = score if score is not None else upper if upper is not None else 0.0
-    score_value = max(0.0, min(100.0, 50.0 + (rule_score - 5.0) * 10.0))
+    raw_buy_score = max(0.0, min(100.0, 50.0 + (rule_score - 5.0) * 10.0))
+    score_value = _buy_score_for_action(raw_buy_score, action)
     strengths = [f"{type_key}确定性状态为{status}"]
     if score is not None:
         strengths.append(f"确定性评分{score:.2f}")
@@ -109,7 +127,7 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
         "key_strengths": strengths[:3],
         "risk_flags": risks[:4],
         "claims": [],
-        "model": "codex-local-review-v1",
+        "model": LOCAL_REVIEW_MODEL,
         "effort": "max",
         "web_search_performed": False,
         "web_search_verified": False,
@@ -121,6 +139,7 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
     override = None
     if isinstance(overrides, Mapping):
         override = overrides.get(f"{code}:{type_key}") or overrides.get(code)
+    override_score_supplied = isinstance(override, Mapping) and "buy_attractiveness_score" in override
     if isinstance(override, Mapping):
         for key in (
             "verdict",
@@ -145,6 +164,32 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
         ):
             if key in override:
                 result[key] = override[key]
+    # Overrides are allowed to add human-reviewed facts, but cannot create a
+    # contradictory score/category pair.  Re-apply the same score band after
+    # an override so a stale manual score can never publish as 100 + 不建议.
+    action = str(result.get("ai_action") or "avoid")
+    expected_category = {
+        "priority_buy": "recommend_buy",
+        "watchlist": "observe",
+        "avoid": "do_not_recommend",
+        "insufficient_evidence": "observe",
+    }.get(action)
+    if expected_category is None:
+        raise ValueError(f"unsupported local AI action: {action}")
+    if result.get("final_category") not in (None, "", expected_category):
+        raise ValueError(f"local AI action/category mismatch: {code}:{type_key}")
+    result["final_category"] = expected_category
+    expected_recommendation = "recommend_buy" if expected_category == "recommend_buy" else "do_not_recommend_buy"
+    if result.get("final_recommendation") not in (None, "", expected_recommendation):
+        raise ValueError(f"local AI recommendation mismatch: {code}:{type_key}")
+    result["final_recommendation"] = expected_recommendation
+    score_number = _number(result.get("buy_attractiveness_score"))
+    if score_number is None:
+        raise ValueError(f"local AI score is invalid: {code}:{type_key}")
+    if override_score_supplied:
+        result["buy_attractiveness_score"] = round(_buy_score_for_action(score_number, action), 1)
+    else:
+        result["buy_attractiveness_score"] = round(score_number, 1)
     return result
 
 

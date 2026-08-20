@@ -658,6 +658,16 @@ function aiScreeningPageResponseFinal2(request){
   const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
   return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
 }
+function aiReviewCategoryValid(review,action,score){
+  const expected=action==="priority_buy"?"recommend_buy":action==="watchlist"?"observe":action==="avoid"?"do_not_recommend":action==="insufficient_evidence"?"observe":"";
+  const category=String(review?.final_category||expected),recommendation=String(review?.final_recommendation||"");
+  if(!expected||category!==expected)return false;
+  if(recommendation&&recommendation!==(expected==="recommend_buy"?"recommend_buy":"do_not_recommend_buy"))return false;
+  if(String(review?.model||"")!=="codex-local-review-v1")return true;
+  if(action==="priority_buy")return score>=60;
+  if(action==="watchlist")return score<70;
+  return score<50;
+}
 function validAiScreeningArtifact(value,generation){
   if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.review_schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
   const fullCoverage=value.full_coverage_final_recommendation===true;
@@ -671,6 +681,7 @@ function validAiScreeningArtifact(value,generation){
   let actualAttempted=0,actualUnreviewed=0,actualNeedsReview=0;
   const actualActions={priority_buy:0,watchlist:0,avoid:0,insufficient_evidence:0};
   for(const packet of value.packets){const code=String(packet?.security_code||""),type=String(packet?.type_key||""),review=packet?.ai_review,model=String(review?.model||""),score=Number(review?.buy_attractiveness_score),action=String(review?.ai_action||""),freshnessPresent=review&&("freshness_status" in review||"freshness_years" in review||"freshness_penalty" in review),freshness=String(review?.freshness_status||"undated"),freshnessYears=review?.freshness_years||[], freshnessPenalty=Number(review?.freshness_penalty??0);if(!/^[036]\d{5}$/.test(code)||!/^type[1-7]$/.test(type)||seen.has(code+"/"+type)||!review||typeof review!=="object"||!["confirmed","caution","misclassified","missed_candidate","needs_review"].includes(String(review.verdict))||!["keep","demote","manual_review"].includes(String(review.recommended_action))||!Number.isFinite(score)||score<0||score>100||!["priority_buy","watchlist","avoid","insufficient_evidence"].includes(action)||!["high","medium","low"].includes(String(review.confidence))||!Array.isArray(review.key_strengths)||review.key_strengths.length>8||!Array.isArray(review.risk_flags)||review.risk_flags.length>12||!Array.isArray(review.claims)||review.claims.length>12||(freshnessPresent&&(!["current_or_recent","historical","undated"].includes(freshness)||!Array.isArray(freshnessYears)||freshnessYears.length>12||freshnessYears.some(year=>!Number.isInteger(year)||year<1900||year>2100)||!Number.isFinite(freshnessPenalty)||freshnessPenalty<0||freshnessPenalty>20||((freshness==="historical"||freshness==="undated")&&(action==="priority_buy"||String(review.final_category||"")==="recommend_buy"||String(review.final_recommendation||"")==="recommend_buy"))))||!Number.isInteger(packet?.ai_rank)||packet.ai_rank<1||packet.ai_rank>value.packets.length)return false;if(model==="pending-local-opencode-go"){if(String(review.verdict)!=="needs_review"||action!=="insufficient_evidence"||score!==0) return false;actualUnreviewed++}else{actualAttempted++;if(String(review.verdict)==="needs_review")actualNeedsReview++}actualActions[action]++;seen.add(code+"/"+type)}
+  for(const packet of value.packets){const review=packet?.ai_review||{},action=String(review.ai_action||""),score=Number(review.buy_attractiveness_score);if(!aiReviewCategoryValid(review,action,score))return false}
   if(hasAttemptedFields&&(actualAttempted!==attempted||actualUnreviewed!==unreviewed||actualNeedsReview!==Number(value.attempted_needs_review_count)))return false;
   for(const action of Object.keys(actualActions)){if(Number(value.ai_action_counts?.[action]||0)!==actualActions[action])return false}
   if(Number(value.priority_buy_count||0)!==actualActions.priority_buy||Number(value.watchlist_count||0)!==actualActions.watchlist||Number(value.avoid_count||0)!==actualActions.avoid||Number(value.insufficient_evidence_count||0)!==actualActions.insufficient_evidence)return false;
