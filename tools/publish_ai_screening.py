@@ -222,6 +222,7 @@ def build_artifact(
     pair_web_search_attempted_count = 0
     pair_web_search_completed_count = 0
     full_coverage = source.get("full_coverage_final_recommendation") is True
+    review_mode = _text(source.get("review_mode"), 64) or "external_ai_review"
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("candidate packet must be an object")
@@ -340,6 +341,7 @@ def build_artifact(
         "ai_is_advisory": True,
         "auto_buy_promotion": False,
         "full_coverage_final_recommendation": full_coverage,
+        "review_mode": review_mode,
         "full_coverage_web_search": bool(
             full_coverage
             and unreviewed_candidate_count == 0

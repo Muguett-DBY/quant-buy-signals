@@ -501,6 +501,67 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     assert artifact["do_not_recommend_buy_count"] == 1
 
 
+def test_local_codex_review_mode_is_full_pair_coverage_without_fake_web_search(tmp_path) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(_snapshot(), ensure_ascii=False), encoding="utf-8")
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "patch7.md").write_text("# type1\n规则", encoding="utf-8")
+    out = tmp_path / "out"
+    manifest = build_input(snapshot_path, rules, out, review_mode="local_codex_review")
+    assert manifest["full_coverage_final_recommendation"] is True
+    reviews = [
+        {
+            "schema_version": 2,
+            "security_code": "600339",
+            "type_key": "type1",
+            "verdict": "confirmed",
+            "recommended_action": "keep",
+            "buy_attractiveness_score": 82,
+            "ai_action": "priority_buy",
+            "confidence": "medium",
+            "key_strengths": ["规则候选分数较高"],
+            "risk_flags": ["仍需人工复核最新报告"],
+            "claims": [],
+            "model": "codex-local-review-v1",
+            "effort": "max",
+            "web_search_performed": False,
+        },
+        {
+            "schema_version": 2,
+            "security_code": "600339",
+            "type_key": "type7",
+            "verdict": "caution",
+            "recommended_action": "manual_review",
+            "buy_attractiveness_score": 65,
+            "ai_action": "watchlist",
+            "confidence": "low",
+            "key_strengths": [],
+            "risk_flags": ["尚未完成逐家公司联网搜索"],
+            "claims": [],
+            "model": "codex-local-review-v1",
+            "effort": "max",
+            "web_search_performed": False,
+        },
+    ]
+    review_path = tmp_path / "reviews.jsonl"
+    review_path.write_text("".join(json.dumps(value, ensure_ascii=False) + "\n" for value in reviews), encoding="utf-8")
+    merged = out / "ai-screening.json"
+    merge_reviews(out / "ai-screening-input.json", review_path, merged)
+    artifact = build_artifact(
+        merged,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-13",
+    )
+    assert artifact["review_mode"] == "local_codex_review"
+    assert artifact["full_coverage_final_recommendation"] is True
+    assert artifact["type_pair_reviewed_count"] == artifact["type_pair_candidate_total"] == 2
+    assert artifact["type_pair_unreviewed_count"] == 0
+    assert artifact["full_coverage_web_search"] is False
+    assert artifact["reviewed_without_web_search"] == artifact["candidate_total"]
+
+
 def test_prepare_overlay_keeps_unreviewed_candidates_visible(tmp_path) -> None:
     input_path = tmp_path / "input.json"
     input_path.write_text(

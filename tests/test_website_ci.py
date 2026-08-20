@@ -247,6 +247,11 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     assert "ai-screening-generation" in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
     assert ".integrity_checked == true" in verify["run"]
+    assert ".type_pair_reviewed_count == .type_pair_candidate_total" in verify["run"]
+    assert ".type_pair_unreviewed_count == 0" in verify["run"]
+    assert '.review_mode == "local_codex_review"' in verify["run"]
+    assert ".reviewed_without_web_search == (.candidate_total - .web_search_attempted_count)" in verify["run"]
+    assert ".web_search_attempted_count == .candidate_total" in verify["run"]
 
 
 def test_cloudflare_deploy_bash_blocks_parse_with_bash():

@@ -135,6 +135,7 @@ def build_input(
     offset: int = 0,
     market_as_of: str | None = None,
     generation: str | None = None,
+    review_mode: str | None = None,
 ) -> dict[str, Any]:
     snapshot = _load_json(snapshot_path)
     snapshot_generation = generation or snapshot.get("generation") or snapshot.get("generation_id")
@@ -172,6 +173,10 @@ def build_input(
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
         "candidate_offset": offset,
+        "review_mode": review_mode,
+        "full_coverage_final_recommendation": (
+            review_mode == "local_codex_review" and offset == 0 and len(packets) == len(candidates)
+        ),
         "packets": packets,
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -190,6 +195,8 @@ def build_input(
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
         "candidate_offset": offset,
+        "review_mode": payload["review_mode"],
+        "full_coverage_final_recommendation": payload["full_coverage_final_recommendation"],
         "rule_file_count": payload["rule_file_count"],
         "input_sha256": _sha256_bytes(input_path.read_bytes()),
     }
@@ -210,10 +217,20 @@ def merge_reviews(input_path: Path, review_path: Path, out_path: Path) -> None:
         if errors:
             raise ValueError(f"invalid review: {','.join(errors)}")
         key = (str(review.get("security_code")), str(review.get("type_key")))
+        if key in reviews:
+            raise ValueError(f"duplicate review: {key}")
         reviews[key] = review
     for packet in payload.get("packets", []):
         key = (str(packet.get("security_code")), str(packet.get("type_key")))
         packet["ai_review"] = reviews.get(key)
+    if payload.get("full_coverage_final_recommendation") is True:
+        missing = [
+            (str(packet.get("security_code")), str(packet.get("type_key")))
+            for packet in payload.get("packets", [])
+            if packet.get("ai_review") is None
+        ]
+        if missing:
+            raise ValueError(f"full-coverage candidates missing reviews: {missing[:3]}")
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -226,6 +243,7 @@ def main() -> int:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--market-as-of")
     parser.add_argument("--generation")
+    parser.add_argument("--review-mode")
     parser.add_argument("--review-jsonl", type=Path)
     args = parser.parse_args()
     build_input(
@@ -236,6 +254,7 @@ def main() -> int:
         offset=args.offset,
         market_as_of=args.market_as_of,
         generation=args.generation,
+        review_mode=args.review_mode,
     )
     if args.review_jsonl:
         merge_reviews(args.out / "ai-screening-input.json", args.review_jsonl, args.out / "ai-screening.json")

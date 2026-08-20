@@ -259,7 +259,26 @@ jobs:
           if [[ -f "$RUNNER_TEMP/ai-screening-generation" ]]; then
             ai_generation="$(< "$RUNNER_TEMP/ai-screening-generation")"
             ai_api="$(curl --fail --silent --show-error "https://quant.custard.top/api/ai-screening?generation_id=${ai_generation}")"
-            if ! jq -e --arg generation "${ai_generation}" '.snapshot_generation == $generation and .ai_is_advisory == true and .auto_buy_promotion == false and .full_coverage_final_recommendation == true and .reviewed_count == .candidate_total and .web_search_attempted_count == .candidate_total and .reviewed_without_web_search == 0 and .insufficient_evidence_count == 0 and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)' <<< "${ai_api}" >/dev/null; then
+            if ! jq -e --arg generation "${ai_generation}" '
+              .snapshot_generation == $generation
+              and .ai_is_advisory == true
+              and .auto_buy_promotion == false
+              and .full_coverage_final_recommendation == true
+              and .reviewed_count == .candidate_total
+              and .type_pair_reviewed_count == .type_pair_candidate_total
+              and .type_pair_unreviewed_count == 0
+              and .insufficient_evidence_count == 0
+              and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+              and (
+                if .review_mode == "local_codex_review" then
+                  (.web_search_attempted_count >= 0
+                   and .web_search_attempted_count <= .candidate_total
+                   and .reviewed_without_web_search == (.candidate_total - .web_search_attempted_count))
+                else
+                  (.web_search_attempted_count == .candidate_total and .reviewed_without_web_search == 0)
+                end
+              )
+            ' <<< "${ai_api}" >/dev/null; then
               echo "Published AI screening overlay failed its generation-bound contract." >&2
               exit 1
             fi
