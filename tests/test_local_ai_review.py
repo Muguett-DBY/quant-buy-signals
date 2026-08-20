@@ -46,9 +46,7 @@ def test_priority_override_summary_matches_buy_category() -> None:
     import json
     from pathlib import Path
 
-    overrides = json.loads(
-        Path("tools/ai_screening_overrides_2026-08-20.json").read_text(encoding="utf-8")
-    )
+    overrides = json.loads(Path("tools/ai_screening_overrides_2026-08-20.json").read_text(encoding="utf-8"))
     review = overrides["601065"]
     assert review["final_category"] == "recommend_buy"
     assert "仅建议控制仓位买入" in review["summary"]
