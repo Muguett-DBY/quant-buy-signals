@@ -3,7 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 
-from tools.ai_screening_contract import decision_text_conflicts, normalise_decision_text, select_candidates, validate_review
+from tools.ai_screening_contract import (
+    decision_text_conflicts,
+    normalise_decision_text,
+    select_candidates,
+    validate_review,
+)
 from tools.build_ai_screening import _relevant_rules, _rule_chunks, build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _claim_url, _review
 from tools.enrich_ai_screening_input import enrich

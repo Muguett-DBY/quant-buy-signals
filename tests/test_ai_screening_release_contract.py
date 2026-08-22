@@ -287,9 +287,7 @@ def test_human_review_downgrade_is_generation_bound_and_keeps_reason(tmp_path) -
             {
                 "snapshot_generation": "g1",
                 "market_as_of": "2026-08-21",
-                "corrections": {
-                    "600000": {"action": "watchlist", "score": 55, "reason": "价格闸门未通过。"}
-                },
+                "corrections": {"600000": {"action": "watchlist", "score": 55, "reason": "价格闸门未通过。"}},
             }
         ),
         encoding="utf-8",
