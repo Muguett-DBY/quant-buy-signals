@@ -223,7 +223,7 @@ jobs:
             exit 0
           fi
           market_as_of="$(jq -er '.market_as_of' <<< "${live_meta}")"
-          python tools/validate_ai_screening_public.py \
+          python -m tools.validate_ai_screening_public \
             --artifact "${seed}" \
             --expected-generation "${generation}" \
             --expected-market-as-of "${market_as_of}"
