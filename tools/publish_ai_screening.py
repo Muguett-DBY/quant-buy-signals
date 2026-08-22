@@ -371,15 +371,18 @@ def build_artifact(
         raise ValueError("full-coverage artifact contains placeholder reviews")
     if full_coverage and (not review_models or not review_efforts):
         raise ValueError("full-coverage artifact must declare its review models and efforts")
-    if full_coverage and review_mode == "local_codex_review" and not (
-        review_models == {LOCAL_REVIEW_MODEL} or review_models <= LOCAL_OPENCODE_MODELS
+    if (
+        full_coverage
+        and review_mode == "local_codex_review"
+        and not (review_models == {LOCAL_REVIEW_MODEL} or review_models <= LOCAL_OPENCODE_MODELS)
     ):
         raise ValueError("local full-coverage artifact must use the local Codex or OpenCode MAX review model")
     if (
         full_coverage
         and review_mode == "local_codex_review"
         and review_models & LOCAL_OPENCODE_MODELS
-        and not review_model_efforts <= {
+        and not review_model_efforts
+        <= {
             ("opencode-go/ox-alpha-free", "max"),
             ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
         }

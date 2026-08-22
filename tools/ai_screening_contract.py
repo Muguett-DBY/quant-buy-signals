@@ -450,8 +450,7 @@ def validate_review(review: Mapping[str, Any], *, require_readable_reason: bool 
     freshness_status = str(review.get("freshness_status") or "")
     if freshness_status in {"historical", "undated"}:
         local_unsearched_buy = (
-            str(review.get("model") or "") in LOCAL_OPENCODE_MODELS
-            and review.get("web_search_performed") is not True
+            str(review.get("model") or "") in LOCAL_OPENCODE_MODELS and review.get("web_search_performed") is not True
         )
         if str(review.get("ai_action") or "") == "priority_buy" and not local_unsearched_buy:
             errors.append("stale_priority_buy")

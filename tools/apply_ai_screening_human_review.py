@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 
 def apply(source_path: Path, corrections_path: Path, output_path: Path) -> dict[str, int]:

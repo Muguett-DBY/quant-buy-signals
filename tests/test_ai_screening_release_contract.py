@@ -638,7 +638,9 @@ def test_local_full_coverage_accepts_mixed_ox_and_muse_efforts(tmp_path) -> None
     )
     source = tmp_path / "local-mixed.json"
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    artifact = build_artifact(source, tmp_path / "public.json", expected_generation="g1", expected_market_as_of="2026-08-21")
+    artifact = build_artifact(
+        source, tmp_path / "public.json", expected_generation="g1", expected_market_as_of="2026-08-21"
+    )
     assert artifact["review_models"] == ["opencode-go/muse-spark-1.2-contributor", "opencode-go/ox-alpha-free"]
     assert artifact["review_efforts"] == ["max", "xhigh"]
 

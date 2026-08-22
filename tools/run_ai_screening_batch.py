@@ -419,7 +419,9 @@ def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
     review["verdict"] = verdict
     review["recommended_action"] = recommended_action
     if "final_category" in review:
-        review["final_category"] = "recommend_buy" if action == "priority_buy" else "do_not_recommend" if action == "avoid" else "observe"
+        review["final_category"] = (
+            "recommend_buy" if action == "priority_buy" else "do_not_recommend" if action == "avoid" else "observe"
+        )
     if "final_recommendation" in review:
         review["final_recommendation"] = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     score = _finite_float(review.get("buy_attractiveness_score"))
@@ -478,9 +480,7 @@ def _compact_local_rules(shared: Mapping[str, list[Mapping[str, Any]]]) -> dict[
         selected: list[dict[str, Any]] = []
         for rule in list(rules)[:2]:
             item = {
-                key: rule.get(key)
-                for key in ("source_id", "line_start", "line_end", "heading", "text")
-                if key in rule
+                key: rule.get(key) for key in ("source_id", "line_start", "line_end", "heading", "text") if key in rule
             }
             text = str(item.get("text") or "")
             if len(text) > 700:
