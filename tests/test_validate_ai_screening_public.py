@@ -107,3 +107,26 @@ def test_public_validator_accepts_mixed_local_review_with_explicit_audit() -> No
     review["web_search_event_verified"] = False
     review["web_search_claim_urls_verified"] = False
     assert validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")["searched"] == 0
+
+
+def test_public_validator_accepts_muse_xhigh_local_review() -> None:
+    value = _artifact()
+    value["review_mode"] = "local_codex_review"
+    value["review_models"] = ["opencode-go/muse-spark-1.2-contributor"]
+    value["review_efforts"] = ["xhigh"]
+    value["reviewed_without_web_search"] = 1
+    value["web_search_attempted_count"] = 0
+    value["web_search_event_verified_count"] = 0
+    value["web_search_claim_urls_verified_count"] = 0
+    value["source_audit"] = {"available": False}
+    review = value["packets"][0]["ai_review"]
+    review["model"] = "opencode-go/muse-spark-1.2-contributor"
+    review["effort"] = "xhigh"
+    review["claims"] = []
+    review["web_search_performed"] = False
+    review["web_search_event_verified"] = False
+    review["web_search_claim_urls_verified"] = False
+    review["web_search_verified"] = False
+    review["web_search_query_count"] = 0
+    review["web_search_verified_claim_url_count"] = 0
+    assert validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")["searched"] == 0

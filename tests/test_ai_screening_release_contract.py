@@ -118,6 +118,27 @@ def test_calibration_bands_model_scores_to_the_final_action() -> None:
     assert validate_review(avoided) == []
 
 
+def test_local_unsearched_buy_remains_advisory_buy_after_penalty() -> None:
+    packet = {
+        "security_code": "600000",
+        "type_key": "type1",
+        "deterministic": {"status": "triggered", "score": 8.0},
+        "ai_review": {
+            **_external_review("priority_buy", 84),
+            "model": "opencode-go/muse-spark-1.2-contributor",
+            "effort": "xhigh",
+            "claims": [],
+            "web_search_performed": False,
+        },
+    }
+    observed = _review(packet, "2026-08-21")
+    assert observed["ai_action"] == "priority_buy"
+    assert observed["final_category"] == "recommend_buy"
+    assert observed["buy_attractiveness_score"] >= 60
+    assert observed["freshness_status"] == "undated"
+    assert validate_review(observed) == []
+
+
 def test_action_label_and_summary_cannot_contradict_the_decision() -> None:
     review = {
         **_external_review("priority_buy", 70),
@@ -453,7 +474,7 @@ def test_external_full_coverage_publish_requires_bound_source_audit(tmp_path) ->
 
 
 def test_local_full_coverage_rejects_external_model_label(tmp_path) -> None:
-    review = {**_external_review("watchlist", 60), "effort": "max"}
+    review = {**_external_review("watchlist", 60), "model": "external-model", "effort": "max"}
     payload = _with_candidate_identity(
         {
             "snapshot_generation": "g1",
@@ -477,13 +498,149 @@ def test_local_full_coverage_rejects_external_model_label(tmp_path) -> None:
     source = tmp_path / "local-wrong-model.json"
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="local Codex review model"):
+    with pytest.raises(ValueError, match="local Codex or OpenCode MAX review model"):
         build_artifact(
             source,
             tmp_path / "public.json",
             expected_generation="g1",
             expected_market_as_of="2026-08-21",
         )
+
+
+def test_local_full_coverage_accepts_opencode_ox_max_model(tmp_path) -> None:
+    review = {
+        **_external_review("watchlist", 60),
+        "effort": "max",
+        "web_search_performed": False,
+        "web_search_event_verified": False,
+        "web_search_claim_urls_verified": False,
+    }
+    source = tmp_path / "local-ox-max.json"
+    source.write_text(
+        json.dumps(
+            _with_candidate_identity(
+                {
+                    "snapshot_generation": "g1",
+                    "market_as_of": "2026-08-21",
+                    "candidate_offset": 0,
+                    "candidate_count": 1,
+                    "candidate_total": 1,
+                    "full_coverage_final_recommendation": True,
+                    "review_mode": "local_codex_review",
+                    "packets": [
+                        {
+                            "security_code": "600000",
+                            "name": "浦发银行",
+                            "type_key": "type1",
+                            "deterministic": {"status": "triggered", "score": 8.0},
+                            "ai_review": review,
+                        }
+                    ],
+                }
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    artifact = build_artifact(
+        source,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-21",
+    )
+    assert artifact["review_models"] == ["opencode-go/ox-alpha-free"]
+    assert artifact["review_efforts"] == ["max"]
+    assert artifact["full_coverage_web_search"] is False
+
+
+def test_local_full_coverage_accepts_muse_spark_xhigh_model(tmp_path) -> None:
+    review = {
+        **_external_review("watchlist", 60),
+        "model": "opencode-go/muse-spark-1.2-contributor",
+        "effort": "xhigh",
+        "web_search_performed": False,
+        "web_search_event_verified": False,
+        "web_search_claim_urls_verified": False,
+    }
+    source = tmp_path / "local-muse-xhigh.json"
+    source.write_text(
+        json.dumps(
+            _with_candidate_identity(
+                {
+                    "snapshot_generation": "g1",
+                    "market_as_of": "2026-08-21",
+                    "candidate_offset": 0,
+                    "candidate_count": 1,
+                    "candidate_total": 1,
+                    "full_coverage_final_recommendation": True,
+                    "review_mode": "local_codex_review",
+                    "packets": [
+                        {
+                            "security_code": "600000",
+                            "name": "浦发银行",
+                            "type_key": "type1",
+                            "deterministic": {"status": "triggered", "score": 8.0},
+                            "ai_review": review,
+                        }
+                    ],
+                }
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    artifact = build_artifact(
+        source,
+        tmp_path / "public.json",
+        expected_generation="g1",
+        expected_market_as_of="2026-08-21",
+    )
+    assert artifact["review_models"] == ["opencode-go/muse-spark-1.2-contributor"]
+    assert artifact["review_efforts"] == ["xhigh"]
+    assert artifact["full_coverage_web_search"] is False
+
+
+def test_local_full_coverage_accepts_mixed_ox_and_muse_efforts(tmp_path) -> None:
+    ox = {**_external_review("watchlist", 60), "effort": "max", "web_search_performed": False}
+    muse = {
+        **_external_review("watchlist", 61),
+        "security_code": "600001",
+        "model": "opencode-go/muse-spark-1.2-contributor",
+        "effort": "xhigh",
+        "web_search_performed": False,
+    }
+    payload = _with_candidate_identity(
+        {
+            "snapshot_generation": "g1",
+            "market_as_of": "2026-08-21",
+            "candidate_offset": 0,
+            "candidate_count": 2,
+            "candidate_total": 2,
+            "full_coverage_final_recommendation": True,
+            "review_mode": "local_codex_review",
+            "packets": [
+                {
+                    "security_code": "600000",
+                    "name": "浦发银行",
+                    "type_key": "type1",
+                    "deterministic": {"status": "triggered", "score": 8.0},
+                    "ai_review": ox,
+                },
+                {
+                    "security_code": "600001",
+                    "name": "第二家公司",
+                    "type_key": "type1",
+                    "deterministic": {"status": "triggered", "score": 8.0},
+                    "ai_review": muse,
+                },
+            ],
+        }
+    )
+    source = tmp_path / "local-mixed.json"
+    source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    artifact = build_artifact(source, tmp_path / "public.json", expected_generation="g1", expected_market_as_of="2026-08-21")
+    assert artifact["review_models"] == ["opencode-go/muse-spark-1.2-contributor", "opencode-go/ox-alpha-free"]
+    assert artifact["review_efforts"] == ["max", "xhigh"]
 
 
 def test_opencode_review_mode_marks_only_the_complete_queue_as_full(tmp_path) -> None:

@@ -17,6 +17,7 @@ from typing import Any, Mapping
 
 from tools.ai_screening_contract import (
     LOCAL_REVIEW_MODEL,
+    LOCAL_OPENCODE_MODELS,
     PARTIAL_SEARCH_REVIEW_MODES,
     PLACEHOLDER_REVIEW_MODEL,
     REVIEW_SCHEMA_VERSION,
@@ -296,6 +297,7 @@ def build_artifact(
     pair_web_search_dropped_claim_url_count = 0
     review_models: set[str] = set()
     review_efforts: set[str] = set()
+    review_model_efforts: set[tuple[str, str]] = set()
     full_coverage = source.get("full_coverage_final_recommendation") is True
     review_mode = _text(source.get("review_mode"), 64) or "external_ai_review"
     if full_coverage and not (
@@ -343,6 +345,8 @@ def build_artifact(
                 review_models.add(public_review["model"])
             if public_review["effort"]:
                 review_efforts.add(public_review["effort"])
+            if public_review["model"] and public_review["effort"]:
+                review_model_efforts.add((public_review["model"], public_review["effort"]))
             if public_review["web_search_performed"]:
                 pair_web_search_attempted_count += 1
             if public_review["web_search_event_verified"]:
@@ -367,8 +371,20 @@ def build_artifact(
         raise ValueError("full-coverage artifact contains placeholder reviews")
     if full_coverage and (not review_models or not review_efforts):
         raise ValueError("full-coverage artifact must declare its review models and efforts")
-    if full_coverage and review_mode == "local_codex_review" and review_models != {LOCAL_REVIEW_MODEL}:
-        raise ValueError("local full-coverage artifact must use the local Codex review model")
+    if full_coverage and review_mode == "local_codex_review" and not (
+        review_models == {LOCAL_REVIEW_MODEL} or review_models <= LOCAL_OPENCODE_MODELS
+    ):
+        raise ValueError("local full-coverage artifact must use the local Codex or OpenCode MAX review model")
+    if (
+        full_coverage
+        and review_mode == "local_codex_review"
+        and review_models & LOCAL_OPENCODE_MODELS
+        and not review_model_efforts <= {
+            ("opencode-go/ox-alpha-free", "max"),
+            ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
+        }
+    ):
+        raise ValueError("OpenCode Go local artifacts must use Ox max or Muse Spark xhigh reviews")
     if (
         full_coverage
         and review_mode not in PARTIAL_SEARCH_REVIEW_MODES

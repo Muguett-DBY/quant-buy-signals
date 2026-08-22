@@ -15,6 +15,12 @@ from typing import Any
 REVIEW_SCHEMA_VERSION = 2
 PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 LOCAL_REVIEW_MODEL = "codex-local-review-v1"
+LOCAL_OPENCODE_MODELS = frozenset(
+    {
+        "opencode-go/ox-alpha-free",
+        "opencode-go/muse-spark-1.2-contributor",
+    }
+)
 PARTIAL_SEARCH_REVIEW_MODES = frozenset({"local_codex_review", "opencode_mixed_review"})
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})
@@ -52,6 +58,7 @@ _CURRENT_BUY_RE = re.compile(
     r"(?:建议买|推荐买|值得买|可以买|可买|应该买|应买)(?!入|方|单)"
 )
 _CURRENT_NON_BUY_RE = re.compile(
+    r"(?:当前)?结论(?:为|是|：|:)(?:观察|不建议(?:买|买入)?|暂不建议(?:买|买入)?)|"
     r"(?:当前|现在|现阶段|本轮|综合判断)?(?:明确|仍然|依然|暂时)?"
     r"(?:不建议|不推荐|不宜|不应|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)"
     r"|(?:当前|现在|现阶段)?(?:尚不构成|不构成|并非|不是)(?:合适的)?(?:买点|买入机会|买入时点)"
@@ -59,6 +66,9 @@ _CURRENT_NON_BUY_RE = re.compile(
     r"|(?:维持|列为|归入|仅作|应列入)(?:继续)?观察"
     r"|(?:暂不|暂缓|推迟|不宜|不应|不可|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)"
     r"|(?:当前|现在|现阶段)?(?:暂不具备|尚不具备|不具备)(?:买入|配置)(?:价值|条件)"
+    r"|(?:当前|现在|现阶段|本轮|目前)?(?:买入|建仓|配置)(?:逻辑|理由|条件)(?:尚未|未|还未|仍未)(?:成立|满足|确认)"
+    r"|(?:暂时不|暂不|暂未|目前不|当前不)(?:考虑|参与|纳入)(?:买入|配置|投资|持仓|交易)?"
+    r"|(?:当前|现在|现阶段|本轮|目前)?(?:不参与|不纳入|暂不纳入)(?:配置|投资|买入|持仓)"
     r"|(?:当前|现在|现阶段)?(?:没有|缺乏)(?:明确)?(?:买点|买入机会)"
     r"|(?:当前|现在|现阶段)?不值得(?:立即|现在|当前)?(?:买入|建仓|配置)"
     r"|(?:建议|应当|应该)(?:持币)?(?:继续)?观望"
@@ -439,11 +449,15 @@ def validate_review(review: Mapping[str, Any], *, require_readable_reason: bool 
         errors.append("freshness_note")
     freshness_status = str(review.get("freshness_status") or "")
     if freshness_status in {"historical", "undated"}:
-        if str(review.get("ai_action") or "") == "priority_buy":
+        local_unsearched_buy = (
+            str(review.get("model") or "") in LOCAL_OPENCODE_MODELS
+            and review.get("web_search_performed") is not True
+        )
+        if str(review.get("ai_action") or "") == "priority_buy" and not local_unsearched_buy:
             errors.append("stale_priority_buy")
-        if str(review.get("final_category") or "") == "recommend_buy":
+        if str(review.get("final_category") or "") == "recommend_buy" and not local_unsearched_buy:
             errors.append("stale_recommend_buy")
-        if str(review.get("final_recommendation") or "") == "recommend_buy":
+        if str(review.get("final_recommendation") or "") == "recommend_buy" and not local_unsearched_buy:
             errors.append("stale_final_recommendation")
     for field in ("key_strengths", "risk_flags"):
         values = review.get(field, [])

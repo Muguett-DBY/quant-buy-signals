@@ -15,7 +15,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.ai_screening_contract import LOCAL_REVIEW_MODEL, PARTIAL_SEARCH_REVIEW_MODES, validate_review
+from tools.ai_screening_contract import (
+    LOCAL_OPENCODE_MODELS,
+    LOCAL_REVIEW_MODEL,
+    PARTIAL_SEARCH_REVIEW_MODES,
+    validate_review,
+)
 
 _CODE_RE = re.compile(r"^[036]\d{5}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -76,7 +81,9 @@ def validate_artifact(
     if not isinstance(models, list) or not models or not isinstance(efforts, list) or not efforts:
         raise ValueError("AI screening model/effort metadata is missing")
     review_mode = str(payload.get("review_mode") or "")
-    if review_mode == "local_codex_review" and set(models) != {LOCAL_REVIEW_MODEL}:
+    if review_mode == "local_codex_review" and not (
+        set(models) == {LOCAL_REVIEW_MODEL} or set(models) <= LOCAL_OPENCODE_MODELS
+    ):
         raise ValueError("local AI screening seed uses an unexpected model")
     external_full = review_mode not in PARTIAL_SEARCH_REVIEW_MODES
     mixed_full = review_mode == "opencode_mixed_review"
@@ -97,6 +104,7 @@ def validate_artifact(
     action_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
     attempted = searched = events = claims = dropped = 0
+    review_model_efforts: set[tuple[str, str]] = set()
     pair_sum = 0
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -121,6 +129,7 @@ def validate_artifact(
             raise ValueError(f"AI screening review is semantically invalid for {code}: {','.join(errors)}")
         if str(review.get("model") or "") not in models or str(review.get("effort") or "") not in efforts:
             raise ValueError(f"AI screening review metadata is inconsistent for {code}")
+        review_model_efforts.add((str(review.get("model") or ""), str(review.get("effort") or "")))
         action = str(review.get("ai_action") or "")
         category = str(review.get("final_category") or "")
         action_counts[action] += 1
@@ -138,6 +147,12 @@ def validate_artifact(
         seen_ranks.add(rank)
     if pair_sum != pair_total or len(seen_ranks) != candidate_total:
         raise ValueError("AI screening type-pair or rank totals are inconsistent")
+    if review_mode == "local_codex_review" and not review_model_efforts <= {
+        ("opencode-go/ox-alpha-free", "max"),
+        ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
+        (LOCAL_REVIEW_MODEL, "max"),
+    }:
+        raise ValueError("local OpenCode Go reviews must use Ox max or Muse Spark xhigh")
     for action in _ACTIONS:
         if (
             _int((payload.get("ai_action_counts") or {}).get(action), f"ai_action_counts.{action}")

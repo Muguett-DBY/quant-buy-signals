@@ -17,6 +17,7 @@ from typing import Any, Mapping
 import re
 
 from tools.ai_screening_contract import (
+    LOCAL_OPENCODE_MODELS,
     REVIEW_SCHEMA_VERSION,
     candidate_identity_sha256,
     decision_text_conflicts,
@@ -262,7 +263,13 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         verdict == "confirmed"
         and source_action == "priority_buy"
         and score >= 60
-        and freshness["status"] == "current_or_recent"
+        and (
+            freshness["status"] == "current_or_recent"
+            # Local OpenCode Go reviews are explicitly advisory and may be
+            # unsearched; the snapshot facts still support an independent
+            # buy opinion after the visible provenance/freshness penalty.
+            or str(source.get("model") or "") in LOCAL_OPENCODE_MODELS
+        )
     ):
         action = "priority_buy"
     elif (
@@ -439,10 +446,27 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
         if validate_review(review):
             raise ValueError(f"calibrated review is invalid: {review['security_code']}/{review['type_key']}")
         output_packets.append({**packet, "ai_review": review})
+    review_mode = str(source.get("review_mode") or "")
+    review_models = {
+        str(packet.get("ai_review", {}).get("model") or "")
+        for packet in output_packets
+        if isinstance(packet.get("ai_review"), Mapping)
+    }
+    if review_mode == "local_codex_review":
+        if review_models == {"opencode-go/ox-alpha-free"}:
+            ranking_source = "opencode-zen-ox-alpha-free-max-local-review-v1"
+        elif review_models == {"opencode-go/muse-spark-1.2-contributor"}:
+            ranking_source = "opencode-go-muse-spark-1.2-xhigh-local-review-v1"
+        elif review_models <= LOCAL_OPENCODE_MODELS:
+            ranking_source = "opencode-go-local-max-review-v1"
+        else:
+            ranking_source = "local-codex-review-v1"
+    else:
+        ranking_source = "opencode-web-search-review-calibrated-independent-buy-v8"
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
-        "ranking_source": "opencode-web-search-review-calibrated-independent-buy-v8",
+        "ranking_source": ranking_source,
         "full_coverage_final_recommendation": requested_full_coverage and complete_queue,
         "packets": output_packets,
     }

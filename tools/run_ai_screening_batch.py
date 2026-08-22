@@ -39,6 +39,7 @@ _WEB_URL_RE = re.compile(r"https?://[^\s<>\"'）)\]]+", re.IGNORECASE)
 _ASCII_URL_PREFIX_RE = re.compile(r"[A-Za-z0-9:/?#\[\]@!$&'()*+,;=%._~\-]+")
 _RULE_EXCERPT_LIMIT = 1400
 _RULES_PER_TYPE_LIMIT = 3
+_OPENCODE_BATCH_TIMEOUT_SECONDS = 900
 
 
 def _finite_float(value: Any) -> float | None:
@@ -144,6 +145,57 @@ def _extract_opencode_text(text: str) -> str:
     if not parts:
         raise ValueError("OpenCode did not return a final assistant text event")
     return "\n".join(parts)
+
+
+def _extract_opencode_reviews(
+    text: str,
+    expected: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Collect complete review objects across OpenCode continuation events.
+
+    Ox may emit an incomplete JSON array, continue the same answer, and then
+    emit another array containing the remaining packets. Treating only the
+    first parseable array as final forces needless recursive single-packet
+    retries. We merge only objects whose identity is in this batch and keep
+    the last occurrence for a key; the caller still performs exact identity
+    checking and validation below.
+    """
+
+    arrays: list[list[dict[str, Any]]] = []
+    for line in text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, Mapping) or event.get("type") != "text":
+            continue
+        part = event.get("part")
+        if not isinstance(part, Mapping) or not isinstance(part.get("text"), str):
+            continue
+        try:
+            value = _extract_array(part["text"])
+        except ValueError:
+            continue
+        arrays.append(value)
+    try:
+        joined = _extract_opencode_text(text)
+        value = _extract_array(joined)
+    except ValueError:
+        value = None
+    if value is not None:
+        arrays.append(value)
+
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for array in arrays:
+        for review in array:
+            key = (str(review.get("security_code")), str(review.get("type_key")))
+            if key in expected:
+                merged[key] = review
+    if merged:
+        return list(merged.values())
+    if value is not None:
+        return value
+    raise ValueError("OpenCode did not return a JSON review array")
 
 
 def _completed_opencode_websearch_events(text: str) -> list[dict[str, Any]]:
@@ -337,7 +389,7 @@ def _normalise_model_review(review: dict[str, Any]) -> dict[str, Any]:
 def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
     """Keep an offline model response inside the public decision contract.
 
-    Local Ox batches are opinions without live evidence.  The model can still
+    Local OpenCode Go batches are opinions without live evidence.  The model can still
     emit a contradictory tuple (for example ``watchlist`` with
     ``recommended_action=keep``) or a 100-point ``avoid`` score.  Correct the
     mechanical tuple/score boundary here while leaving the explanatory text
@@ -345,6 +397,15 @@ def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
     non-buy action.
     """
     action = str(review.get("ai_action") or "watchlist")
+    # A local MAX response can emit a priority_buy enum while its first
+    # sentence explicitly says "当前结论：观察" or "当前结论：不建议".
+    # That is a model contradiction, not evidence for a buy.  Downgrade the
+    # tuple before score/category validation so the published result follows
+    # the written conclusion instead of retrying the batch indefinitely.
+    if action == "priority_buy" and isinstance(review.get("summary"), str):
+        if decision_text_conflicts("priority_buy", review["summary"]):
+            action = "watchlist"
+            review["ai_action"] = action
     tuple_values = {
         "priority_buy": ("confirmed", "keep"),
         "watchlist": ("caution", "manual_review"),
@@ -357,6 +418,10 @@ def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
     verdict, recommended_action = tuple_values[action]
     review["verdict"] = verdict
     review["recommended_action"] = recommended_action
+    if "final_category" in review:
+        review["final_category"] = "recommend_buy" if action == "priority_buy" else "do_not_recommend" if action == "avoid" else "observe"
+    if "final_recommendation" in review:
+        review["final_recommendation"] = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     score = _finite_float(review.get("buy_attractiveness_score"))
     if score is not None:
         if action == "priority_buy":
@@ -405,8 +470,30 @@ def _shared_rules(packets: list[Mapping[str, Any]]) -> dict[str, list[dict[str, 
     return {type_key: list(values.values())[:_RULES_PER_TYPE_LIMIT] for type_key, values in sorted(grouped.items())}
 
 
+def _compact_local_rules(shared: Mapping[str, list[Mapping[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    """Keep the local MAX prompt focused while retaining KB provenance."""
+
+    compact: dict[str, list[dict[str, Any]]] = {}
+    for type_key, rules in shared.items():
+        selected: list[dict[str, Any]] = []
+        for rule in list(rules)[:2]:
+            item = {
+                key: rule.get(key)
+                for key in ("source_id", "line_start", "line_end", "heading", "text")
+                if key in rule
+            }
+            text = str(item.get("text") or "")
+            if len(text) > 700:
+                item["text"] = text[:700] + "...[片段已压缩]"
+            selected.append(item)
+        compact[type_key] = selected
+    return compact
+
+
 def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_search: bool = False) -> str:
     shared = _shared_rules(packets)
+    if not require_web_search:
+        shared = _compact_local_rules(shared)
     slim = [_batch_packet(packet) for packet in packets]
     search_instruction = ""
     if require_web_search:
@@ -511,8 +598,17 @@ def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_sear
         + "Make the decision language internally consistent: begin summary with the current conclusion (建议买/观察/不建议), "
         + "do not use another action's label or enum as the current conclusion, and do not mention priority_buy/watchlist/avoid "
         + "as a hypothetical label inside a different action's summary. "
+        + "The first clause must be exactly one of 当前结论：建议买。/当前结论：观察。/当前结论：不建议。 "
+        + "For watchlist, avoid, or insufficient_evidence, never write an unqualified current-buy phrase such as 建议买、建议买入、值得买 or 可以买; "
+        + "for priority_buy, never write an unqualified current non-buy conclusion. "
         + "Keep every object compact: summary <= 280 Chinese characters, at most 2 strengths, 3 risks, "
         + "and 3 source claims; do not repeat facts."
+        + (
+            " Local MAX mode: claims must be [], summary <= 140 Chinese characters, and use at most "
+            "1 strength and 2 risks so every batch fits in one JSON response."
+            if not require_web_search
+            else ""
+        )
     )
 
 
@@ -572,12 +668,13 @@ def _run_batch(
         if session_id:
             command.extend(["--session", session_id])
         env = os.environ.copy()
-        env["OPENCODE_ENABLE_EXA"] = "1"
-        # The desktop environment enables OpenCode's parallel search path by
-        # default.  That path routes through a rate-limited Parallel endpoint;
-        # the direct Exa tool is the supported, stable path for this batch.
-        env["OPENCODE_ENABLE_PARALLEL"] = "0"
-        env["OPENCODE_EXPERIMENTAL_PARALLEL"] = "0"
+        # OpenCode Zen's built-in websearch is served by the Parallel path.
+        # Keep Exa disabled: its fallback endpoint is rate-limited in this
+        # environment and would turn a real search into a false "unsearched"
+        # batch failure.
+        env["OPENCODE_ENABLE_EXA"] = "0"
+        env["OPENCODE_ENABLE_PARALLEL"] = "1"
+        env["OPENCODE_EXPERIMENTAL_PARALLEL"] = "1"
     else:
         command = [
             _reasonix_path(),
@@ -616,7 +713,7 @@ def _run_batch(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=3600,
+        timeout=_OPENCODE_BATCH_TIMEOUT_SECONDS,
         env=env,
     )
     if completed.returncode != 0:
@@ -627,14 +724,17 @@ def _run_batch(
         missing_searches = _missing_websearch_companies(completed.stdout, packets)
         if missing_searches:
             raise ValueError(f"OpenCode did not complete websearch for companies: {missing_searches}")
+    expected = {(str(packet.get("security_code")), str(packet.get("type_key"))) for packet in packets}
     try:
-        response_text = _extract_opencode_text(completed.stdout) if backend == "opencode" else completed.stdout
-        reviews = _extract_array(response_text)
+        reviews = (
+            _extract_opencode_reviews(completed.stdout, expected)
+            if backend == "opencode"
+            else _extract_array(completed.stdout)
+        )
     except ValueError as error:
         tail = completed.stdout[-2000:].replace("\n", " ")
         stderr_tail = completed.stderr[-500:].replace("\n", " ")
         raise ValueError(f"{error}; stdout_tail={tail!r}; stderr_tail={stderr_tail!r}") from error
-    expected = {(str(packet.get("security_code")), str(packet.get("type_key"))) for packet in packets}
     batch_companies = {
         str(packet.get("security_code")): str(packet.get("name") or "").strip()
         for packet in packets
@@ -701,8 +801,6 @@ def _run_batch(
         review["model"] = model
         review["effort"] = effort
     active_session = _opencode_session_id(completed.stdout) if backend == "opencode" else ""
-    if backend == "opencode" and not active_session:
-        raise ValueError("OpenCode did not report a reusable session ID")
     return (
         [actual[(str(packet.get("security_code")), str(packet.get("type_key")))] for packet in packets],
         active_session,
@@ -798,6 +896,8 @@ def main() -> int:
                     session_id=session_id,
                 )
                 if args.backend == "opencode":
+                    if args.session_batches > 1 and not active_session:
+                        raise ValueError("OpenCode did not report a reusable session ID")
                     session_id = active_session
                     session_batch_count += 1
             except Exception as error:

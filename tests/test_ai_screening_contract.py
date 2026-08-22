@@ -15,7 +15,9 @@ from tools.enrich_ai_screening_input import enrich
 from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
 from tools.run_ai_screening_batch import (
+    _cohere_local_review,
     _extract_array,
+    _extract_opencode_reviews,
     _extract_opencode_text,
     _normalise_model_review,
     _prompt as batch_prompt,
@@ -236,6 +238,36 @@ def test_opencode_events_extract_final_text_and_normalise_action_verdict() -> No
     assert review["claims"] == []
 
 
+def test_opencode_review_fragments_merge_by_packet_identity() -> None:
+    first = {
+        "schema_version": 2,
+        "security_code": "600000",
+        "type_key": "type1",
+        "verdict": "needs_review",
+        "recommended_action": "manual_review",
+        "buy_attractiveness_score": 40,
+        "ai_action": "watchlist",
+        "final_category": "observe",
+        "confidence": "low",
+        "summary": "当前结论：观察。",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [],
+    }
+    second = dict(first, security_code="600001", type_key="type2")
+    events = "\n".join(
+        [
+            json.dumps({"type": "text", "part": {"text": json.dumps([first], ensure_ascii=False)}}),
+            json.dumps({"type": "text", "part": {"text": json.dumps([second], ensure_ascii=False)}}),
+        ]
+    )
+    reviews = _extract_opencode_reviews(events, {("600000", "type1"), ("600001", "type2")})
+    assert {(row["security_code"], row["type_key"]) for row in reviews} == {
+        ("600000", "type1"),
+        ("600001", "type2"),
+    }
+
+
 def test_batch_protocol_allows_independent_near_qualified_buy() -> None:
     prompt = batch_prompt(
         "协议片段",
@@ -288,6 +320,33 @@ def test_decision_text_collapses_repeated_negation_tokens() -> None:
     assert "不不" not in cleaned
     assert decision_text_conflicts("watchlist", "不能据此直接建议买入。") is False
     assert decision_text_conflicts("watchlist", "当前建议买入。") is True
+    assert decision_text_conflicts("priority_buy", "当前买入逻辑尚未成立，继续等待确认。") is True
+    assert decision_text_conflicts("priority_buy", "暂时不考虑买入，等待下一季。") is True
+    assert decision_text_conflicts("priority_buy", "当前不参与配置。") is True
+
+
+def test_local_priority_buy_with_non_buy_summary_is_downgraded() -> None:
+    review = {
+        "schema_version": 2,
+        "security_code": "600662",
+        "type_key": "type1",
+        "verdict": "confirmed",
+        "recommended_action": "keep",
+        "buy_attractiveness_score": 82,
+        "ai_action": "priority_buy",
+        "final_category": "recommend_buy",
+        "confidence": "low",
+        "summary": "当前结论：观察。证据不足，暂不形成买点。",
+        "key_strengths": ["待核验"],
+        "risk_flags": ["资料不足"],
+        "claims": [],
+    }
+    reviewed = _cohere_local_review(review)
+    assert reviewed["ai_action"] == "watchlist"
+    assert reviewed["verdict"] == "caution"
+    assert reviewed["recommended_action"] == "manual_review"
+    assert reviewed["buy_attractiveness_score"] == 69.0
+    assert validate_review(reviewed) == []
 
 
 def test_watchlist_summary_uses_observe_label_before_non_buy_qualification() -> None:
