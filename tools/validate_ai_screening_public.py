@@ -88,7 +88,9 @@ def validate_artifact(
         set(models) == {LOCAL_REVIEW_MODEL} or set(models) <= LOCAL_OPENCODE_MODELS
     ):
         raise ValueError("local AI screening seed uses an unexpected model")
-    if review_mode == NATIVE_WEB_REVIEW_MODE and (set(models) != {NATIVE_WEB_REVIEW_MODEL} or set(efforts) != {"xhigh"}):
+    if review_mode == NATIVE_WEB_REVIEW_MODE and (
+        set(models) != {NATIVE_WEB_REVIEW_MODEL} or set(efforts) != {"xhigh"}
+    ):
         raise ValueError("native AI screening seed must use Muse Spark 1.2 xhigh")
     external_full = review_mode not in PARTIAL_SEARCH_REVIEW_MODES
     mixed_full = review_mode == "opencode_mixed_review"

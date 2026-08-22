@@ -53,8 +53,22 @@ def _action_safe_summary(summary: str, action: str) -> str:
     if decision_text_conflicts(action, summary):
         marker = summary.find("）。")
         prefix = summary[: marker + 2] if marker >= 0 else ""
-        lead = "当前结论：建议买。" if action == "priority_buy" else "当前结论：不建议。" if action == "avoid" else "当前结论：观察。"
-        return prefix + lead + ("联网核验已完成，但现有证据不足以支持当前买入结论。" if action != "priority_buy" else "联网核验与候选逻辑一致，仍需持续跟踪反证。")
+        lead = (
+            "当前结论：建议买。"
+            if action == "priority_buy"
+            else "当前结论：不建议。"
+            if action == "avoid"
+            else "当前结论：观察。"
+        )
+        return (
+            prefix
+            + lead
+            + (
+                "联网核验已完成，但现有证据不足以支持当前买入结论。"
+                if action != "priority_buy"
+                else "联网核验与候选逻辑一致，仍需持续跟踪反证。"
+            )
+        )
     return summary
 
 
