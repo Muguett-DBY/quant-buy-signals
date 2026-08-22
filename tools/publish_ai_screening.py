@@ -21,6 +21,7 @@ from tools.ai_screening_contract import (
     PLACEHOLDER_REVIEW_MODEL,
     REVIEW_SCHEMA_VERSION,
     candidate_identity_sha256,
+    normalise_decision_text,
     validate_review,
 )
 
@@ -155,6 +156,9 @@ def _public_review(review: Mapping[str, Any], *, require_readable_reason: bool =
     label = _text(review.get("recommendation_label"), 64)
     if not label:
         label = "建议买" if recommendation == "recommend_buy" else "观察" if action == "watchlist" else "不建议"
+    summary = normalise_decision_text(_text(review.get("summary"), 1200))
+    if action == "watchlist":
+        summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
@@ -165,7 +169,7 @@ def _public_review(review: Mapping[str, Any], *, require_readable_reason: bool =
         "recommendation_label": label,
         "ai_independent": bool(review.get("ai_independent", False)),
         "confidence": _text(review.get("confidence"), 16),
-        "summary": _text(review.get("summary"), 1200),
+        "summary": summary,
         "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
         "risk_flags": [_text(item, 240) for item in review.get("risk_flags", [])[:12]],
         "claims": claims[:12],

@@ -367,6 +367,8 @@ def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
             review["buy_attractiveness_score"] = min(49.0, score)
     if action != "priority_buy" and isinstance(review.get("summary"), str):
         summary = normalise_decision_text(review["summary"])
+        if action == "watchlist":
+            summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
         if decision_text_conflicts(action, summary):
             for old, new in (
                 ("当前建议买入", "当前不建议买入"),

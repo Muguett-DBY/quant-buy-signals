@@ -28,6 +28,8 @@ from tools.ai_screening_contract import (
 def _action_safe_summary(summary: str, action: str) -> str:
     """Prevent a downgraded card from retaining a current buy sentence."""
     summary = normalise_decision_text(summary)
+    if action == "watchlist":
+        summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
     if action == "priority_buy" or not decision_text_conflicts(action, summary):
         return summary
     for old, new in (

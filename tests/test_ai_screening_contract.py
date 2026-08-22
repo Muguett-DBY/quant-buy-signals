@@ -10,7 +10,7 @@ from tools.ai_screening_contract import (
     validate_review,
 )
 from tools.build_ai_screening import _relevant_rules, _rule_chunks, build_input, merge_reviews
-from tools.calibrate_ai_screening_ranking import _claim_url, _review
+from tools.calibrate_ai_screening_ranking import _action_safe_summary, _claim_url, _review
 from tools.enrich_ai_screening_input import enrich
 from tools.publish_ai_screening import _public_review, build_artifact
 from tools.prepare_ai_screening_overlay import prepare
@@ -288,6 +288,12 @@ def test_decision_text_collapses_repeated_negation_tokens() -> None:
     assert "不不" not in cleaned
     assert decision_text_conflicts("watchlist", "不能据此直接建议买入。") is False
     assert decision_text_conflicts("watchlist", "当前建议买入。") is True
+
+
+def test_watchlist_summary_uses_observe_label_before_non_buy_qualification() -> None:
+    summary = "当前结论：不建议买，此为AI独立判断，等待中报确认。"
+
+    assert _action_safe_summary(summary, "watchlist") == "当前结论：观察（暂不建议买），此为AI独立判断，等待中报确认。"
 
 
 def test_historical_claims_are_visible_and_cannot_remain_a_buy_recommendation() -> None:
