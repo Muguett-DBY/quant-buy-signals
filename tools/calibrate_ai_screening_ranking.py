@@ -29,6 +29,11 @@ from tools.ai_screening_contract import (
 def _action_safe_summary(summary: str, action: str) -> str:
     """Prevent a downgraded card from retaining a current buy sentence."""
     summary = normalise_decision_text(summary)
+    if action == "priority_buy":
+        # A model may append a cautious phrase such as “优先观察标的” to an
+        # otherwise affirmative conclusion.  Keep the risk caveat, but make
+        # the displayed action unambiguous for the three-way UI.
+        summary = summary.replace("优先观察标的", "优先候选标的").replace("观察标的", "候选标的")
     if action == "watchlist":
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
     if action == "priority_buy" or not decision_text_conflicts(action, summary):
@@ -44,7 +49,13 @@ def _action_safe_summary(summary: str, action: str) -> str:
         ("可买", "暂不可买"),
     ):
         summary = summary.replace(old, new)
-    return normalise_decision_text(summary)
+    summary = normalise_decision_text(summary)
+    if decision_text_conflicts(action, summary):
+        marker = summary.find("）。")
+        prefix = summary[: marker + 2] if marker >= 0 else ""
+        lead = "当前结论：建议买。" if action == "priority_buy" else "当前结论：不建议。" if action == "avoid" else "当前结论：观察。"
+        return prefix + lead + ("联网核验已完成，但现有证据不足以支持当前买入结论。" if action != "priority_buy" else "联网核验与候选逻辑一致，仍需持续跟踪反证。")
+    return summary
 
 
 def _number(value: Any) -> float | None:
@@ -268,7 +279,13 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
             # Local OpenCode Go reviews are explicitly advisory and may be
             # unsearched; the snapshot facts still support an independent
             # buy opinion after the visible provenance/freshness penalty.
-            or str(source.get("model") or "") in LOCAL_OPENCODE_MODELS
+            # A native web-search review is different: if its claims do not
+            # identify a current report period, keep it observable rather
+            # than presenting an undated external source as a buy signal.
+            or (
+                str(source.get("model") or "") in LOCAL_OPENCODE_MODELS
+                and source.get("retrieval_backend") != "reasonix-native-server-web-search"
+            )
         )
     ):
         action = "priority_buy"
@@ -386,6 +403,11 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "claims": claims[:12],
         "model": str(source.get("model") or "unknown-external-review"),
         "effort": str(source.get("effort") or "max"),
+        "retrieval_backend": str(source.get("retrieval_backend") or ""),
+        "retrieval_model": str(source.get("retrieval_model") or ""),
+        "retrieval_effort": str(source.get("retrieval_effort") or ""),
+        "native_search_completed": source.get("native_search_completed") is True,
+        "official_fetch_completed": source.get("official_fetch_completed") is True,
         "web_search_performed": bool(source.get("web_search_performed") is True),
         "web_search_event_verified": bool(source.get("web_search_event_verified") is True),
         "web_search_claim_urls_verified": bool(source.get("web_search_claim_urls_verified") is True),

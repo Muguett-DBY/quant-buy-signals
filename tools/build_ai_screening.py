@@ -50,7 +50,9 @@ _PATCH7_GUIDE_MARKER = "\n综合运用指南\n"
 _PATCH7_TYPE5_APPENDIX_MARKER = "补丁7 方法论附录｜强周期产业底部估值特例与五维度操作清单。"
 _PATCH7_SELL_GATE_MARKER = "附录：卖出闸门协议（四硬一软）"
 _MAX_RULE_CHARS = 12_000
-_FULL_COVERAGE_REVIEW_MODES = frozenset({"local_codex_review", "opencode_web_review", "opencode_mixed_review"})
+_FULL_COVERAGE_REVIEW_MODES = frozenset(
+    {"local_codex_review", "opencode_web_review", "opencode_mixed_review", "opencode_native_web_search_review"}
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:

@@ -641,7 +641,7 @@ function aiReviewDecisionValid(review,action,score){
 function validAiReviewDescriptorList(value,maxItems,maxLength){return Array.isArray(value)&&value.length>0&&value.length<=maxItems&&value.every(item=>typeof item==="string"&&item.trim()===item&&item.length>0&&item.length<=maxLength)&&new Set(value).size===value.length}
 function validAiScreeningArtifact(value,generation){
   if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.review_schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
-  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",partialSearchReview=localReview||mixedReview,externalFull=fullCoverage&&!partialSearchReview;
+  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",nativeReview=reviewMode==="opencode_native_web_search_review",partialSearchReview=localReview||mixedReview,externalFull=fullCoverage&&!partialSearchReview;
   if(String(value.market_as_of||"")!==String(generation?.market_as_of||"")||!/^\d{4}-\d{2}-\d{2}$/.test(String(value.market_as_of||""))||!Array.isArray(packets)||packets.length>2000||value.candidate_total!==packets.length||value.type_pair_unique_company_count!==packets.length||value.reviewed_count!==packets.length)return false;
   const pairTotal=value.type_pair_candidate_total,pairExpected=value.type_pair_expected_total,pairReviewed=value.type_pair_reviewed_count,pairUnreviewed=value.type_pair_unreviewed_count,attempted=value.attempted_review_count,unreviewed=value.unreviewed_candidate_count,needsReview=value.attempted_needs_review_count;
   const candidateIdentity=String(value.candidate_identity_sha256||""),universeIdentity=String(value.candidate_universe_identity_sha256||"");
@@ -653,6 +653,7 @@ function validAiScreeningArtifact(value,generation){
   if(fullCoverage){
     if(value.candidate_offset!==0||pairExpected!==pairTotal||pairReviewed!==pairTotal||pairUnreviewed!==0||unreviewed!==0||attempted!==packets.length||!validAiReviewDescriptorList(value.review_models,16,120)||!validAiReviewDescriptorList(value.review_efforts,16,32))return false;
     if(externalFull&&(pairSearchAttempted!==pairTotal||pairSearchEvents!==pairTotal||pairClaimUrls!==pairTotal||companySearchAttempted!==packets.length||companySearchEvents!==packets.length||companyClaimUrls!==packets.length||value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true))return false;
+    if(nativeReview&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="opencode-go/muse-spark-1.2-contributor"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="xhigh"))return false;
     if(partialSearchReview&&(companySearchAttempted<0||companySearchAttempted>packets.length||value.reviewed_without_web_search!==packets.length-companySearchAttempted))return false;
   }
   const seenCodes=new Set(),seenRanks=new Set();
@@ -666,6 +667,7 @@ function validAiScreeningArtifact(value,generation){
     if(!aiReviewDecisionValid(review,action,score))return false;
     if(fullCoverage&&(!value.review_models.includes(model)||!value.review_efforts.includes(effort)))return false;
     if(fullCoverage&&localReview&&((model==="opencode-go/ox-alpha-free"&&effort!=="max")||(model==="opencode-go/muse-spark-1.2-contributor"&&effort!=="xhigh")))return false;
+    if(fullCoverage&&nativeReview&&(model!=="opencode-go/muse-spark-1.2-contributor"||effort!=="xhigh"||review.retrieval_backend!=="reasonix-native-server-web-search"||review.retrieval_model!=="opencode-go-muse/muse-spark-1.2-contributor"||review.retrieval_effort!=="xhigh"||review.native_search_completed!==true||review.official_fetch_completed!==true))return false;
     const freshness=String(review.freshness_status||""),freshnessYears=review.freshness_years,freshnessPenalty=Number(review.freshness_penalty);
     if(!["current_or_recent","historical","undated"].includes(freshness)||!Array.isArray(freshnessYears)||freshnessYears.length>12||freshnessYears.some(year=>!Number.isInteger(year)||year<1900||year>2100)||!Number.isFinite(freshnessPenalty)||freshnessPenalty<0||freshnessPenalty>20||((freshness==="historical"||freshness==="undated")&&!((model==="opencode-go/ox-alpha-free"||model==="opencode-go/muse-spark-1.2-contributor")&&review.web_search_performed!==true)&&(action==="priority_buy"||category==="recommend_buy"||recommendation==="recommend_buy")))return false;
     const sourceRefs=[];
@@ -823,6 +825,8 @@ function aiScreeningPageResponse(request){
     .replace("function modelLabel(model){return model==='opencode-go/ox-alpha-free'?'Ox Alpha Free（'+model+'）':String(model||'—')}","function modelLabel(model){if(model==='opencode-go/ox-alpha-free')return 'Ox Alpha Free（'+model+'）';if(model==='opencode-go/muse-spark-1.2-contributor')return 'Muse Spark 1.2（'+model+'）';return String(model||'—')}")
     .replace('Ox Alpha Free 本地复核 · 本条未执行联网搜索','OpenCode Go 本地复核 · 本条未执行联网搜索')
     .replace('Ox Alpha Free 混合复核（联网事件 + 本地复核）','OpenCode Go 混合复核（联网事件 + 本地复核）')
+    .replace('逐家公司 OpenCode 联网复核','逐家公司 Muse Spark 原生 web_search 复核')
+    .replace('页面直接展示资料时效、实际复核模型与推理档位、OpenCode 搜索事件证明和可点击来源状态。','页面直接展示资料时效、Muse Spark 原生 web_search 事件证明、实际推理档位和可点击来源状态。')
     .replace('历史或未标注资料不能进入建议买；','联网复核的历史或未标注资料不能进入建议买；本地 OpenCode Go 的独立建议买会保留，但会明确显示未联网和时效扣分；');
   const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
   return headSafeResponse(request,new Response(displayHtml,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));

@@ -18,6 +18,9 @@ from typing import Any, Mapping
 from tools.ai_screening_contract import (
     LOCAL_OPENCODE_MODELS,
     LOCAL_REVIEW_MODEL,
+    NATIVE_WEB_REVIEW_MODE,
+    NATIVE_WEB_REVIEW_MODEL,
+    NATIVE_WEB_RETRIEVAL_MODEL,
     PARTIAL_SEARCH_REVIEW_MODES,
     validate_review,
 )
@@ -85,6 +88,8 @@ def validate_artifact(
         set(models) == {LOCAL_REVIEW_MODEL} or set(models) <= LOCAL_OPENCODE_MODELS
     ):
         raise ValueError("local AI screening seed uses an unexpected model")
+    if review_mode == NATIVE_WEB_REVIEW_MODE and (set(models) != {NATIVE_WEB_REVIEW_MODEL} or set(efforts) != {"xhigh"}):
+        raise ValueError("native AI screening seed must use Muse Spark 1.2 xhigh")
     external_full = review_mode not in PARTIAL_SEARCH_REVIEW_MODES
     mixed_full = review_mode == "opencode_mixed_review"
     if external_full:
@@ -129,6 +134,14 @@ def validate_artifact(
             raise ValueError(f"AI screening review is semantically invalid for {code}: {','.join(errors)}")
         if str(review.get("model") or "") not in models or str(review.get("effort") or "") not in efforts:
             raise ValueError(f"AI screening review metadata is inconsistent for {code}")
+        if review_mode == NATIVE_WEB_REVIEW_MODE and (
+            review.get("retrieval_backend") != "reasonix-native-server-web-search"
+            or review.get("retrieval_model") != NATIVE_WEB_RETRIEVAL_MODEL
+            or review.get("retrieval_effort") != "xhigh"
+            or review.get("native_search_completed") is not True
+            or review.get("official_fetch_completed") is not True
+        ):
+            raise ValueError(f"native AI screening evidence metadata is invalid for {code}")
         review_model_efforts.add((str(review.get("model") or ""), str(review.get("effort") or "")))
         action = str(review.get("ai_action") or "")
         category = str(review.get("final_category") or "")

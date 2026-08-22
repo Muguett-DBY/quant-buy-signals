@@ -21,6 +21,9 @@ LOCAL_OPENCODE_MODELS = frozenset(
         "opencode-go/muse-spark-1.2-contributor",
     }
 )
+NATIVE_WEB_REVIEW_MODE = "opencode_native_web_search_review"
+NATIVE_WEB_REVIEW_MODEL = "opencode-go/muse-spark-1.2-contributor"
+NATIVE_WEB_RETRIEVAL_MODEL = "opencode-go-muse/muse-spark-1.2-contributor"
 PARTIAL_SEARCH_REVIEW_MODES = frozenset({"local_codex_review", "opencode_mixed_review"})
 REVIEW_VERDICTS = frozenset({"confirmed", "caution", "misclassified", "missed_candidate", "needs_review"})
 REVIEW_ACTIONS = frozenset({"keep", "demote", "manual_review"})

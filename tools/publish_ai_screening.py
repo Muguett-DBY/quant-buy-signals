@@ -18,6 +18,9 @@ from typing import Any, Mapping
 from tools.ai_screening_contract import (
     LOCAL_REVIEW_MODEL,
     LOCAL_OPENCODE_MODELS,
+    NATIVE_WEB_REVIEW_MODE,
+    NATIVE_WEB_REVIEW_MODEL,
+    NATIVE_WEB_RETRIEVAL_MODEL,
     PARTIAL_SEARCH_REVIEW_MODES,
     PLACEHOLDER_REVIEW_MODEL,
     REVIEW_SCHEMA_VERSION,
@@ -176,6 +179,11 @@ def _public_review(review: Mapping[str, Any], *, require_readable_reason: bool =
         "claims": claims[:12],
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),
+        "retrieval_backend": _text(review.get("retrieval_backend"), 96),
+        "retrieval_model": _text(review.get("retrieval_model"), 120),
+        "retrieval_effort": _text(review.get("retrieval_effort"), 32),
+        "native_search_completed": review.get("native_search_completed") is True,
+        "official_fetch_completed": review.get("official_fetch_completed") is True,
         "web_search_performed": web_search_performed,
         "web_search_event_verified": review.get("web_search_event_verified") is True,
         "web_search_claim_urls_verified": review.get("web_search_claim_urls_verified") is True,
@@ -371,6 +379,19 @@ def build_artifact(
         raise ValueError("full-coverage artifact contains placeholder reviews")
     if full_coverage and (not review_models or not review_efforts):
         raise ValueError("full-coverage artifact must declare its review models and efforts")
+    if full_coverage and review_mode == NATIVE_WEB_REVIEW_MODE:
+        if review_models != {NATIVE_WEB_REVIEW_MODEL} or review_efforts != {"xhigh"}:
+            raise ValueError("native full-coverage artifact must use Muse Spark 1.2 xhigh reviews")
+        for record in company_records:
+            review = record["ai_review"]
+            if (
+                review.get("retrieval_backend") != "reasonix-native-server-web-search"
+                or review.get("retrieval_model") != NATIVE_WEB_RETRIEVAL_MODEL
+                or review.get("retrieval_effort") != "xhigh"
+                or review.get("native_search_completed") is not True
+                or review.get("official_fetch_completed") is not True
+            ):
+                raise ValueError(f"native full-coverage evidence metadata is incomplete: {record['security_code']}")
     if (
         full_coverage
         and review_mode == "local_codex_review"
