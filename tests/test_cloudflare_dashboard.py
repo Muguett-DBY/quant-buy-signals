@@ -1958,16 +1958,22 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'if(path==="/ai-screening")return aiScreeningPageResponseSimpleV5(request);' in source
-    assert "接近达标候选硬性排除" in source
-    assert "来源质量会扣分" in source
-    assert "HTTPS 是来源质量加分项，不是硬门槛" in source
-    assert "已联网且含 HTTPS 来源（质量加分）" in source
-    assert "已联网但找到来源（非 HTTPS）" in source
-    assert "只要 AI 复核认为值得关注，也会进入三类结论" in source
-    assert "AI独立建议·接近达标" in source
+    assert 'if(path==="/ai-screening")return aiScreeningPageResponse(request);' in source
+    assert source.count("function aiScreeningPageResponse(request)") == 1
+    assert "aiScreeningPageResponseSimple" not in source
+    assert "aiScreeningPageResponseV2" not in source
+    assert "legacyAiScreeningPageResponse" not in source
+    assert "MutationObserver" not in source
+    assert "实际复核模型与推理档位" in source
+    assert "搜索事件已核验 · 保留引用已绑定搜索结果" in source
+    assert "仅模型声明已搜索 · 无运行事件证明" in source
+    assert "已移除未绑定引用" in source
+    assert "AI独立建议 · 接近达标" in source
+    assert "Ox Alpha Free" in source
+    assert "复核模型 " in source
+    assert "推理档位 " in source
     assert "Array.isArray(packet.type_keys)" in source
-    assert "packet.type_keys.join(' / ')" in source
+    assert "types.join(' / ')" in source
     assert "MAX_AI_SCREENING_BYTES=8*1024*1024" in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
@@ -1989,13 +1995,37 @@ const artifact = {
   ai_is_advisory: true,
       auto_buy_promotion: false,
       full_coverage_final_recommendation: true,
-  snapshot_generation: generation.generation_id,
+      review_mode: "local_codex_review",
+      review_models: ["opencode-go/ox-alpha-free"],
+      review_efforts: ["max"],
+      snapshot_generation: generation.generation_id,
       market_as_of: "2026-08-13",
+      candidate_total: 1,
+      candidate_identity_sha256: "a".repeat(64),
+      candidate_universe_identity_sha256: "a".repeat(64),
+      type_pair_unique_company_count: 1,
+      candidate_offset: 0,
+      type_pair_candidate_total: 1,
+      type_pair_expected_total: 1,
+      type_pair_reviewed_count: 1,
+      type_pair_unreviewed_count: 0,
+      type_pair_web_search_attempted_count: 0,
+      type_pair_web_search_completed_count: 0,
+      type_pair_web_search_event_verified_count: 0,
+      type_pair_web_search_claim_urls_verified_count: 0,
+      type_pair_web_search_dropped_claim_url_count: 0,
       reviewed_count: 1,
       attempted_review_count: 1,
       unreviewed_candidate_count: 0,
       attempted_needs_review_count: 0,
+      web_search_attempted_count: 0,
+      reviewed_without_web_search: 1,
+      web_search_completed_count: 0,
+      web_search_event_verified_count: 0,
+      web_search_claim_urls_verified_count: 0,
+      web_search_dropped_claim_url_count: 0,
       ai_action_counts: { priority_buy: 0, watchlist: 1, avoid: 0, insufficient_evidence: 0 },
+      final_category_counts: { recommend_buy: 0, observe: 1, do_not_recommend: 0 },
       recommend_buy_count: 0,
       do_not_recommend_buy_count: 1,
       priority_buy_count: 0,
@@ -2007,8 +2037,10 @@ const artifact = {
     ai_rank: 1,
     security_code: "600339",
     type_key: "type1",
+    type_keys: ["type1"],
+    type_pair_count: 1,
     deterministic: { status: "triggered", score: 7.8 },
-            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_recommendation: "do_not_recommend_buy", recommendation_label: "不推荐现在买入", confidence: "medium", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/deepseek-v4-flash", freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
+            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_category: "observe", final_recommendation: "do_not_recommend_buy", recommendation_label: "观察·需更新资料", ai_independent: false, confidence: "medium", summary: "当前资料较旧，列入观察并等待更新。", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/ox-alpha-free", effort: "max", web_search_performed: false, web_search_event_verified: false, web_search_claim_urls_verified: false, web_search_verified: false, web_search_query_count: 0, web_search_verified_claim_url_count: 0, web_search_dropped_claim_url_count: 0, freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));
@@ -2022,10 +2054,142 @@ const env = {
 };
 let response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env);
 assert.equal(response.status, 200);
-let payload = await response.json();
-assert.equal(payload.snapshot_generation, generation.generation_id);
-assert.equal(payload.ai_is_advisory, true);
-response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening?bad=1"), env);
+    let payload = await response.json();
+    assert.equal(payload.snapshot_generation, generation.generation_id);
+    assert.equal(payload.ai_is_advisory, true);
+    assert.deepEqual(payload.review_models, ["opencode-go/ox-alpha-free"]);
+    assert.deepEqual(payload.review_efforts, ["max"]);
+    const statusForArtifact = async value => {
+      const valueBytes = new TextEncoder().encode(JSON.stringify(value));
+      objects.set("ai-screening/0123456789abcdef.json", {
+        size: valueBytes.byteLength,
+        arrayBuffer: async () => valueBytes.buffer.slice(valueBytes.byteOffset, valueBytes.byteOffset + valueBytes.byteLength),
+      });
+      return (await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env)).status;
+    };
+    const external = structuredClone(artifact);
+    external.review_mode = "opencode_web_review";
+    external.full_coverage_web_search = true;
+    external.reviewed_without_web_search = 0;
+    external.type_pair_web_search_attempted_count = 1;
+    external.type_pair_web_search_event_verified_count = 1;
+    external.type_pair_web_search_claim_urls_verified_count = 1;
+    external.web_search_attempted_count = 1;
+    external.web_search_event_verified_count = 1;
+    external.web_search_claim_urls_verified_count = 1;
+    external.packets[0].ai_review.web_search_performed = true;
+    external.packets[0].ai_review.web_search_event_verified = true;
+    external.packets[0].ai_review.web_search_claim_urls_verified = true;
+    external.packets[0].ai_review.web_search_query_count = 1;
+    assert.equal(await statusForArtifact(external), 200);
+    const droppedClaim = structuredClone(external);
+    droppedClaim.type_pair_web_search_dropped_claim_url_count = 1;
+    droppedClaim.web_search_dropped_claim_url_count = 1;
+    droppedClaim.packets[0].ai_review.web_search_dropped_claim_url_count = 1;
+    assert.equal(await statusForArtifact(droppedClaim), 200);
+    const missingCardEvent = structuredClone(external);
+    missingCardEvent.packets[0].ai_review.web_search_event_verified = false;
+    assert.equal(await statusForArtifact(missingCardEvent), 404);
+    const missingTopEvent = structuredClone(external);
+    missingTopEvent.web_search_event_verified_count = 0;
+    assert.equal(await statusForArtifact(missingTopEvent), 404);
+    const missingClaimBinding = structuredClone(external);
+    missingClaimBinding.packets[0].ai_review.web_search_claim_urls_verified = false;
+    assert.equal(await statusForArtifact(missingClaimBinding), 404);
+    const qualifiedWatch = structuredClone(artifact);
+    qualifiedWatch.packets[0].ai_review.summary = "若估值进一步回落并完成复核，再考虑建议买入。";
+    assert.equal(await statusForArtifact(qualifiedWatch), 200);
+    const contradictoryWatch = structuredClone(artifact);
+    contradictoryWatch.packets[0].ai_review.summary = "当前建议买入并立即建仓。";
+    assert.equal(await statusForArtifact(contradictoryWatch), 404);
+    const priority = structuredClone(artifact);
+    Object.assign(priority.packets[0].ai_review, { verdict: "confirmed", recommended_action: "keep", buy_attractiveness_score: 70, ai_action: "priority_buy", final_category: "recommend_buy", final_recommendation: "recommend_buy", recommendation_label: "建议买·当前复核通过", summary: "当前建议买入，但仍需控制仓位。", freshness_status: "current_or_recent", freshness_years: [2026], freshness_penalty: 0 });
+    priority.ai_action_counts = { priority_buy: 1, watchlist: 0, avoid: 0, insufficient_evidence: 0 };
+    priority.final_category_counts = { recommend_buy: 1, observe: 0, do_not_recommend: 0 };
+    priority.priority_buy_count = 1;
+    priority.recommend_buy_count = 1;
+    priority.watchlist_count = 0;
+    priority.do_not_recommend_buy_count = 0;
+    assert.equal(await statusForArtifact(priority), 200);
+    const priorityWithoutKeep = structuredClone(priority);
+    priorityWithoutKeep.packets[0].ai_review.recommended_action = "manual_review";
+    assert.equal(await statusForArtifact(priorityWithoutKeep), 404);
+    const contradictoryPriority = structuredClone(priority);
+    contradictoryPriority.packets[0].ai_review.summary = "建议继续观望，当前不构成买点。";
+    assert.equal(await statusForArtifact(contradictoryPriority), 404);
+    const misclassified = structuredClone(artifact);
+    Object.assign(misclassified.packets[0].ai_review, { verdict: "misclassified", recommended_action: "demote", buy_attractiveness_score: 45, ai_action: "avoid", final_category: "do_not_recommend", final_recommendation: "do_not_recommend_buy", recommendation_label: "不建议·规则可能误判", summary: "当前不建议买入。" });
+    misclassified.ai_action_counts = { priority_buy: 0, watchlist: 0, avoid: 1, insufficient_evidence: 0 };
+    misclassified.final_category_counts = { recommend_buy: 0, observe: 0, do_not_recommend: 1 };
+    misclassified.watchlist_count = 0;
+    misclassified.avoid_count = 1;
+    assert.equal(await statusForArtifact(misclassified), 200);
+    const invalidMisclassified = structuredClone(misclassified);
+    invalidMisclassified.packets[0].ai_review.recommended_action = "manual_review";
+    assert.equal(await statusForArtifact(invalidMisclassified), 404);
+    const needsReview = structuredClone(artifact);
+    needsReview.packets[0].ai_review.verdict = "needs_review";
+    needsReview.attempted_needs_review_count = 1;
+    assert.equal(await statusForArtifact(needsReview), 200);
+    const needsReviewWithoutManual = structuredClone(needsReview);
+    needsReviewWithoutManual.packets[0].ai_review.recommended_action = "keep";
+    assert.equal(await statusForArtifact(needsReviewWithoutManual), 404);
+    const malformedTypes = structuredClone(artifact);
+    malformedTypes.packets[0].type_keys = ["type2"];
+    assert.equal(await statusForArtifact(malformedTypes), 404);
+    const mismatchedPairCount = structuredClone(artifact);
+    mismatchedPairCount.packets[0].type_pair_count = 2;
+    assert.equal(await statusForArtifact(mismatchedPairCount), 404);
+    const forgedPairTotal = structuredClone(artifact);
+    forgedPairTotal.type_pair_candidate_total = 2;
+    forgedPairTotal.type_pair_expected_total = 2;
+    forgedPairTotal.type_pair_reviewed_count = 2;
+    assert.equal(await statusForArtifact(forgedPairTotal), 404);
+    const twoCardArtifact = (secondCode, secondRank) => {
+      const value = structuredClone(artifact);
+      const second = structuredClone(value.packets[0]);
+      second.security_code = secondCode;
+      second.type_key = "type2";
+      second.type_keys = ["type2"];
+      second.ai_rank = secondRank;
+      value.packets.push(second);
+      value.candidate_total = 2;
+      value.reviewed_count = 2;
+      value.attempted_review_count = 2;
+      value.type_pair_candidate_total = 2;
+      value.type_pair_expected_total = 2;
+      value.type_pair_reviewed_count = 2;
+      value.ai_action_counts.watchlist = 2;
+      value.do_not_recommend_buy_count = 2;
+      value.watchlist_count = 2;
+      return value;
+    };
+    assert.equal(await statusForArtifact(twoCardArtifact("600339", 2)), 404);
+    assert.equal(await statusForArtifact(twoCardArtifact("600340", 1)), 404);
+    const missingIdentity = structuredClone(artifact);
+    delete missingIdentity.candidate_identity_sha256;
+    assert.equal(await statusForArtifact(missingIdentity), 404);
+    const mismatchedUniverse = structuredClone(artifact);
+    mismatchedUniverse.candidate_universe_identity_sha256 = "b".repeat(64);
+    assert.equal(await statusForArtifact(mismatchedUniverse), 404);
+    delete artifact.review_models;
+    const missingModelBytes = new TextEncoder().encode(JSON.stringify(artifact));
+    objects.set("ai-screening/0123456789abcdef.json", {
+      size: missingModelBytes.byteLength,
+      arrayBuffer: async () => missingModelBytes.buffer.slice(missingModelBytes.byteOffset, missingModelBytes.byteOffset + missingModelBytes.byteLength),
+    });
+    response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env);
+    assert.equal(response.status, 404);
+    artifact.review_models = ["opencode-go/ox-alpha-free"];
+    artifact.packets[0].ai_review.buy_attractiveness_score = 100;
+    const invalidBytes = new TextEncoder().encode(JSON.stringify(artifact));
+    objects.set("ai-screening/0123456789abcdef.json", {
+      size: invalidBytes.byteLength,
+      arrayBuffer: async () => invalidBytes.buffer.slice(invalidBytes.byteOffset, invalidBytes.byteOffset + invalidBytes.byteLength),
+    });
+    response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env);
+    assert.equal(response.status, 404);
+    response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening?bad=1"), env);
 assert.equal(response.status, 400);
 response = await worker.fetch(new Request("https://dashboard.test/ai-screening"), env);
 assert.equal(response.status, 200);
@@ -2036,8 +2200,9 @@ assert.ok(html.includes("AI筛查"));
 assert.ok(html.includes("建议买"));
 assert.ok(html.includes("观察"));
 assert.ok(html.includes("不建议"));
-assert.ok(html.includes("已联网但找到来源（非 HTTPS）"));
-assert.ok(html.includes("已联网且含 HTTPS 来源（质量加分）"));
+assert.ok(html.includes("真实搜索事件"));
+assert.ok(html.includes("保留引用已绑定搜索结果"));
+assert.ok(html.includes("已移除未绑定引用"));
 assert.ok(html.includes("资料时效"));
 assert.ok(!html.includes("待核验（未形成买入结论）"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));

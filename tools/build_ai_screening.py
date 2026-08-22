@@ -14,7 +14,43 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, select_candidates, validate_review
+from tools.ai_screening_contract import (
+    REVIEW_SCHEMA_VERSION,
+    candidate_identity_sha256,
+    select_candidates,
+    validate_review,
+)
+
+
+_PATCH7_RULE_FILE = "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
+_TYPE_RULE_FILES = {
+    "type1": ("第25模板.md",),
+    "type2": ("第17模板.md",),
+    "type3": ("第15模板.md",),
+    "type4": ("第10模板.md",),
+    "type5": ("第6模板.md", "第9模板.md"),
+    "type6": ("第19模板.md",),
+    "type7": (
+        "补丁6· 公司三属性分类与三维度量化打分机制.md",
+        "第1模板.md",
+        "第5模板.md",
+        "补丁5.md",
+    ),
+}
+_PATCH7_SITUATION_MARKERS = {
+    "type1": "情况一｜第25模板",
+    "type2": "情况二｜第17模板",
+    "type3": "情况三｜第15模板",
+    "type4": "情况四｜第10模板",
+    "type5": "情况五｜第6、第9模板",
+    "type6": "情况六｜第19模板",
+    "type7": "\n情况七\n",
+}
+_PATCH7_GUIDE_MARKER = "\n综合运用指南\n"
+_PATCH7_TYPE5_APPENDIX_MARKER = "补丁7 方法论附录｜强周期产业底部估值特例与五维度操作清单。"
+_PATCH7_SELL_GATE_MARKER = "附录：卖出闸门协议（四硬一软）"
+_MAX_RULE_CHARS = 12_000
+_FULL_COVERAGE_REVIEW_MODES = frozenset({"local_codex_review", "opencode_web_review", "opencode_mixed_review"})
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -30,6 +66,66 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _line_number(text: str, offset: int) -> str:
+    return str(text.count("\n", 0, offset) + 1)
+
+
+def _patch7_chunks(path: Path, raw: bytes, text: str) -> list[dict[str, str]]:
+    """Split Patch 7 by its semantic situation markers, not Markdown headings.
+
+    The authoritative Patch 7 document has one Markdown heading for more than
+    two thousand lines.  Treating that as one chunk and truncating its prefix
+    hides every detailed situation rule from the model.  These stable section
+    labels are part of the source document's own contract.
+    """
+
+    normalised = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    def marker_offset(marker: str) -> int:
+        offset = normalised.find(marker)
+        if offset < 0:
+            raise ValueError(f"Patch 7 is missing required section marker: {marker.strip()}")
+        return offset
+
+    positions = {type_key: marker_offset(marker) for type_key, marker in _PATCH7_SITUATION_MARKERS.items()}
+    guide = marker_offset(_PATCH7_GUIDE_MARKER)
+    appendix = marker_offset(_PATCH7_TYPE5_APPENDIX_MARKER)
+    sell_gate = marker_offset(_PATCH7_SELL_GATE_MARKER)
+    ordered = [*(positions[type_key] for type_key in _TYPE_RULE_FILES), guide, appendix, sell_gate]
+    if ordered != sorted(ordered) or len(set(ordered)) != len(ordered):
+        raise ValueError("Patch 7 situation sections are missing or out of order")
+
+    digest = _sha256_bytes(raw)
+
+    def chunk(start: int, end: int, heading: str, scope: str) -> dict[str, str]:
+        return {
+            "source_id": path.name,
+            "source_sha256": digest,
+            "heading": heading,
+            "line_start": _line_number(normalised, start),
+            "scope": scope,
+            "text": normalised[start:end].strip(),
+        }
+
+    chunks = [
+        chunk(0, positions["type1"], "补丁7共同前提与总闸门", "common"),
+        chunk(guide, appendix, "补丁7综合运用指南", "common"),
+    ]
+    type_keys = tuple(_TYPE_RULE_FILES)
+    for index, type_key in enumerate(type_keys):
+        end = positions[type_keys[index + 1]] if index + 1 < len(type_keys) else guide
+        chunks.append(
+            chunk(
+                positions[type_key],
+                end,
+                _PATCH7_SITUATION_MARKERS[type_key].strip(),
+                type_key,
+            )
+        )
+    chunks.append(chunk(appendix, sell_gate, "补丁7强周期方法论附录", "type5"))
+    return chunks
+
+
 def _rule_chunks(root: Path) -> list[dict[str, str]]:
     if not root.exists() or not root.is_dir():
         raise ValueError(f"rules root does not exist or is not a directory: {root}")
@@ -37,6 +133,9 @@ def _rule_chunks(root: Path) -> list[dict[str, str]]:
     for path in sorted(root.rglob("*.md")):
         raw = path.read_bytes()
         text = raw.decode("utf-8", errors="strict")
+        if path.name == _PATCH7_RULE_FILE:
+            chunks.extend(_patch7_chunks(path, raw, text))
+            continue
         current = ""
         buf: list[str] = []
         start = 1
@@ -75,16 +174,30 @@ def _rule_chunks(root: Path) -> list[dict[str, str]]:
 
 
 def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[str, str]]:
-    terms = {
-        type_key,
-        "\u603b\u95f8\u95e8",
-        "\u4e70\u5165",
-        "\u8bc1\u636e",
-        "\u5426\u51b3",
-    }
-    selected = [chunk for chunk in chunks if any(term in chunk["text"] or term in chunk["heading"] for term in terms)]
+    if type_key not in _TYPE_RULE_FILES:
+        raise ValueError(f"unsupported AI screening type: {type_key}")
+    has_authoritative_patch7 = any(chunk["source_id"] == _PATCH7_RULE_FILE for chunk in chunks)
+    if has_authoritative_patch7:
+        required_files = set(_TYPE_RULE_FILES[type_key])
+        selected = [
+            chunk
+            for chunk in chunks
+            if chunk.get("scope") in {"common", type_key} or chunk["source_id"] in required_files
+        ]
+        present_files = {chunk["source_id"] for chunk in selected}
+        missing_files = sorted(required_files - present_files)
+        if missing_files:
+            raise ValueError(f"rules root is missing authoritative {type_key} sources: {missing_files}")
+    else:
+        # Unit fixtures and deliberately small custom rule roots predate the
+        # authoritative filename contract.  Prefer an exact type marker, then
+        # retain the complete small rule set rather than guessing via generic
+        # words such as "买入" or "证据".
+        selected = [chunk for chunk in chunks if type_key in chunk["text"] or type_key in chunk["heading"]]
+        if not selected:
+            selected = chunks
     selected.sort(key=lambda chunk: (chunk["source_id"], int(chunk["line_start"])))
-    return [{**chunk, "text": chunk["text"][:1400]} for chunk in selected[:16]]
+    return [{**chunk, "text": chunk["text"][:_MAX_RULE_CHARS]} for chunk in selected]
 
 
 def _compact_company(company: Mapping[str, Any], selected_type: str) -> dict[str, Any]:
@@ -141,6 +254,7 @@ def build_input(
     snapshot_generation = generation or snapshot.get("generation") or snapshot.get("generation_id")
     snapshot_market_as_of = market_as_of or snapshot.get("market_as_of")
     candidates = select_candidates(snapshot)
+    candidate_universe_sha256 = candidate_identity_sha256(candidates)
     if offset < 0:
         raise ValueError("offset must be non-negative")
     selected = candidates[offset:]
@@ -150,18 +264,28 @@ def build_input(
         selected = selected[:limit]
     chunks = _rule_chunks(rules_root)
     packets: list[dict[str, Any]] = []
+    selected_rule_hashes: dict[str, str] = {}
     for candidate in selected:
         company = candidate.pop("company", {})
+        rule_context = _relevant_rules(chunks, candidate["type_key"])
+        for rule in rule_context:
+            source_id = rule["source_id"]
+            digest = rule["source_sha256"]
+            existing = selected_rule_hashes.setdefault(source_id, digest)
+            if existing != digest:
+                raise ValueError(f"rule source has conflicting hashes: {source_id}")
         packets.append(
             {
                 **candidate,
                 "generation": snapshot_generation,
                 "market_as_of": snapshot_market_as_of,
-                "rule_context": _relevant_rules(chunks, candidate["type_key"]),
+                "rule_context": rule_context,
                 "company_context": _compact_company(company, candidate["type_key"]),
                 "ai_review": None,
             }
         )
+    queue_full_coverage = offset == 0 and len(packets) == len(candidates)
+    candidate_identity_digest = candidate_identity_sha256(packets)
     payload = {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "snapshot_generation": snapshot_generation,
@@ -169,14 +293,16 @@ def build_input(
         "methodology_version": snapshot.get("methodology_version"),
         "index_contract": snapshot.get("index_contract"),
         "rules_root": str(rules_root),
-        "rule_file_count": len({chunk["source_id"] for chunk in chunks}),
+        "rule_file_count": len(selected_rule_hashes),
+        "rule_source_sha256": dict(sorted(selected_rule_hashes.items())),
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
         "candidate_offset": offset,
+        "candidate_identity_sha256": candidate_identity_digest,
+        "candidate_universe_identity_sha256": candidate_universe_sha256,
+        "queue_full_coverage": queue_full_coverage,
         "review_mode": review_mode,
-        "full_coverage_final_recommendation": (
-            review_mode == "local_codex_review" and offset == 0 and len(packets) == len(candidates)
-        ),
+        "full_coverage_final_recommendation": (review_mode in _FULL_COVERAGE_REVIEW_MODES and queue_full_coverage),
         "packets": packets,
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -195,9 +321,13 @@ def build_input(
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
         "candidate_offset": offset,
+        "candidate_identity_sha256": payload["candidate_identity_sha256"],
+        "candidate_universe_identity_sha256": payload["candidate_universe_identity_sha256"],
+        "queue_full_coverage": payload["queue_full_coverage"],
         "review_mode": payload["review_mode"],
         "full_coverage_final_recommendation": payload["full_coverage_final_recommendation"],
         "rule_file_count": payload["rule_file_count"],
+        "rule_source_sha256": payload["rule_source_sha256"],
         "input_sha256": _sha256_bytes(input_path.read_bytes()),
     }
     (out_dir / "ai-screening-manifest.json").write_text(

@@ -242,16 +242,29 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
     }
     assert "r2 object put" in upload_ai["run"]
+    assert upload_ai["id"] == "ai_overlay"
     assert "quant-market-data/ai-screening/${generation}.json" in upload_ai["run"]
     assert "AI screening seed targets" in upload_ai["run"]
+    assert "seed_changed=${seed_changed}" in upload_ai["run"]
+    assert "Changed AI screening seed targets" in upload_ai["run"]
+    assert 'echo "uploaded=true"' in upload_ai["run"]
+    assert "steps.ai_overlay.outputs.seed_changed" in verify["run"]
+    assert "steps.ai_overlay.outputs.uploaded" in verify["run"]
     assert "ai-screening-generation" in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
     assert ".integrity_checked == true" in verify["run"]
     assert ".type_pair_reviewed_count == .type_pair_candidate_total" in verify["run"]
+    assert ".type_pair_candidate_total == .type_pair_expected_total" in verify["run"]
+    assert ".candidate_offset == 0" in verify["run"]
     assert ".type_pair_unreviewed_count == 0" in verify["run"]
     assert '.review_mode == "local_codex_review"' in verify["run"]
+    assert '.review_mode == "opencode_mixed_review"' in verify["run"]
     assert ".reviewed_without_web_search == (.candidate_total - .web_search_attempted_count)" in verify["run"]
     assert ".web_search_attempted_count == .candidate_total" in verify["run"]
+    assert ".web_search_event_verified_count == .candidate_total" in verify["run"]
+    assert ".type_pair_web_search_attempted_count == .type_pair_candidate_total" in verify["run"]
+    assert ".type_pair_web_search_event_verified_count == .type_pair_candidate_total" in verify["run"]
+    assert ".type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total" in verify["run"]
 
 
 def test_cloudflare_deploy_bash_blocks_parse_with_bash():

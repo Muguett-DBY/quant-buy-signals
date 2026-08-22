@@ -16,7 +16,25 @@ from pathlib import Path
 from typing import Any, Mapping
 import re
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, validate_review
+from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, candidate_identity_sha256, validate_review
+
+
+def _action_safe_summary(summary: str, action: str) -> str:
+    """Prevent a downgraded card from retaining a current buy sentence."""
+    if action == "priority_buy":
+        return summary
+    for old, new in (
+        ("当前建议买入", "当前不建议买入"),
+        ("建议立即买入", "暂不建议立即买入"),
+        ("建议买入", "不建议买入"),
+        ("建议买", "不建议买"),
+        ("值得买入", "暂不建议买入"),
+        ("值得买", "暂不建议买"),
+        ("可以买", "暂不构成买点"),
+        ("可买", "暂不可买"),
+    ):
+        summary = summary.replace(old, new)
+    return summary
 
 
 def _number(value: Any) -> float | None:
@@ -190,7 +208,7 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str
         # and provenance lower confidence in small, visible increments; they
         # do not turn a near-threshold AI buy opinion into an automatic avoid.
         score = model_score - source_penalty - status_penalty - float(freshness["penalty"])
-        if str(source.get("ai_action") or "") == "avoid" or verdict == "misclassified":
+        if str(source.get("ai_action") or "") in {"avoid", "insufficient_evidence"} or verdict == "misclassified":
             return round(max(0.0, min(49.0, score)), 1)
         return round(max(0.0, min(100.0, score)), 1)
     risk_flags = [str(value) for value in (source.get("risk_flags") or [])]
@@ -255,6 +273,13 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         # answer: attractive but unverified packets stay on the watchlist,
         # while weak or contradictory packets are marked avoid.
         action = "watchlist" if score >= 50 else "avoid"
+    # The displayed number and conclusion must speak the same language.  The
+    # model's raw score remains the starting point, while the final action owns
+    # the public score band.
+    if action == "watchlist":
+        score = min(score, 69.0)
+    elif action in {"avoid", "insufficient_evidence"}:
+        score = min(score, 49.0)
     confidence = {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
     if _source_quality(source) not in {"verified_https", "source_found"}:
         confidence = "low"
@@ -269,11 +294,15 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         if not source_ref:
             continue
         claims.append({**claim, "source_ref": source_ref})
-    strengths = [
+    claim_strengths = [
         str(claim.get("statement") or "")[:240]
         for claim in claims
         if isinstance(claim, Mapping) and claim.get("support") == "supports"
-    ][:4]
+    ]
+    model_strengths = [
+        str(value)[:240] for value in (source.get("key_strengths") or []) if isinstance(value, str) and value.strip()
+    ]
+    strengths = list(dict.fromkeys([*model_strengths, *claim_strengths]))[:4]
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
@@ -305,6 +334,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     }[source_quality]
     status_note = "确定性规则已触发" if status == "triggered" else f"确定性规则状态为 {status}，按接近达标口径扣分"
     summary = f"AI买入吸引力 {score:.1f} 分（{status_note}；{source_note}；{freshness['note']}）。{summary}"
+    summary = _action_safe_summary(summary, action)
     if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
         risk_flags.insert(0, source_note)
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
@@ -320,14 +350,13 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         if action == "watchlist"
         else "不建议"
     )
+    recommended_action = "keep" if action == "priority_buy" else "demote" if action == "avoid" else "manual_review"
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
         "type_key": str(packet.get("type_key") or ""),
         "verdict": public_verdict,
-        "recommended_action": str(source.get("recommended_action") or "manual_review")
-        if str(source.get("recommended_action") or "manual_review") in {"keep", "demote", "manual_review"}
-        else "manual_review",
+        "recommended_action": recommended_action,
         "buy_attractiveness_score": score,
         "ai_action": action,
         "final_category": _final_category(action),
@@ -339,9 +368,22 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "key_strengths": strengths,
         "risk_flags": risk_flags,
         "claims": claims[:12],
-        "model": str(source.get("model") or "opencode-go/deepseek-v4-flash"),
+        "model": str(source.get("model") or "unknown-external-review"),
         "effort": str(source.get("effort") or "max"),
         "web_search_performed": bool(source.get("web_search_performed") is True),
+        "web_search_event_verified": bool(source.get("web_search_event_verified") is True),
+        "web_search_claim_urls_verified": bool(source.get("web_search_claim_urls_verified") is True),
+        "web_search_queries": [
+            str(value)[:240]
+            for value in (source.get("web_search_queries") or [])
+            if isinstance(value, str) and value.strip()
+        ][:16],
+        "web_search_verified_claim_urls": [
+            str(value)[:800]
+            for value in (source.get("web_search_verified_claim_urls") or [])
+            if isinstance(value, str) and value.strip()
+        ][:16],
+        "web_search_dropped_claim_url_count": int(source.get("web_search_dropped_claim_url_count", 0) or 0),
         "web_search_verified": web_verified,
         "freshness_status": freshness["status"],
         "freshness_years": freshness["years"],
@@ -355,6 +397,31 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     packets = source.get("packets")
     if not isinstance(packets, list):
         raise ValueError("source packets are missing")
+    candidate_offset = int(source.get("candidate_offset", 0) or 0)
+    candidate_count = int(source.get("candidate_count", len(packets)) or 0)
+    candidate_total = int(source.get("candidate_total", len(packets)) or 0)
+    identities = [
+        (str(packet.get("security_code") or ""), str(packet.get("type_key") or ""))
+        for packet in packets
+        if isinstance(packet, Mapping)
+    ]
+    identity_digest = candidate_identity_sha256(packet for packet in packets if isinstance(packet, Mapping))
+    declared_identity_digest = str(source.get("candidate_identity_sha256") or "")
+    universe_identity_digest = str(source.get("candidate_universe_identity_sha256") or "")
+    if declared_identity_digest and declared_identity_digest != identity_digest:
+        raise ValueError("candidate identity hash does not match the reviewed packet queue")
+    requested_full_coverage = source.get("full_coverage_final_recommendation") is True
+    complete_queue = (
+        candidate_offset == 0
+        and candidate_count == candidate_total == len(packets)
+        and len(identities) == len(packets)
+        and len(set(identities)) == len(identities)
+        and declared_identity_digest == identity_digest == universe_identity_digest
+        and all(isinstance(packet.get("ai_review"), Mapping) for packet in packets if isinstance(packet, Mapping))
+    )
+    if requested_full_coverage and not complete_queue:
+        raise ValueError("full-coverage calibration requires the complete unique reviewed candidate queue")
+
     output_packets: list[dict[str, Any]] = []
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -366,8 +433,8 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
-        "ranking_source": "opencode-go-web-search-review-calibrated-independent-buy-v7",
-        "full_coverage_final_recommendation": True,
+        "ranking_source": "opencode-web-search-review-calibrated-independent-buy-v8",
+        "full_coverage_final_recommendation": requested_full_coverage and complete_queue,
         "packets": output_packets,
     }
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

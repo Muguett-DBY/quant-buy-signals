@@ -32,13 +32,20 @@ The queue includes deterministic triggers, Type7 boundary rows, conditional or
 pending rows that can still cross the threshold, and the relevant rule excerpts.
 The packet is compact: the selected type is complete, while other types are a
 summary only.  The full queue is local and is not uploaded by this command.
+Patch 7's common buy gate and the matching type section are injected; its sell
+gate is intentionally excluded because this page ranks new buy candidates, not
+post-purchase holding or exit decisions.
 
-## OpenCode Go Plan / MiMo v2.5
+## OpenCode CLI / OpenCode Go 联网模型
 
-The production-friendly local runner uses the OpenCode CLI with the OpenCode Go
-Plan model `opencode-go/mimo-v2.5` and `--variant max`.  Its isolated project
+The production-friendly runner uses the OpenCode CLI with an explicit
+OpenCode Go model.  The current refresh uses `opencode-go/ox-alpha-free`.
+Its isolated project
 config allows only the harness `websearch` tool; shell, file writes, reads and
-other MCP tools are denied.  A bounded pilot can be run as follows:
+other MCP tools are denied, and the unrelated global `context7`, `gh_grep` and
+`playwright` MCP servers are disabled for this isolated run.  `--model` is
+required so a missing argument can never silently fall back to a paid model.
+A bounded pilot can be run as follows:
 
 ```powershell
 python -m tools.run_ai_screening_batch `
@@ -46,8 +53,9 @@ python -m tools.run_ai_screening_batch `
   --out build\ai-screening-pilot\opencode-reviews.jsonl `
   --backend opencode `
   --batch-size 10 `
+  --session-batches 4 `
   --limit 12 `
-  --model opencode-go/mimo-v2.5 `
+  --model opencode-go/ox-alpha-free `
   --effort max `
   --root .
 ```
@@ -64,22 +72,56 @@ in Reasonix configuration and are never written to the packet.
 For the complete queue, use the batch runner instead of starting one model
 session per company. It keeps shared rule fragments in the prompt prefix,
 reviews a bounded group, and writes validated JSONL; a failed group remains
-explicitly pending and can be retried later:
+explicit. In the normal full run, a rejected group is bisected until the bad
+row is isolated; only an irreducible one-row failure remains in the error
+JSONL. `--fail-fast` keeps the stricter one-shot behavior for pilots:
 
 ```powershell
 python -m tools.run_ai_screening_batch `
   --candidates build\ai-screening-full\ai-screening-candidates.jsonl `
   --out build\ai-screening-full\opencode-reviews.jsonl `
   --backend opencode `
-  --batch-size 10 `
-  --model opencode-go/mimo-v2.5 `
+  --batch-size 40 `
+  --session-batches 4 `
+  --model opencode-go/ox-alpha-free `
   --effort max `
   --root .
 ```
 
-`tools.prepare_ai_screening_overlay` merges completed reviews with every
-selected candidate. A missing review is published as `needs_review`, never
-dropped and never upgraded to `confirmed` by a fallback.
+For a weekend refresh, `--allow-unsearched` is an explicit local-only mode:
+the model may provide an opinion from the packet and the injected knowledge
+base, but the runner clears claims and records the row as unsearched. The
+public page labels this mixed result; it never presents it as web evidence.
+Verified OpenCode-search rows take precedence over local rows when assembling
+the final queue. Use the identity-checked assembler when several resumable
+shards are available:
+
+```powershell
+python -m tools.assemble_ai_screening_reviews `
+  --candidates build\ai-screening-full\ai-screening-candidates.jsonl `
+  --reviews build\ai-screening-full\search-0.jsonl build\ai-screening-full\local-0.jsonl `
+  --out build\ai-screening-full\opencode-reviews.jsonl
+```
+
+The assembler requires every candidate pair exactly once. A missing review is
+a hard release error, never silently dropped or upgraded to `confirmed` by a
+fallback.
+
+The runner does not trust `web_search_performed` in the model JSON.  For every
+company it requires a completed OpenCode `websearch` event whose query contains
+the code or company name.  Every cited URL must also occur in the returned tool
+results.  The resulting review persists the matched query and URL proof for the
+release audit.
+
+When the full queue is split across parallel runners, merge the shards through
+the identity-checked merger rather than concatenating files manually:
+
+```powershell
+python -m tools.merge_ai_screening_reviews `
+  --candidates build\ai-screening-full\ai-screening-candidates.jsonl `
+  --reviews build\ai-screening-full\part-0.jsonl build\ai-screening-full\part-1.jsonl `
+  --out build\ai-screening-full\opencode-reviews.jsonl
+```
 
 ## Merge and preview
 
@@ -87,12 +129,21 @@ dropped and never upgraded to `confirmed` by a fallback.
 python -m tools.build_ai_screening `
   --snapshot <validated-snapshot.json.gz> `
   --rules-root 'E:\模板汇总MD' `
-  --out build\ai-screening `
-  --review-jsonl build\ai-screening\opencode-reviews.jsonl
+  --out build\ai-screening-full `
+  --review-mode opencode_mixed_review `
+  --review-jsonl build\ai-screening-full\opencode-reviews.jsonl
+
+python -m tools.calibrate_ai_screening_ranking `
+  --source build\ai-screening-full\ai-screening.json `
+  --output build\ai-screening-full\ai-screening-calibrated.json
+
+python -m tools.audit_ai_screening_sources `
+  --merged build\ai-screening-full\ai-screening-calibrated.json `
+  --output build\ai-screening-full\source-audit.json
 
 python -m tools.render_ai_screening_preview `
-  build\ai-screening\ai-screening.json `
-  build\ai-screening\ai-screening.html
+  build\ai-screening-full\ai-screening-calibrated.json `
+  build\ai-screening-full\ai-screening.html
 ```
 
 The static preview is intentionally local.  The Cloudflare route reads only a
@@ -108,12 +159,15 @@ strict public contract:
 
 ```powershell
 python -m tools.publish_ai_screening `
-  --merged build\ai-screening\ai-screening.json `
-  --output build\ai-screening\ai-screening-public.json `
+  --merged build\ai-screening-full\ai-screening-calibrated.json `
+  --output build\ai-screening-full\ai-screening-public.json `
   --expected-generation <generation-id> `
   --expected-market-as-of <YYYY-MM-DD> `
-  --source-audit build\ai-screening\source-audit.json
+  --source-audit build\ai-screening-full\source-audit.json
 ```
+
+Pass `--source-audit <json>` only after the separate URL audit has really run;
+the OpenCode search flag alone is not a reachability or issuer-identity audit.
 
 The resulting overlay keeps deterministic status/bounds and AI claims only;
 `ai_is_advisory=true` and `auto_buy_promotion=false` are required.  Upload it

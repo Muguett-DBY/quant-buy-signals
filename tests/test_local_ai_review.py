@@ -38,7 +38,7 @@ def test_local_watchlist_score_stays_below_buy_band() -> None:
 def test_local_contract_rejects_high_score_avoid() -> None:
     review = _review(_packet())
     review["buy_attractiveness_score"] = 100
-    assert "local_negative_score_band" in validate_review(review)
+    assert "negative_score_band" in validate_review(review)
 
 
 def test_priority_override_summary_matches_buy_category() -> None:

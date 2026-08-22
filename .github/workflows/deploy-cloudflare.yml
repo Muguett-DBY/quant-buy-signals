@@ -188,6 +188,7 @@ jobs:
           grep -E "Deployment complete" "$RUNNER_TEMP/pages-deploy.log"
 
       - name: Upload the optional generation-bound AI screening overlay
+        id: ai_overlay
         if: steps.stale.outputs.skip != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -196,6 +197,12 @@ jobs:
         run: |
           set -euo pipefail
           seed="cloudflare/quant-dashboard/ai_screening_seed.json"
+          seed_changed=false
+          resolved_sha="${{ steps.resolve.outputs.sha }}"
+          if git rev-parse --verify "${resolved_sha}^" >/dev/null 2>&1 && ! git diff --quiet "${resolved_sha}^" "${resolved_sha}" -- "${seed}"; then
+            seed_changed=true
+          fi
+          echo "seed_changed=${seed_changed}" >> "${GITHUB_OUTPUT}"
           if [[ ! -f "${seed}" ]]; then
             echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
             exit 0
@@ -208,18 +215,32 @@ jobs:
           live_meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
           live_generation="$(jq -er '.generation_id' <<< "${live_meta}")"
           if [[ "${live_generation}" != "${generation}" ]]; then
-            echo "AI screening seed targets ${generation}, while the published site serves ${live_generation}; skipping stale overlay."
+            if [[ "${seed_changed}" == "true" ]]; then
+              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}." >&2
+              exit 1
+            fi
+            echo "Unchanged AI screening seed targets ${generation}, while the published site serves ${live_generation}; skipping stale overlay."
             exit 0
           fi
+          market_as_of="$(jq -er '.market_as_of' <<< "${live_meta}")"
+          python tools/validate_ai_screening_public.py \
+            --artifact "${seed}" \
+            --expected-generation "${generation}" \
+            --expected-market-as-of "${market_as_of}"
           npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "quant-market-data/ai-screening/${generation}.json" \
             --file "${seed}" --remote --content-type application/json
           printf '%s' "${generation}" > "$RUNNER_TEMP/ai-screening-generation"
+          echo "uploaded=true" >> "${GITHUB_OUTPUT}"
 
       - name: Verify the deployed site
         if: steps.stale.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${{ steps.ai_overlay.outputs.seed_changed }}" == "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
+            echo "The changed AI screening seed was not uploaded." >&2
+            exit 1
+          fi
           # pages_worker.js also carries the template placeholder constants
           # (__QUANT_METHODOLOGY_VERSION__/__QUANT_METHODOLOGY_LABEL__) used by
           # the release pipeline; -m1 pins the real constants at the top of the
@@ -264,18 +285,25 @@ jobs:
               and .ai_is_advisory == true
               and .auto_buy_promotion == false
               and .full_coverage_final_recommendation == true
+              and .candidate_offset == 0
               and .reviewed_count == .candidate_total
               and .type_pair_reviewed_count == .type_pair_candidate_total
+              and .type_pair_candidate_total == .type_pair_expected_total
               and .type_pair_unreviewed_count == 0
               and .insufficient_evidence_count == 0
               and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
               and (
-                if .review_mode == "local_codex_review" then
+                if (.review_mode == "local_codex_review" or .review_mode == "opencode_mixed_review") then
                   (.web_search_attempted_count >= 0
                    and .web_search_attempted_count <= .candidate_total
                    and .reviewed_without_web_search == (.candidate_total - .web_search_attempted_count))
                 else
-                  (.web_search_attempted_count == .candidate_total and .reviewed_without_web_search == 0)
+                  (.web_search_attempted_count == .candidate_total
+                   and .web_search_event_verified_count == .candidate_total
+                   and .reviewed_without_web_search == 0
+                   and .type_pair_web_search_attempted_count == .type_pair_candidate_total
+                   and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
+                   and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total)
                 end
               )
             ' <<< "${ai_api}" >/dev/null; then
