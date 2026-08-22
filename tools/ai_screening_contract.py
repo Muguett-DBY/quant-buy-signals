@@ -465,6 +465,16 @@ def validate_review(review: Mapping[str, Any], *, require_readable_reason: bool 
         values = review.get(field, [])
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             errors.append(field)
+    if "quantitative_facts" in review:
+        values = review.get("quantitative_facts")
+        if (
+            not isinstance(values, list)
+            or len(values) < 1
+            or len(values) > 8
+            or any(not isinstance(value, str) or not value.strip() or len(value) > 240 for value in values)
+            or len(set(values)) != len(values)
+        ):
+            errors.append("quantitative_facts")
     claims = review.get("claims", [])
     if not isinstance(claims, list):
         errors.append("claims")

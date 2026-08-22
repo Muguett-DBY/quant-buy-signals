@@ -12,6 +12,7 @@
 2. 这是一轮大批量排序。packet 的 `market_as_of` 是本次快照交易日；不要调用 shell、MCP、skill、security-review、GitHub 工具或任何写入工具。对每家公司都必须调用当前会话提供的只读 web_search，至少搜索公司代码/名称 + **截至 market_as_of 可获得的最新年报、季报或公告**，并优先查 CNINFO、上交所、深交所、港交所、公司投资者关系网站和正式年报/季报/公告。先找 2025/2026 期间实际报告；若只有 2024 或更早资料，必须明确写“当前资料只覆盖 2024 或更早，不能代表当前状态”，`confidence=low`，不得给 `priority_buy`。网页发布时间不能替代报告期；URL 中的股票代码也不是数据年份。搜索成功但没有可靠来源时，仍将 `web_search_performed` 设为 `true`，并明确写“未找到可核验来源”；程序会把这种公司归入“观察”，不会伪装成建议买。
 3. 对每个候选同时写“为什么值得买”和“为什么可能不该买”。不能只因为确定性分数高就给高分；也不能只因为一个 PE/单季现金流就否定 DCF。要说明口径差异。
 4. 即使没有找到可靠外部来源，也必须返回该 packet，并将 `confidence` 设为 `low`、`web_search_performed=true`，在 risk_flags 中写明“已搜索但未找到可核验来源”。不要返回“没有结果”或省略 packet。
+5. 建议买不能只由“已披露半年报”“龙头”“现金流稳健”这类无数值判断组成。每条 `priority_buy` 必须给出至少 2 个具体量化事实，至少覆盖估值、现金流、盈利、行业供需中的两个维度；每个事实都要带数值、单位和报告期或交易日。若当前联网资料没有可靠数值，必须降为观察或不建议，并在风险中明确缺什么。
 
 ## 分数口径
 
@@ -50,6 +51,7 @@
   "final_category": "recommend_buy|observe|do_not_recommend",
   "confidence": "high|medium|low",
   "summary": "用中文说明为什么排在这个分数，以及最关键的买入逻辑和限制",
+  "quantitative_facts": ["2025年度经营现金流 12.3 亿元；交易日 PE 8.4 倍"],
   "key_strengths": ["最重要的优势", "第二个优势"],
   "risk_flags": ["最重要的风险", "需要继续核验的事项"],
   "claims": [
@@ -67,6 +69,6 @@
 
 `model` 和 `effort` 由本地 runner 按实际命令覆盖；模型不得在正文中声称自己是某个固定供应商。
 
-每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；优先使用联网工具实际返回的 HTTPS 正式公告、年报、交易所页面或公司投资者关系页面，但 HTTPS 只是来源质量加分项，不是 AI 建议买入的硬门槛。返回的官方 HTTP 页面可以引用并降低 `confidence`；没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明；不要把搜索摘要当成正式证据，也不要编造 URL。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。最终页面只显示三类：`recommend_buy=建议买`、`observe=观察`、`do_not_recommend=不建议`；`insufficient_evidence` 只能作为内部原因，发布时归入 `observe`。
+每个 `claims` 的事实陈述都必须有 URL 或 packet 中明确的本地来源标识；优先使用联网工具实际返回的 HTTPS 正式公告、年报、交易所页面或公司投资者关系页面，但 HTTPS 只是来源质量加分项，不是 AI 建议买入的硬门槛。返回的官方 HTTP 页面可以引用并降低 `confidence`；没有可靠来源时可以为空，但必须降低 `confidence` 并在风险中说明；不要把搜索摘要当成正式证据，也不要编造 URL。`quantitative_facts` 必须是 1—8 条带数字和单位的事实；优先买入至少两条，不能用“报告已披露”替代数字。`summary`、`key_strengths` 和 `risk_flags` 必须是可直接给投资者阅读的中文，不要只写“证据不足”。最终页面只显示三类：`recommend_buy=建议买`、`observe=观察`、`do_not_recommend=不建议`；`insufficient_evidence` 只能作为内部原因，发布时归入 `observe`。
 
 确定性筛选仍然是基础事实层，AI 在候选池内独立排序并给出第二意见；AI 可以推荐接近达标公司，但不能修改七类规则、买入区、总闸门、卖出域或公司原始数据。页面必须同时展示确定性状态与 AI 独立建议，避免把两者混成一个结论。

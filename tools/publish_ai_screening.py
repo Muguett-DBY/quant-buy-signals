@@ -163,6 +163,7 @@ def _public_review(review: Mapping[str, Any], *, require_readable_reason: bool =
     summary = normalise_decision_text(_text(review.get("summary"), 1200))
     if action == "watchlist":
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
+    quantitative_facts = [_text(item, 240) for item in review.get("quantitative_facts", [])[:8]]
     return {
         "verdict": _text(review.get("verdict"), 32),
         "recommended_action": _text(review.get("recommended_action"), 32),
@@ -174,6 +175,7 @@ def _public_review(review: Mapping[str, Any], *, require_readable_reason: bool =
         "ai_independent": bool(review.get("ai_independent", False)),
         "confidence": _text(review.get("confidence"), 16),
         "summary": summary,
+        "quantitative_facts": quantitative_facts,
         "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
         "risk_flags": [_text(item, 240) for item in review.get("risk_flags", [])[:12]],
         "claims": claims[:12],

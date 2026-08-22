@@ -1969,6 +1969,8 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     assert "仅模型声明已搜索 · 无运行事件证明" in source
     assert "已移除未绑定引用" in source
     assert "AI独立建议 · 接近达标" in source
+    assert "量化依据（同代际数据）" in source
+    assert "quantitative_facts" in source
     assert "Ox Alpha Free" in source
     assert "复核模型 " in source
     assert "推理档位 " in source
@@ -2040,7 +2042,7 @@ const artifact = {
     type_keys: ["type1"],
     type_pair_count: 1,
     deterministic: { status: "triggered", score: 7.8 },
-            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_category: "observe", final_recommendation: "do_not_recommend_buy", recommendation_label: "观察·需更新资料", ai_independent: false, confidence: "medium", summary: "当前资料较旧，列入观察并等待更新。", key_strengths: ["规则基础"], risk_flags: [], claims: [], model: "opencode-go/ox-alpha-free", effort: "max", web_search_performed: false, web_search_event_verified: false, web_search_claim_urls_verified: false, web_search_verified: false, web_search_query_count: 0, web_search_verified_claim_url_count: 0, web_search_dropped_claim_url_count: 0, freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
+            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_category: "observe", final_recommendation: "do_not_recommend_buy", recommendation_label: "观察·需更新资料", ai_independent: false, confidence: "medium", summary: "当前资料较旧，列入观察并等待更新。", key_strengths: ["规则基础"], quantitative_facts: ["估值快照：PE 8.4 倍；2025年经营现金流 12.3 亿元"], risk_flags: [], claims: [], model: "opencode-go/ox-alpha-free", effort: "max", web_search_performed: false, web_search_event_verified: false, web_search_claim_urls_verified: false, web_search_verified: false, web_search_query_count: 0, web_search_verified_claim_url_count: 0, web_search_dropped_claim_url_count: 0, freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));

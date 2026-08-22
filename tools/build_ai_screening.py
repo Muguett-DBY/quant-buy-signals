@@ -20,6 +20,7 @@ from tools.ai_screening_contract import (
     select_candidates,
     validate_review,
 )
+from tools.ai_quantitative_facts import quantitative_facts
 
 
 _PATCH7_RULE_FILE = "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
@@ -202,7 +203,9 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
     return [{**chunk, "text": chunk["text"][:_MAX_RULE_CHARS]} for chunk in selected]
 
 
-def _compact_company(company: Mapping[str, Any], selected_type: str) -> dict[str, Any]:
+def _compact_company(
+    company: Mapping[str, Any], selected_type: str, *, market_as_of: str | None = None
+) -> dict[str, Any]:
     """Keep the model packet small without hiding deterministic context."""
     fields = (
         "code",
@@ -238,6 +241,17 @@ def _compact_company(company: Mapping[str, Any], selected_type: str) -> dict[str
                 "veto_state": decision.get("veto_state"),
             }
         compact["other_type_summary"] = other
+    active_types = [
+        selected_type,
+        *[str(value) for value in (company.get("buy_types") or []) if str(value)],
+        *[str(value) for value in (company.get("conditional_types") or []) if str(value)],
+    ]
+    facts: list[str] = []
+    for type_key in dict.fromkeys(active_types):
+        facts.extend(quantitative_facts(company, type_key, market_as_of=market_as_of))
+    facts = list(dict.fromkeys(facts))[:8]
+    if facts:
+        compact["quantitative_facts"] = facts
     return compact
 
 
@@ -282,7 +296,7 @@ def build_input(
                 "generation": snapshot_generation,
                 "market_as_of": snapshot_market_as_of,
                 "rule_context": rule_context,
-                "company_context": _compact_company(company, candidate["type_key"]),
+                "company_context": _compact_company(company, candidate["type_key"], market_as_of=snapshot_market_as_of),
                 "ai_review": None,
             }
         )

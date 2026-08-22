@@ -349,7 +349,21 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     model_strengths = [
         str(value)[:240] for value in (source.get("key_strengths") or []) if isinstance(value, str) and value.strip()
     ]
-    strengths = list(dict.fromkeys([*model_strengths, *claim_strengths]))[:4]
+    raw_quantitative = source.get("quantitative_facts") if isinstance(source.get("quantitative_facts"), list) else []
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    context_quantitative = (
+        context.get("quantitative_facts") if isinstance(context.get("quantitative_facts"), list) else []
+    )
+    quantitative_facts = list(
+        dict.fromkeys(
+            str(value)[:240]
+            for value in [*raw_quantitative, *context_quantitative]
+            if isinstance(value, str) and value.strip()
+        )
+    )[:8]
+    # Put the auditable numbers first.  The model prose remains useful, but
+    # must not hide the figures that justify a public recommendation.
+    strengths = list(dict.fromkeys([*quantitative_facts, *model_strengths, *claim_strengths]))[:8]
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
@@ -413,6 +427,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "confidence": confidence,
         "summary": summary,
         "key_strengths": strengths,
+        **({"quantitative_facts": quantitative_facts} if quantitative_facts else {}),
         "risk_flags": risk_flags,
         "claims": claims[:12],
         "model": str(source.get("model") or "unknown-external-review"),

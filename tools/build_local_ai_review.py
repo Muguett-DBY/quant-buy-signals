@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.ai_screening_contract import LOCAL_REVIEW_MODEL, REVIEW_SCHEMA_VERSION
+from tools.ai_quantitative_facts import has_numeric_fact
 
 
 _WARNING_WORDS = ("负", "下降", "高", "不足", "缺", "不完整", "待", "风险", "否决")
@@ -95,7 +96,9 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
     rule_score = score if score is not None else upper if upper is not None else 0.0
     raw_buy_score = max(0.0, min(100.0, 50.0 + (rule_score - 5.0) * 10.0))
     score_value = _buy_score_for_action(raw_buy_score, action)
-    strengths = [f"{type_key}确定性状态为{status}"]
+    context_facts = context.get("quantitative_facts") if isinstance(context.get("quantitative_facts"), list) else []
+    quantitative = [str(value).strip()[:240] for value in context_facts if has_numeric_fact(value)]
+    strengths = [*quantitative, f"{type_key}确定性状态为{status}"]
     if score is not None:
         strengths.append(f"确定性评分{score:.2f}")
     risks = ["本轮结论基于今日快照与本地模板规则，未把外部网页事实当作已核验事实"]
@@ -136,6 +139,8 @@ def _review(packet: Mapping[str, Any], overrides: Mapping[str, Any] | None = Non
         "freshness_penalty": 0.0,
         "freshness_note": "基于 2026-08-20 已验证闭市快照；未把网页发布时间当作报告期。",
     }
+    if quantitative:
+        result["quantitative_facts"] = quantitative[:8]
     override = None
     if isinstance(overrides, Mapping):
         override = overrides.get(f"{code}:{type_key}") or overrides.get(code)

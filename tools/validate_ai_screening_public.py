@@ -24,6 +24,7 @@ from tools.ai_screening_contract import (
     PARTIAL_SEARCH_REVIEW_MODES,
     validate_review,
 )
+from tools.ai_quantitative_facts import has_numeric_fact
 
 _CODE_RE = re.compile(r"^[036]\d{5}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -134,6 +135,15 @@ def validate_artifact(
         errors = validate_review(review_value, require_readable_reason=True)
         if errors:
             raise ValueError(f"AI screening review is semantically invalid for {code}: {','.join(errors)}")
+        quantitative = review.get("quantitative_facts")
+        if review_mode == NATIVE_WEB_REVIEW_MODE:
+            if not isinstance(quantitative, list) or not quantitative:
+                raise ValueError(f"native AI screening review has no quantitative facts: {code}")
+            if any(not has_numeric_fact(item) for item in quantitative):
+                raise ValueError(f"native AI screening review contains a non-quantitative fact: {code}")
+            if str(review.get("ai_action") or "") == "priority_buy":
+                if sum(has_numeric_fact(item) for item in quantitative) < 2:
+                    raise ValueError(f"native AI priority-buy review lacks two numeric facts: {code}")
         if str(review.get("model") or "") not in models or str(review.get("effort") or "") not in efforts:
             raise ValueError(f"AI screening review metadata is inconsistent for {code}")
         if review_mode == NATIVE_WEB_REVIEW_MODE and (
