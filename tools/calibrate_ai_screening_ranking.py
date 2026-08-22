@@ -16,12 +16,19 @@ from pathlib import Path
 from typing import Any, Mapping
 import re
 
-from tools.ai_screening_contract import REVIEW_SCHEMA_VERSION, candidate_identity_sha256, validate_review
+from tools.ai_screening_contract import (
+    REVIEW_SCHEMA_VERSION,
+    candidate_identity_sha256,
+    decision_text_conflicts,
+    normalise_decision_text,
+    validate_review,
+)
 
 
 def _action_safe_summary(summary: str, action: str) -> str:
     """Prevent a downgraded card from retaining a current buy sentence."""
-    if action == "priority_buy":
+    summary = normalise_decision_text(summary)
+    if action == "priority_buy" or not decision_text_conflicts(action, summary):
         return summary
     for old, new in (
         ("当前建议买入", "当前不建议买入"),
@@ -34,7 +41,7 @@ def _action_safe_summary(summary: str, action: str) -> str:
         ("可买", "暂不可买"),
     ):
         summary = summary.replace(old, new)
-    return summary
+    return normalise_decision_text(summary)
 
 
 def _number(value: Any) -> float | None:

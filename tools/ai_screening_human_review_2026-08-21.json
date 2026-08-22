@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "snapshot_generation": "8dbcb516637ea25c",
+  "market_as_of": "2026-08-21",
+  "review_scope": "full_priority_buy_recheck",
+  "notes": "逐家公司核对补丁7价格闸门、确定性否决与联网摘要后，对原AI建议买结论作人工复核降级；未改动原始确定性数据或联网claims。",
+  "corrections": {
+    "300033": {
+      "action": "watchlist",
+      "score": 55,
+      "reason": "type7分数虽高，但价格闸门未通过；高增长不能替代当前安全边际，列入观察。"
+    },
+    "605098": {
+      "action": "watchlist",
+      "score": 55,
+      "reason": "type7分数虽高，但估值仍明显高于合理区间；现金流和分红不能单独构成当前买点，列入观察。"
+    },
+    "300573": {
+      "action": "watchlist",
+      "score": 54,
+      "reason": "type7价格闸门未通过，当前估值安全边际不足；等待正式中报和估值回落后再评估。"
+    },
+    "002901": {
+      "action": "watchlist",
+      "score": 52,
+      "reason": "type1被否决且type7价格合理性未通过；回购和经营改善不足以覆盖估值风险，列入观察。"
+    },
+    "601600": {
+      "action": "watchlist",
+      "score": 52,
+      "reason": "周期类型均未触发，单季高景气利润不能替代正常化周期估值，列入观察。"
+    },
+    "002440": {
+      "action": "watchlist",
+      "score": 50,
+      "reason": "type5尚未触发且利润含较大公允价值收益疑点；等待正式中报确认主营质量，列入观察。"
+    },
+    "688208": {
+      "action": "watchlist",
+      "score": 47,
+      "reason": "type1被否决，type3/type7证据不足且估值区间未核实；当前不形成买点，列入观察。"
+    },
+    "600938": {
+      "action": "watchlist",
+      "score": 47,
+      "reason": "type1/type2被否决，强周期正常化估值和周期冷度未达买点要求，列入观察。"
+    },
+    "002415": {
+      "action": "avoid",
+      "score": 45,
+      "reason": "type1/type3被否决且type7仅为观察，当前价格安全边际不足，不建议买入。"
+    },
+    "600406": {
+      "action": "avoid",
+      "score": 45,
+      "reason": "type1/type2被否决、type7仅为观察且经营现金流承压，当前不建议买入。"
+    }
+  }
+}

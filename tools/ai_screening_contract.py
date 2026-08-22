@@ -274,6 +274,24 @@ def _decision_text_conflicts(action: str, text: str) -> bool:
     return False
 
 
+def normalise_decision_text(text: str) -> str:
+    """Collapse accidental repeated negation tokens in model-written prose.
+
+    Some local model responses repeat the Chinese negation character while
+    preserving the intended conclusion (for example ``暂不不不建议买入``).
+    This is a presentation defect, not a new decision.  Keeping the cleanup
+    here gives both the batch and calibration paths the same final-text rule.
+    """
+
+    return re.sub(r"不{2,}", "不", str(text or ""))
+
+
+def decision_text_conflicts(action: str, text: str) -> bool:
+    """Expose the contract's current-conclusion check to output cleaners."""
+
+    return _decision_text_conflicts(str(action or ""), str(text or ""))
+
+
 def _readable_reason(value: Any, *, minimum: int) -> bool:
     if not isinstance(value, str):
         return False

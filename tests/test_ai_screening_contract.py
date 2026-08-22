@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from tools.ai_screening_contract import select_candidates, validate_review
+from tools.ai_screening_contract import decision_text_conflicts, normalise_decision_text, select_candidates, validate_review
 from tools.build_ai_screening import _relevant_rules, _rule_chunks, build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _claim_url, _review
 from tools.enrich_ai_screening_input import enrich
@@ -274,6 +274,15 @@ def test_calibrated_priority_can_include_near_threshold_rule() -> None:
     assert unresolved["final_recommendation"] == "recommend_buy"
     assert unresolved["final_category"] == "recommend_buy"
     assert unresolved["buy_attractiveness_score"] < observed["buy_attractiveness_score"]
+
+
+def test_decision_text_collapses_repeated_negation_tokens() -> None:
+    text = "当前暂不不不不不建议买入，纳入观察。"
+    cleaned = normalise_decision_text(text)
+    assert cleaned == "当前暂不建议买入，纳入观察。"
+    assert "不不" not in cleaned
+    assert decision_text_conflicts("watchlist", "不能据此直接建议买入。") is False
+    assert decision_text_conflicts("watchlist", "当前建议买入。") is True
 
 
 def test_historical_claims_are_visible_and_cannot_remain_a_buy_recommendation() -> None:

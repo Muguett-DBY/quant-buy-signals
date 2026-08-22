@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
-from tools.ai_screening_contract import validate_review
+from tools.ai_screening_contract import decision_text_conflicts, normalise_decision_text, validate_review
 
 
 _REVIEW_KEYS = frozenset(
@@ -366,19 +366,20 @@ def _cohere_local_review(review: dict[str, Any]) -> dict[str, Any]:
         else:
             review["buy_attractiveness_score"] = min(49.0, score)
     if action != "priority_buy" and isinstance(review.get("summary"), str):
-        summary = review["summary"]
-        for old, new in (
-            ("当前建议买入", "当前不建议买入"),
-            ("建议立即买入", "暂不建议立即买入"),
-            ("建议买入", "不建议买入"),
-            ("建议买", "不建议买"),
-            ("值得买入", "暂不建议买入"),
-            ("值得买", "暂不建议买"),
-            ("可以买", "暂不构成买点"),
-            ("可买", "暂不可买"),
-        ):
-            summary = summary.replace(old, new)
-        review["summary"] = summary
+        summary = normalise_decision_text(review["summary"])
+        if decision_text_conflicts(action, summary):
+            for old, new in (
+                ("当前建议买入", "当前不建议买入"),
+                ("建议立即买入", "暂不建议立即买入"),
+                ("建议买入", "不建议买入"),
+                ("建议买", "不建议买"),
+                ("值得买入", "暂不建议买入"),
+                ("值得买", "暂不建议买"),
+                ("可以买", "暂不构成买点"),
+                ("可买", "暂不可买"),
+            ):
+                summary = summary.replace(old, new)
+        review["summary"] = normalise_decision_text(summary)
     return review
 
 

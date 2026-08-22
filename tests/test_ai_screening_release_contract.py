@@ -6,6 +6,7 @@ import hashlib
 import pytest
 
 from tools.ai_screening_contract import candidate_identity_sha256, validate_review
+from tools.apply_ai_screening_human_review import apply as apply_human_review
 from tools.calibrate_ai_screening_ranking import _review, calibrate
 from tools.build_ai_screening import build_input
 from tools.publish_ai_screening import build_artifact
@@ -255,6 +256,50 @@ def test_partial_queue_cannot_be_calibrated_or_published_as_full_coverage(tmp_pa
             expected_generation="g1",
             expected_market_as_of="2026-08-21",
         )
+
+
+def test_human_review_downgrade_is_generation_bound_and_keeps_reason(tmp_path) -> None:
+    source = tmp_path / "source.json"
+    corrections = tmp_path / "corrections.json"
+    output = tmp_path / "output.json"
+    source.write_text(
+        json.dumps(
+            {
+                "snapshot_generation": "g1",
+                "market_as_of": "2026-08-21",
+                "packets": [
+                    {
+                        "security_code": "600000",
+                        "type_key": "type1",
+                        "ai_review": {
+                            **_external_review("priority_buy", 72),
+                            "summary": "当前建议买入。",
+                            "risk_flags": [],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    corrections.write_text(
+        json.dumps(
+            {
+                "snapshot_generation": "g1",
+                "market_as_of": "2026-08-21",
+                "corrections": {
+                    "600000": {"action": "watchlist", "score": 55, "reason": "价格闸门未通过。"}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert apply_human_review(source, corrections, output) == {"changed_packets": 1, "changed_companies": 1}
+    reviewed = json.loads(output.read_text(encoding="utf-8"))["packets"][0]["ai_review"]
+    assert reviewed["ai_action"] == "watchlist"
+    assert reviewed["final_category"] == "observe"
+    assert reviewed["final_recommendation"] == "do_not_recommend_buy"
+    assert "价格闸门未通过" in reviewed["summary"]
 
 
 def test_full_coverage_publish_requires_model_and_effort_metadata(tmp_path) -> None:
