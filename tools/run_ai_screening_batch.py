@@ -85,7 +85,7 @@ def _extract_array(text: str) -> list[dict[str, Any]]:
     # text rather than returning a valid JSON string.  Remove only that
     # transport escaping; the review schema is still checked below.
     if '\\"' in cleaned:
-        unescaped = cleaned.replace('\\"', '"').replace('\\n', '\n')
+        unescaped = cleaned.replace('\\"', '"').replace("\\n", "\n")
         if unescaped != cleaned:
             try:
                 return _extract_array(unescaped)
@@ -396,15 +396,10 @@ def _shared_rules(packets: list[Mapping[str, Any]]) -> dict[str, list[dict[str, 
             text = str(compact.get("text") or "")
             if len(text) > _RULE_EXCERPT_LIMIT:
                 compact["text"] = (
-                    text[:950]
-                    + "\n...[knowledge-base excerpt shortened for this batch]...\n"
-                    + text[-350:]
+                    text[:950] + "\n...[knowledge-base excerpt shortened for this batch]...\n" + text[-350:]
                 )
             grouped[type_key][key] = compact
-    return {
-        type_key: list(values.values())[:_RULES_PER_TYPE_LIMIT]
-        for type_key, values in sorted(grouped.items())
-    }
+    return {type_key: list(values.values())[:_RULES_PER_TYPE_LIMIT] for type_key, values in sorted(grouped.items())}
 
 
 def _prompt(protocol: str, packets: list[Mapping[str, Any]], *, require_web_search: bool = False) -> str:

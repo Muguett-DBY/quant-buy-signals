@@ -365,7 +365,11 @@ def build_artifact(
         raise ValueError("full-coverage artifact must declare its review models and efforts")
     if full_coverage and review_mode == "local_codex_review" and review_models != {LOCAL_REVIEW_MODEL}:
         raise ValueError("local full-coverage artifact must use the local Codex review model")
-    if full_coverage and review_mode not in PARTIAL_SEARCH_REVIEW_MODES and pair_web_search_attempted_count != len(packets):
+    if (
+        full_coverage
+        and review_mode not in PARTIAL_SEARCH_REVIEW_MODES
+        and pair_web_search_attempted_count != len(packets)
+    ):
         raise ValueError("external full-coverage artifact must search every company/type pair")
     if (
         full_coverage
