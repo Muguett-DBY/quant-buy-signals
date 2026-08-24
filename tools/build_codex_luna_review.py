@@ -24,6 +24,10 @@ MARKET_DATE = "2026-08-24"
 MODEL = LOCAL_REVIEW_MODEL
 EFFORT = "max"
 MIN_BUY_FCF_MARGIN = 0.03
+MIN_BUY_FCF_HISTORY_AVERAGE = 0.0
+MAX_BUY_PB_STRETCH_RATIO = 2.5
+MAX_BUY_INTERIM_CASHFLOW_DECLINE = -10.0
+MAX_BUY_INTERIM_REVENUE_DECLINE = -5.0
 
 
 def _number(value: Any) -> float | None:
@@ -165,6 +169,9 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     latest = annual[-1] if annual else {}
     previous = annual[-2] if len(annual) >= 2 else {}
     first = annual[0] if annual else {}
+    deterministic = packet.get("deterministic")
+    deterministic = deterministic if isinstance(deterministic, Mapping) else {}
+    candidate_status = _text(deterministic.get("status"))
     revenue = _number(latest.get("revenue"))
     profit = _number(latest.get("parent_net_profit"))
     ocf = _number(latest.get("operating_cashflow"))
@@ -174,12 +181,28 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     profit_cagr = _cagr(_number(first.get("parent_net_profit")), profit)
     profit_yoy = (profit / previous_profit - 1) if profit is not None and previous_profit and previous_profit > 0 else None
     fcf_positive = sum(1 for row in annual if (_number(row.get("free_cashflow")) or 0) > 0)
+    annual_fcf_values = [
+        value
+        for value in (_number(row.get("free_cashflow")) for row in annual[-3:])
+        if value is not None
+    ]
+    fcf_history_average = (
+        sum(annual_fcf_values) / len(annual_fcf_values)
+        if len(annual_fcf_values) == 3
+        else None
+    )
+    fcf_history_ready = (
+        fcf_history_average is not None
+        and fcf_history_average > MIN_BUY_FCF_HISTORY_AVERAGE
+        and sum(value > 0 for value in annual_fcf_values) >= 2
+    )
     fcf_margin = fcf / revenue if fcf is not None and revenue and revenue > 0 else None
     fcf_quality_ready = fcf_margin is None or fcf_margin >= MIN_BUY_FCF_MARGIN
     pe = snap.get("pe")
     pb = snap.get("pb")
     pe_median = snap.get("pe_median")
     pb_median = snap.get("pb_median")
+    pb_stretch_ratio = pb / pb_median if pb is not None and pb_median and pb_median > 0 else None
 
     score = 50.0
     strengths: list[str] = []
@@ -213,6 +236,11 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     else:
         score -= 8
         risks.append(f"交易日 {MARKET_DATE} 缺少可用 PE/PB，估值安全边际无法直接确认。")
+    if pb_stretch_ratio is not None and pb_stretch_ratio > 2:
+        score -= min(12, round((pb_stretch_ratio - 2) * 4, 1))
+        risks.append(
+            f"交易日 {MARKET_DATE} 的 PB {pb:.2f} 倍约为同业中位数 {pb_median:.2f} 倍的 {pb_stretch_ratio:.1f} 倍，资产估值溢价需要额外业务证据。"
+        )
 
     if fcf is not None and fcf > 0 and ocf is not None and ocf > 0:
         score += 12
@@ -234,6 +262,11 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
             risks.append(
                 f"2025 年简化自由现金流率 {_pct(fcf_margin)} 低于 {MIN_BUY_FCF_MARGIN:.0%}，虽为正值但现金回报偏薄，不能支持积极买入结论。"
             )
+    if fcf_history_average is not None:
+        facts.append(f"2023—2025 年简化自由现金流均值 {_hundred_million(fcf_history_average)}。")
+    if not fcf_history_ready:
+        score -= 8
+        risks.append("2023—2025 年自由现金流序列的均值不为正或完整性不足，不能仅凭最新一年转正确认买入。")
 
     if profit is not None and profit > 0:
         if profit_yoy is not None and profit_yoy > 0.15:
@@ -305,6 +338,13 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
                 f"最新可得中期现金流同比明显走弱：经营现金流 {_pct(interim_ocf_decline / 100) if interim_ocf_decline is not None else '未知'}、"
                 f"自由现金流 {_pct(interim_fcf_decline / 100) if interim_fcf_decline is not None else '未知'}，不能仅凭年度现金流确认买入。"
             )
+        elif cashflow_declines and min(cashflow_declines) < 0:
+            decline = min(cashflow_declines)
+            score -= min(6, round(abs(decline) / 5, 1))
+            risks.append(
+                f"最新可得中期现金流同比下滑：经营现金流 {_pct(interim_ocf_decline / 100) if interim_ocf_decline is not None else '未知'}、"
+                f"自由现金流 {_pct(interim_fcf_decline / 100) if interim_fcf_decline is not None else '未知'}，现金趋势仍需观察。"
+            )
 
     shareholder = company.get("shareholder_returns")
     missing_returns = shareholder.get("missing_fields", []) if isinstance(shareholder, Mapping) else []
@@ -329,11 +369,11 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and interim_revenue_decline <= -10
     )
     annual_or_interim_trend_stress = (
-        (interim_revenue_decline is not None and interim_revenue_decline <= -10)
+        (interim_revenue_decline is not None and interim_revenue_decline <= MAX_BUY_INTERIM_REVENUE_DECLINE)
         or (interim_profit_decline is not None and interim_profit_decline <= -5)
     )
     cashflow_trend_stress = any(
-        value is not None and value <= -30
+        value is not None and value <= MAX_BUY_INTERIM_CASHFLOW_DECLINE
         for value in (interim_ocf_decline, interim_fcf_decline)
     )
     capital_return_ready = roic is not None and roic >= 5
@@ -353,6 +393,9 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and not cashflow_trend_stress
         and capital_return_ready
         and fcf_quality_ready
+        and fcf_history_ready
+        and candidate_status != "insufficient_evidence"
+        and (pb_stretch_ratio is None or pb_stretch_ratio <= MAX_BUY_PB_STRETCH_RATIO)
     )
     if category == "quality_equity":
         evidence_ready = evidence_ready and not missing_returns and pe is not None and pe_median is not None and pe <= pe_median * 1.1
@@ -384,10 +427,12 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         summary_lead = "当前结论：不建议。"
     current = f"交易日 {MARKET_DATE} 股价 {snap['price']:.2f} 元" if snap.get("price") is not None else f"交易日 {MARKET_DATE} 价格未知"
     valuation_text = f"PE {pe:.2f} 倍" if pe is not None else f"PB {pb:.2f} 倍" if pb is not None else "估值倍数缺失"
+    basis = ("；".join(strengths[:2]) if strengths else "研究包未形成足够强的正向证据").rstrip("。；")
+    counter = (risks[0] if risks else "仍需持续核验行业与治理风险").rstrip("。；")
     summary = (
         f"{summary_lead}{name}（{code}）属于{industry or '未知行业'}，{current}、{valuation_text}；"
         f"2025 年经营现金流 {_hundred_million(ocf)}、自由现金流 {_hundred_million(fcf)}，"
-        f"当前价格的主要矛盾是现金回报与盈利趋势能否延续。"
+        f"核心依据：{basis}；主要反证：{counter}"
     )
     return score, action, strengths[:3], risks[:4], list(dict.fromkeys(facts))[:8], summary
 
@@ -440,7 +485,7 @@ def _review(packet: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, 
         "ai_independent": True,
         "economic_category": category,
         "score_components": {"risk_adjusted_expected_return": score, "evidence_confidence": max(35.0, min(95.0, score))},
-        "confidence": "high" if action == "priority_buy" else "medium" if action == "watchlist" else "high",
+        "confidence": "medium" if action in {"priority_buy", "watchlist"} else "high",
         "summary": summary,
         "key_strengths": strengths,
         "risk_flags": risks,
