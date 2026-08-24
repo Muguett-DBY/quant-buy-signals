@@ -71,7 +71,9 @@ def _source_binding_key(binding: Mapping[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def _native_source_packet_contract(packets: list[Any]) -> tuple[set[str], Counter[tuple[Any, ...]], dict[str, dict[str, Any]]]:
+def _native_source_packet_contract(
+    packets: list[Any],
+) -> tuple[set[str], Counter[tuple[Any, ...]], dict[str, dict[str, Any]]]:
     """Rebuild URL and finding bindings from the artifact being validated."""
 
     urls: set[str] = set()
@@ -132,9 +134,7 @@ def _native_source_packet_contract(packets: list[Any]) -> tuple[set[str], Counte
     return urls, bindings, coverage
 
 
-def _validate_native_company_source_audit(
-    source_audit: Mapping[str, Any], packets: list[Any]
-) -> None:
+def _validate_native_company_source_audit(source_audit: Mapping[str, Any], packets: list[Any]) -> None:
     """Require the v3 audit matrix used by native-company publication."""
 
     if source_audit.get("audit_contract_version") != 3:
@@ -152,9 +152,7 @@ def _validate_native_company_source_audit(
     for field, expected in projection_counts.items():
         if _int(source_audit.get(field), f"source_audit.{field}") != expected:
             raise ValueError(f"native company research source audit {field} is stale")
-    if _int(source_audit.get("claim_count"), "source_audit.claim_count") != projection_counts[
-        "projection_claim_count"
-    ]:
+    if _int(source_audit.get("claim_count"), "source_audit.claim_count") != projection_counts["projection_claim_count"]:
         raise ValueError("native company research source audit projection claim count is inconsistent")
     semantic_counts = {
         field: _int(source_audit.get(field), f"source_audit.{field}")
@@ -174,11 +172,14 @@ def _validate_native_company_source_audit(
     if semantic_counts["semantic_failed_count"] or semantic_counts["semantic_unverified_count"]:
         raise ValueError("native company research source audit has non-passing semantic findings")
     canonical_urls = source_audit.get("canonical_urls")
-    if not isinstance(canonical_urls, list) or any(
-        not isinstance(value, str) or not re.match(r"^https?://", value, re.IGNORECASE)
-        or value != value.strip()
-        for value in canonical_urls
-    ) or len(canonical_urls) != len(set(canonical_urls)):
+    if (
+        not isinstance(canonical_urls, list)
+        or any(
+            not isinstance(value, str) or not re.match(r"^https?://", value, re.IGNORECASE) or value != value.strip()
+            for value in canonical_urls
+        )
+        or len(canonical_urls) != len(set(canonical_urls))
+    ):
         raise ValueError("native company research source audit canonical URL set is invalid")
     if len(canonical_urls) != projection_counts["projection_unique_url_count"]:
         raise ValueError("native company research source audit projection URL count is inconsistent")
@@ -229,13 +230,23 @@ def _validate_native_company_source_audit(
             raise ValueError(f"native company research source audit URL coverage is stale: {code}")
         company_counts = {
             field: _int(item.get(field), f"source_audit.company_coverage.{field}")
-            for field in ("semantic_claim_count", "semantic_passed_count", "semantic_failed_count", "semantic_unverified_count")
+            for field in (
+                "semantic_claim_count",
+                "semantic_passed_count",
+                "semantic_failed_count",
+                "semantic_unverified_count",
+            )
         }
-        if company_counts["semantic_claim_count"] != (
-            company_counts["semantic_passed_count"]
-            + company_counts["semantic_failed_count"]
-            + company_counts["semantic_unverified_count"]
-        ) or company_counts["semantic_failed_count"] or company_counts["semantic_unverified_count"]:
+        if (
+            company_counts["semantic_claim_count"]
+            != (
+                company_counts["semantic_passed_count"]
+                + company_counts["semantic_failed_count"]
+                + company_counts["semantic_unverified_count"]
+            )
+            or company_counts["semantic_failed_count"]
+            or company_counts["semantic_unverified_count"]
+        ):
             raise ValueError(f"native company research source audit company semantic results failed: {code}")
         coverage_semantic_total += company_counts["semantic_claim_count"]
         status = str(item.get("status") or "")
@@ -459,9 +470,7 @@ def validate_artifact(
                 expected_market_as_of=expected_market_as_of,
             )
             if snapshot_errors:
-                raise ValueError(
-                    f"AI screening valuation snapshot is invalid for {code}: {','.join(snapshot_errors)}"
-                )
+                raise ValueError(f"AI screening valuation snapshot is invalid for {code}: {','.join(snapshot_errors)}")
         _validate_decision_texts(review, code=code)
         if company_research_review and str(review.get("research_as_of") or "") != research_as_of:
             raise ValueError(f"AI screening research date is inconsistent for {code}")
@@ -513,10 +522,7 @@ def validate_artifact(
                         source_quality != "not_found"
                         and (source_id not in claim_sources or source_ref != claim_sources[source_id])
                     )
-                    or (
-                        source_quality == "not_found"
-                        and source_ref
-                    )
+                    or (source_quality == "not_found" and source_ref)
                 ):
                     raise ValueError(f"AI screening business-model source is unbound for {code}")
                 public_source_ids.append(source_id)
@@ -606,12 +612,18 @@ def validate_artifact(
         if _int(payload.get(field), field) != expected:
             raise ValueError(f"AI screening scalar count is inconsistent: {field}")
     for verdict in _VERDICTS:
-        if _int((payload.get("verdict_counts") or {}).get(verdict, 0), f"verdict_counts.{verdict}") != verdict_counts[verdict]:
+        if (
+            _int((payload.get("verdict_counts") or {}).get(verdict, 0), f"verdict_counts.{verdict}")
+            != verdict_counts[verdict]
+        ):
             raise ValueError(f"AI screening verdict count is inconsistent: {verdict}")
-        if _int(
-            (payload.get("type_pair_verdict_counts") or {}).get(verdict, 0),
-            f"type_pair_verdict_counts.{verdict}",
-        ) != pair_verdict_counts[verdict]:
+        if (
+            _int(
+                (payload.get("type_pair_verdict_counts") or {}).get(verdict, 0),
+                f"type_pair_verdict_counts.{verdict}",
+            )
+            != pair_verdict_counts[verdict]
+        ):
             raise ValueError(f"AI screening type-pair verdict count is inconsistent: {verdict}")
     if review_mode == "local_codex_review" and not review_model_efforts <= {
         ("opencode-go/ox-alpha-free", "max"),
@@ -644,7 +656,9 @@ def validate_artifact(
         "recommend_buy_count": action_counts["priority_buy"],
         "watchlist_count": action_counts["watchlist"],
         "avoid_count": action_counts["avoid"],
-        "do_not_recommend_buy_count": action_counts["watchlist"] + action_counts["avoid"] + action_counts["insufficient_evidence"],
+        "do_not_recommend_buy_count": action_counts["watchlist"]
+        + action_counts["avoid"]
+        + action_counts["insufficient_evidence"],
     }
     for field, expected in declared_action_scalars.items():
         if _int(payload.get(field), field) != expected:
@@ -701,14 +715,10 @@ def validate_artifact(
     }
 
 
-def validate_artifact_file(
-    path: Path, *, expected_generation: str, expected_market_as_of: str
-) -> dict[str, Any]:
+def validate_artifact_file(path: Path, *, expected_generation: str, expected_market_as_of: str) -> dict[str, Any]:
     size = path.stat().st_size
     if size < 1 or size > MAX_PUBLIC_ARTIFACT_BYTES:
-        raise ValueError(
-            f"AI screening seed size {size} is outside the 1..{MAX_PUBLIC_ARTIFACT_BYTES} byte limit"
-        )
+        raise ValueError(f"AI screening seed size {size} is outside the 1..{MAX_PUBLIC_ARTIFACT_BYTES} byte limit")
     payload = json.loads(path.read_bytes())
     if not isinstance(payload, Mapping):
         raise ValueError("AI screening seed must be a JSON object")

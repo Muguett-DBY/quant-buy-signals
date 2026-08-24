@@ -1958,9 +1958,7 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
 
 def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_path):
     source = DASHBOARD.read_text(encoding="utf-8")
-    page_function = source.split("function aiScreeningPageResponse(request){", 1)[1].split(
-        "export default{", 1
-    )[0]
+    page_function = source.split("function aiScreeningPageResponse(request){", 1)[1].split("export default{", 1)[0]
     assert 'if(path==="/ai-screening")return aiScreeningPageResponse(request);' in source
     assert source.count("function aiScreeningPageResponse(request)") == 1
     assert "aiScreeningPageResponseSimple" not in source

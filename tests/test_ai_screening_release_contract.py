@@ -106,9 +106,7 @@ def _write_clean_source_audit(source, audit_path) -> None:
                 if claim_urls:
                     claim_ids_with_urls.add(str(claim["search_finding_id"]))
         finding_urls = {
-            url
-            for finding in findings.values()
-            for url in review_canonical_urls({"search_findings": [finding]})
+            url for finding in findings.values() for url in review_canonical_urls({"search_findings": [finding]})
         }
         company_semantic_count += len(finding_urls - company_claim_urls)
         semantic_claim_count += company_semantic_count
@@ -140,7 +138,9 @@ def _write_clean_source_audit(source, audit_path) -> None:
                 "market_as_of": "2026-08-21",
                 "invalid_claim_url_count": 0,
                 "audit_passed": True,
-                "claim_count": sum(len(packet.get("ai_review", {}).get("claims", [])) for packet in payload.get("packets", [])),
+                "claim_count": sum(
+                    len(packet.get("ai_review", {}).get("claims", [])) for packet in payload.get("packets", [])
+                ),
                 "semantic_claim_count": semantic_claim_count,
                 "semantic_passed_count": semantic_claim_count,
                 "semantic_failed_count": 0,
@@ -205,9 +205,24 @@ def _native_company_review(*, code: str, model: str, effort: str, retrieval_mode
             "pb": 0.55,
             "market_cap": 36_210_000_000.0,
             "scenarios": {
-                "bear": {"value_per_share": 11.2, "upside_pct": -9.2382495948, "book_value_per_share": 20.0, "target_pb": 0.56},
-                "base": {"value_per_share": 16.0, "upside_pct": 29.6596434360, "book_value_per_share": 20.0, "target_pb": 0.8},
-                "bull": {"value_per_share": 20.8, "upside_pct": 68.5575364668, "book_value_per_share": 20.0, "target_pb": 1.04},
+                "bear": {
+                    "value_per_share": 11.2,
+                    "upside_pct": -9.2382495948,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 0.56,
+                },
+                "base": {
+                    "value_per_share": 16.0,
+                    "upside_pct": 29.6596434360,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 0.8,
+                },
+                "bull": {
+                    "value_per_share": 20.8,
+                    "upside_pct": 68.5575364668,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 1.04,
+                },
             },
             "margin_of_safety": -10.1785714286,
             "safety_margin_band": "negative",
@@ -730,9 +745,9 @@ def test_native_company_research_separates_search_event_from_financial_sources(t
             },
             "valuation": {"fact_ids": ["valuation-fact"], "search_finding_ids": []},
         },
-            "economic_profile": {
-                "business_model": "通过企业金融与零售金融获取利差及手续费收入。",
-                "business_model_source_ids": ["search-business"],
+        "economic_profile": {
+            "business_model": "通过企业金融与零售金融获取利差及手续费收入。",
+            "business_model_source_ids": ["search-business"],
             "business_model_source_quality": "current_primary",
             "business_model_uncertainty": "已由2026年半年度报告的一手业务分部口径核验。",
             "moat": "客户基础仍有价值，但净息差下行构成反证。",
@@ -740,47 +755,62 @@ def test_native_company_research_separates_search_event_from_financial_sources(t
             "fcf_outlook": "结合资本充足率和分红能力判断股东现金回报。",
             "governance": "资本补充需求与分红安排需要同时核验。",
         },
-            "valuation": {
-                "method": "book_value_multiple",
-                "as_of": "2026-08-21",
+        "valuation": {
+            "method": "book_value_multiple",
+            "as_of": "2026-08-21",
             "current_price": 12.34,
             "pe": 6.2,
             "pb": 0.55,
-                "market_cap": 3621.0,
-                "scenarios": {
-                    "bear": {"value_per_share": 11.2, "upside_pct": -9.2382495948, "book_value_per_share": 20.0, "target_pb": 0.56},
-                    "base": {"value_per_share": 16.0, "upside_pct": 29.6596434360, "book_value_per_share": 20.0, "target_pb": 0.8},
-                    "bull": {"value_per_share": 20.8, "upside_pct": 68.5575364668, "book_value_per_share": 20.0, "target_pb": 1.04},
+            "market_cap": 3621.0,
+            "scenarios": {
+                "bear": {
+                    "value_per_share": 11.2,
+                    "upside_pct": -9.2382495948,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 0.56,
                 },
-                "margin_of_safety": -10.1785714286,
-                "safety_margin_band": "negative",
-                "basis": "结合市净率、资产质量与悲观信用成本情景判断安全边际。",
-                "evidence_ids": ["valuation-fact"],
-                "normalization_anchor": {
-                    "metric": "book_value_per_share",
-                    "years": [],
-                    "total": None,
-                    "share_count": None,
-                    "per_share": 20.0,
-                    "source_ref": "https://example.test/financial-api/2025#valuation",
+                "base": {
+                    "value_per_share": 16.0,
+                    "upside_pct": 29.6596434360,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 0.8,
                 },
-                "multiple_basis": {
-                    "metric": "pb",
-                    "value": 0.8,
-                    "source_ref": "https://example.test/financial-api/2025#valuation",
-                    "search_finding_id": None,
+                "bull": {
+                    "value_per_share": 20.8,
+                    "upside_pct": 68.5575364668,
+                    "book_value_per_share": 20.0,
+                    "target_pb": 1.04,
                 },
             },
-            "valuation_snapshot": make_valuation_snapshot(
-                security_code="600000",
-                snapshot_generation="g1",
-                market_as_of="2026-08-21",
-                current_price=12.34,
-                pe=6.2,
-                pb=0.55,
-                market_cap=3621.0,
-            ),
-        }
+            "margin_of_safety": -10.1785714286,
+            "safety_margin_band": "negative",
+            "basis": "结合市净率、资产质量与悲观信用成本情景判断安全边际。",
+            "evidence_ids": ["valuation-fact"],
+            "normalization_anchor": {
+                "metric": "book_value_per_share",
+                "years": [],
+                "total": None,
+                "share_count": None,
+                "per_share": 20.0,
+                "source_ref": "https://example.test/financial-api/2025#valuation",
+            },
+            "multiple_basis": {
+                "metric": "pb",
+                "value": 0.8,
+                "source_ref": "https://example.test/financial-api/2025#valuation",
+                "search_finding_id": None,
+            },
+        },
+        "valuation_snapshot": make_valuation_snapshot(
+            security_code="600000",
+            snapshot_generation="g1",
+            market_as_of="2026-08-21",
+            current_price=12.34,
+            pe=6.2,
+            pb=0.55,
+            market_cap=3621.0,
+        ),
+    }
     source = tmp_path / "company-research.json"
     source.write_text(
         json.dumps(
@@ -839,16 +869,12 @@ def test_native_company_research_separates_search_event_from_financial_sources(t
     assert artifact["packets"][0]["ai_review"]["web_search_verified"] is False
     assert artifact["packets"][0]["ai_review"]["research_as_of"] == "2026-08-23"
     assert artifact["packets"][0]["ai_review"]["economic_profile"]["business_model"].startswith("通过")
+    assert artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_source_quality"] == "current_primary"
+    assert artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_source_ids"] == ["search-business"]
     assert (
-        artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_source_quality"]
-        == "current_primary"
+        artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_sources"][0]["source_ref"]
+        == "https://example.test/financial-api/2025"
     )
-    assert artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_source_ids"] == [
-        "search-business"
-    ]
-    assert artifact["packets"][0]["ai_review"]["economic_profile"]["business_model_sources"][0][
-        "source_ref"
-    ] == "https://example.test/financial-api/2025"
 
 
 def test_native_company_research_publish_accepts_muse_and_deepseek_profiles(tmp_path) -> None:
@@ -915,10 +941,7 @@ def test_native_company_research_publish_accepts_muse_and_deepseek_profiles(tmp_
         "opencode-go/muse-spark-1.2-contributor",
     ]
     assert artifact["review_efforts"] == ["max", "xhigh"]
-    assert {
-        (packet["ai_review"]["model"], packet["ai_review"]["effort"])
-        for packet in artifact["packets"]
-    } == {
+    assert {(packet["ai_review"]["model"], packet["ai_review"]["effort"]) for packet in artifact["packets"]} == {
         ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
         ("opencode-go/deepseek-v4-flash", "max"),
     }
@@ -946,7 +969,9 @@ def test_native_company_research_not_found_is_searched_no_source_and_not_buy() -
     review["economic_profile"]["business_model"] = "主营业务尚未核验，暂不能形成可靠业务判断。"
     review["economic_profile"]["business_model_source_ids"] = []
     review["economic_profile"]["business_model_source_quality"] = "not_found"
-    review["economic_profile"]["business_model_uncertainty"] = "已完成联网搜索但未找到可引用的一手资料，主营业务尚未核验。"
+    review["economic_profile"]["business_model_uncertainty"] = (
+        "已完成联网搜索但未找到可引用的一手资料，主营业务尚未核验。"
+    )
     review["claims"][0]["source_ref"] = ""
     review["claims"][0]["source_context"] = "搜索事件完成，但未找到可引用来源。"
     review["search_findings"][0]["url"] = None

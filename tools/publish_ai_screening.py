@@ -215,15 +215,11 @@ def _validated_source_audit(
         "projection_source_reference_count",
         "projection_unique_url_count",
     )
-    projection_counts = {
-        field: _audit_count(audit, field)
-        for field in projection_count_fields
-    }
+    projection_counts = {field: _audit_count(audit, field) for field in projection_count_fields}
     if expected_projection_sha256 is not None and projection_sha256 != expected_projection_sha256:
         raise ValueError("source audit semantic projection does not match the merged AI screening file")
     if expected_projection_counts is not None and projection_counts != {
-        field: expected_projection_counts.get(field)
-        for field in projection_count_fields
+        field: expected_projection_counts.get(field) for field in projection_count_fields
     }:
         raise ValueError("source audit semantic projection counts do not match the merged AI screening file")
     invalid_count = _audit_count(audit, "invalid_claim_url_count")
@@ -241,10 +237,7 @@ def _validated_source_audit(
     claim_count = _audit_count(audit, "claim_count")
     if projection_counts["projection_claim_count"] != claim_count:
         raise ValueError("source audit projection claim count is inconsistent")
-    if (
-        projection_counts["projection_source_reference_count"]
-        < projection_counts["projection_unique_url_count"]
-    ):
+    if projection_counts["projection_source_reference_count"] < projection_counts["projection_unique_url_count"]:
         raise ValueError("source audit projection URL counts are inconsistent")
     semantic_claim_count = _audit_count(audit, "semantic_claim_count")
     semantic_passed_count = _audit_count(audit, "semantic_passed_count")
@@ -268,13 +261,14 @@ def _validated_source_audit(
         if audit.get("audit_passed") is not True:
             raise ValueError("company-research source audit did not pass")
     canonical_urls_value = audit.get("canonical_urls")
-    if (
-        isinstance(canonical_urls_value, list)
-        and projection_counts["projection_unique_url_count"] != len(canonical_urls_value)
+    if isinstance(canonical_urls_value, list) and projection_counts["projection_unique_url_count"] != len(
+        canonical_urls_value
     ):
         raise ValueError("source audit projection URL count does not match canonical URLs")
     if expected_urls is not None:
-        if not isinstance(canonical_urls_value, list) or any(not isinstance(value, str) for value in canonical_urls_value):
+        if not isinstance(canonical_urls_value, list) or any(
+            not isinstance(value, str) for value in canonical_urls_value
+        ):
             if strict:
                 raise ValueError("source audit canonical URL set is missing")
         elif set(canonical_urls_value) != expected_urls:
@@ -292,9 +286,7 @@ def _validated_source_audit(
         if not isinstance(coverage, list):
             raise ValueError("source audit company coverage is missing")
         coverage_by_code = {
-            str(item.get("security_code") or ""): item
-            for item in coverage
-            if isinstance(item, Mapping)
+            str(item.get("security_code") or ""): item for item in coverage if isinstance(item, Mapping)
         }
         for code, expected in (expected_companies or {}).items():
             actual = coverage_by_code.get(code)
@@ -310,9 +302,7 @@ def _validated_source_audit(
                 raise ValueError(f"source audit searched_no_source coverage is incomplete: {code}")
             expected_referenced_no_source = set(expected.get("referenced_no_source", set()))
             actual_referenced_no_source = set(
-                str(value)
-                for value in actual.get("referenced_no_source_finding_ids", [])
-                if str(value)
+                str(value) for value in actual.get("referenced_no_source_finding_ids", []) if str(value)
             )
             if not actual_referenced_no_source and expected_referenced_no_source:
                 # Reports written before this field existed can still be
@@ -379,19 +369,13 @@ def _source_text(value: Any, limit: int = 800) -> str:
 
 
 def _public_artifact_bytes(artifact: Mapping[str, Any]) -> bytes:
-    output_bytes = (
-        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
+    output_bytes = (json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
     if len(output_bytes) > MAX_PUBLIC_ARTIFACT_BYTES:
-        raise ValueError(
-            f"public AI screening artifact exceeds {MAX_PUBLIC_ARTIFACT_BYTES} bytes"
-        )
+        raise ValueError(f"public AI screening artifact exceeds {MAX_PUBLIC_ARTIFACT_BYTES} bytes")
     return output_bytes
 
 
-def _public_company_research(
-    review: Mapping[str, Any], public_claims: list[dict[str, Any]]
-) -> dict[str, Any]:
+def _public_company_research(review: Mapping[str, Any], public_claims: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the compact, validated company thesis safe for the public API."""
 
     if not all(field in review for field in ("research_as_of", "economic_profile", "valuation")):
@@ -405,7 +389,9 @@ def _public_company_research(
     for field in VALUATION_FIELDS:
         value = valuation.get(field)
         if field in {"method", "as_of", "basis", "safety_margin_band"}:
-            limit = 1000 if field == "basis" else 80 if field == "method" else 16 if field == "safety_margin_band" else 10
+            limit = (
+                1000 if field == "basis" else 80 if field == "method" else 16 if field == "safety_margin_band" else 10
+            )
             public_valuation[field] = _text(value, limit)
         elif field == "scenarios":
             if value is None:
@@ -432,9 +418,7 @@ def _public_company_research(
     if not isinstance(evidence_ids, list):
         public_valuation["evidence_ids"] = []
     else:
-        public_valuation["evidence_ids"] = [
-            _text(value, 120) for value in evidence_ids[:32]
-        ]
+        public_valuation["evidence_ids"] = [_text(value, 120) for value in evidence_ids[:32]]
 
     anchor = valuation.get("normalization_anchor")
     if anchor is None:
@@ -443,18 +427,11 @@ def _public_company_research(
         public_valuation["normalization_anchor"] = {
             "metric": _text(anchor.get("metric"), 64),
             "years": [
-                int(value)
-                for value in (
-                    anchor.get("years") if isinstance(anchor.get("years"), list) else []
-                )[:16]
+                int(value) for value in (anchor.get("years") if isinstance(anchor.get("years"), list) else [])[:16]
             ],
             "total": float(anchor["total"]) if anchor.get("total") not in (None, "") else None,
-            "share_count": float(anchor["share_count"])
-            if anchor.get("share_count") not in (None, "")
-            else None,
-            "per_share": float(anchor["per_share"])
-            if anchor.get("per_share") not in (None, "")
-            else None,
+            "share_count": float(anchor["share_count"]) if anchor.get("share_count") not in (None, "") else None,
+            "per_share": float(anchor["per_share"]) if anchor.get("per_share") not in (None, "") else None,
             "source_ref": _source_text(anchor.get("source_ref"), 160),
         }
     else:
@@ -466,12 +443,9 @@ def _public_company_research(
     elif isinstance(multiple_basis, Mapping):
         public_valuation["multiple_basis"] = {
             "metric": _text(multiple_basis.get("metric"), 16),
-            "value": float(multiple_basis["value"])
-            if multiple_basis.get("value") not in (None, "")
-            else None,
+            "value": float(multiple_basis["value"]) if multiple_basis.get("value") not in (None, "") else None,
             "source_ref": _source_text(multiple_basis.get("source_ref"), 800),
-            "search_finding_id": _text(multiple_basis.get("search_finding_id"), 120)
-            or None,
+            "search_finding_id": _text(multiple_basis.get("search_finding_id"), 120) or None,
         }
     else:
         raise ValueError("company research has invalid multiple_basis")
@@ -547,9 +521,7 @@ def _public_company_research(
             "current_price": float(snapshot["current_price"]),
             "pe": float(snapshot["pe"]) if snapshot.get("pe") is not None else None,
             "pb": float(snapshot["pb"]) if snapshot.get("pb") is not None else None,
-            "market_cap": float(snapshot["market_cap"])
-            if snapshot.get("market_cap") is not None
-            else None,
+            "market_cap": float(snapshot["market_cap"]) if snapshot.get("market_cap") is not None else None,
             "canonical_sha256": _text(snapshot.get("canonical_sha256"), 64),
         }
         if isinstance(snapshot, Mapping)
@@ -904,8 +876,7 @@ def build_artifact(
             )
             if snapshot_errors:
                 raise ValueError(
-                    f"native company research valuation snapshot is invalid: {code}:"
-                    + ",".join(snapshot_errors)
+                    f"native company research valuation snapshot is invalid: {code}:" + ",".join(snapshot_errors)
                 )
         public_review = _public_review(
             review_for_validation,
@@ -987,8 +958,7 @@ def build_artifact(
             review = record["ai_review"]
             if not native_company_research_profile_matches(review):
                 raise ValueError(
-                    "native company-research model/evidence metadata is invalid: "
-                    f"{record['security_code']}"
+                    f"native company-research model/evidence metadata is invalid: {record['security_code']}"
                 )
     if review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE and len(research_dates) != 1:
         raise ValueError("native company research must use one shared research_as_of date")
@@ -1089,10 +1059,7 @@ def build_artifact(
     public_projection_sha256, public_projection_counts = source_semantic_projection_sha256(
         {"review_mode": review_mode, "packets": public_packets}
     )
-    if (
-        public_projection_sha256 != merged_projection_sha256
-        or public_projection_counts != merged_projection_counts
-    ):
+    if public_projection_sha256 != merged_projection_sha256 or public_projection_counts != merged_projection_counts:
         raise ValueError("public source semantic projection does not match the merged AI screening file")
     source_audit: dict[str, Any] = {"available": False}
     if source_audit_path:

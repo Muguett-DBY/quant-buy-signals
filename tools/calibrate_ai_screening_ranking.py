@@ -191,8 +191,7 @@ def _fact_dimension_kind(claim: Mapping[str, Any]) -> str:
         if token
     }
     financial = bool(dimensions & _FINANCIAL_FACT_DIMENSIONS) or any(
-        re.search(r"财务|盈利|利润|现金流|资产负债|资本回报|经营|运营", token)
-        for token in dimensions
+        re.search(r"财务|盈利|利润|现金流|资产负债|资本回报|经营|运营", token) for token in dimensions
     )
     market = bool(dimensions & _MARKET_FACT_DIMENSIONS) or any(
         re.search(r"估值|股价|市值|交易", token) for token in dimensions
@@ -237,9 +236,8 @@ def _statement_financial_years(statement: str) -> list[int]:
         context = statement[start:end]
         after_year = statement[match.end() : min(len(statement), match.end() + 16)]
         explicit_report_period = bool(_REPORT_PERIOD_MARKERS.search(after_year))
-        if (
-            (_FORECAST_MARKERS.search(context) and not explicit_report_period)
-            or _publication_date_year(statement, match)
+        if (_FORECAST_MARKERS.search(context) and not explicit_report_period) or _publication_date_year(
+            statement, match
         ):
             continue
         financial_matches = list(_FINANCIAL_STATEMENT_MARKERS.finditer(context))
@@ -252,9 +250,7 @@ def _statement_financial_years(statement: str) -> list[int]:
                 (abs((item.start() + item.end()) / 2 - year_offset) for item in financial_matches),
                 default=float("inf"),
             )
-            nearest_market = min(
-                abs((item.start() + item.end()) / 2 - year_offset) for item in market_matches
-            )
+            nearest_market = min(abs((item.start() + item.end()) / 2 - year_offset) for item in market_matches)
             if nearest_market <= nearest_financial:
                 continue
         years.add(int(match.group(1)))
@@ -466,10 +462,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
             # A native web-search review is different: if its claims do not
             # identify a current report period, keep it observable rather
             # than presenting an undated external source as a buy signal.
-            or (
-                str(source.get("model") or "") in LOCAL_OPENCODE_MODELS
-                and not native_company_research
-            )
+            or (str(source.get("model") or "") in LOCAL_OPENCODE_MODELS and not native_company_research)
         )
     ):
         action = "priority_buy"
@@ -499,9 +492,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     confidence = (
         source_confidence
         if source_confidence in {"high", "medium", "low"}
-        else {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(
-            verdict, "low"
-        )
+        else {"confirmed": "medium", "caution": "medium", "missed_candidate": "low"}.get(verdict, "low")
     )
     if _source_quality(source) not in {"verified_https", "source_found"}:
         confidence = "low"
@@ -548,9 +539,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     # and sourced claim statements in AI strengths so the two kinds of reasons
     # cannot be mistaken for one another.
     strengths = (
-        model_strengths
-        if native_company_research
-        else list(dict.fromkeys([*model_strengths, *claim_strengths]))[:8]
+        model_strengths if native_company_research else list(dict.fromkeys([*model_strengths, *claim_strengths]))[:8]
     )
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
     if not risk_flags and not native_company_research:
@@ -576,8 +565,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     # reason, and it does not affect the calibrated score.
     source_quality = _source_quality(source)
     local_codex_review = (
-        str(source.get("model") or "") == LOCAL_REVIEW_MODEL
-        and source.get("web_search_performed") is not True
+        str(source.get("model") or "") == LOCAL_REVIEW_MODEL and source.get("web_search_performed") is not True
     )
     source_note = (
         "本地全量复核（未逐家公司联网；事实来源绑定到当代研究包）"
@@ -616,16 +604,8 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "verdict": public_verdict,
         "recommended_action": recommended_action,
         "buy_attractiveness_score": score,
-        **(
-            {"economic_category": source.get("economic_category")}
-            if "economic_category" in source
-            else {}
-        ),
-        **(
-            {"score_components": source.get("score_components")}
-            if "score_components" in source
-            else {}
-        ),
+        **({"economic_category": source.get("economic_category")} if "economic_category" in source else {}),
+        **({"score_components": source.get("score_components")} if "score_components" in source else {}),
         "calibration_adjustments": calibration_adjustments,
         "ai_action": action,
         "final_category": _final_category(action),
@@ -633,20 +613,14 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "recommendation_label": recommendation_label,
         "ai_independent": bool(source.get("ai_independent", True))
         and not (
-            source_action == "priority_buy"
-            and action != "priority_buy"
-            and freshness["status"] != "current_or_recent"
+            source_action == "priority_buy" and action != "priority_buy" and freshness["status"] != "current_or_recent"
         ),
         "confidence": confidence,
         "summary": summary,
         "key_strengths": strengths,
         **({"quantitative_facts": quantitative_facts} if quantitative_facts else {}),
         "risk_flags": risk_flags,
-        "claims": (
-            claims
-            if native_company_research
-            else claims[:12]
-        ),
+        "claims": (claims if native_company_research else claims[:12]),
         "model": str(source.get("model") or "unknown-external-review"),
         "effort": str(source.get("effort") or "max"),
         "retrieval_backend": str(source.get("retrieval_backend") or ""),
@@ -679,11 +653,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
                 "research_as_of": source.get("research_as_of"),
                 "economic_profile": source.get("economic_profile"),
                 "valuation": source.get("valuation"),
-                **(
-                    {"valuation_snapshot": source.get("valuation_snapshot")}
-                    if "valuation_snapshot" in source
-                    else {}
-                ),
+                **({"valuation_snapshot": source.get("valuation_snapshot")} if "valuation_snapshot" in source else {}),
                 "search_findings": source.get("search_findings"),
                 "evidence_bindings": source.get("evidence_bindings"),
             }

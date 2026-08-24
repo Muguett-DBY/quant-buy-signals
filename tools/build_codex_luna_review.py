@@ -23,6 +23,7 @@ from tools.ai_screening_contract import LOCAL_REVIEW_MODEL, REVIEW_SCHEMA_VERSIO
 MARKET_DATE = "2026-08-24"
 MODEL = LOCAL_REVIEW_MODEL
 EFFORT = "max"
+DEFAULT_KNOWLEDGE_PATH = Path("tools/ai_company_research_knowledge.md")
 MIN_BUY_FCF_MARGIN = 0.03
 MIN_BUY_FCF_HISTORY_AVERAGE = 0.0
 MAX_BUY_PB_STRETCH_RATIO = 2.5
@@ -148,9 +149,33 @@ def _interim_yoy(statement: str, metric: str) -> float | None:
 
 
 def _category(industry: str) -> str:
-    if industry in {"化工", "工业机械", "建材", "有色金属", "钢铁", "煤炭", "石油天然气", "汽车整车", "汽车零部件", "工程机械", "电气设备", "交通运输"}:
+    if industry in {
+        "化工",
+        "工业机械",
+        "建材",
+        "有色金属",
+        "钢铁",
+        "煤炭",
+        "石油天然气",
+        "汽车整车",
+        "汽车零部件",
+        "工程机械",
+        "电气设备",
+        "交通运输",
+    }:
         return "cyclical"
-    if industry in {"半导体", "电子元器件", "软件互联网", "通信设备", "传媒游戏", "医疗服务", "化学制药", "生物制药", "中药", "专业技术服务"}:
+    if industry in {
+        "半导体",
+        "电子元器件",
+        "软件互联网",
+        "通信设备",
+        "传媒游戏",
+        "医疗服务",
+        "化学制药",
+        "生物制药",
+        "中药",
+        "专业技术服务",
+    }:
         return "growth"
     if industry in {"银行", "证券", "保险", "房地产"}:
         return "quality_equity"
@@ -159,7 +184,9 @@ def _category(industry: str) -> str:
     return "other"
 
 
-def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) -> tuple[float, str, list[str], list[str], list[str], str]:
+def _score_and_reasons(
+    company: Mapping[str, Any], packet: Mapping[str, Any]
+) -> tuple[float, str, list[str], list[str], list[str], str]:
     code = _text(packet.get("security_code"))
     name = _text(packet.get("name")) or _text(company.get("name")) or code
     industry = _text(company.get("industry"))
@@ -179,18 +206,14 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     previous_profit = _number(previous.get("parent_net_profit"))
     revenue_cagr = _cagr(_number(first.get("revenue")), revenue)
     profit_cagr = _cagr(_number(first.get("parent_net_profit")), profit)
-    profit_yoy = (profit / previous_profit - 1) if profit is not None and previous_profit and previous_profit > 0 else None
+    profit_yoy = (
+        (profit / previous_profit - 1) if profit is not None and previous_profit and previous_profit > 0 else None
+    )
     fcf_positive = sum(1 for row in annual if (_number(row.get("free_cashflow")) or 0) > 0)
     annual_fcf_values = [
-        value
-        for value in (_number(row.get("free_cashflow")) for row in annual[-3:])
-        if value is not None
+        value for value in (_number(row.get("free_cashflow")) for row in annual[-3:]) if value is not None
     ]
-    fcf_history_average = (
-        sum(annual_fcf_values) / len(annual_fcf_values)
-        if len(annual_fcf_values) == 3
-        else None
-    )
+    fcf_history_average = sum(annual_fcf_values) / len(annual_fcf_values) if len(annual_fcf_values) == 3 else None
     fcf_history_ready = (
         fcf_history_average is not None
         and fcf_history_average > MIN_BUY_FCF_HISTORY_AVERAGE
@@ -215,14 +238,18 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     if pe is not None and pe > 0:
         if pe_median and pe < pe_median * 0.75:
             score += 13
-            strengths.append(f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍，低于同业中位数 {pe_median:.2f} 倍，价格端有缓冲。")
+            strengths.append(
+                f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍，低于同业中位数 {pe_median:.2f} 倍，价格端有缓冲。"
+            )
         elif pe_median and pe <= pe_median * 1.1:
             score += 5
             strengths.append(f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍接近同业中位数 {pe_median:.2f} 倍，估值不算极端。")
         elif pe_median:
             premium = pe / pe_median - 1
             score -= min(14, round(premium * 30, 1))
-            risks.append(f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍高于同业中位数 {pe_median:.2f} 倍约 {_pct(premium)}，安全边际偏薄。")
+            risks.append(
+                f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍高于同业中位数 {pe_median:.2f} 倍约 {_pct(premium)}，安全边际偏薄。"
+            )
         elif pe > 45:
             score -= 12
             risks.append(f"交易日 {MARKET_DATE} 的 PE {pe:.2f} 倍偏高，盈利兑现不足时安全边际有限。")
@@ -244,7 +271,9 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
 
     if fcf is not None and fcf > 0 and ocf is not None and ocf > 0:
         score += 12
-        strengths.append(f"2025 年经营现金流 {_hundred_million(ocf)}、简化自由现金流 {_hundred_million(fcf)} 均为正，现金转化尚可。")
+        strengths.append(
+            f"2025 年经营现金流 {_hundred_million(ocf)}、简化自由现金流 {_hundred_million(fcf)} 均为正，现金转化尚可。"
+        )
     elif fcf is not None and fcf <= 0:
         score -= 15
         risks.append(f"2025 年简化自由现金流 {_hundred_million(fcf)}，当前现金回报不足以支撑积极结论。")
@@ -312,7 +341,10 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         interim_revenue_decline = _interim_yoy(interim_income, "营业收入")
         if interim_profit_decline is not None and interim_profit_decline <= -30:
             score -= 15
-            risks.insert(0, f"最新可得中期归母净利润同比下降 {_pct(interim_profit_decline / 100)}，收入与盈利同时走弱时不宜追价。")
+            risks.insert(
+                0,
+                f"最新可得中期归母净利润同比下降 {_pct(interim_profit_decline / 100)}，收入与盈利同时走弱时不宜追价。",
+            )
         elif interim_profit_decline is not None and interim_profit_decline < 0:
             score -= 4
             risks.append(f"最新可得中期数据仍有同比下滑：{interim_income}。")
@@ -328,9 +360,13 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
             interim_cashflow_conflict = True
             score -= 7
             if interim_ocf is not None and interim_ocf < 0:
-                risks.append(f"最新可得中期经营活动现金流为 {_reported_billion_yuan(interim_ocf)}，简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，现金回报转弱。")
+                risks.append(
+                    f"最新可得中期经营活动现金流为 {_reported_billion_yuan(interim_ocf)}，简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，现金回报转弱。"
+                )
             else:
-                risks.append(f"最新可得中期经营活动现金流仍为 {_reported_billion_yuan(interim_ocf)}，但资本开支后简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，不满足当前买入的现金回报条件。")
+                risks.append(
+                    f"最新可得中期经营活动现金流仍为 {_reported_billion_yuan(interim_ocf)}，但资本开支后简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，不满足当前买入的现金回报条件。"
+                )
         cashflow_declines = [value for value in (interim_ocf_decline, interim_fcf_decline) if value is not None]
         if cashflow_declines and min(cashflow_declines) <= -30:
             score -= 8
@@ -369,9 +405,8 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and interim_revenue_decline <= -10
     )
     annual_or_interim_trend_stress = (
-        (interim_revenue_decline is not None and interim_revenue_decline <= MAX_BUY_INTERIM_REVENUE_DECLINE)
-        or (interim_profit_decline is not None and interim_profit_decline <= -5)
-    )
+        interim_revenue_decline is not None and interim_revenue_decline <= MAX_BUY_INTERIM_REVENUE_DECLINE
+    ) or (interim_profit_decline is not None and interim_profit_decline <= -5)
     cashflow_trend_stress = any(
         value is not None and value <= MAX_BUY_INTERIM_CASHFLOW_DECLINE
         for value in (interim_ocf_decline, interim_fcf_decline)
@@ -398,8 +433,17 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and (pb_stretch_ratio is None or pb_stretch_ratio <= MAX_BUY_PB_STRETCH_RATIO)
     )
     if category == "quality_equity":
-        evidence_ready = evidence_ready and not missing_returns and pe is not None and pe_median is not None and pe <= pe_median * 1.1
-        risks.insert(0, "金融机构的经营现金流与资本开支不按普通企业自由现金流解读，且研究包未形成完整股东回报核验，暂不升级为买入。")
+        evidence_ready = (
+            evidence_ready
+            and not missing_returns
+            and pe is not None
+            and pe_median is not None
+            and pe <= pe_median * 1.1
+        )
+        risks.insert(
+            0,
+            "金融机构的经营现金流与资本开支不按普通企业自由现金流解读，且研究包未形成完整股东回报核验，暂不升级为买入。",
+        )
     if category == "cyclical" and (pe is None or pe <= 0 or pe_median is None):
         evidence_ready = False
     # Keep headroom below a false-precision 100.  A score in the upper 80s or
@@ -425,7 +469,11 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         summary_lead = "当前结论：观察。"
     else:
         summary_lead = "当前结论：不建议。"
-    current = f"交易日 {MARKET_DATE} 股价 {snap['price']:.2f} 元" if snap.get("price") is not None else f"交易日 {MARKET_DATE} 价格未知"
+    current = (
+        f"交易日 {MARKET_DATE} 股价 {snap['price']:.2f} 元"
+        if snap.get("price") is not None
+        else f"交易日 {MARKET_DATE} 价格未知"
+    )
     valuation_text = f"PE {pe:.2f} 倍" if pe is not None else f"PB {pb:.2f} 倍" if pb is not None else "估值倍数缺失"
     basis = ("；".join(strengths[:2]) if strengths else "研究包未形成足够强的正向证据").rstrip("。；")
     counter = (risks[0] if risks else "仍需持续核验行业与治理风险").rstrip("。；")
@@ -451,25 +499,41 @@ def _review(packet: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, 
     refs_by_id = {key: _source_refs(value) for key, value in _fact_map(company).items()}
     claims: list[dict[str, Any]] = []
     for statement in facts[:6]:
-        item = next((value for value in company.get("facts", []) if isinstance(value, Mapping) and _text(value.get("statement")) == statement), None)
+        item = next(
+            (
+                value
+                for value in company.get("facts", [])
+                if isinstance(value, Mapping) and _text(value.get("statement")) == statement
+            ),
+            None,
+        )
         refs = refs_by_id.get(_text(item.get("id")) if isinstance(item, Mapping) else "", [])
         if not refs:
             continue
-        claims.append({
-            "fact_id": _text(item.get("id")),
-            "statement": statement,
-            "source_ref": refs[0],
-            "source_refs": refs[:8],
-            "source_context": _text(item.get("source_kind")),
-            "support": (
-                "supports"
-                if _text(item.get("id")) in {"valuation", "latest_cashflow", "annual_cashflow", "capital_quality"}
-                else "contradicts"
-                if statement in risks
-                else "context"
-            ),
-        })
-    years = sorted({int(year) for item in company.get("facts", []) if isinstance(item, Mapping) for year in re.findall(r"(?:19|20)\d{2}", _text(item.get("period")))})
+        claims.append(
+            {
+                "fact_id": _text(item.get("id")),
+                "statement": statement,
+                "source_ref": refs[0],
+                "source_refs": refs[:8],
+                "source_context": _text(item.get("source_kind")),
+                "support": (
+                    "supports"
+                    if _text(item.get("id")) in {"valuation", "latest_cashflow", "annual_cashflow", "capital_quality"}
+                    else "contradicts"
+                    if statement in risks
+                    else "context"
+                ),
+            }
+        )
+    years = sorted(
+        {
+            int(year)
+            for item in company.get("facts", [])
+            if isinstance(item, Mapping)
+            for year in re.findall(r"(?:19|20)\d{2}", _text(item.get("period")))
+        }
+    )
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": code,
@@ -484,7 +548,10 @@ def _review(packet: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, 
         "recommendation_label": label,
         "ai_independent": True,
         "economic_category": category,
-        "score_components": {"risk_adjusted_expected_return": score, "evidence_confidence": max(35.0, min(95.0, score))},
+        "score_components": {
+            "risk_adjusted_expected_return": score,
+            "evidence_confidence": max(35.0, min(95.0, score)),
+        },
         "confidence": "medium" if action in {"priority_buy", "watchlist"} else "high",
         "summary": summary,
         "key_strengths": strengths,
@@ -503,11 +570,40 @@ def _review(packet: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, 
             _text(item.get("type_key"))
             for item in packet.get("candidate_types", [])
             if isinstance(item, Mapping) and _text(item.get("type_key"))
-        ] or [type_key],
+        ]
+        or [type_key],
     }
 
 
-def build(candidates_path: Path, research_path: Path, output_path: Path) -> dict[str, Any]:
+def _knowledge_metadata(knowledge_path: Path) -> dict[str, Any]:
+    """Record the exact contract document without claiming model injection.
+
+    This reviewer is deliberately facts-only: it does not call a model with
+    the knowledge text.  Reading the file here still binds the generated
+    metadata to the contract document selected for the run and prevents a
+    stale hard-coded digest from looking like provenance.
+    """
+
+    knowledge_bytes = knowledge_path.read_bytes()
+    if not knowledge_bytes.strip():
+        raise ValueError(f"knowledge document is empty: {knowledge_path}")
+    return {
+        "knowledge_contract": (
+            "facts-only local review; knowledge loaded for contract only, not injected into model reasoning"
+        ),
+        "knowledge_loaded_for_contract": True,
+        "knowledge_used_for_model_reasoning": False,
+        "knowledge_sha256": hashlib.sha256(knowledge_bytes).hexdigest(),
+    }
+
+
+def build(
+    candidates_path: Path,
+    research_path: Path,
+    output_path: Path,
+    knowledge_path: Path = DEFAULT_KNOWLEDGE_PATH,
+) -> dict[str, Any]:
+    knowledge_metadata = _knowledge_metadata(knowledge_path)
     candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
     research_payload = json.loads(research_path.read_text(encoding="utf-8"))
     companies = research_payload.get("companies", research_payload)
@@ -538,8 +634,12 @@ def build(candidates_path: Path, research_path: Path, output_path: Path) -> dict
     if errors:
         raise ValueError("invalid local reviews: " + "; ".join(errors[:8]))
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
-    counts = {action: sum(row["ai_action"] == action for row in rows) for action in ("priority_buy", "watchlist", "avoid")}
+    output_path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows), encoding="utf-8"
+    )
+    counts = {
+        action: sum(row["ai_action"] == action for row in rows) for action in ("priority_buy", "watchlist", "avoid")
+    }
     return {
         "candidate_count": len(rows),
         "type_pair_count": sum(len(row.get("_candidate_type_keys") or []) for row in rows),
@@ -547,8 +647,7 @@ def build(candidates_path: Path, research_path: Path, output_path: Path) -> dict
         "effort": EFFORT,
         "web_search_performed": 0,
         **counts,
-        "knowledge_contract": "E:\\模板汇总MD / 补丁7 + 补丁6; facts-only local review",
-        "knowledge_sha256": "1435d9886520bdd1a9b30a133037aa6d2c74d8b3d6ddf7ef105b092d58249565",
+        **knowledge_metadata,
         "input_sha256": hashlib.sha256(candidates_path.read_bytes()).hexdigest(),
     }
 
@@ -558,8 +657,15 @@ def main() -> int:
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--research", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--knowledge", type=Path, default=DEFAULT_KNOWLEDGE_PATH)
     args = parser.parse_args()
-    print(json.dumps(build(args.candidates, args.research, args.out), ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            build(args.candidates, args.research, args.out, args.knowledge),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

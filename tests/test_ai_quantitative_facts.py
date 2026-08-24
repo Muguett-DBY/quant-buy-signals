@@ -36,10 +36,7 @@ def test_quantitative_facts_keep_period_and_units() -> None:
     facts = quantitative_facts(_tcl_company(), "type1", market_as_of="2026-08-21")
     assert facts[0] == "估值快照：股价 9.25 元；PE 8.89 倍；PB 2.62 倍；市值 100.28 亿元（交易日 2026-08-21）"
     assert "年度财务历史覆盖至 2025 年；年度数字不等同于预测" in facts
-    assert all(
-        not any(term in value.lower() for term in ("type", "确定性", "触发", "规则分数"))
-        for value in facts
-    )
+    assert all(not any(term in value.lower() for term in ("type", "确定性", "触发", "规则分数")) for value in facts)
     assert all(has_numeric_fact(value) for value in facts)
 
 
@@ -86,4 +83,7 @@ def test_enrich_keeps_quantitative_facts_out_of_ai_strengths() -> None:
     assert priority_with_two == 1
     assert review["key_strengths"] == ["模型确认主营业务稳定"]
     assert review["quantitative_facts"] == quantitative_facts(_tcl_company(), "", market_as_of="2026-08-21")
-    assert all("确定性" not in value and "触发" not in value and "type" not in value.lower() for value in review["quantitative_facts"])
+    assert all(
+        "确定性" not in value and "触发" not in value and "type" not in value.lower()
+        for value in review["quantitative_facts"]
+    )

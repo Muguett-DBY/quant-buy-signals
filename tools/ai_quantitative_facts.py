@@ -50,8 +50,7 @@ def _annual_end_year(company: Mapping[str, Any]) -> int | None:
     years = [
         int(item.get("end_year", item.get("year")))
         for item in history
-        if isinstance(item, Mapping)
-        and isinstance(item.get("end_year", item.get("year")), int)
+        if isinstance(item, Mapping) and isinstance(item.get("end_year", item.get("year")), int)
     ]
     return max(years) if years else None
 

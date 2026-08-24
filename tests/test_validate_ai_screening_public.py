@@ -446,7 +446,7 @@ def _company_research_artifact() -> dict:
                     "source_kind": "company_ir",
                     "fact_id": "valuation-fact",
                     "support": "context",
-                }
+                },
             ],
             "search_findings": [
                 {
@@ -745,9 +745,9 @@ def test_company_research_rejects_failed_source_audit() -> None:
 
 def test_company_research_rejects_unbound_business_model_source() -> None:
     value = _company_research_artifact()
-    value["packets"][0]["ai_review"]["economic_profile"]["business_model_sources"][0][
-        "source_ref"
-    ] = "https://example.test/forged"
+    value["packets"][0]["ai_review"]["economic_profile"]["business_model_sources"][0]["source_ref"] = (
+        "https://example.test/forged"
+    )
 
     with pytest.raises(ValueError, match="business-model source is unbound"):
         validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
@@ -774,8 +774,10 @@ def test_company_research_rejects_synchronised_price_and_upside_tamper() -> None
     for scenario in valuation["scenarios"].values():
         scenario["upside_pct"] = (scenario["value_per_share"] / 13.0 - 1.0) * 100.0
     valuation["margin_of_safety"] = (
-        valuation["scenarios"]["bear"]["value_per_share"] - 13.0
-    ) / valuation["scenarios"]["bear"]["value_per_share"] * 100.0
+        (valuation["scenarios"]["bear"]["value_per_share"] - 13.0)
+        / valuation["scenarios"]["bear"]["value_per_share"]
+        * 100.0
+    )
 
     with pytest.raises(ValueError, match="valuation_snapshot|valuation snapshot"):
         validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")

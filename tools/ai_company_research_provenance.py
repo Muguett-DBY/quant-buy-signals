@@ -181,13 +181,15 @@ def load_research_provenance_context(
         raise ValueError("company research input is not declared as a full-coverage review")
     if int(payload.get("candidate_offset") or 0) != 0:
         raise ValueError("company research full-coverage queue has a non-zero offset")
-    if int(payload.get("candidate_count") or -1) != company_count or int(
-        payload.get("candidate_total") or -1
-    ) != company_count:
+    if (
+        int(payload.get("candidate_count") or -1) != company_count
+        or int(payload.get("candidate_total") or -1) != company_count
+    ):
         raise ValueError("company research candidate counts do not prove full coverage")
-    if int(payload.get("type_pair_candidate_count") or -1) != pair_count or int(
-        payload.get("type_pair_candidate_total") or -1
-    ) != pair_count:
+    if (
+        int(payload.get("type_pair_candidate_count") or -1) != pair_count
+        or int(payload.get("type_pair_candidate_total") or -1) != pair_count
+    ):
         raise ValueError("company research type-pair counts do not prove full coverage")
 
     packet_map: dict[tuple[str, str], dict[str, Any]] = {}
@@ -291,9 +293,10 @@ def validate_review_provenance(
 
     packet_code = str(packet.get("security_code") or "").strip()
     packet_type = str(packet.get("type_key") or "").strip()
-    if str(review.get("security_code") or "").strip() != packet_code or str(
-        review.get("type_key") or ""
-    ).strip() != packet_type:
+    if (
+        str(review.get("security_code") or "").strip() != packet_code
+        or str(review.get("type_key") or "").strip() != packet_type
+    ):
         raise ValueError("company review candidate identity does not match provenance packet")
     packet_name = str(packet.get("name") or "").strip()
     review_name = str(review.get("company_name") or review.get("name") or "").strip()
@@ -324,9 +327,7 @@ def validate_review_provenance(
         raise ValueError("company review candidate type-pair identity mismatch")
 
 
-def validate_review_set_provenance(
-    reviews: list[Mapping[str, Any]], context: ResearchProvenanceContext
-) -> None:
+def validate_review_set_provenance(reviews: list[Mapping[str, Any]], context: ResearchProvenanceContext) -> None:
     """Validate a complete set while allowing only the two approved profiles."""
 
     seen: set[tuple[str, str]] = set()

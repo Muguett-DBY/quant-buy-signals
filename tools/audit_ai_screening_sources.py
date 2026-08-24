@@ -89,9 +89,7 @@ def public_source_semantic_projection(payload: Mapping[str, Any]) -> dict[str, A
     packets = payload.get("packets")
     if not isinstance(packets, list):
         raise ValueError("AI screening packets are missing")
-    publish_search_findings = (
-        str(payload.get("review_mode") or "") == "opencode_native_company_research_review"
-    )
+    publish_search_findings = str(payload.get("review_mode") or "") == "opencode_native_company_research_review"
     companies: list[dict[str, Any]] = []
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -419,11 +417,7 @@ def _period_matches(text: str, tokens: set[str]) -> bool:
     # ``_report_period_tokens`` intentionally includes a year fallback for
     # year-only claims.  Once a quarter/half/year-end/date token exists, use
     # those specific forms so a different period in the same year cannot pass.
-    detailed = {
-        token
-        for token in tokens
-        if not re.fullmatch(r"20\d{2}年?", str(token).casefold())
-    }
+    detailed = {token for token in tokens if not re.fullmatch(r"20\d{2}年?", str(token).casefold())}
     candidates = detailed or tokens
     return any(re.sub(r"[\s./-]", "", str(token)).casefold() in compact_text for token in candidates if token)
 
@@ -436,9 +430,7 @@ def _structured_field_tokens(url: str) -> set[str]:
     fields: set[str] = set()
     for value in params.get("columns", []):
         fields.update(
-            token.casefold()
-            for token in re.split(r"[,\s]+", value)
-            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token)
+            token.casefold() for token in re.split(r"[,\s]+", value) if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token)
         )
     return fields
 
@@ -1044,8 +1036,7 @@ def audit(
                     semantic_failed_keys.add(int(claim["key"]))
                     company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
                     semantic_issues.extend(
-                        {**common, "source": str(claim["url"]), "reason": reason}
-                        for reason in structured_issues
+                        {**common, "source": str(claim["url"]), "reason": reason} for reason in structured_issues
                     )
                 continue
         if not is_html or not isinstance(body, bytes):
@@ -1119,7 +1110,10 @@ def audit(
             issue.get("source") == result["url"] and "non-HTML" not in issue.get("reason", "")
             for issue in semantic_issues
         )
-        url_unverified = any(issue.get("source") == result["url"] and "unverified" in issue.get("reason", "") for issue in semantic_issues)
+        url_unverified = any(
+            issue.get("source") == result["url"] and "unverified" in issue.get("reason", "")
+            for issue in semantic_issues
+        )
         result["semantic_status"] = "failed" if url_failed else "unverified" if url_unverified else "pass"
         if result["result"] == "invalid":
             for binding in result.get("bindings", []):
@@ -1140,7 +1134,9 @@ def audit(
     semantic_failed_count = len(semantic_failed_keys)
     semantic_unverified_count = len(semantic_unverified_keys)
     for state in company_states.values():
-        state["semantic_passed_keys"] = state["semantic_keys"] - state["semantic_failed_keys"] - state["semantic_unverified_keys"]
+        state["semantic_passed_keys"] = (
+            state["semantic_keys"] - state["semantic_failed_keys"] - state["semantic_unverified_keys"]
+        )
     company_coverage: list[dict[str, Any]] = []
     for code in sorted(company_states):
         state = company_states[code]
@@ -1231,9 +1227,7 @@ def audit(
         "official_market_domain_count": sum(bool(result["official_market_domain"]) for result in results),
         "invalid_claim_urls": invalid_claim_urls,
         "semantic_issues": semantic_issues,
-        "source_bindings": [
-            binding for url in sorted(detailed_bindings) for binding in detailed_bindings[url]
-        ],
+        "source_bindings": [binding for url in sorted(detailed_bindings) for binding in detailed_bindings[url]],
         "company_coverage": company_coverage,
         "company_coverage_by_code": {item["security_code"]: item for item in company_coverage},
         "results": results,

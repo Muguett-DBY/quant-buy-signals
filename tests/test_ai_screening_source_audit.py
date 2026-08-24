@@ -237,8 +237,7 @@ def test_source_audit_projection_detects_text_tampering_with_unchanged_url(
             "content_type": "text/html; charset=utf-8",
             "official_market_domain": False,
             "_body": (
-                '<p>600585 海螺水泥 2026H1</p>'
-                '<meta property="article:published_time" content="2026-08-13">'
+                '<p>600585 海螺水泥 2026H1</p><meta property="article:published_time" content="2026-08-13">'
             ).encode(),
         },
     )
@@ -327,7 +326,7 @@ def test_source_audit_accepts_matching_html_article_period(tmp_path, monkeypatch
             "status": 200,
             "content_type": "text/html; charset=utf-8",
             "official_market_domain": False,
-                "_body": b'<p>600585 2026H1</p><meta property="article:published_time" content="2026-08-13">',
+            "_body": b'<p>600585 2026H1</p><meta property="article:published_time" content="2026-08-13">',
         },
     )
 
@@ -733,8 +732,12 @@ def test_source_audit_reports_company_coverage_without_global_count_substitution
                 "name": "浦发银行",
                 "type_key": "type1",
                 "ai_review": {
-                    "claims": [{"statement": "2026H1现金流18亿元", "source_ref": good_url, "search_finding_id": "good"}],
-                    "search_findings": [{"id": "good", "url": good_url, "report_period": "2026H1", "finding": "现金流18亿元"}],
+                    "claims": [
+                        {"statement": "2026H1现金流18亿元", "source_ref": good_url, "search_finding_id": "good"}
+                    ],
+                    "search_findings": [
+                        {"id": "good", "url": good_url, "report_period": "2026H1", "finding": "现金流18亿元"}
+                    ],
                 },
             },
             {
@@ -743,7 +746,9 @@ def test_source_audit_reports_company_coverage_without_global_count_substitution
                 "type_key": "type1",
                 "ai_review": {
                     "claims": [{"statement": "2026H1现金流19亿元", "source_ref": bad_url, "search_finding_id": "bad"}],
-                    "search_findings": [{"id": "bad", "url": bad_url, "report_period": "2026H1", "finding": "现金流19亿元"}],
+                    "search_findings": [
+                        {"id": "bad", "url": bad_url, "report_period": "2026H1", "finding": "现金流19亿元"}
+                    ],
                 },
             },
         ],

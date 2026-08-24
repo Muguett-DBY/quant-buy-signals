@@ -286,9 +286,7 @@ def build_input(
     requested_generation = str(generation or "").strip()
     requested_market_as_of = str(market_as_of or "").strip()
     if requested_generation and source_generation and requested_generation != source_generation:
-        raise ValueError(
-            f"generation override conflicts with snapshot: {requested_generation}/{source_generation}"
-        )
+        raise ValueError(f"generation override conflicts with snapshot: {requested_generation}/{source_generation}")
     if requested_market_as_of and source_market_as_of and requested_market_as_of != source_market_as_of:
         raise ValueError(
             f"market_as_of override conflicts with snapshot: {requested_market_as_of}/{source_market_as_of}"
@@ -445,8 +443,7 @@ def merge_reviews(
             raise ValueError(f"duplicate review: {key}")
         reviews[key] = review
     packet_keys = {
-        (str(packet.get("security_code")), str(packet.get("type_key")))
-        for packet in payload.get("packets", [])
+        (str(packet.get("security_code")), str(packet.get("type_key"))) for packet in payload.get("packets", [])
     }
     extra = sorted(set(reviews) - packet_keys)
     if extra:

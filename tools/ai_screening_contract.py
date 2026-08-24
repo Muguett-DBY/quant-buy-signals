@@ -151,9 +151,7 @@ GORDON_SCENARIO_FIELDS = (
     "terminal_growth_rate_pct",
     "equity_adjustment_per_share",
 )
-RELIABLE_VALUATION_METHODS = frozenset(
-    {"gordon_fcf_per_share", "normalized_earnings_multiple", "book_value_multiple"}
-)
+RELIABLE_VALUATION_METHODS = frozenset({"gordon_fcf_per_share", "normalized_earnings_multiple", "book_value_multiple"})
 LEGACY_VALUATION_METHODS = frozenset({"scenario_multiple", "multiple"})
 UNAVAILABLE_VALUATION_METHODS = frozenset(
     {
@@ -244,7 +242,12 @@ def valuation_snapshot_errors(
     errors: list[str] = []
     if snapshot.get("contract_version") != VALUATION_SNAPSHOT_CONTRACT_VERSION:
         errors.append("valuation_snapshot.contract_version")
-    if not snapshot_code or snapshot_code != code or expected_security_code is not None and snapshot_code != expected_security_code:
+    if (
+        not snapshot_code
+        or snapshot_code != code
+        or expected_security_code is not None
+        and snapshot_code != expected_security_code
+    ):
         errors.append("valuation_snapshot.security_code")
     if not generation or expected_snapshot_generation is not None and generation != expected_snapshot_generation:
         errors.append("valuation_snapshot.snapshot_generation")
@@ -271,16 +274,12 @@ def valuation_snapshot_errors(
 def native_company_research_profile_matches(review: Mapping[str, Any]) -> bool:
     """Return whether one review uses an exact audited native-search profile."""
     return (
-        (
-            str(review.get("model") or ""),
-            str(review.get("effort") or ""),
-            str(review.get("retrieval_backend") or ""),
-            str(review.get("retrieval_model") or ""),
-            str(review.get("retrieval_effort") or ""),
-        )
-        in NATIVE_COMPANY_RESEARCH_PROFILES
-        and review.get("native_search_completed") is True
-    )
+        str(review.get("model") or ""),
+        str(review.get("effort") or ""),
+        str(review.get("retrieval_backend") or ""),
+        str(review.get("retrieval_model") or ""),
+        str(review.get("retrieval_effort") or ""),
+    ) in NATIVE_COMPANY_RESEARCH_PROFILES and review.get("native_search_completed") is True
 
 
 _ACTION_ALLOWED_VERDICTS = {
@@ -719,9 +718,7 @@ def stale_current_period_fields(review: Mapping[str, Any]) -> list[str]:
     """Find user prose that labels an older period as current/latest."""
 
     reference_years = [
-        int(value)
-        for value in review.get("freshness_years", [])
-        if isinstance(value, int) and 1900 <= value <= 2100
+        int(value) for value in review.get("freshness_years", []) if isinstance(value, int) and 1900 <= value <= 2100
     ]
     valuation = review.get("valuation")
     # A 2026 research/price date does not make the latest filed annual period
@@ -940,9 +937,7 @@ def _company_research_envelope_errors(review: Mapping[str, Any], *, reject_rule_
             multiple_value = _as_float(multiple.get("value")) if isinstance(multiple, Mapping) else None
             normalization_anchor = valuation.get("normalization_anchor")
             anchor_per_share = (
-                _as_float(normalization_anchor.get("per_share"))
-                if isinstance(normalization_anchor, Mapping)
-                else None
+                _as_float(normalization_anchor.get("per_share")) if isinstance(normalization_anchor, Mapping) else None
             )
             for scenario, multiple_factor in zip(VALUATION_SCENARIOS, (0.7, 1.0, 1.3), strict=True):
                 item = scenarios.get(scenario)
@@ -1045,20 +1040,17 @@ def _company_research_envelope_errors(review: Mapping[str, Any], *, reject_rule_
                 if not values["bear"] <= values["base"] <= values["bull"]:
                     invalid = True
                 if all(scenario in anchors for scenario in VALUATION_SCENARIOS) and not (
-                    anchors["bear"] <= anchors["base"] + 0.005
-                    and anchors["base"] <= anchors["bull"] + 0.005
+                    anchors["bear"] <= anchors["base"] + 0.005 and anchors["base"] <= anchors["bull"] + 0.005
                 ):
                     invalid = True
-                if reject_rule_language and method == "gordon_fcf_per_share" and (
-                    not all(scenario in gordon_growths for scenario in VALUATION_SCENARIOS)
-                    or not all(scenario in gordon_discounts for scenario in VALUATION_SCENARIOS)
-                    or not (
-                        gordon_growths["bear"] <= gordon_growths["base"]
-                        <= gordon_growths["bull"]
-                    )
-                    or not (
-                        gordon_discounts["bear"] >= gordon_discounts["base"]
-                        >= gordon_discounts["bull"]
+                if (
+                    reject_rule_language
+                    and method == "gordon_fcf_per_share"
+                    and (
+                        not all(scenario in gordon_growths for scenario in VALUATION_SCENARIOS)
+                        or not all(scenario in gordon_discounts for scenario in VALUATION_SCENARIOS)
+                        or not (gordon_growths["bear"] <= gordon_growths["base"] <= gordon_growths["bull"])
+                        or not (gordon_discounts["bear"] >= gordon_discounts["base"] >= gordon_discounts["bull"])
                     )
                 ):
                     invalid = True
@@ -1085,14 +1077,10 @@ def _company_research_envelope_errors(review: Mapping[str, Any], *, reject_rule_
                 if isinstance(profile, Mapping):
                     research_texts.extend(profile.get(field) for field in ECONOMIC_PROFILE_FIELDS)
                 research_texts.extend(
-                    item.get("statement")
-                    for item in review.get("claims", [])
-                    if isinstance(item, Mapping)
+                    item.get("statement") for item in review.get("claims", []) if isinstance(item, Mapping)
                 )
                 research_texts.extend(
-                    item.get("finding")
-                    for item in review.get("search_findings", [])
-                    if isinstance(item, Mapping)
+                    item.get("finding") for item in review.get("search_findings", []) if isinstance(item, Mapping)
                 )
                 if has_material_minority_interest_risk(research_texts):
                     invalid = True
@@ -1332,8 +1320,7 @@ def _company_research_public_errors(review: Mapping[str, Any], *, require_calibr
         if source_ref.lower().startswith("http://"):
             errors.append("claim_https_source_ref")
         if isinstance(source_refs, list) and any(
-            isinstance(value, str) and value.strip().lower().startswith("http://")
-            for value in source_refs
+            isinstance(value, str) and value.strip().lower().startswith("http://") for value in source_refs
         ):
             errors.append("claim_https_source_refs")
         fact_id = str(claim.get("fact_id") or "").strip()

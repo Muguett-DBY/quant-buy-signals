@@ -49,11 +49,14 @@ def test_valuation_snapshot_rejects_synchronised_valuation_tamper() -> None:
         pb=1.2,
         market_cap=50_000_000_000.0,
     )
-    assert valuation_snapshot_errors(
-        review,
-        expected_snapshot_generation="generation-1",
-        expected_market_as_of="2026-08-24",
-    ) == []
+    assert (
+        valuation_snapshot_errors(
+            review,
+            expected_snapshot_generation="generation-1",
+            expected_market_as_of="2026-08-24",
+        )
+        == []
+    )
 
     missing = dict(review)
     missing.pop("valuation_snapshot")
