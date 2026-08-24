@@ -15,9 +15,13 @@ on:
       - tools/validate_ai_screening_public.py
       - tools/calibrate_ai_screening_ranking.py
       - tools/build_codex_luna_review.py
+      - tools/ai_company_research_knowledge.md
+      - tools/ai_screening_dual_channel_contract.py
       - tests/test_ai_screening_contract.py
       - tests/test_validate_ai_screening_public.py
       - tests/test_ai_screening_release_contract.py
+      - tests/test_build_codex_luna_review.py
+      - tests/test_ai_screening_dual_channel_contract.py
       - tests/test_assemble_ai_screening_reviews.py
       - tests/test_merge_ai_screening_reviews.py
       - .github/workflows/publish-ai-screening.yml
@@ -57,6 +61,8 @@ jobs:
             tests/test_ai_screening_contract.py \
             tests/test_validate_ai_screening_public.py \
             tests/test_ai_screening_release_contract.py \
+            tests/test_build_codex_luna_review.py \
+            tests/test_ai_screening_dual_channel_contract.py \
             tests/test_assemble_ai_screening_reviews.py \
             tests/test_merge_ai_screening_reviews.py \
             tests/test_cloudflare_dashboard.py \
