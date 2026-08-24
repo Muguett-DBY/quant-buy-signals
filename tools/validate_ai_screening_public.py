@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 from tools.ai_screening_contract import (
     LOCAL_OPENCODE_MODELS,
+    LOCAL_REVIEW_MODELS,
     LOCAL_REVIEW_MODEL,
     NATIVE_COMPANY_RESEARCH_PROFILES,
     NATIVE_COMPANY_RESEARCH_REVIEW_MODE,
@@ -351,7 +352,7 @@ def validate_artifact(
         raise ValueError("AI screening model/effort metadata is missing")
     review_mode = str(payload.get("review_mode") or "")
     if review_mode == "local_codex_review" and not (
-        set(models) == {LOCAL_REVIEW_MODEL} or set(models) <= LOCAL_OPENCODE_MODELS
+        set(models) <= LOCAL_REVIEW_MODELS or set(models) <= LOCAL_OPENCODE_MODELS
     ):
         raise ValueError("local AI screening seed uses an unexpected model")
     native_review = review_mode in {NATIVE_WEB_REVIEW_MODE, NATIVE_COMPANY_RESEARCH_REVIEW_MODE}
@@ -629,6 +630,7 @@ def validate_artifact(
         ("opencode-go/ox-alpha-free", "max"),
         ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
         (LOCAL_REVIEW_MODEL, "max"),
+        ("codex-luna-max", "max"),
     }:
         raise ValueError("local OpenCode Go reviews must use Ox max or Muse Spark xhigh")
     if company_research_review:

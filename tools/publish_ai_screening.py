@@ -25,7 +25,7 @@ from tools.ai_source_urls import (
 )
 from tools.ai_screening_contract import (
     ECONOMIC_PROFILE_FIELDS,
-    LOCAL_REVIEW_MODEL,
+    LOCAL_REVIEW_MODELS,
     LOCAL_OPENCODE_MODELS,
     NATIVE_COMPANY_RESEARCH_REVIEW_MODE,
     NATIVE_WEB_REVIEW_MODE,
@@ -587,15 +587,15 @@ def _public_review(
             public_claim["source_refs"] = source_refs
         claims.append(public_claim)
     web_search_performed = review.get("web_search_performed") is True
-    web_search_verified = bool(
-        claims_are_search_results
-        and web_search_performed
-        and any(
-            str(claim.get("source_ref") or "").lower().startswith("https://")
-            for claim in claims
-            if isinstance(claim, Mapping)
-        )
+    has_https_claim = any(
+        str(claim.get("source_ref") or "").lower().startswith("https://")
+        for claim in claims
+        if isinstance(claim, Mapping)
     )
+    computed_web_verified = bool(claims_are_search_results and web_search_performed and has_https_claim)
+    # An explicit false is an attestation that the tool event was not proven;
+    # an explicit true still has to pass the HTTPS claim check.
+    web_search_verified = False if review.get("web_search_verified") is False else computed_web_verified
     action = _text(review.get("ai_action"), 32)
     profile = review.get("economic_profile")
     if (
@@ -965,7 +965,7 @@ def build_artifact(
     if (
         full_coverage
         and review_mode == "local_codex_review"
-        and not (review_models == {LOCAL_REVIEW_MODEL} or review_models <= LOCAL_OPENCODE_MODELS)
+        and not (review_models <= LOCAL_REVIEW_MODELS or review_models <= LOCAL_OPENCODE_MODELS)
     ):
         raise ValueError("local full-coverage artifact must use the local Codex or OpenCode MAX review model")
     if (

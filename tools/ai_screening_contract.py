@@ -18,6 +18,8 @@ REVIEW_SCHEMA_VERSION = 2
 VALUATION_SNAPSHOT_CONTRACT_VERSION = 1
 PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 LOCAL_REVIEW_MODEL = "codex-local-review-v1"
+CODEX_LUNA_REVIEW_MODEL = "codex-luna-max"
+LOCAL_REVIEW_MODELS = frozenset({LOCAL_REVIEW_MODEL, CODEX_LUNA_REVIEW_MODEL})
 LOCAL_OPENCODE_MODELS = frozenset(
     {
         "opencode-go/ox-alpha-free",

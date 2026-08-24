@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.ai_screening_contract import (
-    LOCAL_REVIEW_MODEL,
+    LOCAL_REVIEW_MODELS,
     LOCAL_OPENCODE_MODELS,
     REVIEW_SCHEMA_VERSION,
     candidate_identity_sha256,
@@ -462,7 +462,10 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
             # A native web-search review is different: if its claims do not
             # identify a current report period, keep it observable rather
             # than presenting an undated external source as a buy signal.
-            or (str(source.get("model") or "") in LOCAL_OPENCODE_MODELS and not native_company_research)
+            or (
+                str(source.get("model") or "") in (LOCAL_OPENCODE_MODELS | LOCAL_REVIEW_MODELS)
+                and not native_company_research
+            )
         )
     ):
         action = "priority_buy"
@@ -565,7 +568,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     # reason, and it does not affect the calibrated score.
     source_quality = _source_quality(source)
     local_codex_review = (
-        str(source.get("model") or "") == LOCAL_REVIEW_MODEL and source.get("web_search_performed") is not True
+        str(source.get("model") or "") in LOCAL_REVIEW_MODELS and source.get("web_search_performed") is not True
     )
     source_note = (
         "本地全量复核（未逐家公司联网；事实来源绑定到当代研究包）"

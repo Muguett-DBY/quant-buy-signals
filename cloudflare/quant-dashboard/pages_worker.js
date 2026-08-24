@@ -1268,12 +1268,16 @@ function aiScreeningPageResponse(request){
       if(review?.web_search_event_verified===true&&review?.research_source_urls_verified===true)return "原生搜索事件已核验 · 财报来源已核验";
       if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true)return "原生搜索事件已核验 · 搜索引用已核验（旧版）";
       if(review?.web_search_event_verified===true)return "原生搜索事件已核验 · 财报来源未核验";
-      if(review?.web_search_performed===true)return "仅模型声明已搜索 · 无运行事件证明";
+      if(review?.web_search_performed===true){
+        if(payload.review_mode==="local_codex_review"&&Number(payload.web_search_attempted_count||0)>0)return "Codex逐家公司搜索已执行 · 原生事件未接入";
+        return "仅模型声明已搜索 · 无运行事件证明";
+      }
       if(payload.review_mode==="local_codex_review")return "本地全量复核 · 未逐家公司联网";
       if(payload.review_mode==="opencode_mixed_review")return "OpenCode Go 本地复核 · 本条未执行联网搜索";
       return "未完成联网搜索";
     }
     function reviewModeLabel(value){
+      if(value.review_mode==="local_codex_review"&&Number(value.web_search_attempted_count||0)>0)return "Codex逐家公司检索 + 本地事实复核（非原生事件）";
       if(value.review_mode==="local_codex_review")return "本地全量二次复核";
       if(value.review_mode==="opencode_mixed_review")return "OpenCode Go 混合复核（联网事件 + 本地复核）";
       if(value.review_mode==="opencode_native_company_research_review")return "逐家公司原生搜索 + 财报来源核验";
@@ -1472,6 +1476,7 @@ function aiScreeningPageResponse(request){
         "<span>"+esc(reviewModeLabel(value))+"</span>"+
         "<span>复核模型 "+esc(models)+"</span>"+
         "<span>推理档位 "+esc(efforts)+"</span>"+
+        "<span>Codex搜索尝试 "+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>原生搜索事件 "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";
@@ -1488,6 +1493,7 @@ function aiScreeningPageResponse(request){
           '<div class="stat"><b>'+esc(counts.recommend_buy??value.priority_buy_count??0)+"</b><small>建议买</small></div>"+
           '<div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+"</b><small>观察</small></div>"+
           '<div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+"</b><small>不建议</small></div>"+
+          '<div class="stat"><b>'+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>Codex搜索尝试</small></div>"+
           '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>原生搜索事件</small></div>"+
           '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源核验</small></div>"+
           '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
