@@ -36472,17 +36472,6 @@
             "support": "supports"
           },
           {
-            "search_finding_id": "codex-search-006",
-            "source_context": "新产业(300832)_公司公告_新产业：2026年半年度报告摘要新浪财经_新浪网 (",
-            "source_kind": "financial_portal_filing",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832"
-            ],
-            "statement": "新产业(300832)_公司公告_新产业：2026年半年度报告摘要新浪财经_新浪网 ( turn492search4 [wordlim: 200] Published: last week; Crawled: today; 附件：公告原文-------------------------------------------------------------------------------- 证券代码：688029 ( turn492search13 [wordlim: 200] Published: last year; 股股东净利润的比例为25.72%。 ... 司2025年半年度利润分配方案>的议案》，本方案符合《公司章程》规定的利润 ... 本次利润分配方案综合考虑了公司所处行业情况、业务发展阶段、自身经营模式、盈利水平及未来资金需求等因素，不会对公司每股收益、现金流状况",
-            "support": "supports"
-          },
-          {
             "search_finding_id": "codex-luna-search-001",
             "source_context": "证券代码：688029 (https://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260227/fb0972889deb4a129ce0d128fa0bec2e.PDF)",
             "source_kind": "codex_web_search",
@@ -36491,17 +36480,6 @@
               "https://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260227/fb0972889deb4a129ce0d128fa0bec2e.PDF"
             ],
             "statement": "证券代码：688029 (https://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260227/fb0972889deb4a129ce0d128fa0bec2e.PDF)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "新产业(300832)_公司公告_新产业：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832"
-            ],
-            "statement": "新产业(300832)_公司公告_新产业：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12491617&stockid=300832)",
             "support": "supports"
           }
         ],
@@ -55370,17 +55348,6 @@
             "support": "supports"
           },
           {
-            "search_finding_id": "codex-search-001",
-            "source_context": "2024 年半年度报告 (",
-            "source_kind": "secondary_web_source",
-            "source_ref": "https://www.600496.com/upload/files/202409/2024090215342261bo.pdf",
-            "source_refs": [
-              "https://www.600496.com/upload/files/202409/2024090215342261bo.pdf"
-            ],
-            "statement": "2024 年半年度报告 ( turn602search12 [wordlim: 200] Published: 8 months ago; 2024 年半年度报告 ... 公司是钢结构行业中的综合性企业，具备满足客户各种实际需求的系统集成服务能力。 ... 在“双碳”目标指引社会能源转型背景下，全产业链的竞争优势有助于公司为客户提供全面 ... 经营性现金流2.22 亿元，同比增长238%。 ... （一）营销突破，主业逆势增长，海外业务成新增长点 ... 报告期，国际业务实现快速增长，促进了公司整体业务的稳步发展：新签合同18.8 ... 海外地标建筑签约10.1 亿元，同比增长 651.6%。 增效，聚焦企业发展关键破局点，构建公司高质量发展。报告期内，公司新签合同累计122.4 亿 元，同比增长9.4%；营业收入76.54 亿元，同比基本持平；归母净利润2.73 亿元，同比下降30.17%； 经营性现金流2.22 亿元，同比增长238%。尽管报告期营收利润同比仍有下滑，但较一季度环比 明显提升：营业收入环比增加24%，归母净利润环比增加80%。具体经营分析见下： （一）营销突破，主业逆势增长，海外业务成新增长点 报告期，公司新签合同金额122.4 亿元，同比增长9.4%，其中承接亿元以上项目合同金额累 计56 亿元（同比增长5%），占新签合同总金额的45%，在当前经济形势下突",
-            "support": "supports"
-          },
-          {
             "search_finding_id": "codex-search-006",
             "source_context": "广信股份(603599) 经营分析_F10_同花顺金融服务网 (",
             "source_kind": "secondary_web_source",
@@ -55411,17 +55378,6 @@
               "https://s.askci.com/stock/financialreport/603599/financefile/"
             ],
             "statement": "广信股份(603599)财报原始文件下载-中商产业研究院数据库-中商情报网 ( turn602search7 [wordlim: 200] Crawled: 3 weeks ago; * 主营产品业务 年度经营评述 ... * 资产负债表 利润表 现金流量表 财务分析（年度） 财务分析（季度） 财报原始文件（PDF） ... 4 | 603599 | 半年度报告 | 广信股份:2025年半年度报告 | 下载财报(PDF) ... 6 | 603599 | 年度报告 | 广信股份:2024年年度报告 | 下载财报(PDF)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "2024 年半年度报告 (https://www.600496.com/upload/files/202409/2024090215342261bo.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://www.600496.com/upload/files/202409/2024090215342261bo.pdf",
-            "source_refs": [
-              "https://www.600496.com/upload/files/202409/2024090215342261bo.pdf"
-            ],
-            "statement": "2024 年半年度报告 (https://www.600496.com/upload/files/202409/2024090215342261bo.pdf)",
             "support": "supports"
           },
           {
@@ -74478,17 +74434,6 @@
             "support": "supports"
           },
           {
-            "search_finding_id": "codex-search-010",
-            "source_context": "天山铝业(002532)_公司公告_天山铝业：2026年半年度报告摘要新浪财经_新浪网 (",
-            "source_kind": "financial_portal_filing",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532"
-            ],
-            "statement": "天山铝业(002532)_公司公告_天山铝业：2026年半年度报告摘要新浪财经_新浪网 ( turn480search9 [wordlim: 200] Published: 5 days ago; Crawled: 6 days ago; 附件：公告原文-------------------------------------------------------------------------------- 大金重工(002487)个股资金流向查询_个股行情_同花顺财经 ( turn480search10 [wordlim: 200] Published: today; Crawled: today; * 大金重工：2026年半年度报告摘要 2026-08-22 ... * 大金重工：关于调整2026年度现金管理额度的公告 2026-08-22 ... * 大金重工：中信证券股份有限公司关于大金重工股 2026-08-22 ... ## 行业资讯",
-            "support": "supports"
-          },
-          {
             "search_finding_id": "codex-luna-search-001",
             "source_context": "大金重工(002487)_公司公告_大金重工：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12517186&stockid=002487)",
             "source_kind": "codex_web_search",
@@ -74497,17 +74442,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12517186&stockid=002487"
             ],
             "statement": "大金重工(002487)_公司公告_大金重工：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12517186&stockid=002487)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "天山铝业(002532)_公司公告_天山铝业：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532"
-            ],
-            "statement": "天山铝业(002532)_公司公告_天山铝业：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12502796&stockid=002532)",
             "support": "supports"
           }
         ],
@@ -103326,17 +103260,6 @@
             "support": "supports"
           },
           {
-            "search_finding_id": "codex-search-009",
-            "source_context": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 (",
-            "source_kind": "financial_portal_filing",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071"
-            ],
-            "statement": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 ( turn503search8 [wordlim: 200] Published: 3 weeks ago; Crawled: yesterday; 附件：公告原文-------------------------------------------------------------------------------- 金力永磁(300748)个股资金流向查询_个股行情_同花顺财经 ( turn503search9 [wordlim: 200] Published: 3 days ago; Crawled: yesterday; * 金力永磁：2026年半年度报告摘要 2026-08-21 ... * 金力永磁：2026年半年度非经营性资金占用及其他 2026-08-21 ... 主营业务： ... 每股现金流： ... 4.8 综合判断：4.8分 打败了32%的股票！ ... 已有13家主力机构披露2026-06-30报告期持股数据，持仓量总计5.71亿股，占流通A股50.42%",
-            "support": "supports"
-          },
-          {
             "search_finding_id": "codex-search-012",
             "source_context": "金力永磁(300748)A股财报_Publicly traded company (",
             "source_kind": "secondary_web_source",
@@ -103356,17 +103279,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748"
             ],
             "statement": "金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071"
-            ],
-            "statement": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071)",
             "support": "supports"
           },
           {
@@ -123805,17 +123717,6 @@
             ],
             "statement": "001259 2026年中报累计口径：经营活动现金流净额 0.23 亿元，同比 +108.00%；购建长期资产现金支出 0.34 亿元；简化自由现金流 -0.10 亿元，同比百分比不适用（非正值或正负切换）",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "景兴纸业(002067)_公司公告_景兴纸业：2025年年度报告新浪财经_新浪网",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12180068&stockid=002067",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12180068&stockid=002067"
-            ],
-            "statement": "景兴纸业：2025年年度报告 （下载公告） --- 公告日期:2026-04-25 浙江景兴纸业股份有限公司2026年4月25日2025年年度报告股票代码：002067 2025年年度报告第一节 重要提示、目录和释义公司董事会及董事、高级管理人员保证年度报告内容的真实、准确、完整，不存在虚假记载、误导性陈述或重大遗漏，并承担个别和连带的法律责任。公司负责人朱在龙、主管会计工作负责人盛晓英及会计机构负责人（会计主管人员）盛晓英声明：保证本年度报告中财务报告的真实、准确、完整。所有董事均已出席了审议本报告的董事会会议。本年度报告中关于对未来计划等前瞻性陈述，不构成公司对投资者的实质承诺，投资者及相关人士均应当对此保持足够的风险认识，并且应当理解计划、预计与承诺之间的差异。公司在本报告“第三节管理层讨论与分析”中“十一、公司未来发展的展望”部分，详细描述了公司经营过程中可能存在的风险及应对措施，敬请投资者关注相关内容。-------------------------------------------------------------------------------- 利仁科技(001259) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/001259/)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -140367,17 +140268,6 @@
             ],
             "statement": "301281 2026年一季报累计口径：经营活动现金流净额 0.31 亿元，同比百分比不适用（非正值或正负切换）；购建长期资产现金支出 0.28 亿元；简化自由现金流 0.03 亿元，同比百分比不适用（非正值或正负切换）",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "股票代码：301281     股票简称：科源制药     上市地点：深圳证券交易所",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.cninfo.com.cn/finalpage/2025-08-18/1224504240.pdf",
-            "source_refs": [
-              "https://static.cninfo.com.cn/finalpage/2025-08-18/1224504240.pdf"
-            ],
-            "statement": "七、标的公司业绩承诺无法实现的风险 根据公司与补偿义务人签署的交易协议，力诺投资、力诺集团作为补偿义务 人，对标的公司麝香酮专有技术及客户渠道、中成药专有技术及宏济堂商标（即 业绩承诺资产）未来业绩进行了承诺。 相关业绩承诺是业绩补偿义务人综合考虑行业发展前景、业务发展规划等因 素所做出的，但是业绩承诺期内宏观经济、市场环境等外部因素的变化均可能给 标的公司的经营管理造成不利影响。相关业绩承诺资产实际实现的收入不能达到 承诺收入数，则会对上市公司造成不利影响，并且本次交易依然存在业绩补偿承 诺实施的违约风险，提请投资者注意相关风险。 八、标的公司2024 年度经营活动现金流减少的风险 2024 年，标的公司经营活动现金流量净额为-11,791.36 万元，较去年同期有 所减少，主要系标的公司客户北京联馨回款较2023 年延后、众益康诉讼、下游 行业经营压力增大、支付职工薪酬金额增加以及承兑汇票使用增加等原因所导致。 若未来标的公司下游客户回款速度放缓或支付各项经营活动现金流增多，会 进一步减少经营活动现金流，并对标的公司经营带来一定影响。 30-------------------------------------------------------------------------------- 共同药业(300966)_公司公告_共同药业：2025年年度报告新浪财经_新浪网",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -140419,7 +140309,7 @@
           "2025 年简化自由现金流率 -23.5% 低于 3%，虽为正值但现金回报偏薄，不能支持积极买入结论。",
           "2023—2025 年自由现金流序列的均值不为正或完整性不足，不能仅凭最新一年转正确认买入。"
         ],
-        "summary": "当前结论：不建议。科源制药（301281）属于化学制药，交易日 2026-08-24 股价 43.97 元、PE 293.13 倍；2025 年经营现金流 0.43亿元、自由现金流 -0.94亿元，核心依据：最新可得中期数据出现较快增长：301281 2026年一季报累计口径：营业收入 1.61 亿元，同比 +45.05%；归母净利润 0.30 亿元，同比 +30.27%；主要反证：交易日 2026-08-24 的 PE 293.13 倍高于同业中位数 36.70 倍约 698.6%，安全边际偏薄；联网事实（Codex web_search，来源《股票代码：301281     股票简称：科源制药     上市地点：深圳证券交易所》）：七、标的公司业绩承诺无法实现的风险 根据公司与补偿义务人签署的交易协议，力诺投资、力诺集团作为补偿义务 人，对标的公司麝香酮专有技术及客户渠道、中成药专有技术及宏济堂商标（即 业绩承诺资产）未来业绩进行了承诺。 相关业绩承诺是业绩补偿义务人综合考虑行业发展前景、业务发展规划等因 素所做出的，但是业绩承诺期内宏观经济、市场环境等外部因素的变化均可能给 标的公司的经营管理造成不利影响。相关业绩承诺资产实际实现的收入不能达到 承诺收入数，则会对上市公司造成不利影响，并且本次交易依然存在业绩补偿承 诺实施的违约风险，提请投资者注意相关风险。 八、标的公司2024 年度经营活动现金流减少的风险 2024（https://static.cninfo.com.cn/finalpage/2025-08-18/1224504240.pdf）",
+        "summary": "当前结论：不建议。科源制药（301281）属于化学制药，交易日 2026-08-24 股价 43.97 元、PE 293.13 倍；2025 年经营现金流 0.43亿元、自由现金流 -0.94亿元，核心依据：最新可得中期数据出现较快增长：301281 2026年一季报累计口径：营业收入 1.61 亿元，同比 +45.05%；归母净利润 0.30 亿元，同比 +30.27%；主要反证：交易日 2026-08-24 的 PE 293.13 倍高于同业中位数 36.70 倍约 698.6%，安全边际偏薄。联网检索已执行，但来源公司代码未通过归属校验，未将该页面作为本公司事实。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": false,
         "web_search_dropped_claim_url_count": 0,
@@ -145258,8 +145148,6 @@
             "source_ref": "https://www.hkcd.com.hk/pdf/202604/0421/ha06421c.pdf",
             "source_refs": [
               "https://www.hkcd.com.hk/pdf/202604/0421/ha06421c.pdf",
-              "http://www.hkcd.com",
-              "http://www.hkcd.com公司代码",
               "https://www.hkcd.com.hk/pdf/202604/0"
             ],
             "statement": "| A6 公告 2026年4月21日 星期二 Hong Kong Commercial Daily http://www.hkcd.com | --- | --- | --- | | Hong Kong Commercial Daily http://www.hkcd.com公司代码：600623                                            公司简称：华谊集团 (https://www.hkcd.com.hk/pdf/202604/0",
@@ -160564,28 +160452,6 @@
             ],
             "statement": "688802 2026年一季报累计口径：经营活动现金流净额 -5.50 亿元，同比百分比不适用（非正值或正负切换）；购建长期资产现金支出 0.51 亿元；简化自由现金流 -6.01 亿元，同比百分比不适用（非正值或正负切换）",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-search-006",
-            "source_context": "金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 (",
-            "source_kind": "financial_portal_filing",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748"
-            ],
-            "statement": "金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 ( turn607search4 [wordlim: 200] Published: 3 days ago; Crawled: 2 days ago; 第三节 管理层讨论与分析一、报告期内公司从事的主要业务（一）报告期内公司从事的主要业务报告期内，公司主营业务及产品用途、商业模式及主要的业绩驱动因素等未发生重大变化，具体情况如下：1、公司主要业务及产品用途公司是集研发、生产和销售高性能钕铁硼永磁材料、磁组件、具身机器人电机转子及稀土回收综合利用于一体的高新技术企业，是新能源和节能环保领域稀土永磁材料的领先供应商。 ... 二）报告期内经营情况回顾2026年上半年，公司管理层秉承“坚持守法合规，坚持客户导向，聚焦磁材主业，按期新建2万吨产能，积极布局具身机器人电机转子，再攀新高峰”的年度经营方针，通过技术创新、组织优化、数字化建设、精益管理等措施，在全力保障按合同履约交付给广大客户的同时，实现公司经营业绩稳健增长。 ... 截至报告期末，公司通过产业基金已投资了沐曦股份（688802. ... 包头稀交所作为稀土（金属）资源专业化交易平台，本次股权受让事项若顺利完成，将进一步提升公司稀土原材料供应保障能力，增强企业综合竞争力，巩固公司在稀土永磁行业的市场地位。 ... 2026年半年度，公司拟向全体股",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748"
-            ],
-            "statement": "金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510772&stockid=300748)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -160605,7 +160471,7 @@
           "2023—2025 年收入复合增速 456.8%，规模端仍有扩张。",
           "688802 截至 2026-08-24：股价 664.00 元；PB 20.28 倍；总市值 2656.66 亿元",
           "2025 年简化自由现金流率 -88.5%（自由现金流/营业收入）。",
-          "公司公开资料：金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 ( turn607search4 [wordlim: 200] Published: 3 days ago; Crawled: 2 days ago; 第三节 管理层讨论与分析一、报告期内公司从事的主要业务（一）报告期内公司从事的主要业务报告期内，公司主营业务及产品用途、商业模式及主要的业绩驱动因素等未发生重大变化，具体情况如下：1、公司主要业务及产品用"
+          "。联网检索已执行，但来源公司代码未通过归属校验，未将该页面作为本公司事实。"
         ],
         "model": "codex-luna-max",
         "native_search_completed": false,
@@ -160631,7 +160497,7 @@
           "2025 年简化自由现金流率 -88.5% 低于 3%，虽为正值但现金回报偏薄，不能支持积极买入结论。",
           "网页检索结果不能替代财报原文和持续跟踪。"
         ],
-        "summary": "量化快照：688802 截至 2026-08-24：股价 664.00 元；PB 20.28 倍；总市值 2656.66 亿元；2025 年简化自由现金流率 -88.5%（自由现金流/营业收入）。联网资料摘要：金力永磁(300748)_公司公告_金力永磁：2026年半年度报告新浪财经_新浪网 ( turn607search4 [wordlim: 200] Published: 3 days ago; Crawled: 2 days ago; 第三节 管理层讨论与分析一、报告期内公司从事的主要业务（一）报告期内公司从事的主要业务报告期内，公司主营业务及产品用途、商业模式及主要的业绩驱动因素等未发生重大变化，具体情况如下：1、公司主要业务及产品用结论：不建议。；主要风险：交易日 2026-08-24 的 PB 20.28 倍较高，需要更强的资产回报来支撑。",
+        "summary": "量化快照：688802 截至 2026-08-24：股价 664.00 元；PB 20.28 倍；总市值 2656.66 亿元；2025 年简化自由现金流率 -88.5%（自由现金流/营业收入）。联网检索已执行，但来源公司代码未通过归属校验，未将该页面作为本公司事实。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": false,
         "web_search_dropped_claim_url_count": 0,
@@ -160721,17 +160587,6 @@
               "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DMSK_FN_CASHFLOW&columns=SECURITY_CODE%2CNETCASH_OPERATE%2CCONSTRUCT_LONG_ASSET%2CREPORT_DATE&pageNumber=1&pageSize=500&sortTypes=1&sortColumns=SECURITY_CODE&source=WEB&client=PC&filter=%28REPORT_DATE%3D%272025-03-31%27%29%28SECURITY_CODE+in+%28%22688818%22%29%29"
             ],
             "statement": "688818 2026年一季报累计口径：经营活动现金流净额 -0.87 亿元，同比百分比不适用（非正值或正负切换）；购建长期资产现金支出 0.82 亿元；简化自由现金流 -1.70 亿元，同比百分比不适用（非正值或正负切换）",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "大东南(002263)_公司公告_大东南：2025年年度报告新浪财经_新浪网",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12242951&stockid=002263",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12242951&stockid=002263"
-            ],
-            "statement": "项目 2025年 2024年 同比增减 经营活动现金流入小计 1,348,788,819.14 1,409,250,579.66 -4.29% 经营活动现金流出小计 1,314,116,334.17 1,272,481,497.45 3.27% 经营活动产生的现金流量净额 34,672,484.97 136,769,082.21 -74.65% 投资活动现金流入小计 731,269,958.23 410,564,888.88 78.11% 投资活动现金流出小计 942,306,524.48 825,470,649.80 14.15% 投资活动产生的现金流量净额 -211,036,566.25 -414,905,760.92 49.14% 筹资活动现金流入小计 141,132,641.52 -100.00% 筹资活动现金流出小计 290,771,487.17 -100.00% 筹资活动产生的现金流量净额 -149,638,845.65 100.00% 现金及现金等价物净增加额 -176,364,081.28 -427,775,524.36 58.77% 相关数据同比发生重大变动的主要影响因素说明?适用□不适用1.经营活动产生的现金流量净额较上年同期减少74.65%，主要系本期销售商品收到的现金较上年同期减少且购买商品支付的现金较上年同期增加所致。2.投资活动现金流入小计较上年同期增加",
             "support": "supports"
           },
           {
@@ -161218,5 +161073,10 @@
   "web_search_completed_count": 0,
   "web_search_dropped_claim_url_count": 0,
   "web_search_event_verified_count": 0,
-  "web_source_verified_count": 0
+  "web_source_verified_count": 0,
+  "publication_sanitization": {
+    "contract_version": 1,
+    "removed_unbound_claim_count": 13,
+    "removed_http_source_ref_count": 2
+  }
 }
