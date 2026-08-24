@@ -248,6 +248,7 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         strengths.append(f"2023—2025 年收入复合增速 {_pct(revenue_cagr)}，规模端仍有扩张。")
 
     quality = _statement(company, "capital_quality")
+    roic: float | None = None
     if quality:
         facts.append(quality)
         match = re.search(r"ROIC[^0-9-]*([0-9]+(?:\.[0-9]+)?)%", quality)
@@ -263,6 +264,8 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     interim_cashflow_conflict = False
     interim_profit_decline: float | None = None
     interim_revenue_decline: float | None = None
+    interim_ocf_decline: float | None = None
+    interim_fcf_decline: float | None = None
     if interim_income:
         facts.append(interim_income)
         interim_profit_decline = _interim_yoy(interim_income, "归母净利润")
@@ -279,6 +282,8 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     if interim_cash:
         facts.append(interim_cash)
         interim_ocf, interim_fcf = _cashflow_values(interim_cash)
+        interim_ocf_decline = _interim_yoy(interim_cash, "经营活动现金流净额")
+        interim_fcf_decline = _interim_yoy(interim_cash, "自由现金流")
         if (interim_ocf is not None and interim_ocf < 0) or (interim_fcf is not None and interim_fcf < 0):
             interim_cashflow_conflict = True
             score -= 7
@@ -286,6 +291,13 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
                 risks.append(f"最新可得中期经营活动现金流为 {_reported_billion_yuan(interim_ocf)}，简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，现金回报转弱。")
             else:
                 risks.append(f"最新可得中期经营活动现金流仍为 {_reported_billion_yuan(interim_ocf)}，但资本开支后简化自由现金流为 {_reported_billion_yuan(interim_fcf)}，不满足当前买入的现金回报条件。")
+        cashflow_declines = [value for value in (interim_ocf_decline, interim_fcf_decline) if value is not None]
+        if cashflow_declines and min(cashflow_declines) <= -30:
+            score -= 8
+            risks.append(
+                f"最新可得中期现金流同比明显走弱：经营现金流 {_pct(interim_ocf_decline / 100) if interim_ocf_decline is not None else '未知'}、"
+                f"自由现金流 {_pct(interim_fcf_decline / 100) if interim_fcf_decline is not None else '未知'}，不能仅凭年度现金流确认买入。"
+            )
 
     shareholder = company.get("shareholder_returns")
     missing_returns = shareholder.get("missing_fields", []) if isinstance(shareholder, Mapping) else []
@@ -309,6 +321,15 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and interim_revenue_decline is not None
         and interim_revenue_decline <= -10
     )
+    annual_or_interim_trend_stress = (
+        (interim_revenue_decline is not None and interim_revenue_decline <= -10)
+        or (interim_profit_decline is not None and interim_profit_decline <= -5)
+    )
+    cashflow_trend_stress = any(
+        value is not None and value <= -30
+        for value in (interim_ocf_decline, interim_fcf_decline)
+    )
+    capital_return_ready = roic is not None and roic >= 5
     evidence_ready = (
         len(annual) >= 3
         and profit is not None
@@ -321,7 +342,13 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and not interim_cashflow_conflict
         and cycle_history_ready
         and not severe_recent_decline
+        and not annual_or_interim_trend_stress
+        and not cashflow_trend_stress
+        and capital_return_ready
     )
+    if category == "quality_equity":
+        evidence_ready = evidence_ready and not missing_returns and pe is not None and pe_median is not None and pe <= pe_median * 1.1
+        risks.insert(0, "金融机构的经营现金流与资本开支不按普通企业自由现金流解读，且研究包未形成完整股东回报核验，暂不升级为买入。")
     if category == "cyclical" and (pe is None or pe <= 0 or pe_median is None):
         evidence_ready = False
     # Keep headroom below a false-precision 100.  A score in the upper 80s or
