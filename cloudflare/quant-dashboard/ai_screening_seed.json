@@ -136011,6 +136011,7 @@
   "ranking_source": "local-codex-review-v1",
   "ranking_version": "ai-buy-attractiveness-v9-score-first-action-banded",
   "recommend_buy_count": 32,
+  "research_as_of": "2026-08-24",
   "research_source_urls_verified_count": 0,
   "review_efforts": [
     "max"
