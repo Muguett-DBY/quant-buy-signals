@@ -1424,7 +1424,9 @@ function aiScreeningPageResponse(request){
       const group=category(review);
       const types=Array.isArray(packet.type_keys)?packet.type_keys:[packet.type_key];
       const freshness=String(review.freshness_status||"undated");
-      const independent=review.ai_independent===true?'<span class="badge independent">AI独立判断</span>':"";
+      // The local_codex_review artifact is a deterministic Python facts review;
+      // do not present its boolean compatibility field as a model judgment.
+      const independent=review.ai_independent===true&&payload.review_mode!=="local_codex_review"?'<span class="badge independent">AI独立判断</span>':"";
       const quantitativeFacts=Array.isArray(review.quantitative_facts)?review.quantitative_facts:[];
       const keyStrengths=Array.isArray(review.key_strengths)?review.key_strengths:[];
       const riskFlags=Array.isArray(review.risk_flags)?review.risk_flags:[];
