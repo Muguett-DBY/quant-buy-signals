@@ -23,7 +23,7 @@ def _review(code: str, type_key: str) -> dict[str, object]:
         "type_key": type_key,
         "verdict": "confirmed",
         "recommended_action": "keep",
-        "buy_attractiveness_score": 65,
+        "buy_attractiveness_score": 75,
         "ai_action": "priority_buy",
         "confidence": "medium",
         "summary": "当前盈利和现金流支持买入，但下游需求仍可能波动。",

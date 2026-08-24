@@ -20,7 +20,7 @@ def _review(code: str, *, searched: bool) -> dict[str, object]:
         "type_key": "type1",
         "verdict": "caution" if not searched else "confirmed",
         "recommended_action": "manual_review" if not searched else "keep",
-        "buy_attractiveness_score": 55 if not searched else 65,
+        "buy_attractiveness_score": 55 if not searched else 75,
         "ai_action": "watchlist" if not searched else "priority_buy",
         "confidence": "low" if not searched else "medium",
         "summary": "观察，等待进一步核验。" if not searched else "当前建议买入，仍需控制仓位。",
