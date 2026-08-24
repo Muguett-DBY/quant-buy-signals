@@ -23,6 +23,7 @@ from tools.ai_screening_contract import LOCAL_REVIEW_MODEL, REVIEW_SCHEMA_VERSIO
 MARKET_DATE = "2026-08-24"
 MODEL = LOCAL_REVIEW_MODEL
 EFFORT = "max"
+MIN_BUY_FCF_MARGIN = 0.03
 
 
 def _number(value: Any) -> float | None:
@@ -174,6 +175,7 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
     profit_yoy = (profit / previous_profit - 1) if profit is not None and previous_profit and previous_profit > 0 else None
     fcf_positive = sum(1 for row in annual if (_number(row.get("free_cashflow")) or 0) > 0)
     fcf_margin = fcf / revenue if fcf is not None and revenue and revenue > 0 else None
+    fcf_quality_ready = fcf_margin is None or fcf_margin >= MIN_BUY_FCF_MARGIN
     pe = snap.get("pe")
     pb = snap.get("pb")
     pe_median = snap.get("pe_median")
@@ -227,6 +229,11 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         score -= 7
     if fcf_margin is not None:
         facts.append(f"2025 年简化自由现金流率 {_pct(fcf_margin)}（自由现金流/营业收入）。")
+        if fcf_margin < MIN_BUY_FCF_MARGIN:
+            score -= 10
+            risks.append(
+                f"2025 年简化自由现金流率 {_pct(fcf_margin)} 低于 {MIN_BUY_FCF_MARGIN:.0%}，虽为正值但现金回报偏薄，不能支持积极买入结论。"
+            )
 
     if profit is not None and profit > 0:
         if profit_yoy is not None and profit_yoy > 0.15:
@@ -345,6 +352,7 @@ def _score_and_reasons(company: Mapping[str, Any], packet: Mapping[str, Any]) ->
         and not annual_or_interim_trend_stress
         and not cashflow_trend_stress
         and capital_return_ready
+        and fcf_quality_ready
     )
     if category == "quality_equity":
         evidence_ready = evidence_ready and not missing_returns and pe is not None and pe_median is not None and pe <= pe_median * 1.1

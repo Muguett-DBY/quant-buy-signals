@@ -14,6 +14,7 @@ on:
       - tools/ai_screening_contract.py
       - tools/validate_ai_screening_public.py
       - tools/calibrate_ai_screening_ranking.py
+      - tools/build_codex_luna_review.py
       - tests/test_ai_screening_contract.py
       - tests/test_validate_ai_screening_public.py
       - tests/test_ai_screening_release_contract.py
