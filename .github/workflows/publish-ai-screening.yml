@@ -109,6 +109,24 @@ jobs:
             --file cloudflare/quant-dashboard/ai_screening_seed.json \
             --remote --content-type application/json
 
+      - name: Deploy only the Pages AI reader
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          pages_dir="$(mktemp -d)"
+          cp cloudflare/quant-dashboard/pages_worker.js "${pages_dir}/_worker.js"
+          test "$(find "${pages_dir}" -type f | wc -l)" -eq 1
+          npx --yes "wrangler@${WRANGLER_VERSION}" pages deploy "${pages_dir}" \
+            --project-name quant \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-dirty=false
+
       - name: Verify the published AI API
         shell: bash
         run: |
