@@ -839,28 +839,6 @@
             ],
             "statement": "东鹏饮料(605499)_公司公告_东鹏饮料：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12470595&stockid=605499)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "东鹏饮料(605499)_公司资料_证券之星 (https://stock.quote.stockstar.com/corp_605499.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/corp_605499.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/corp_605499.shtml"
-            ],
-            "statement": "东鹏饮料(605499)_公司资料_证券之星 (https://stock.quote.stockstar.com/corp_605499.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "大手笔分红！605499，拟10股派30元！ (https://stock.10jqka.com.cn/20260730/c678564700.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.10jqka.com.cn/20260730/c678564700.shtml",
-            "source_refs": [
-              "https://stock.10jqka.com.cn/20260730/c678564700.shtml"
-            ],
-            "statement": "大手笔分红！605499，拟10股派30元！ (https://stock.10jqka.com.cn/20260730/c678564700.shtml)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -1086,28 +1064,6 @@
               "https://stock.qianzhan.com/hs/sourcefiles_002558.SZ.html"
             ],
             "statement": "巨人网络(002558.SZ)最新财报下载(PDF)_历史财报下载 - 前瞻眼 (https://stock.qianzhan.com/hs/sourcefiles_002558.SZ.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "巨人网络(002558.SZ)操盘必读-PC_HSF10资料 (https://emweb.eastmoney.com/PC_HSF10/OperationsRequired/Index?code=sz002558&type=web)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://emweb.eastmoney.com/PC_HSF10/OperationsRequired/Index?code=sz002558&type=web",
-            "source_refs": [
-              "https://emweb.eastmoney.com/PC_HSF10/OperationsRequired/Index?code=sz002558&type=web"
-            ],
-            "statement": "巨人网络(002558.SZ)操盘必读-PC_HSF10资料 (https://emweb.eastmoney.com/PC_HSF10/OperationsRequired/Index?code=sz002558&type=web)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "证券代码：002558 (https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-04-27/c9c63222-e16d-4247-865e-46daa6197f4b.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-04-27/c9c63222-e16d-4247-865e-46daa6197f4b.PDF",
-            "source_refs": [
-              "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-04-27/c9c63222-e16d-4247-865e-46daa6197f4b.PDF"
-            ],
-            "statement": "证券代码：002558 (https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-04-27/c9c63222-e16d-4247-865e-46daa6197f4b.PDF)",
             "support": "supports"
           }
         ],
@@ -1493,28 +1449,6 @@
             ],
             "statement": "证券代码：688615 (https://dataclouds.cninfo.com.cn/shgonggao/2025/2025-04-18/4f9160841c3611f0ac53fa163e39923a.pdf)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：合合信息2026年半年度净利润2.47亿元 (https://news.10jqka.com.cn/20260819/c679090404.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://news.10jqka.com.cn/20260819/c679090404.shtml",
-            "source_refs": [
-              "https://news.10jqka.com.cn/20260819/c679090404.shtml"
-            ],
-            "statement": "财报速递：合合信息2026年半年度净利润2.47亿元 (https://news.10jqka.com.cn/20260819/c679090404.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "证券代码：688615 (https://static.cninfo.com.cn/finalpage/2026-03-17/1225013128.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.cninfo.com.cn/finalpage/2026-03-17/1225013128.PDF",
-            "source_refs": [
-              "https://static.cninfo.com.cn/finalpage/2026-03-17/1225013128.PDF"
-            ],
-            "statement": "证券代码：688615 (https://static.cninfo.com.cn/finalpage/2026-03-17/1225013128.PDF)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -1752,72 +1686,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12484076&stockid=603508"
             ],
             "statement": "思维列控(603508)_公司公告_思维列控：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12484076&stockid=603508)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "思维列控2026可视化半年报|上海证券报·中国证券网 (https://visualfin.cnstock.com/h5/202606/603508.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://visualfin.cnstock.com/h5/202606/603508.html",
-            "source_refs": [
-              "https://visualfin.cnstock.com/h5/202606/603508.html"
-            ],
-            "statement": "思维列控2026可视化半年报|上海证券报·中国证券网 (https://visualfin.cnstock.com/h5/202606/603508.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "[未知机构]：思维列控2026年半年度业绩说明会 - 发现报告 (https://www.fxbaogao.com/detail/5615367)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://www.fxbaogao.com/detail/5615367",
-            "source_refs": [
-              "https://www.fxbaogao.com/detail/5615367"
-            ],
-            "statement": "[未知机构]：思维列控2026年半年度业绩说明会 - 发现报告 (https://www.fxbaogao.com/detail/5615367)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "思维列控（603508）2026年半年度管理层讨论与分析_财报审计_数据解析_股票_证券之星 (https://wap.stockstar.com/detail/RB2026081000012664)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.stockstar.com/detail/RB2026081000012664",
-            "source_refs": [
-              "https://wap.stockstar.com/detail/RB2026081000012664"
-            ],
-            "statement": "思维列控（603508）2026年半年度管理层讨论与分析_财报审计_数据解析_股票_证券之星 (https://wap.stockstar.com/detail/RB2026081000012664)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "思维列控(603508)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletin.php?Page=1&stockid=603508)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletin.php?Page=1&stockid=603508",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletin.php?Page=1&stockid=603508"
-            ],
-            "statement": "思维列控(603508)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletin.php?Page=1&stockid=603508)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "思维列控(603508)_财报全文_中财网 (https://gg.cfi.cn/quote.aspx?client=phone&contenttype=cbgg&stockid=28565)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://gg.cfi.cn/quote.aspx?client=phone&contenttype=cbgg&stockid=28565",
-            "source_refs": [
-              "https://gg.cfi.cn/quote.aspx?client=phone&contenttype=cbgg&stockid=28565"
-            ],
-            "statement": "思维列控(603508)_财报全文_中财网 (https://gg.cfi.cn/quote.aspx?client=phone&contenttype=cbgg&stockid=28565)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "思维列控：上半年归母净利润3.18亿元，同比增长4.65%_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-07/doc-inimnzsc3127375.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.sina.com.cn/stock/zqgd/2026-08-07/doc-inimnzsc3127375.shtml",
-            "source_refs": [
-              "https://finance.sina.com.cn/stock/zqgd/2026-08-07/doc-inimnzsc3127375.shtml"
-            ],
-            "statement": "思维列控：上半年归母净利润3.18亿元，同比增长4.65%_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-07/doc-inimnzsc3127375.shtml)",
             "support": "supports"
           }
         ],
@@ -2456,72 +2324,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501434&stockid=603075"
             ],
             "statement": "热威股份(603075)_公司公告_热威股份：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501434&stockid=603075)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "热威股份(603075)_公司公告_热威股份：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501435&stockid=603075)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501435&stockid=603075",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501435&stockid=603075"
-            ],
-            "statement": "热威股份(603075)_公司公告_热威股份：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501435&stockid=603075)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "热威股份(603075) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603075/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/603075/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/603075/bw.shtml"
-            ],
-            "statement": "热威股份(603075) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603075/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "热威股份(603075)_公司公告_热威股份：关于2026年半年度募集资金存放、管理与实际使用情况的专项报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501433&stockid=603075)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501433&stockid=603075",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501433&stockid=603075"
-            ],
-            "statement": "热威股份(603075)_公司公告_热威股份：关于2026年半年度募集资金存放、管理与实际使用情况的专项报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12501433&stockid=603075)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "热威股份：2026年上半年净利润1.63亿元 同比增长1.76% _ 东方财富网 (https://wap.eastmoney.com/a/202608183844938655.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.eastmoney.com/a/202608183844938655.html",
-            "source_refs": [
-              "https://wap.eastmoney.com/a/202608183844938655.html"
-            ],
-            "statement": "热威股份：2026年上半年净利润1.63亿元 同比增长1.76% _ 东方财富网 (https://wap.eastmoney.com/a/202608183844938655.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "热威股份2026年半年报：营收11.05亿元净利1.63亿，汇兑损失侵蚀利润募投结项补流 _ 东方财富网 (https://finance.eastmoney.com/a/202608193846409098.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608193846409098.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608193846409098.html"
-            ],
-            "statement": "热威股份2026年半年报：营收11.05亿元净利1.63亿，汇兑损失侵蚀利润募投结项补流 _ 东方财富网 (https://finance.eastmoney.com/a/202608193846409098.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "财报速递：热威股份2026年半年度净利润1.63亿元 (https://yuanchuang.10jqka.com.cn/20260818/c679048842.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260818/c679048842.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260818/c679048842.shtml"
-            ],
-            "statement": "财报速递：热威股份2026年半年度净利润1.63亿元 (https://yuanchuang.10jqka.com.cn/20260818/c679048842.shtml)",
             "support": "supports"
           }
         ],
@@ -7018,50 +6820,6 @@
             ],
             "statement": "证券代码：002027 (https://static.cninfo.com.cn/finalpage/2026-03-31/1225057551.PDF)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "分众传媒(002027)_公司公告_分众传媒：投资者关系管理信息20260819新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506139&stockid=002027)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506139&stockid=002027",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506139&stockid=002027"
-            ],
-            "statement": "分众传媒(002027)_公司公告_分众传媒：投资者关系管理信息20260819新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506139&stockid=002027)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "分众传媒(002027)中期报告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_Bulletin/stockid/002027/page_type/zqbg.phtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_Bulletin/stockid/002027/page_type/zqbg.phtml",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_Bulletin/stockid/002027/page_type/zqbg.phtml"
-            ],
-            "statement": "分众传媒(002027)中期报告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_Bulletin/stockid/002027/page_type/zqbg.phtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "分众传媒(002027)个股资金流向查询_个股行情_同花顺财经 (https://f10.10jqka.com.cn/002027/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://f10.10jqka.com.cn/002027/",
-            "source_refs": [
-              "https://f10.10jqka.com.cn/002027/"
-            ],
-            "statement": "分众传媒(002027)个股资金流向查询_个股行情_同花顺财经 (https://f10.10jqka.com.cn/002027/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "证券代码：002027 (https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-01-24/5234ed5b-6c30-4ccf-a471-03c944e5133e.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-01-24/5234ed5b-6c30-4ccf-a471-03c944e5133e.pdf",
-            "source_refs": [
-              "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-01-24/5234ed5b-6c30-4ccf-a471-03c944e5133e.pdf"
-            ],
-            "statement": "证券代码：002027 (https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-01-24/5234ed5b-6c30-4ccf-a471-03c944e5133e.pdf)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -7287,50 +7045,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12494943&stockid=002028"
             ],
             "statement": "思源电气(002028)_公司公告_思源电气：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12494943&stockid=002028)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "2026年中报点评：高毛利主业韧性凸显，国际化+AIDC双轮驱动- 宏观研究报告 _ 数据中心 _ 东方财富网 (https://data.eastmoney.com/report/info/AP202608171828066150.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://data.eastmoney.com/report/info/AP202608171828066150.html",
-            "source_refs": [
-              "https://data.eastmoney.com/report/info/AP202608171828066150.html"
-            ],
-            "statement": "2026年中报点评：高毛利主业韧性凸显，国际化+AIDC双轮驱动- 宏观研究报告 _ 数据中心 _ 东方财富网 (https://data.eastmoney.com/report/info/AP202608171828066150.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "思源电气(002028)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002028.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/info_002028.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/info_002028.shtml"
-            ],
-            "statement": "思源电气(002028)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002028.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "思源电气(002028)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/002028/index/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stockpage.10jqka.com.cn/002028/index/",
-            "source_refs": [
-              "https://stockpage.10jqka.com.cn/002028/index/"
-            ],
-            "statement": "思源电气(002028)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/002028/index/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "思源电气(002028) - 主营收入构成 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/002028/srgc.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/002028/srgc.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/002028/srgc.shtml"
-            ],
-            "statement": "思源电气(002028) - 主营收入构成 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/002028/srgc.shtml)",
             "support": "supports"
           }
         ],
@@ -15648,50 +15362,6 @@
             ],
             "statement": "银河磁体(300127)_公司公告_银河磁体：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514878&stockid=300127)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "银河磁体(300127)_公司公告_银河磁体：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514878&stockid=300127)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514878&stockid=300127",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514878&stockid=300127"
-            ],
-            "statement": "银河磁体(300127)_公司公告_银河磁体：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514878&stockid=300127)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "银河磁体(300127)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/300127.phtml?ftype=0)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/300127.phtml?ftype=0",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/300127.phtml?ftype=0"
-            ],
-            "statement": "银河磁体(300127)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/300127.phtml?ftype=0)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报速递：银河磁体2026年半年度净利润1.17亿元 (https://yuanchuang.10jqka.com.cn/20260821/c679172153.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260821/c679172153.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260821/c679172153.shtml"
-            ],
-            "statement": "财报速递：银河磁体2026年半年度净利润1.17亿元 (https://yuanchuang.10jqka.com.cn/20260821/c679172153.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "银河磁体(300127)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/300127/index/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stockpage.10jqka.com.cn/300127/index/",
-            "source_refs": [
-              "https://stockpage.10jqka.com.cn/300127/index/"
-            ],
-            "statement": "银河磁体(300127)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/300127/index/)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -22459,28 +22129,6 @@
             ],
             "statement": "财报速递：宝钢股份2026年半年度净利润45.71亿元 (https://yuanchuang.10jqka.com.cn/20260821/c679176079.shtml)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "宝钢股份(600019)个股资金流向查询_个股行情_同花顺财经 (https://profile.10jqka.com.cn/600019/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://profile.10jqka.com.cn/600019/",
-            "source_refs": [
-              "https://profile.10jqka.com.cn/600019/"
-            ],
-            "statement": "宝钢股份(600019)个股资金流向查询_个股行情_同花顺财经 (https://profile.10jqka.com.cn/600019/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "宝钢股份(600019)_股票行情_证券之星 (https://stock.quote.stockstar.com/600019.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/600019.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/600019.shtml"
-            ],
-            "statement": "宝钢股份(600019)_股票行情_证券之星 (https://stock.quote.stockstar.com/600019.shtml)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -24478,28 +24126,6 @@
               "https://news.10jqka.com.cn/20260818/c679039027.shtml"
             ],
             "statement": "宁波韵升上半年净利增154%，人形机器人及低空经济布局初具成效 (https://news.10jqka.com.cn/20260818/c679039027.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "证券代码：600366 (https://static.cninfo.com.cn/finalpage/2026-04-23/1225147128.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.cninfo.com.cn/finalpage/2026-04-23/1225147128.PDF",
-            "source_refs": [
-              "https://static.cninfo.com.cn/finalpage/2026-04-23/1225147128.PDF"
-            ],
-            "statement": "证券代码：600366 (https://static.cninfo.com.cn/finalpage/2026-04-23/1225147128.PDF)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "证券代码：600366 (https://stockmc.xueqiu.com/202604/600366_20260423_IAOQ.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stockmc.xueqiu.com/202604/600366_20260423_IAOQ.pdf",
-            "source_refs": [
-              "https://stockmc.xueqiu.com/202604/600366_20260423_IAOQ.pdf"
-            ],
-            "statement": "证券代码：600366 (https://stockmc.xueqiu.com/202604/600366_20260423_IAOQ.pdf)",
             "support": "supports"
           }
         ],
@@ -27908,50 +27534,6 @@
             ],
             "statement": "北矿科技(600980)_公司公告_北矿科技：2026年半年度业绩快报公告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12458007&stockid=600980)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "北矿科技(600980) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/600980/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/600980/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/600980/bw.shtml"
-            ],
-            "statement": "北矿科技(600980) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/600980/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "北矿科技：2026年上半年净利润同比增长25.68% 拟10派0.55元 _ 东方财富网 (https://finance.eastmoney.com/a/202608203848200614.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608203848200614.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608203848200614.html"
-            ],
-            "statement": "北矿科技：2026年上半年净利润同比增长25.68% 拟10派0.55元 _ 东方财富网 (https://finance.eastmoney.com/a/202608203848200614.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报快递|北矿科技2026年上半年扣非净利增42%，现金流激增近9倍订单充足_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082100021579)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.stockstar.com/detail/RB2026082100021579",
-            "source_refs": [
-              "https://wap.stockstar.com/detail/RB2026082100021579"
-            ],
-            "statement": "财报快递|北矿科技2026年上半年扣非净利增42%，现金流激增近9倍订单充足_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082100021579)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "北矿科技(600980) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600980/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/600980/",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/600980/"
-            ],
-            "statement": "北矿科技(600980) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600980/)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -28500,72 +28082,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127"
             ],
             "statement": "赛力斯(601127)_公司公告_赛力斯：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "赛力斯(601127)_公司公告_赛力斯：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127"
-            ],
-            "statement": "赛力斯(601127)_公司公告_赛力斯：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12505883&stockid=601127)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "赛力斯(601127) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601127/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/601127/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/601127/bw.shtml"
-            ],
-            "statement": "赛力斯(601127) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601127/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "巨潮资讯网 (https://www.cninfo.com.cn/new/fulltextSearch?keyWord=601127)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://www.cninfo.com.cn/new/fulltextSearch?keyWord=601127",
-            "source_refs": [
-              "https://www.cninfo.com.cn/new/fulltextSearch?keyWord=601127"
-            ],
-            "statement": "巨潮资讯网 (https://www.cninfo.com.cn/new/fulltextSearch?keyWord=601127)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "股市必读：赛力斯新发布《2026年半年度报告摘要》_公司公告_主力资金_损失 (https://www.sohu.com/a/1065046558_122123195)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://www.sohu.com/a/1065046558_122123195",
-            "source_refs": [
-              "https://www.sohu.com/a/1065046558_122123195"
-            ],
-            "statement": "股市必读：赛力斯新发布《2026年半年度报告摘要》_公司公告_主力资金_损失 (https://www.sohu.com/a/1065046558_122123195)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "赛力斯(601127)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/601127/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/601127/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/601127/financefile/"
-            ],
-            "statement": "赛力斯(601127)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/601127/financefile/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "证券代码：601127 (https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2024-09-14/601127_20240914_SA3M.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2024-09-14/601127_20240914_SA3M.pdf",
-            "source_refs": [
-              "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2024-09-14/601127_20240914_SA3M.pdf"
-            ],
-            "statement": "证券代码：601127 (https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2024-09-14/601127_20240914_SA3M.pdf)",
             "support": "supports"
           }
         ],
@@ -30942,28 +30458,6 @@
               "https://static.cninfo.com.cn/finalpage/2022-08-31/1214505194.pdf"
             ],
             "statement": "公司代码：601881                                        公司简称：中国银河 (https://static.cninfo.com.cn/finalpage/2022-08-31/1214505194.pdf)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "公司代码：601881                                公司简称：中国银河 (https://static.sse.com.cn/disclosure/bond/announcement/company/c/new/2024-08-31/115343_20240831_0FF3.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.sse.com.cn/disclosure/bond/announcement/company/c/new/2024-08-31/115343_20240831_0FF3.pdf",
-            "source_refs": [
-              "https://static.sse.com.cn/disclosure/bond/announcement/company/c/new/2024-08-31/115343_20240831_0FF3.pdf"
-            ],
-            "statement": "公司代码：601881                                公司简称：中国银河 (https://static.sse.com.cn/disclosure/bond/announcement/company/c/new/2024-08-31/115343_20240831_0FF3.pdf)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "中国银河(601881) - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601881/index.shtml?_trans_=060008_lym)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/601881/index.shtml?_trans_=060008_lym",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/601881/index.shtml?_trans_=060008_lym"
-            ],
-            "statement": "中国银河(601881) - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601881/index.shtml?_trans_=060008_lym)",
             "support": "supports"
           }
         ],
@@ -33881,72 +33375,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406"
             ],
             "statement": "天富龙(603406)_公司公告_天富龙：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "天富龙(603406)_公司公告_天富龙：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497962&stockid=603406)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497962&stockid=603406",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497962&stockid=603406"
-            ],
-            "statement": "天富龙(603406)_公司公告_天富龙：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497962&stockid=603406)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "天富龙(603406)_公司公告_天富龙：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406"
-            ],
-            "statement": "天富龙(603406)_公司公告_天富龙：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12497963&stockid=603406)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "天富龙(603406) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603406/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/603406/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/603406/bw.shtml"
-            ],
-            "statement": "天富龙(603406) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603406/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "天富龙(603406) 经营分析_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/603406/operate.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/603406/operate.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/603406/operate.html"
-            ],
-            "statement": "天富龙(603406) 经营分析_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/603406/operate.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "天富龙(603406) - 主营收入构成 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603406/srgc.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/603406/srgc.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/603406/srgc.shtml"
-            ],
-            "statement": "天富龙(603406) - 主营收入构成 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/603406/srgc.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "天富龙(603406) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/603406/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/603406/",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/603406/"
-            ],
-            "statement": "天富龙(603406) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/603406/)",
             "support": "supports"
           }
         ],
@@ -43431,28 +42859,6 @@
             ],
             "statement": "证券代码：601717                                公司简称：中创智领 (https://pdf.dfcfw.com/pdf/H22_AN202605281822943983_1.pdf)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "中创智领(601717)_股票行情_证券之星 (https://stock.quote.stockstar.com/601717.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/601717.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/601717.shtml"
-            ],
-            "statement": "中创智领(601717)_股票行情_证券之星 (https://stock.quote.stockstar.com/601717.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "中创智领(601717):全球煤机龙头转型智能制造集团 - 个股研报 - 大虾皮AI投资数据 (https://daxiapi.com/article/stock-report/2026-07-05-601717/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://daxiapi.com/article/stock-report/2026-07-05-601717/",
-            "source_refs": [
-              "https://daxiapi.com/article/stock-report/2026-07-05-601717/"
-            ],
-            "statement": "中创智领(601717):全球煤机龙头转型智能制造集团 - 个股研报 - 大虾皮AI投资数据 (https://daxiapi.com/article/stock-report/2026-07-05-601717/)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -47301,50 +46707,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12512248&stockid=000786"
             ],
             "statement": "北新建材(000786)_公司公告_北新建材：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12512248&stockid=000786)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "财报速递：北新建材2026年半年度净利润13.75亿元 (https://yuanchuang.10jqka.com.cn/20260820/c679141554.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260820/c679141554.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260820/c679141554.shtml"
-            ],
-            "statement": "财报速递：北新建材2026年半年度净利润13.75亿元 (https://yuanchuang.10jqka.com.cn/20260820/c679141554.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "股市必读：北新建材新发布《2026年半年度报告摘要》_搜狐网 (https://m.sohu.com/a/1065557770_115377)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://m.sohu.com/a/1065557770_115377",
-            "source_refs": [
-              "https://m.sohu.com/a/1065557770_115377"
-            ],
-            "statement": "股市必读：北新建材新发布《2026年半年度报告摘要》_搜狐网 (https://m.sohu.com/a/1065557770_115377)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "北新建材(000786)_公司资料_证券之星 (https://stock.quote.stockstar.com/corp_000786.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/corp_000786.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/corp_000786.shtml"
-            ],
-            "statement": "北新建材(000786)_公司资料_证券之星 (https://stock.quote.stockstar.com/corp_000786.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "北新建材(000786)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/000786/index/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stockpage.10jqka.com.cn/000786/index/",
-            "source_refs": [
-              "https://stockpage.10jqka.com.cn/000786/index/"
-            ],
-            "statement": "北新建材(000786)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/000786/index/)",
             "support": "supports"
           }
         ],
@@ -52383,94 +51745,6 @@
             ],
             "statement": "国金证券-雷赛智能(002979)营收加速增长，机器人第二增长曲线确立-260423.pdf ( turn552search14 [wordlim: 200] Published: 4 months ago; 雷赛智能（002979.SZ）2026年04月23日买入（维持评级）公司点评证券研究报告 ... 现营收18.7 亿元，同比+18.3%，实现归母净利2.3 亿元，同比 ... 雷赛智能公司点评：主业稳健增长，机器人业务蓄势待发》，2025.8.293.《 ... 1）行业：根据MIR，25 年国内自动化市场规模同比-1%，跌幅缩 ... 每股经营性现金流净额 ... 下游制造业不景气、新技术研发不及预期、市场竞争加剧等。",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "证券代码：002979 (https://static.cninfo.com.cn/finalpage/2026-04-28/1225238225.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.cninfo.com.cn/finalpage/2026-04-28/1225238225.PDF",
-            "source_refs": [
-              "https://static.cninfo.com.cn/finalpage/2026-04-28/1225238225.PDF"
-            ],
-            "statement": "证券代码：002979 (https://static.cninfo.com.cn/finalpage/2026-04-28/1225238225.PDF)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "26H1业绩预告点评：业绩大超市场预期，AI投资驱动&三年战略升级红利期已至- 宏观研究报告 _ 数据中心 _ 东方财富网 (https://data.eastmoney.com/report/zw_stock.jshtml?encodeUrl=e8uG6eiIVZW0nwiqzAxJqgkUchIcZeYP2oz+3cq6vEo%3D)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://data.eastmoney.com/report/zw_stock.jshtml?encodeUrl=e8uG6eiIVZW0nwiqzAxJqgkUchIcZeYP2oz+3cq6vEo%3D",
-            "source_refs": [
-              "https://data.eastmoney.com/report/zw_stock.jshtml?encodeUrl=e8uG6eiIVZW0nwiqzAxJqgkUchIcZeYP2oz+3cq6vEo%3D"
-            ],
-            "statement": "26H1业绩预告点评：业绩大超市场预期，AI投资驱动&三年战略升级红利期已至- 宏观研究报告 _ 数据中心 _ 东方财富网 (https://data.eastmoney.com/report/zw_stock.jshtml?encodeUrl=e8uG6eiIVZW0nwiqzAxJqgkUchIcZeYP2oz+3cq6vEo%3D)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "雷赛智能(002979)_公司公告_雷赛智能：2025年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396419&stockid=002979)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396419&stockid=002979",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396419&stockid=002979"
-            ],
-            "statement": "雷赛智能(002979)_公司公告_雷赛智能：2025年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396419&stockid=002979)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "雷赛智能(002979)_公司公告_雷赛智能：2025年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396416&stockid=002979)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396416&stockid=002979",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396416&stockid=002979"
-            ],
-            "statement": "雷赛智能(002979)_公司公告_雷赛智能：2025年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=11396416&stockid=002979)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "雷赛智能(002979)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/002979/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/002979/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/002979/financefile/"
-            ],
-            "statement": "雷赛智能(002979)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/002979/financefile/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "雷赛智能(002979)_财报全文_中财网 (https://quoteimg.cfi.cn/cbgg/20088/002979.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://quoteimg.cfi.cn/cbgg/20088/002979.html",
-            "source_refs": [
-              "https://quoteimg.cfi.cn/cbgg/20088/002979.html"
-            ],
-            "statement": "雷赛智能(002979)_财报全文_中财网 (https://quoteimg.cfi.cn/cbgg/20088/002979.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "雷赛智能(002979)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/002979/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://market.chinajson.com/cn/company/a/002979/",
-            "source_refs": [
-              "https://market.chinajson.com/cn/company/a/002979/"
-            ],
-            "statement": "雷赛智能(002979)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/002979/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-008",
-            "source_context": "国金证券-雷赛智能(002979)营收加速增长，机器人第二增长曲线确立-260423.pdf (https://pdf.dfcfw.com/pdf/H3_AP202604231821484000_1.pdf?1776938632000.pdf=)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://pdf.dfcfw.com/pdf/H3_AP202604231821484000_1.pdf?1776938632000.pdf=",
-            "source_refs": [
-              "https://pdf.dfcfw.com/pdf/H3_AP202604231821484000_1.pdf?1776938632000.pdf="
-            ],
-            "statement": "国金证券-雷赛智能(002979)营收加速增长，机器人第二增长曲线确立-260423.pdf (https://pdf.dfcfw.com/pdf/H3_AP202604231821484000_1.pdf?1776938632000.pdf=)",
-            "support": "supports"
           }
         ],
         "confidence": "medium",
@@ -52977,28 +52251,6 @@
               "https://basic.10jqka.com.cn/003006/"
             ],
             "statement": "百亚股份(003006) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/003006/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "百亚股份(003006) 经营分析_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/003006/operate.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/003006/operate.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/003006/operate.html"
-            ],
-            "statement": "百亚股份(003006) 经营分析_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/003006/operate.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "百亚股份(003006)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/003006/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/003006/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/003006/financefile/"
-            ],
-            "statement": "百亚股份(003006)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/003006/financefile/)",
             "support": "supports"
           }
         ],
@@ -63043,94 +62295,6 @@
             ],
             "statement": "华鲁恒升(600426)A股财报_Publicly traded company ( turn486search9 [wordlim: 200] Published: 3 months ago; Crawled: last week; 项目 | 2026-03-31 | 2025-12-31 | 2025-09-30 | 2025-06-30 ... 经营现金流净额占比 | 101.4258 | 657.2913 | 541.4939 | 504.103 ... 筹资现金流净额占比 | 115.2368 | 12.562 | 36.6594 | 31.5316",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "华鲁恒升(600426)_公司公告_华鲁恒升：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12504625&stockid=600426)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12504625&stockid=600426",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12504625&stockid=600426"
-            ],
-            "statement": "华鲁恒升(600426)_公司公告_华鲁恒升：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12504625&stockid=600426)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "华鲁恒升: 华鲁恒升2026年半年度主要经营数据的公告_公司公告_每日必读_股票_证券之星 (https://wap.stockstar.com/detail/SN2026081900029704)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.stockstar.com/detail/SN2026081900029704",
-            "source_refs": [
-              "https://wap.stockstar.com/detail/SN2026081900029704"
-            ],
-            "statement": "华鲁恒升: 华鲁恒升2026年半年度主要经营数据的公告_公司公告_每日必读_股票_证券之星 (https://wap.stockstar.com/detail/SN2026081900029704)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "华鲁恒升(600426) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/600426/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/600426/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/600426/bw.shtml"
-            ],
-            "statement": "华鲁恒升(600426) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/600426/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "华鲁恒升(600426) 盈利预测_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600426/worth.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/600426/worth.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/600426/worth.html"
-            ],
-            "statement": "华鲁恒升(600426) 盈利预测_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600426/worth.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "华鲁恒升上半年归母净利润23.5亿元，同比增长50%_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-19/doc-ininvwqt9374685.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.sina.com.cn/stock/zqgd/2026-08-19/doc-ininvwqt9374685.shtml",
-            "source_refs": [
-              "https://finance.sina.com.cn/stock/zqgd/2026-08-19/doc-ininvwqt9374685.shtml"
-            ],
-            "statement": "华鲁恒升上半年归母净利润23.5亿元，同比增长50%_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-19/doc-ininvwqt9374685.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "财报速递：华鲁恒升2026年半年度净利润23.53亿元 (https://news.10jqka.com.cn/20260820/c679109090.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://news.10jqka.com.cn/20260820/c679109090.shtml",
-            "source_refs": [
-              "https://news.10jqka.com.cn/20260820/c679109090.shtml"
-            ],
-            "statement": "财报速递：华鲁恒升2026年半年度净利润23.53亿元 (https://news.10jqka.com.cn/20260820/c679109090.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "华鲁恒升(600426)_公司公告_华鲁恒升：2025年年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12036763&stockid=600426)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12036763&stockid=600426",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12036763&stockid=600426"
-            ],
-            "statement": "华鲁恒升(600426)_公司公告_华鲁恒升：2025年年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12036763&stockid=600426)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-008",
-            "source_context": "华鲁恒升(600426)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/600426/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://market.chinajson.com/cn/company/a/600426/",
-            "source_refs": [
-              "https://market.chinajson.com/cn/company/a/600426/"
-            ],
-            "statement": "华鲁恒升(600426)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/600426/)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -69556,28 +68720,6 @@
               "https://data.cfi.cn/phonebaseinfo.aspx?client=phone&lm=p_jyzj&stockid=180858"
             ],
             "statement": "林平发展(603284)的F10-中财网 (https://data.cfi.cn/phonebaseinfo.aspx?client=phone&lm=p_jyzj&stockid=180858)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：林平发展2026年半年度净利润1.16亿元 (https://yuanchuang.10jqka.com.cn/20260817/c679012646.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260817/c679012646.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260817/c679012646.shtml"
-            ],
-            "statement": "财报速递：林平发展2026年半年度净利润1.16亿元 (https://yuanchuang.10jqka.com.cn/20260817/c679012646.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "林平发展(603284)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/603284/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/603284/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/603284/financefile/"
-            ],
-            "statement": "林平发展(603284)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/603284/financefile/)",
             "support": "supports"
           }
         ],
@@ -80332,28 +79474,6 @@
             ],
             "statement": "浙江众成：2026年上半年净利润5393.81万元 同比增长48.47% _ 东方财富网 (https://finance.eastmoney.com/a/202608233850368138.html)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "浙江众成(002522) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002522/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/002522/",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/002522/"
-            ],
-            "statement": "浙江众成(002522) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002522/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报速递：浙江众成2026年半年度净利润5393.81万元 (https://yuanchuang.10jqka.com.cn/20260824/c679199961.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260824/c679199961.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260824/c679199961.shtml"
-            ],
-            "statement": "财报速递：浙江众成2026年半年度净利润5393.81万元 (https://yuanchuang.10jqka.com.cn/20260824/c679199961.shtml)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -85131,50 +84251,6 @@
               "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002137.phtml"
             ],
             "statement": "实益达(002137)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002137.phtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "实益达：2026年上半年净利润3203.14万元 同比增长107.13% _ 东方财富网 (https://finance.eastmoney.com/a/202608113836984086.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608113836984086.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608113836984086.html"
-            ],
-            "statement": "实益达：2026年上半年净利润3203.14万元 同比增长107.13% _ 东方财富网 (https://finance.eastmoney.com/a/202608113836984086.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "证券代码：002137 (https://pdf.dfcfw.com/pdf/H2_AN202605121822222394_1.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://pdf.dfcfw.com/pdf/H2_AN202605121822222394_1.pdf",
-            "source_refs": [
-              "https://pdf.dfcfw.com/pdf/H2_AN202605121822222394_1.pdf"
-            ],
-            "statement": "证券代码：002137 (https://pdf.dfcfw.com/pdf/H2_AN202605121822222394_1.pdf)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "实益达(002137)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002137.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/info_002137.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/info_002137.shtml"
-            ],
-            "statement": "实益达(002137)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002137.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "实益达(002137)_公司公告_实益达：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12486552&stockid=002137)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12486552&stockid=002137",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12486552&stockid=002137"
-            ],
-            "statement": "实益达(002137)_公司公告_实益达：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12486552&stockid=002137)",
             "support": "supports"
           }
         ],
@@ -96019,72 +95095,6 @@
             ],
             "statement": "上纬新材(688585)_公司公告_上纬新材：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496850&stockid=688585)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "上纬新材(688585)_公司公告_上纬新材：关于2026年度“提质增效重回报”行动方案的半年度评估报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496853&stockid=688585)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496853&stockid=688585",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496853&stockid=688585"
-            ],
-            "statement": "上纬新材(688585)_公司公告_上纬新材：关于2026年度“提质增效重回报”行动方案的半年度评估报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496853&stockid=688585)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "上纬新材(688585) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/688585/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/688585/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/688585/bw.shtml"
-            ],
-            "statement": "上纬新材(688585) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/688585/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "新材料龙头，上半年亏损1.67亿元，推逾806万股激励计划 _ 东方财富网 (https://finance.eastmoney.com/a/202608143842067680.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608143842067680.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608143842067680.html"
-            ],
-            "statement": "新材料龙头，上半年亏损1.67亿元，推逾806万股激励计划 _ 东方财富网 (https://finance.eastmoney.com/a/202608143842067680.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "上纬新材：2026年上半年亏损1.67亿元 _ 东方财富网 (https://finance.eastmoney.com/a/202608163842531979.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608163842531979.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608163842531979.html"
-            ],
-            "statement": "上纬新材：2026年上半年亏损1.67亿元 _ 东方财富网 (https://finance.eastmoney.com/a/202608163842531979.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "机器人风口下的上纬新材：上半年净亏损1.67亿元 却掏出股权激励“押注”新业务 _ 东方财富网 (https://finance.eastmoney.com/a/202608143842098155.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608143842098155.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608143842098155.html"
-            ],
-            "statement": "机器人风口下的上纬新材：上半年净亏损1.67亿元 却掏出股权激励“押注”新业务 _ 东方财富网 (https://finance.eastmoney.com/a/202608143842098155.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "上纬新材(688585) 财务概况_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/688585/finance.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/688585/finance.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/688585/finance.html"
-            ],
-            "statement": "上纬新材(688585) 财务概况_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/688585/finance.html)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -97409,28 +96419,6 @@
               "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/301707.phtml"
             ],
             "statement": "展芯股份(301707)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/301707.phtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：展芯股份2026年半年度净利润1.43亿元 (https://yuanchuang.10jqka.com.cn/20260824/c679233912.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260824/c679233912.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260824/c679233912.shtml"
-            ],
-            "statement": "财报速递：展芯股份2026年半年度净利润1.43亿元 (https://yuanchuang.10jqka.com.cn/20260824/c679233912.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "展芯股份(301707)股票股价,行情,新闻,财报数据_新浪财经_新浪网 (https://finance.sina.com.cn/realstock/company/sz301707/nc.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.sina.com.cn/realstock/company/sz301707/nc.shtml",
-            "source_refs": [
-              "https://finance.sina.com.cn/realstock/company/sz301707/nc.shtml"
-            ],
-            "statement": "展芯股份(301707)股票股价,行情,新闻,财报数据_新浪财经_新浪网 (https://finance.sina.com.cn/realstock/company/sz301707/nc.shtml)",
             "support": "supports"
           }
         ],
@@ -101001,50 +99989,6 @@
             ],
             "statement": "神剑股份(002361)_公司公告_神剑股份：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12520469&stockid=002361)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "神剑股份(002361)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002361.phtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002361.phtml",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002361.phtml"
-            ],
-            "statement": "神剑股份(002361)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/002361.phtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "证券代码：002361 (https://file.finance.sina.com.cn/cn/diaoyan/jgdy/2026/2026-05/2026-05-08/10179389_1.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://file.finance.sina.com.cn/cn/diaoyan/jgdy/2026/2026-05/2026-05-08/10179389_1.PDF",
-            "source_refs": [
-              "https://file.finance.sina.com.cn/cn/diaoyan/jgdy/2026/2026-05/2026-05-08/10179389_1.PDF"
-            ],
-            "statement": "证券代码：002361 (https://file.finance.sina.com.cn/cn/diaoyan/jgdy/2026/2026-05/2026-05-08/10179389_1.PDF)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "神剑股份(002361)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/002361/index/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stockpage.10jqka.com.cn/002361/index/",
-            "source_refs": [
-              "https://stockpage.10jqka.com.cn/002361/index/"
-            ],
-            "statement": "神剑股份(002361)个股资金流向查询_个股行情_同花顺财经 (https://stockpage.10jqka.com.cn/002361/index/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "神剑股份(002361)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/002361/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/002361/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/002361/financefile/"
-            ],
-            "statement": "神剑股份(002361)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/002361/financefile/)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -103315,50 +102259,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515729&stockid=300853"
             ],
             "statement": "申昊科技(300853)_公司公告_申昊科技：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515729&stockid=300853)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "申昊科技：上半年净亏损收窄至5994万元_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-21/doc-inipakum6507416.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.sina.com.cn/stock/zqgd/2026-08-21/doc-inipakum6507416.shtml",
-            "source_refs": [
-              "https://finance.sina.com.cn/stock/zqgd/2026-08-21/doc-inipakum6507416.shtml"
-            ],
-            "statement": "申昊科技：上半年净亏损收窄至5994万元_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-21/doc-inipakum6507416.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "申昊科技（300853）2026年半年度管理层讨论与分析_财报审计_数据解析_股票_证券之星 (https://4g.stockstar.com/detail/RB2026082200010119)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://4g.stockstar.com/detail/RB2026082200010119",
-            "source_refs": [
-              "https://4g.stockstar.com/detail/RB2026082200010119"
-            ],
-            "statement": "申昊科技（300853）2026年半年度管理层讨论与分析_财报审计_数据解析_股票_证券之星 (https://4g.stockstar.com/detail/RB2026082200010119)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报速递：申昊科技2026年半年度净亏损5993.84万元 (https://yuanchuang.10jqka.com.cn/20260821/c679176089.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260821/c679176089.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260821/c679176089.shtml"
-            ],
-            "statement": "财报速递：申昊科技2026年半年度净亏损5993.84万元 (https://yuanchuang.10jqka.com.cn/20260821/c679176089.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "申昊科技(300853)_公司公告_申昊科技：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515733&stockid=300853)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515733&stockid=300853",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515733&stockid=300853"
-            ],
-            "statement": "申昊科技(300853)_公司公告_申昊科技：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12515733&stockid=300853)",
             "support": "supports"
           }
         ],
@@ -107031,28 +105931,6 @@
               "https://finance.eastmoney.com/a/202607283823726239.html"
             ],
             "statement": "一批A股公司上半年业绩报喜 力量钻石上半年净利润同比增长247.61% _ 东方财富网 (https://finance.eastmoney.com/a/202607283823726239.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071"
-            ],
-            "statement": "力量钻石(301071)_公司公告_力量钻石：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12465811&stockid=301071)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "证券代码：301071 (https://pdf.dfcfw.com/pdf/H2_AN202605151822353550_1.pdf)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://pdf.dfcfw.com/pdf/H2_AN202605151822353550_1.pdf",
-            "source_refs": [
-              "https://pdf.dfcfw.com/pdf/H2_AN202605151822353550_1.pdf"
-            ],
-            "statement": "证券代码：301071 (https://pdf.dfcfw.com/pdf/H2_AN202605151822353550_1.pdf)",
             "support": "supports"
           }
         ],
@@ -114069,50 +112947,6 @@
             ],
             "statement": "红星发展(600367)_公司公告_红星发展：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514636&stockid=600367)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "红星发展(600367)_重大事项提醒与新闻公告_投资提醒_新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllMemordDetail.php?stockid=600367)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllMemordDetail.php?stockid=600367",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllMemordDetail.php?stockid=600367"
-            ],
-            "statement": "红星发展(600367)_重大事项提醒与新闻公告_投资提醒_新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllMemordDetail.php?stockid=600367)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "红星发展(600367)_公司公告_红星发展：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514637&stockid=600367)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514637&stockid=600367",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514637&stockid=600367"
-            ],
-            "statement": "红星发展(600367)_公司公告_红星发展：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12514637&stockid=600367)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "红星发展(600367)个股资金流向查询_个股行情_同花顺财经 (https://f10.10jqka.com.cn/600367/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://f10.10jqka.com.cn/600367/",
-            "source_refs": [
-              "https://f10.10jqka.com.cn/600367/"
-            ],
-            "statement": "红星发展(600367)个股资金流向查询_个股行情_同花顺财经 (https://f10.10jqka.com.cn/600367/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "红星发展(600367) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600367/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/600367/",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/600367/"
-            ],
-            "statement": "红星发展(600367) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/600367/)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -116684,28 +115518,6 @@
             ],
             "statement": "中旗股份(300575) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/300575/)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：中旗股份2026年半年度净利润4938.21万元 (https://news.10jqka.com.cn/20260818/c679025267.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://news.10jqka.com.cn/20260818/c679025267.shtml",
-            "source_refs": [
-              "https://news.10jqka.com.cn/20260818/c679025267.shtml"
-            ],
-            "statement": "财报速递：中旗股份2026年半年度净利润4938.21万元 (https://news.10jqka.com.cn/20260818/c679025267.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "中旗股份(300575.SZ)最新财报下载(PDF)_历史财报下载 - 前瞻眼 (https://stock.qianzhan.com/hs/sourcefiles_300575.sz.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.qianzhan.com/hs/sourcefiles_300575.sz.html",
-            "source_refs": [
-              "https://stock.qianzhan.com/hs/sourcefiles_300575.sz.html"
-            ],
-            "statement": "中旗股份(300575.SZ)最新财报下载(PDF)_历史财报下载 - 前瞻眼 (https://stock.qianzhan.com/hs/sourcefiles_300575.sz.html)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -117099,28 +115911,6 @@
             ],
             "statement": "[中报]恒源煤电(600971):恒源煤电2026年半年度报告摘要- CFi.CN 中财网 (https://www.cfi.net.cn/p20260820000880.html)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "恒源煤电(600971)_公司公告_恒源煤电：“提质增效重回报”行动方案半年度评估报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508687&stockid=600971)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508687&stockid=600971",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508687&stockid=600971"
-            ],
-            "statement": "恒源煤电(600971)_公司公告_恒源煤电：“提质增效重回报”行动方案半年度评估报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508687&stockid=600971)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报快递|恒源煤电2026年上半年扭亏为盈，扣非净利仅四成七，财务费用增251%_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082100001891)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.stockstar.com/detail/RB2026082100001891",
-            "source_refs": [
-              "https://wap.stockstar.com/detail/RB2026082100001891"
-            ],
-            "statement": "财报快递|恒源煤电2026年上半年扭亏为盈，扣非净利仅四成七，财务费用增251%_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082100001891)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -117346,28 +116136,6 @@
               "https://finance.sina.com.cn/stock/zqgd/2026-08-24/doc-inipmnpm0022912.shtml"
             ],
             "statement": "再升科技：上半年归母净利润同比降25.6%至4484万元_新浪财经_新浪网 (https://finance.sina.com.cn/stock/zqgd/2026-08-24/doc-inipmnpm0022912.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "再升科技(603601)_公司公告_再升科技：关于2025年年度报告的信息披露监管问询函的回复公告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12450335&stockid=603601)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12450335&stockid=603601",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12450335&stockid=603601"
-            ],
-            "statement": "再升科技(603601)_公司公告_再升科技：关于2025年年度报告的信息披露监管问询函的回复公告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12450335&stockid=603601)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "再升科技：H1净利润下滑超两成 股价较年内高点已跌去逾六成|财报解读_新浪财经_新浪网 (https://finance.sina.com.cn/roll/2026-08-24/doc-inipmsvn6019244.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.sina.com.cn/roll/2026-08-24/doc-inipmsvn6019244.shtml",
-            "source_refs": [
-              "https://finance.sina.com.cn/roll/2026-08-24/doc-inipmsvn6019244.shtml"
-            ],
-            "statement": "再升科技：H1净利润下滑超两成 股价较年内高点已跌去逾六成|财报解读_新浪财经_新浪网 (https://finance.sina.com.cn/roll/2026-08-24/doc-inipmsvn6019244.shtml)",
             "support": "supports"
           }
         ],
@@ -122174,72 +120942,6 @@
             ],
             "statement": "中兵红箭(000519)_公司公告_中兵红箭：2026年半年度报告摘要新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511959&stockid=000519)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "中兵红箭(000519)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/000519.phtml?ftype=0)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/000519.phtml?ftype=0",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/000519.phtml?ftype=0"
-            ],
-            "statement": "中兵红箭(000519)公司公告_新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/000519.phtml?ftype=0)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "中兵红箭(000519)_财报全文_中财网 (https://quote.cfi.cn/cbgg/119/000519.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://quote.cfi.cn/cbgg/119/000519.html",
-            "source_refs": [
-              "https://quote.cfi.cn/cbgg/119/000519.html"
-            ],
-            "statement": "中兵红箭(000519)_财报全文_中财网 (https://quote.cfi.cn/cbgg/119/000519.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "中兵红箭(000519.SZ)最新财报下载(PDF)_历史财报下载 - 前瞻眼 (https://stock.qianzhan.com/hs/sourcefiles_000519.SZ.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.qianzhan.com/hs/sourcefiles_000519.SZ.html",
-            "source_refs": [
-              "https://stock.qianzhan.com/hs/sourcefiles_000519.SZ.html"
-            ],
-            "statement": "中兵红箭(000519.SZ)最新财报下载(PDF)_历史财报下载 - 前瞻眼 (https://stock.qianzhan.com/hs/sourcefiles_000519.SZ.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "中兵红箭(000519)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/000519/financefile/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://s.askci.com/stock/financialreport/000519/financefile/",
-            "source_refs": [
-              "https://s.askci.com/stock/financialreport/000519/financefile/"
-            ],
-            "statement": "中兵红箭(000519)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/000519/financefile/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "财报速递：中兵红箭2026年半年度净利润3719.80万元 (https://yuanchuang.10jqka.com.cn/20260820/c679141103.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260820/c679141103.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260820/c679141103.shtml"
-            ],
-            "statement": "财报速递：中兵红箭2026年半年度净利润3719.80万元 (https://yuanchuang.10jqka.com.cn/20260820/c679141103.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "中兵红箭(000519)_公司公告_中兵红箭：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511999&stockid=000519)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511999&stockid=000519",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511999&stockid=000519"
-            ],
-            "statement": "中兵红箭(000519)_公司公告_中兵红箭：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511999&stockid=000519)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -123067,72 +121769,6 @@
               "https://s.askci.com/stock/financialreport/000595/financefile/"
             ],
             "statement": "新能股份(000595)财报原始文件下载-中商产业研究院数据库-中商情报网 (https://s.askci.com/stock/financialreport/000595/financefile/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "新能股份(000595)_公司公告_新能股份：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496183&stockid=000595)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496183&stockid=000595",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496183&stockid=000595"
-            ],
-            "statement": "新能股份(000595)_公司公告_新能股份：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496183&stockid=000595)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "新能股份：2026年上半年净利润2883.99万元 同比下降74.4% _ 东方财富网 (https://emwap.eastmoney.com/a/202608143842108437.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://emwap.eastmoney.com/a/202608143842108437.html",
-            "source_refs": [
-              "https://emwap.eastmoney.com/a/202608143842108437.html"
-            ],
-            "statement": "新能股份：2026年上半年净利润2883.99万元 同比下降74.4% _ 东方财富网 (https://emwap.eastmoney.com/a/202608143842108437.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "新能股份(000595)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/000595/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://market.chinajson.com/cn/company/a/000595/",
-            "source_refs": [
-              "https://market.chinajson.com/cn/company/a/000595/"
-            ],
-            "statement": "新能股份(000595)A股财报_Publicly traded company (https://market.chinajson.com/cn/company/a/000595/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "新能股份(000595) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/000595/index.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/000595/index.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/000595/index.html"
-            ],
-            "statement": "新能股份(000595) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/000595/index.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "财报速递：新能股份2026年半年度净利润2883.99万元 (https://news.10jqka.com.cn/20260814/c678972435.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://news.10jqka.com.cn/20260814/c678972435.shtml",
-            "source_refs": [
-              "https://news.10jqka.com.cn/20260814/c678972435.shtml"
-            ],
-            "statement": "财报速递：新能股份2026年半年度净利润2883.99万元 (https://news.10jqka.com.cn/20260814/c678972435.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "新能股份(000595)_公司公告_新能股份：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496182&stockid=000595)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496182&stockid=000595",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496182&stockid=000595"
-            ],
-            "statement": "新能股份(000595)_公司公告_新能股份：2026年半年度报告摘要新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12496182&stockid=000595)",
             "support": "supports"
           }
         ],
@@ -124870,28 +123506,6 @@
               "https://yuanchuang.10jqka.com.cn/20260821/c679172123.shtml"
             ],
             "statement": "财报速递：中科三环2026年半年度净利润4921.27万元 (https://yuanchuang.10jqka.com.cn/20260821/c679172123.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "中科三环(000970)_股票行情_证券之星 (https://stock.quote.stockstar.com/000970.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/000970.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/000970.shtml"
-            ],
-            "statement": "中科三环(000970)_股票行情_证券之星 (https://stock.quote.stockstar.com/000970.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "中科三环(000970) - 经营情况 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/000970/jyqk.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/000970/jyqk.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/000970/jyqk.shtml"
-            ],
-            "statement": "中科三环(000970) - 经营情况 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/000970/jyqk.shtml)",
             "support": "supports"
           }
         ],
@@ -129222,50 +127836,6 @@
               "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511909&stockid=002443"
             ],
             "statement": "金洲管道(002443)_公司公告_金洲管道：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12511909&stockid=002443)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "金洲管道(002443) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002443/)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/002443/",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/002443/"
-            ],
-            "statement": "金洲管道(002443) 最新动态_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002443/)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "金洲管道(002443)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002443.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/info_002443.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/info_002443.shtml"
-            ],
-            "statement": "金洲管道(002443)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_002443.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "财报速递：金洲管道2026年半年度净利润8575.04万元 (https://yuanchuang.10jqka.com.cn/20260820/c679141113.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260820/c679141113.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260820/c679141113.shtml"
-            ],
-            "statement": "财报速递：金洲管道2026年半年度净利润8575.04万元 (https://yuanchuang.10jqka.com.cn/20260820/c679141113.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "金洲管道(002443) 公司大事_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002443/event.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://basic.10jqka.com.cn/002443/event.html",
-            "source_refs": [
-              "https://basic.10jqka.com.cn/002443/event.html"
-            ],
-            "statement": "金洲管道(002443) 公司大事_F10_同花顺金融服务网 (https://basic.10jqka.com.cn/002443/event.html)",
             "support": "supports"
           }
         ],
@@ -138358,28 +136928,6 @@
             ],
             "statement": "证券代码：300796 (https://file.finance.sina.com.cn/cn/diaoyan/jgdy/2026/2026-04/2026-04-30/10178663_1.PDF)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：贝斯美2026年半年度净利润588.65万元 (https://yuanchuang.10jqka.com.cn/20260822/c679188346.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260822/c679188346.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260822/c679188346.shtml"
-            ],
-            "statement": "财报速递：贝斯美2026年半年度净利润588.65万元 (https://yuanchuang.10jqka.com.cn/20260822/c679188346.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "证券代码：300796 (https://static.cninfo.com.cn/finalpage/2025-04-19/1223147579.PDF)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147579.PDF",
-            "source_refs": [
-              "https://static.cninfo.com.cn/finalpage/2025-04-19/1223147579.PDF"
-            ],
-            "statement": "证券代码：300796 (https://static.cninfo.com.cn/finalpage/2025-04-19/1223147579.PDF)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -145655,28 +144203,6 @@
             ],
             "statement": "上海能源(600508)_公司资料_证券之星 (https://stock.quote.stockstar.com/corp_600508.shtml)",
             "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报快递|上海能源2026上半年净利增38%现金流增5.5倍，流动比率跌破1_公司_同比增长_投资 (https://www.sohu.com/a/1066031448_122757765)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://www.sohu.com/a/1066031448_122757765",
-            "source_refs": [
-              "https://www.sohu.com/a/1066031448_122757765"
-            ],
-            "statement": "财报快递|上海能源2026上半年净利增38%现金流增5.5倍，流动比率跌破1_公司_同比增长_投资 (https://www.sohu.com/a/1066031448_122757765)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "上海能源(600508)_公司公告_上海能源：2025年年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12033319&stockid=600508)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12033319&stockid=600508",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12033319&stockid=600508"
-            ],
-            "statement": "上海能源(600508)_公司公告_上海能源：2025年年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12033319&stockid=600508)",
-            "support": "supports"
           }
         ],
         "confidence": "high",
@@ -146212,28 +144738,6 @@
               "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510567&stockid=600589"
             ],
             "statement": "大位科技(600589)_公司公告_大位科技：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12510567&stockid=600589)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "财报速递：大位科技2026年半年度净亏损6974.41万元 (https://yuanchuang.10jqka.com.cn/20260821/c679148452.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://yuanchuang.10jqka.com.cn/20260821/c679148452.shtml",
-            "source_refs": [
-              "https://yuanchuang.10jqka.com.cn/20260821/c679148452.shtml"
-            ],
-            "statement": "财报速递：大位科技2026年半年度净亏损6974.41万元 (https://yuanchuang.10jqka.com.cn/20260821/c679148452.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "股市必读：大位科技新发布《2026年半年度报告_摘要》_搜狐网 (https://m.sohu.com/a/1065531346_115377)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://m.sohu.com/a/1065531346_115377",
-            "source_refs": [
-              "https://m.sohu.com/a/1065531346_115377"
-            ],
-            "statement": "股市必读：大位科技新发布《2026年半年度报告_摘要》_搜狐网 (https://m.sohu.com/a/1065531346_115377)",
             "support": "supports"
           }
         ],
@@ -148478,94 +146982,6 @@
               "https://stock.quote.stockstar.com/info_601360.shtml"
             ],
             "statement": "三六零(601360)_新闻动态_证券之星 ( turn546search7 [wordlim: 200] Crawled: today; * 2026-08-19三六零: 三六零安全科技股份有限公司2026年半年度报告摘要 ... 2026-08-20 | 股东户数 | 截止2026-06-30，公司A股股东户数为337013户，较上期（2026-03-31）减少31455户，变动幅度-8.54%",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-001",
-            "source_context": "三六零(601360)_公司公告_三六零：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360"
-            ],
-            "statement": "三六零(601360)_公司公告_三六零：2026年半年度报告新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-002",
-            "source_context": "三六零(601360)_公司公告_三六零：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360",
-            "source_refs": [
-              "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360"
-            ],
-            "statement": "三六零(601360)_公司公告_三六零：2026年半年度报告新浪财经_新浪网 (https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12506231&stockid=601360)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-003",
-            "source_context": "三六零(601360) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601360/bw.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://q.stock.sohu.com/cn/601360/bw.shtml",
-            "source_refs": [
-              "https://q.stock.sohu.com/cn/601360/bw.shtml"
-            ],
-            "statement": "三六零(601360) - 重大事项备忘 - 股票行情中心 - 搜狐证券 (https://q.stock.sohu.com/cn/601360/bw.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-004",
-            "source_context": "三六零(601360)公司公告_新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/601360.phtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://money.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/601360.phtml",
-            "source_refs": [
-              "https://money.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/601360.phtml"
-            ],
-            "statement": "三六零(601360)公司公告_新浪财经_新浪网 (https://money.finance.sina.com.cn/corp/go.php/vCB_AllBulletin/stockid/601360.phtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-005",
-            "source_context": "三六零上半年扭亏为盈 归母净利润达2.16亿元 _ 东方财富网 (https://finance.eastmoney.com/a/202608193846441873.html)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://finance.eastmoney.com/a/202608193846441873.html",
-            "source_refs": [
-              "https://finance.eastmoney.com/a/202608193846441873.html"
-            ],
-            "statement": "三六零上半年扭亏为盈 归母净利润达2.16亿元 _ 东方财富网 (https://finance.eastmoney.com/a/202608193846441873.html)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-006",
-            "source_context": "财报快递|三六零2026年上半年扭亏为盈净利2.16亿，综合收益亏4亿现金流为负_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082000001971)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://wap.stockstar.com/detail/RB2026082000001971",
-            "source_refs": [
-              "https://wap.stockstar.com/detail/RB2026082000001971"
-            ],
-            "statement": "财报快递|三六零2026年上半年扭亏为盈净利2.16亿，综合收益亏4亿现金流为负_股市直击_股票_证券之星 (https://wap.stockstar.com/detail/RB2026082000001971)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-007",
-            "source_context": "财报速递：三六零2026年半年度净利润2.16亿元 (https://news.10jqka.com.cn/20260819/c679091573.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://news.10jqka.com.cn/20260819/c679091573.shtml",
-            "source_refs": [
-              "https://news.10jqka.com.cn/20260819/c679091573.shtml"
-            ],
-            "statement": "财报速递：三六零2026年半年度净利润2.16亿元 (https://news.10jqka.com.cn/20260819/c679091573.shtml)",
-            "support": "supports"
-          },
-          {
-            "search_finding_id": "codex-luna-search-008",
-            "source_context": "三六零(601360)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_601360.shtml)",
-            "source_kind": "codex_web_search",
-            "source_ref": "https://stock.quote.stockstar.com/info_601360.shtml",
-            "source_refs": [
-              "https://stock.quote.stockstar.com/info_601360.shtml"
-            ],
-            "statement": "三六零(601360)_新闻动态_证券之星 (https://stock.quote.stockstar.com/info_601360.shtml)",
             "support": "supports"
           }
         ],
