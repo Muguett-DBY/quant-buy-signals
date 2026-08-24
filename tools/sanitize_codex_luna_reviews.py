@@ -123,8 +123,10 @@ def _without_unbound_source(value: Any, code: str, bad_tokens: set[str] | None =
     wrong_codes = _explicit_company_codes(text) - {code}
     bad_codes = {token for token in tokens if re.fullmatch(r"\d{6}", token)}
     has_bad_token = any(token in text for token in tokens)
-    if not _wrong_stock_ids(text, code) and not has_bad_token and not (
-        wrong_codes & bad_codes and any(marker in text for marker in _SOURCE_MARKERS)
+    if (
+        not _wrong_stock_ids(text, code)
+        and not has_bad_token
+        and not (wrong_codes & bad_codes and any(marker in text for marker in _SOURCE_MARKERS))
     ):
         return text
     for marker in _SOURCE_MARKERS:

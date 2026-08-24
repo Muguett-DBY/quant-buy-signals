@@ -20,14 +20,8 @@ def _claim(**overrides: object) -> dict[str, object]:
 def test_only_code_bound_sina_or_explicit_wrong_company_sources_are_rejected() -> None:
     assert _claim_is_unbound(
         _claim(
-            source_ref=(
-                "https://money.finance.sina.com.cn/corp/view/"
-                "vCB_AllBulletinDetail.php?stockid=300966"
-            ),
-            source_refs=[
-                "https://money.finance.sina.com.cn/corp/view/"
-                "vCB_AllBulletinDetail.php?stockid=300966"
-            ],
+            source_ref=("https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300966"),
+            source_refs=["https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300966"],
             statement="共同药业(300966)半年报",
         ),
         "603508",
@@ -73,12 +67,10 @@ def test_sanitize_removes_bad_claims_and_http_extras_without_touching_scores() -
                         ),
                         _claim(
                             source_ref=(
-                                "https://money.finance.sina.com.cn/corp/view/"
-                                "vCB_AllBulletinDetail.php?stockid=300966"
+                                "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300966"
                             ),
                             source_refs=[
-                                "https://money.finance.sina.com.cn/corp/view/"
-                                "vCB_AllBulletinDetail.php?stockid=300966"
+                                "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?stockid=300966"
                             ],
                             statement="共同药业(300966)半年报",
                         ),
