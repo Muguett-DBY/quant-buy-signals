@@ -1956,27 +1956,55 @@ def test_refresh_worker_deployment_uses_real_bindings_without_a_plaintext_key():
     assert "REFRESH_KEY" not in config["vars"]
 
 
-def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
+def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_path):
     source = DASHBOARD.read_text(encoding="utf-8")
+    page_function = source.split("function aiScreeningPageResponse(request){", 1)[1].split(
+        "export default{", 1
+    )[0]
     assert 'if(path==="/ai-screening")return aiScreeningPageResponse(request);' in source
     assert source.count("function aiScreeningPageResponse(request)") == 1
     assert "aiScreeningPageResponseSimple" not in source
     assert "aiScreeningPageResponseV2" not in source
     assert "legacyAiScreeningPageResponse" not in source
     assert "MutationObserver" not in source
-    assert "实际复核模型与推理档位" in source
-    assert "搜索事件已核验 · 保留引用已绑定搜索结果" in source
+    assert "收盘数据日" in source
+    assert "公司研究日" in source
+    assert "原生搜索事件证明" in source
+    assert "公司财务来源核验" in source
+    assert "原生搜索事件已核验 · 财报来源已核验" in source
     assert "仅模型声明已搜索 · 无运行事件证明" in source
-    assert "已移除未绑定引用" in source
-    assert "AI独立建议 · 接近达标" in source
-    assert "量化依据（同代际数据）" in source
+    assert "已移除无效来源" in source
+    assert "AI独立判断" in source
+    assert "AI独立建议 · 接近达标" not in source
+    assert "AI_RULE_REASON_RE" in source
+    assert "const displayHtml=" not in source
+    assert "const sourceSemanticsHtml=" not in source
+    assert "const finalHtml=" not in source
+    assert ".replace(" not in page_function
+    assert "AI为什么这样判断" in source
+    assert "公司量化事实" in source
+    assert "公司商业画像" in source
+    assert "估值与安全边际" in source
+    assert "主要反证与风险" in source
+    assert "公司资料与来源" in source
+    assert "为何进入规则候选池" in source
+    assert "candidate-rules" in source
     assert "quantitative_facts" in source
+    assert "economic_category" in source
+    assert "score_components" in source
+    assert "calibration_adjustments" in source
+    assert "evidence_bindings" in source
+    assert "search_findings" in source
+    assert "normalization_anchor" in source
+    assert "multiple_basis" in source
+    assert "function evidenceLinks" in source
     assert "Ox Alpha Free" in source
+    assert "DeepSeek V4 Flash（OpenCode Go）" in source
     assert "复核模型 " in source
     assert "推理档位 " in source
     assert "Array.isArray(packet.type_keys)" in source
-    assert "types.join(' / ')" in source
-    assert "MAX_AI_SCREENING_BYTES=8*1024*1024" in source
+    assert 'types.filter(Boolean).join(" / ")' in source
+    assert "MAX_AI_SCREENING_BYTES=32*1024*1024" in source
     assert 'env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json")' in source
     assert "value.ai_is_advisory!==true" in source
     assert "value.auto_buy_promotion!==false" in source
@@ -1984,12 +2012,46 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected():
     assert node is not None
     validator = r"""
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 let source = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) source += chunk;
-const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
-const worker = (await import(url)).default;
+const url = "data:text/javascript;base64," + Buffer.from(source + "\nexport { sourceSemanticProjectionDigest };\n").toString("base64");
+const loadedWorker = await import(url);
+const worker = loadedWorker.default;
+const sourceSemanticProjectionDigest = loadedWorker.sourceSemanticProjectionDigest;
 const generation = { generation_id: "0123456789abcdef", market_as_of: "2026-08-13" };
+assert.deepEqual(await sourceSemanticProjectionDigest({
+  review_mode: "opencode_native_company_research_review",
+  packets: [{ security_code: "600000", name: "Demo Co", type_key: "type1", ai_review: {
+    claims: [{ statement: "cash flow improved", source_ref: "https://example.test/report", source_context: "https://example.test/report filing", support: "supports", search_finding_id: "finding-1", source_kind: "official_filing" }],
+    search_findings: [{ id: "finding-1", query: "Demo Co filing", title: "Interim report", url: "https://example.test/report", published_at: "2026-08-20", report_period: "2026H1", finding: "cash flow improved", stance: "support", source_kind: "official_filing", source_quality: "primary" }],
+  } }],
+}), {
+  projection_sha256: "1f3d738f5225266bcaec750adbb06f03f9ada417c6eba6a20e666d063fbab47f",
+  projection_company_count: 1,
+  projection_claim_count: 1,
+  projection_search_finding_count: 1,
+  projection_source_reference_count: 2,
+  projection_unique_url_count: 1,
+});
+const bindCandidateIdentities = value => {
+  const pairs = value.packets.flatMap(packet => packet.type_keys.map(type => [String(packet.security_code), String(type)]));
+  pairs.sort((left, right) => left[0] === right[0] ? Number(left[1].slice(4)) - Number(right[1].slice(4)) : left[0] < right[0] ? -1 : 1);
+  const digest = createHash("sha256").update(pairs.map(([code, type]) => code + "\0" + type + "\n").join(""), "utf8").digest("hex");
+  value.candidate_identity_sha256 = digest;
+  value.candidate_universe_identity_sha256 = digest;
+  value.type_pair_candidate_identity_sha256 = digest;
+  value.type_pair_universe_identity_sha256 = digest;
+  return value;
+};
+const valuationSnapshot = (securityCode, valuation) => {
+  const number = value => value === null || value === undefined || value === "" ? null : Number(value).toFixed(8).replace(/0+$/, "").replace(/\.$/, "") || "0";
+  const snapshot = { contract_version: 1, security_code: securityCode, snapshot_generation: generation.generation_id, market_as_of: generation.market_as_of, current_price: valuation.current_price, pe: valuation.pe, pb: valuation.pb, market_cap: valuation.market_cap };
+  const canonical = { contract_version: 1, current_price: number(snapshot.current_price), market_as_of: snapshot.market_as_of, market_cap: number(snapshot.market_cap), pb: number(snapshot.pb), pe: number(snapshot.pe), security_code: snapshot.security_code, snapshot_generation: snapshot.snapshot_generation };
+  snapshot.canonical_sha256 = createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+  return snapshot;
+};
 const artifact = {
   schema_version: 2,
   review_schema_version: 2,
@@ -2003,14 +2065,18 @@ const artifact = {
       snapshot_generation: generation.generation_id,
       market_as_of: "2026-08-13",
       candidate_total: 1,
-      candidate_identity_sha256: "a".repeat(64),
-      candidate_universe_identity_sha256: "a".repeat(64),
+      candidate_identity_sha256: "204f58fc8253c17d36a5b3125999811155572bfc950162469554e0ef9cf622b4",
+      candidate_universe_identity_sha256: "204f58fc8253c17d36a5b3125999811155572bfc950162469554e0ef9cf622b4",
+      type_pair_candidate_identity_sha256: "204f58fc8253c17d36a5b3125999811155572bfc950162469554e0ef9cf622b4",
+      type_pair_universe_identity_sha256: "204f58fc8253c17d36a5b3125999811155572bfc950162469554e0ef9cf622b4",
       type_pair_unique_company_count: 1,
       candidate_offset: 0,
       type_pair_candidate_total: 1,
       type_pair_expected_total: 1,
       type_pair_reviewed_count: 1,
       type_pair_unreviewed_count: 0,
+      type_pair_needs_review_count: 0,
+      type_pair_verdict_counts: { confirmed: 0, caution: 1, misclassified: 0, missed_candidate: 0, needs_review: 0 },
       type_pair_web_search_attempted_count: 0,
       type_pair_web_search_completed_count: 0,
       type_pair_web_search_event_verified_count: 0,
@@ -2020,9 +2086,13 @@ const artifact = {
       attempted_review_count: 1,
       unreviewed_candidate_count: 0,
       attempted_needs_review_count: 0,
+      completed_review_count: 1,
+      pending_review_count: 0,
+      verdict_counts: { confirmed: 0, caution: 1, misclassified: 0, missed_candidate: 0, needs_review: 0 },
       web_search_attempted_count: 0,
       reviewed_without_web_search: 1,
       web_search_completed_count: 0,
+      web_source_verified_count: 0,
       web_search_event_verified_count: 0,
       web_search_claim_urls_verified_count: 0,
       web_search_dropped_claim_url_count: 0,
@@ -2042,7 +2112,7 @@ const artifact = {
     type_keys: ["type1"],
     type_pair_count: 1,
     deterministic: { status: "triggered", score: 7.8 },
-            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_category: "observe", final_recommendation: "do_not_recommend_buy", recommendation_label: "观察·需更新资料", ai_independent: false, confidence: "medium", summary: "当前资料较旧，列入观察并等待更新。", key_strengths: ["规则基础"], quantitative_facts: ["估值快照：PE 8.4 倍；2025年经营现金流 12.3 亿元"], risk_flags: [], claims: [], model: "opencode-go/ox-alpha-free", effort: "max", web_search_performed: false, web_search_event_verified: false, web_search_claim_urls_verified: false, web_search_verified: false, web_search_query_count: 0, web_search_verified_claim_url_count: 0, web_search_dropped_claim_url_count: 0, freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
+            ai_review: { verdict: "caution", recommended_action: "manual_review", buy_attractiveness_score: 64, ai_action: "watchlist", final_category: "observe", final_recommendation: "do_not_recommend_buy", recommendation_label: "观察·需更新资料", ai_independent: false, confidence: "medium", summary: "当前资料较旧，列入观察并等待更新。", key_strengths: ["2025年经营现金流同比改善"], quantitative_facts: ["估值快照：PE 8.4 倍；2025年经营现金流 12.3 亿元"], risk_flags: [], claims: [], model: "opencode-go/ox-alpha-free", effort: "max", web_search_performed: false, web_search_event_verified: false, web_search_claim_urls_verified: false, web_search_verified: false, web_search_query_count: 0, web_search_verified_claim_url_count: 0, web_search_dropped_claim_url_count: 0, freshness_status: "historical", freshness_years: [2024], freshness_penalty: 8, freshness_note: "主要事实只到 2024 年或更早" },
   }],
 };
 const bytes = new TextEncoder().encode(JSON.stringify(artifact));
@@ -2061,6 +2131,13 @@ assert.equal(response.status, 200);
     assert.equal(payload.ai_is_advisory, true);
     assert.deepEqual(payload.review_models, ["opencode-go/ox-alpha-free"]);
     assert.deepEqual(payload.review_efforts, ["max"]);
+    assert.match(response.headers.get("etag") || "", /^"[0-9a-f]{64}"$/);
+    assert.equal(response.headers.get("cache-control"), "public, max-age=60, stale-while-revalidate=300");
+    const notModified = await worker.fetch(new Request("https://dashboard.test/api/ai-screening", { headers: { "if-none-match": response.headers.get("etag") } }), env);
+    assert.equal(notModified.status, 304);
+    const immutableResponse = await worker.fetch(new Request("https://dashboard.test/api/ai-screening?generation_id=0123456789abcdef"), env);
+    assert.equal(immutableResponse.status, 200);
+    assert.equal(immutableResponse.headers.get("cache-control"), "public, max-age=31536000, immutable");
     const statusForArtifact = async value => {
       const valueBytes = new TextEncoder().encode(JSON.stringify(value));
       objects.set("ai-screening/0123456789abcdef.json", {
@@ -2069,6 +2146,31 @@ assert.equal(response.status, 200);
       });
       return (await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env)).status;
     };
+    let oversizedBodyRead = false;
+    objects.set("ai-screening/0123456789abcdef.json", {
+      size: 32 * 1024 * 1024 + 1,
+      arrayBuffer: async () => {
+        oversizedBodyRead = true;
+        throw new Error("oversized AI artifact body must not be read");
+      },
+    });
+    assert.equal((await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env)).status, 404);
+    assert.equal(oversizedBodyRead, false);
+    objects.set("ai-screening/0123456789abcdef.json", {
+      size: 32 * 1024 * 1024,
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    });
+    assert.equal((await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env)).status, 404);
+    const largeArtifact = structuredClone(artifact);
+    largeArtifact.test_padding = "x".repeat(9 * 1024 * 1024);
+    const largeBytes = new TextEncoder().encode(JSON.stringify(largeArtifact));
+    assert.ok(largeBytes.byteLength > 8 * 1024 * 1024);
+    assert.ok(largeBytes.byteLength < 32 * 1024 * 1024);
+    objects.set("ai-screening/0123456789abcdef.json", {
+      size: largeBytes.byteLength,
+      arrayBuffer: async () => largeBytes.buffer.slice(largeBytes.byteOffset, largeBytes.byteOffset + largeBytes.byteLength),
+    });
+    assert.equal((await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env)).status, 200);
     const muse = structuredClone(artifact);
     muse.review_models = ["opencode-go/muse-spark-1.2-contributor"];
     muse.review_efforts = ["xhigh"];
@@ -2089,6 +2191,7 @@ assert.equal(response.status, 200);
     external.web_search_attempted_count = 1;
     external.web_search_event_verified_count = 1;
     external.web_search_claim_urls_verified_count = 1;
+    external.source_audit = { available: true, invalid_claim_url_count: 0, failed: 0 };
     external.packets[0].ai_review.web_search_performed = true;
     external.packets[0].ai_review.web_search_event_verified = true;
     external.packets[0].ai_review.web_search_claim_urls_verified = true;
@@ -2108,6 +2211,224 @@ assert.equal(response.status, 200);
     const missingClaimBinding = structuredClone(external);
     missingClaimBinding.packets[0].ai_review.web_search_claim_urls_verified = false;
     assert.equal(await statusForArtifact(missingClaimBinding), 404);
+    const companyResearch = structuredClone(external);
+    companyResearch.review_mode = "opencode_native_company_research_review";
+    companyResearch.review_models = ["opencode-go/muse-spark-1.2-contributor"];
+    companyResearch.review_efforts = ["xhigh"];
+    companyResearch.research_as_of = "2026-08-15";
+    companyResearch.web_search_claim_urls_verified_count = 0;
+    companyResearch.type_pair_web_search_claim_urls_verified_count = 0;
+    companyResearch.research_source_urls_verified_count = 1;
+    companyResearch.type_pair_research_source_urls_verified_count = 1;
+    companyResearch.source_audit = { available: true, audit_contract_version: 3, audit_passed: true, audit_sha256: "c".repeat(64), merged_sha256: "b".repeat(64), invalid_claim_url_count: 0, checked: 1, ok: 1, failed: 0, blocked: 0, invalid: 0, claim_count: 3, semantic_claim_count: 3, semantic_passed_count: 3, semantic_failed_count: 0, semantic_unverified_count: 0, canonical_urls: ["https://example.test/financial-api", "https://example.test/financial-api#cashflow", "https://example.test/financial-api#valuation"], source_bindings: [
+      { security_code: "600339", name: "", type_key: "type1", claim_index: 0, search_finding_id: "search-business", url: "https://example.test/financial-api", kind: "claim" },
+      { security_code: "600339", name: "", type_key: "type1", claim_index: 1, search_finding_id: "", url: "https://example.test/financial-api#cashflow", kind: "claim" },
+      { security_code: "600339", name: "", type_key: "type1", claim_index: 2, search_finding_id: "", url: "https://example.test/financial-api#valuation", kind: "claim" },
+      { security_code: "600339", name: "", type_key: "type1", claim_index: null, finding_index: 0, search_finding_id: "search-business", url: "https://example.test/financial-api", kind: "search_finding" },
+    ], company_coverage: [{ security_code: "600339", name: "测试公司", referenced_finding_ids: ["search-business"], searched_no_source_finding_ids: [], referenced_no_source_finding_ids: [], canonical_url_count: 3, semantic_claim_count: 3, semantic_passed_count: 3, semantic_failed_count: 0, semantic_unverified_count: 0, all_referenced_findings_semantic_pass: true, status: "pass" }] };
+    Object.assign(companyResearch.packets[0].ai_review, {
+      model: "opencode-go/muse-spark-1.2-contributor",
+      effort: "xhigh",
+      buy_attractiveness_score: 50,
+      economic_category: "quality_equity",
+      score_components: { risk_adjusted_expected_return: 56, evidence_confidence: 80 },
+      calibration_adjustments: { raw_score: 56, source_penalty: 0, freshness_penalty: 8, pre_band_score: 48, action_band_min: 50, action_band_max: 69, final_score: 50, source_quality: "verified_https", freshness_status: "historical", band_clamped: true, verdict: "caution" },
+      claims: [{ statement: "2026年半年度报告披露企业金融与零售金融业务。", source_ref: "https://example.test/financial-api", source_kind: "company_ir", search_finding_id: "search-business" }],
+      web_search_claim_urls_verified: false,
+      claims: [
+        { statement: "2026�����ȱ�����¶��ҵ���������۽���ҵ��", source_ref: "https://example.test/financial-api", source_kind: "company_ir", search_finding_id: "search-business" },
+        { statement: "2025�꾭Ӫ�ֽ��� 18 ��Ԫ", source_ref: "https://example.test/financial-api#cashflow", source_kind: "company_ir", fact_id: "cashflow-fact" },
+        { statement: "2025��������¶��ǰ��ֵ��ɼۡ�", source_ref: "https://example.test/financial-api#valuation", source_kind: "company_ir", fact_id: "valuation-fact" },
+      ],
+      search_findings: [{ id: "search-business", query: "600339 ������� ���¾�Ӫ���", title: "��˾����ȱ���", url: "https://example.test/financial-api", published_at: "2026-08-15", report_period: "2026H1", finding: "��Ӫҵ��;�Ӫ�ֽ�������������顣", stance: "neutral", source_kind: "company_ir", source_quality: "primary" }],
+      evidence_bindings: {
+        summary: { fact_ids: ["cashflow-fact", "valuation-fact"], search_finding_ids: [] },
+        strengths: [{ fact_ids: ["cashflow-fact"], search_finding_ids: [] }],
+        risks: [],
+        economic_profile: {
+          business_model: { fact_ids: [], search_finding_ids: ["search-business"] },
+          moat: { fact_ids: ["valuation-fact"], search_finding_ids: [] },
+          cycle: { fact_ids: ["cashflow-fact"], search_finding_ids: [] },
+          fcf_outlook: { fact_ids: ["cashflow-fact"], search_finding_ids: [] },
+          governance: { fact_ids: ["valuation-fact"], search_finding_ids: [] },
+        },
+        valuation: { fact_ids: ["valuation-fact"], search_finding_ids: [] },
+      },
+      web_search_verified: false,
+      web_search_verified_claim_url_count: 0,
+      research_source_urls_verified: true,
+      retrieval_backend: "reasonix-native-server-web-search",
+      retrieval_model: "opencode-go-muse/muse-spark-1.2-contributor",
+      retrieval_effort: "xhigh",
+      native_search_completed: true,
+      official_fetch_completed: false,
+      research_as_of: "2026-08-15",
+          economic_profile: {
+            business_model: "通过企业金融与零售金融获取利差及手续费收入。",
+            business_model_source_ids: ["search-business"],
+            business_model_sources: [{ id: "search-business", statement: "2026年半年度报告披露企业金融与零售金融业务。", source_ref: "https://example.test/financial-api", source_kind: "company_ir" }],
+            business_model_source_quality: "current_primary",
+            business_model_source_status: "source_found",
+            business_model_uncertainty: "已由2026年半年度报告的一手业务分部口径核验。",
+            moat: "客户基础仍有价值，但净息差下行构成反证。",
+        cycle: "信用成本与净息差处于需要继续观察的阶段。",
+        fcf_outlook: "结合资本充足率和分红能力判断股东现金回报。",
+        governance: "资本补充需求与分红安排需要同时核验。",
+      },
+      valuation: {
+        method: "book_value_multiple",
+        as_of: "2026-08-13",
+        current_price: 12.34,
+        pe: 6.2,
+        pb: 0.55,
+        market_cap: 3621,
+        scenarios: {
+          bear: { value_per_share: 11.2, upside_pct: -9.2382495948, book_value_per_share: 20, target_pb: 0.56 },
+          base: { value_per_share: 16, upside_pct: 29.6596434360, book_value_per_share: 20, target_pb: 0.8 },
+          bull: { value_per_share: 20.8, upside_pct: 68.5575364668, book_value_per_share: 20, target_pb: 1.04 },
+        },
+        margin_of_safety: -10.1785714286,
+        safety_margin_band: "negative",
+        evidence_ids: ["valuation-fact"],
+        normalization_anchor: { metric: "book_value_per_share", years: [], total: null, share_count: null, per_share: 20, source_ref: "https://example.test/financial-api#valuation" },
+        multiple_basis: { metric: "pb", value: 0.8, source_ref: "https://example.test/financial-api#valuation", search_finding_id: null },
+        basis: "结合市净率、资产质量与悲观信用成本情景判断安全边际。",
+      },
+    });
+    companyResearch.packets[0].ai_review.valuation_snapshot = valuationSnapshot("600339", companyResearch.packets[0].ai_review.valuation);
+    Object.assign(companyResearch.source_audit, await sourceSemanticProjectionDigest(companyResearch));
+    assert.equal(await statusForArtifact(companyResearch), 200);
+    const staleClaimProjection = structuredClone(companyResearch);
+    staleClaimProjection.packets[0].ai_review.claims[0].statement = "同一网址下被篡改的声明";
+    assert.equal(await statusForArtifact(staleClaimProjection), 404);
+    const staleFindingProjection = structuredClone(companyResearch);
+    staleFindingProjection.packets[0].ai_review.search_findings[0].finding = "同一网址下被篡改的搜索结论";
+    assert.equal(await statusForArtifact(staleFindingProjection), 404);
+    const staleProjectionCount = structuredClone(companyResearch);
+    staleProjectionCount.source_audit.projection_claim_count += 1;
+    assert.equal(await statusForArtifact(staleProjectionCount), 404);
+    const missingValuationSnapshot = structuredClone(companyResearch);
+    delete missingValuationSnapshot.packets[0].ai_review.valuation_snapshot;
+    assert.equal(await statusForArtifact(missingValuationSnapshot), 404);
+    const synchronizedValuationTamper = structuredClone(companyResearch);
+    const tamperedValuation = synchronizedValuationTamper.packets[0].ai_review.valuation;
+    tamperedValuation.current_price = 13;
+    synchronizedValuationTamper.packets[0].ai_review.valuation_snapshot.current_price = 13;
+    for (const scenario of Object.values(tamperedValuation.scenarios)) scenario.upside_pct = (scenario.value_per_share / 13 - 1) * 100;
+    tamperedValuation.margin_of_safety = (tamperedValuation.scenarios.bear.value_per_share - 13) / tamperedValuation.scenarios.bear.value_per_share * 100;
+    assert.equal(await statusForArtifact(synchronizedValuationTamper), 404);
+    const legacyValuationMethod = structuredClone(companyResearch);
+    legacyValuationMethod.packets[0].ai_review.valuation.method = "scenario_multiple";
+    assert.equal(await statusForArtifact(legacyValuationMethod), 404);
+    const insecureCompanyClaim = structuredClone(companyResearch);
+    insecureCompanyClaim.packets[0].ai_review.claims[0].source_ref = "http://example.test/financial-api";
+    assert.equal(await statusForArtifact(insecureCompanyClaim), 404);
+    const legacyCompanyResearchAudit = structuredClone(companyResearch);
+    delete legacyCompanyResearchAudit.source_audit.audit_contract_version;
+    assert.equal(await statusForArtifact(legacyCompanyResearchAudit), 404);
+    const missingCompanyResearchSourceStatus = structuredClone(companyResearch);
+    delete missingCompanyResearchSourceStatus.packets[0].ai_review.economic_profile.business_model_source_status;
+    assert.equal(await statusForArtifact(missingCompanyResearchSourceStatus), 404);
+    const mixedCompanyResearch = structuredClone(companyResearch);
+    const deepseekPacket = structuredClone(mixedCompanyResearch.packets[0]);
+    deepseekPacket.security_code = "000001";
+    deepseekPacket.type_key = "type7";
+    deepseekPacket.type_keys = ["type7"];
+    deepseekPacket.ai_rank = 2;
+    Object.assign(deepseekPacket.ai_review, {
+      security_code: "000001",
+      type_key: "type7",
+      model: "opencode-go/deepseek-v4-flash",
+      effort: "max",
+      retrieval_model: "opencode-go-deepseek-responses/deepseek-v4-flash",
+      retrieval_effort: "max",
+    });
+    deepseekPacket.ai_review.valuation_snapshot = valuationSnapshot("000001", deepseekPacket.ai_review.valuation);
+    mixedCompanyResearch.packets.push(deepseekPacket);
+    mixedCompanyResearch.review_models = ["opencode-go/deepseek-v4-flash", "opencode-go/muse-spark-1.2-contributor"];
+    mixedCompanyResearch.review_efforts = ["max", "xhigh"];
+    mixedCompanyResearch.candidate_total = 2;
+    mixedCompanyResearch.type_pair_unique_company_count = 2;
+    mixedCompanyResearch.type_pair_candidate_total = 2;
+    mixedCompanyResearch.type_pair_expected_total = 2;
+    mixedCompanyResearch.type_pair_reviewed_count = 2;
+    mixedCompanyResearch.type_pair_web_search_attempted_count = 2;
+    mixedCompanyResearch.type_pair_web_search_event_verified_count = 2;
+    mixedCompanyResearch.type_pair_research_source_urls_verified_count = 2;
+    mixedCompanyResearch.reviewed_count = 2;
+    mixedCompanyResearch.attempted_review_count = 2;
+    mixedCompanyResearch.completed_review_count = 2;
+    mixedCompanyResearch.type_pair_verdict_counts.caution = 2;
+    mixedCompanyResearch.verdict_counts.caution = 2;
+    mixedCompanyResearch.web_search_attempted_count = 2;
+    mixedCompanyResearch.web_search_event_verified_count = 2;
+    mixedCompanyResearch.research_source_urls_verified_count = 2;
+    mixedCompanyResearch.ai_action_counts.watchlist = 2;
+    mixedCompanyResearch.final_category_counts.observe = 2;
+    mixedCompanyResearch.do_not_recommend_buy_count = 2;
+    mixedCompanyResearch.watchlist_count = 2;
+    mixedCompanyResearch.source_audit.claim_count = 6;
+    mixedCompanyResearch.source_audit.semantic_claim_count = 6;
+    mixedCompanyResearch.source_audit.semantic_passed_count = 6;
+    mixedCompanyResearch.source_audit.source_bindings = mixedCompanyResearch.source_audit.source_bindings.flatMap((item) => [
+      item,
+      { ...structuredClone(item), security_code: "000001", type_key: "type7" },
+    ]);
+    mixedCompanyResearch.source_audit.company_coverage = mixedCompanyResearch.source_audit.company_coverage.flatMap((item) => [
+      item,
+      { ...structuredClone(item), security_code: "000001", name: "平安银行" },
+    ]);
+    mixedCompanyResearch.packets.sort((left, right) => left.security_code < right.security_code ? -1 : 1);
+    mixedCompanyResearch.packets.forEach((packet, index) => { packet.ai_rank = index + 1; });
+    bindCandidateIdentities(mixedCompanyResearch);
+    Object.assign(mixedCompanyResearch.source_audit, await sourceSemanticProjectionDigest(mixedCompanyResearch));
+    assert.equal(await statusForArtifact(mixedCompanyResearch), 200);
+    const crossedDeepseekProfile = structuredClone(mixedCompanyResearch);
+    crossedDeepseekProfile.packets.find(packet => packet.security_code === "000001").ai_review.retrieval_effort = "xhigh";
+    assert.equal(await statusForArtifact(crossedDeepseekProfile), 404);
+    const researchBeforeMarket = structuredClone(companyResearch);
+    researchBeforeMarket.research_as_of = "2026-08-12";
+    researchBeforeMarket.packets[0].ai_review.research_as_of = "2026-08-12";
+    assert.equal(await statusForArtifact(researchBeforeMarket), 404);
+    const mismatchedResearchDate = structuredClone(companyResearch);
+    mismatchedResearchDate.packets[0].ai_review.research_as_of = "2026-08-14";
+    assert.equal(await statusForArtifact(mismatchedResearchDate), 404);
+    const missingEconomicProfile = structuredClone(companyResearch);
+    delete missingEconomicProfile.packets[0].ai_review.economic_profile;
+    assert.equal(await statusForArtifact(missingEconomicProfile), 404);
+    const missingBusinessSourceQuality = structuredClone(companyResearch);
+    delete missingBusinessSourceQuality.packets[0].ai_review.economic_profile.business_model_source_quality;
+    assert.equal(await statusForArtifact(missingBusinessSourceQuality), 404);
+    const wrongScenarioUpside = structuredClone(companyResearch);
+    wrongScenarioUpside.packets[0].ai_review.valuation.scenarios.base.upside_pct = 99;
+    assert.equal(await statusForArtifact(wrongScenarioUpside), 404);
+    const missingValuationMethod = structuredClone(companyResearch);
+    delete missingValuationMethod.packets[0].ai_review.valuation.method;
+    assert.equal(await statusForArtifact(missingValuationMethod), 404);
+    const missingResearchSourceProof = structuredClone(companyResearch);
+    missingResearchSourceProof.packets[0].ai_review.research_source_urls_verified = false;
+    missingResearchSourceProof.research_source_urls_verified_count = 0;
+    missingResearchSourceProof.type_pair_research_source_urls_verified_count = 0;
+    assert.equal(await statusForArtifact(missingResearchSourceProof), 404);
+    const invalidResearchSourceAudit = structuredClone(companyResearch);
+    invalidResearchSourceAudit.source_audit.invalid_claim_url_count = 1;
+    assert.equal(await statusForArtifact(invalidResearchSourceAudit), 404);
+    const failedResearchSourceAudit = structuredClone(companyResearch);
+    failedResearchSourceAudit.source_audit.audit_passed = false;
+    assert.equal(await statusForArtifact(failedResearchSourceAudit), 404);
+    const forgedBusinessSource = structuredClone(companyResearch);
+    forgedBusinessSource.packets[0].ai_review.economic_profile.business_model_sources[0].source_ref = "https://example.test/forged";
+    assert.equal(await statusForArtifact(forgedBusinessSource), 404);
+    for (const [field, leakedReason] of [
+      ["summary", "2026年营收100亿元，但模型已达标。"],
+      ["key_strengths", ["规则评分88分"]],
+      ["risk_flags", ["type1 已触发"]],
+      ["quantitative_facts", ["2026年营收100亿元", "入池原因88分"]],
+    ]) {
+      const ruleLeakingCompanyResearch = structuredClone(companyResearch);
+      ruleLeakingCompanyResearch.packets[0].ai_review[field] = leakedReason;
+      assert.equal(await statusForArtifact(ruleLeakingCompanyResearch), 404);
+    }
     const qualifiedWatch = structuredClone(artifact);
     qualifiedWatch.packets[0].ai_review.summary = "若估值进一步回落并完成复核，再考虑建议买入。";
     assert.equal(await statusForArtifact(qualifiedWatch), 200);
@@ -2120,6 +2441,14 @@ assert.equal(response.status, 200);
     const contradictoryWatch = structuredClone(artifact);
     contradictoryWatch.packets[0].ai_review.summary = "当前建议买入并立即建仓。";
     assert.equal(await statusForArtifact(contradictoryWatch), 404);
+    for (const field of ["recommendation_label", "key_strengths", "risk_flags"]) {
+      const contradictoryField = structuredClone(artifact);
+      contradictoryField.packets[0].ai_review[field] = field === "recommendation_label" ? "观察·当前建议买入" : ["当前建议买入并立即建仓"];
+      assert.equal(await statusForArtifact(contradictoryField), 404);
+    }
+    const mismatchedFinalCategory = structuredClone(artifact);
+    mismatchedFinalCategory.packets[0].ai_review.final_category = "recommend_buy";
+    assert.equal(await statusForArtifact(mismatchedFinalCategory), 404);
     const priority = structuredClone(artifact);
     Object.assign(priority.packets[0].ai_review, { verdict: "confirmed", recommended_action: "keep", buy_attractiveness_score: 70, ai_action: "priority_buy", final_category: "recommend_buy", final_recommendation: "recommend_buy", recommendation_label: "建议买·当前复核通过", summary: "当前建议买入，但仍需控制仓位。", freshness_status: "current_or_recent", freshness_years: [2026], freshness_penalty: 0 });
     priority.ai_action_counts = { priority_buy: 1, watchlist: 0, avoid: 0, insufficient_evidence: 0 };
@@ -2128,6 +2457,8 @@ assert.equal(response.status, 200);
     priority.recommend_buy_count = 1;
     priority.watchlist_count = 0;
     priority.do_not_recommend_buy_count = 0;
+    priority.verdict_counts = { confirmed: 1, caution: 0, misclassified: 0, missed_candidate: 0, needs_review: 0 };
+    priority.type_pair_verdict_counts = { confirmed: 1, caution: 0, misclassified: 0, missed_candidate: 0, needs_review: 0 };
     assert.equal(await statusForArtifact(priority), 200);
     const priorityWithoutKeep = structuredClone(priority);
     priorityWithoutKeep.packets[0].ai_review.recommended_action = "manual_review";
@@ -2135,12 +2466,19 @@ assert.equal(response.status, 200);
     const contradictoryPriority = structuredClone(priority);
     contradictoryPriority.packets[0].ai_review.summary = "建议继续观望，当前不构成买点。";
     assert.equal(await statusForArtifact(contradictoryPriority), 404);
+    for (const field of ["recommendation_label", "key_strengths", "risk_flags"]) {
+      const contradictoryPriorityField = structuredClone(priority);
+      contradictoryPriorityField.packets[0].ai_review[field] = field === "recommendation_label" ? "建议买·当前应当观望" : ["当前不建议买入，应当继续观望"];
+      assert.equal(await statusForArtifact(contradictoryPriorityField), 404);
+    }
     const misclassified = structuredClone(artifact);
     Object.assign(misclassified.packets[0].ai_review, { verdict: "misclassified", recommended_action: "demote", buy_attractiveness_score: 45, ai_action: "avoid", final_category: "do_not_recommend", final_recommendation: "do_not_recommend_buy", recommendation_label: "不建议·规则可能误判", summary: "当前不建议买入。" });
     misclassified.ai_action_counts = { priority_buy: 0, watchlist: 0, avoid: 1, insufficient_evidence: 0 };
     misclassified.final_category_counts = { recommend_buy: 0, observe: 0, do_not_recommend: 1 };
     misclassified.watchlist_count = 0;
     misclassified.avoid_count = 1;
+    misclassified.verdict_counts = { confirmed: 0, caution: 0, misclassified: 1, missed_candidate: 0, needs_review: 0 };
+    misclassified.type_pair_verdict_counts = { confirmed: 0, caution: 0, misclassified: 1, missed_candidate: 0, needs_review: 0 };
     assert.equal(await statusForArtifact(misclassified), 200);
     const invalidMisclassified = structuredClone(misclassified);
     invalidMisclassified.packets[0].ai_review.recommended_action = "manual_review";
@@ -2148,6 +2486,11 @@ assert.equal(response.status, 200);
     const needsReview = structuredClone(artifact);
     needsReview.packets[0].ai_review.verdict = "needs_review";
     needsReview.attempted_needs_review_count = 1;
+    needsReview.type_pair_needs_review_count = 1;
+    needsReview.verdict_counts.caution = 0;
+    needsReview.verdict_counts.needs_review = 1;
+    needsReview.type_pair_verdict_counts.caution = 0;
+    needsReview.type_pair_verdict_counts.needs_review = 1;
     assert.equal(await statusForArtifact(needsReview), 200);
     const needsReviewWithoutManual = structuredClone(needsReview);
     needsReviewWithoutManual.packets[0].ai_review.recommended_action = "keep";
@@ -2155,9 +2498,15 @@ assert.equal(response.status, 200);
     const malformedTypes = structuredClone(artifact);
     malformedTypes.packets[0].type_keys = ["type2"];
     assert.equal(await statusForArtifact(malformedTypes), 404);
+    const mismatchedCandidateTypes = structuredClone(artifact);
+    mismatchedCandidateTypes.packets[0].candidate_types = [{ type_key: "type2" }];
+    assert.equal(await statusForArtifact(mismatchedCandidateTypes), 404);
     const mismatchedPairCount = structuredClone(artifact);
     mismatchedPairCount.packets[0].type_pair_count = 2;
     assert.equal(await statusForArtifact(mismatchedPairCount), 404);
+    const mismatchedCompletedCount = structuredClone(artifact);
+    mismatchedCompletedCount.completed_review_count = 0;
+    assert.equal(await statusForArtifact(mismatchedCompletedCount), 404);
     const forgedPairTotal = structuredClone(artifact);
     forgedPairTotal.type_pair_candidate_total = 2;
     forgedPairTotal.type_pair_expected_total = 2;
@@ -2172,24 +2521,43 @@ assert.equal(response.status, 200);
       second.ai_rank = secondRank;
       value.packets.push(second);
       value.candidate_total = 2;
+      value.type_pair_unique_company_count = 2;
       value.reviewed_count = 2;
       value.attempted_review_count = 2;
+      value.completed_review_count = 2;
+      value.reviewed_without_web_search = 2;
       value.type_pair_candidate_total = 2;
       value.type_pair_expected_total = 2;
       value.type_pair_reviewed_count = 2;
+      value.verdict_counts.caution = 2;
+      value.type_pair_verdict_counts.caution = 2;
       value.ai_action_counts.watchlist = 2;
+      value.final_category_counts.observe = 2;
       value.do_not_recommend_buy_count = 2;
       value.watchlist_count = 2;
       return value;
     };
     assert.equal(await statusForArtifact(twoCardArtifact("600339", 2)), 404);
     assert.equal(await statusForArtifact(twoCardArtifact("600340", 1)), 404);
+    const orderedTwoCards = twoCardArtifact("600340", 2);
+    bindCandidateIdentities(orderedTwoCards);
+    assert.equal(await statusForArtifact(orderedTwoCards), 200);
+    const wrongScoreOrder = structuredClone(orderedTwoCards);
+    wrongScoreOrder.packets[0].ai_review.buy_attractiveness_score = 63;
+    assert.equal(await statusForArtifact(wrongScoreOrder), 404);
+    const wrongStableOrder = structuredClone(orderedTwoCards);
+    wrongStableOrder.packets.reverse();
+    wrongStableOrder.packets[0].ai_rank = 1;
+    wrongStableOrder.packets[1].ai_rank = 2;
+    assert.equal(await statusForArtifact(wrongStableOrder), 404);
     const missingIdentity = structuredClone(artifact);
     delete missingIdentity.candidate_identity_sha256;
     assert.equal(await statusForArtifact(missingIdentity), 404);
-    const mismatchedUniverse = structuredClone(artifact);
-    mismatchedUniverse.candidate_universe_identity_sha256 = "b".repeat(64);
-    assert.equal(await statusForArtifact(mismatchedUniverse), 404);
+    for (const field of ["candidate_identity_sha256", "candidate_universe_identity_sha256", "type_pair_candidate_identity_sha256", "type_pair_universe_identity_sha256"]) {
+      const mismatchedIdentity = structuredClone(artifact);
+      mismatchedIdentity[field] = "b".repeat(64);
+      assert.equal(await statusForArtifact(mismatchedIdentity), 404);
+    }
     delete artifact.review_models;
     const missingModelBytes = new TextEncoder().encode(JSON.stringify(artifact));
     objects.set("ai-screening/0123456789abcdef.json", {
@@ -2218,19 +2586,153 @@ assert.ok(html.includes("AI筛查"));
 assert.ok(html.includes("建议买"));
 assert.ok(html.includes("观察"));
 assert.ok(html.includes("不建议"));
-assert.ok(html.includes("真实搜索事件"));
-assert.ok(html.includes("保留引用已绑定搜索结果"));
-assert.ok(html.includes("已移除未绑定引用"));
+assert.ok(html.includes("原生搜索事件"));
+assert.ok(html.includes("财报来源核验"));
+assert.ok(!html.includes("保留引用已绑定搜索结果"));
+assert.ok(html.includes("已移除无效来源"));
 assert.ok(html.includes("资料时效"));
 assert.ok(!html.includes("待核验（未形成买入结论）"));
 assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
  const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
  assert.ok(inlineScript);
- assert.ok(inlineScript.includes("freshness_counts"));
- assert.doesNotThrow(() => new Function(inlineScript));
+assert.ok(inlineScript.includes("freshness_counts"));
+assert.ok(inlineScript.includes("function isRuleText"));
+assert.ok(inlineScript.includes("function aiSummary"));
+assert.ok(inlineScript.includes("candidate-rules"));
+assert.ok(html.includes("AI为什么这样判断"));
+assert.ok(html.includes("公司量化事实"));
+assert.ok(html.includes("公司商业画像"));
+assert.ok(html.includes("估值与安全边际"));
+assert.ok(html.includes("主要反证与风险"));
+assert.ok(html.includes("公司资料与来源"));
+assert.ok(html.includes("为何进入规则候选池"));
+assert.ok(!inlineScript.includes("reasonValues=group==='recommend_buy'"));
+assert.ok(!inlineScript.includes("确定性规则：'+esc(det.status"));
+assert.doesNotThrow(() => new Function(inlineScript));
+const elements = new Map();
+const fakeDocument = {
+  querySelector(selector) {
+    if (!elements.has(selector)) {
+      elements.set(selector, {
+        value: "all",
+        innerHTML: "",
+        textContent: "",
+        hidden: false,
+        disabled: false,
+        addEventListener() {},
+      });
+    }
+    return elements.get(selector);
+  },
+};
+const pageApi = new Function(
+  "document",
+  "fetch",
+  inlineScript + "; return {card,isRuleText,searchLabel};",
+)(
+  fakeDocument,
+  async () => ({ ok: false, json: async () => ({ error: "audit" }) }),
+);
+assert.equal(pageApi.isRuleText("规则评分88分"), true);
+assert.equal(pageApi.isRuleText("模型已达标"), true);
+const renderedCard = pageApi.card({
+  ai_rank: 1,
+  security_code: "600000",
+  name: "审计样本",
+  type_key: "type1",
+  type_keys: ["type1", "type2"],
+  deterministic: { status: "conditional", score: 88 },
+  ai_review: {
+    final_category: "recommend_buy",
+    ai_action: "priority_buy",
+    buy_attractiveness_score: 87,
+    confidence: "high",
+    ai_independent: true,
+    freshness_status: "current_or_recent",
+    freshness_years: [2026],
+    model: "opencode-go/muse-spark-1.2-contributor",
+    effort: "xhigh",
+    web_search_performed: true,
+    web_search_event_verified: true,
+    research_source_urls_verified: true,
+    research_as_of: "2026-08-15",
+        economic_profile: {
+              business_model: "家电制造与海外渠道形成主要收入。",
+              business_model_source_ids: ["search-business"],
+              business_model_sources: [{ id: "search-business", statement: "公司官网披露家电制造与海外渠道业务。", source_ref: "https://example.test/business", source_kind: "company_ir" }],
+              business_model_source_quality: "secondary_only",
+          business_model_uncertainty: "目前仅有二手来源，业务口径尚待一手资料核验。",
+          moat: "规模采购与渠道效率具备优势，但品牌议价力仍需核验。",
+      cycle: "地产后周期需求恢复仍有不确定性。",
+      fcf_outlook: "经营现金流改善，但资本开支与营运资金仍需跟踪。",
+      governance: "分红稳定性与关联交易是资本配置核验重点。",
+    },
+    valuation: {
+      method: "scenario_multiple",
+      as_of: "2026-08-13",
+      current_price: 9.25,
+      pe: 8.89,
+      pb: 1.42,
+          market_cap: 10050000000,
+      scenarios: {
+        bear: { value_per_share: 10, upside_pct: 8.1081081081 },
+        base: { value_per_share: 12, upside_pct: 29.7297297297 },
+        bull: { value_per_share: 15, upside_pct: 62.1621621622 },
+      },
+      margin_of_safety: 7.5,
+      basis: "当前估值低于行业中位数，但悲观需求情景仍需保留折价。",
+    },
+    web_search_query_count: 3,
+    web_search_verified_claim_url_count: 0,
+    web_search_dropped_claim_url_count: 0,
+    summary: "2026年上半年营收100亿元，同比增长15%。模型已达标。",
+    quantitative_facts: ["2026年上半年营收100亿元，同比增长15%。", "type1 已触发"],
+    key_strengths: ["2026年上半年经营现金流12亿元。", "规则评分88分"],
+    risk_flags: ["2026年上半年应收账款增长35%。"],
+    claims: [
+      { statement: "2026年上半年营收100亿元", source_ref: "https://example.test/report" },
+      { statement: "2026年上半年经营现金流12亿元", source_ref: "https://example.test/cashflow" },
+    ],
+  },
+});
+const candidateDetails = renderedCard.match(/<details class="candidate-rules">[\s\S]*?<\/details>/)?.[0] || "";
+const defaultCard = renderedCard.replace(candidateDetails, "");
+assert.ok(defaultCard.includes("AI独立判断"));
+assert.ok(!defaultCard.includes("接近达标"));
+assert.ok(defaultCard.includes("原生搜索事件已核验 · 财报来源已核验"));
+assert.ok(defaultCard.includes("可点击来源：2"));
+assert.ok(defaultCard.includes("公司研究截至：2026-08-15"));
+    assert.ok(defaultCard.includes("家电制造与海外渠道形成主要收入"));
+        assert.ok(defaultCard.includes("业务口径来源质量"));
+        assert.ok(defaultCard.includes("仅二手资料"));
+        assert.ok(defaultCard.includes("主营业务资料"));
+        assert.ok(defaultCard.includes("查看原始资料"));
+    assert.ok(defaultCard.includes("业务口径不确定性"));
+assert.ok(defaultCard.includes("估值与安全边际（收盘日 2026-08-13）"));
+assert.ok(defaultCard.includes("9.25元"));
+assert.ok(defaultCard.includes("情景倍数法"));
+assert.ok(defaultCard.includes("悲观情景"));
+assert.ok(defaultCard.includes("中性情景"));
+assert.ok(defaultCard.includes("乐观情景"));
+assert.ok(defaultCard.includes("每股价值 10 元"));
+assert.ok(defaultCard.includes("相对现价 +8.108%"));
+assert.ok(defaultCard.includes("悲观安全边际"));
+    assert.ok(defaultCard.includes("7.5%"));
+    assert.ok(defaultCard.includes("100.5亿元"));
+    assert.equal((defaultCard.match(/<a rel=/g) || []).length, 3);
+assert.ok(!defaultCard.includes("规则评分88分"));
+assert.ok(!defaultCard.includes("模型已达标"));
+assert.ok(!defaultCard.includes("type1"));
+assert.ok(!defaultCard.includes("conditional"));
+assert.ok(candidateDetails.includes("规则候选类型：type1 / type2"));
+assert.ok(candidateDetails.includes("确定性状态：conditional"));
+assert.ok(candidateDetails.includes("规则评分88分"));
+assert.ok(!candidateDetails.includes("原生搜索事件已核验"));
 """
+    validator_path = tmp_path / "ai-screening-worker-validator.mjs"
+    validator_path.write_text(validator, encoding="utf-8")
     result = subprocess.run(
-        [node, "--input-type=module", "-e", validator],
+        [node, str(validator_path)],
         input=source.encode("utf-8"),
         capture_output=True,
         check=False,

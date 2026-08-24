@@ -128,7 +128,97 @@ jobs:
           # Same fixed versions as requirements-dev-lock.txt (pytest 9.1.1,
           # pyyaml 6.0.3) so verification never floats either.
           python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
-          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py -q
+          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py tests/test_validate_ai_screening_public.py -q
+
+      - name: Preflight the optional generation-bound AI screening overlay
+        id: ai_preflight
+        if: steps.stale.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
+          seed_changed=false
+          resolved_sha="${{ steps.resolve.outputs.sha }}"
+          if git rev-parse --verify "${resolved_sha}^" >/dev/null 2>&1 && ! git diff --quiet "${resolved_sha}^" "${resolved_sha}" -- "${seed}"; then
+            seed_changed=true
+          fi
+          echo "seed_changed=${seed_changed}" >> "${GITHUB_OUTPUT}"
+          echo "upload=false" >> "${GITHUB_OUTPUT}"
+          if [[ ! -f "${seed}" ]]; then
+            echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
+            exit 0
+          fi
+          seed_bytes="$(stat -c '%s' "${seed}")"
+          if [[ "${seed_bytes}" -lt 1 || "${seed_bytes}" -gt 33554432 ]]; then
+            echo "AI screening seed size ${seed_bytes} is outside the 1..33554432 byte limit." >&2
+            exit 1
+          fi
+          generation="$(jq -er '.snapshot_generation' "${seed}")"
+          if [[ ! "${generation}" =~ ^[0-9a-f]{16}$ ]]; then
+            echo "AI screening seed has an invalid generation id." >&2
+            exit 1
+          fi
+          live_meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
+          live_generation="$(jq -er '.generation_id' <<< "${live_meta}")"
+          stale_seed=false
+          if [[ "${live_generation}" != "${generation}" ]]; then
+            if [[ "${seed_changed}" == "true" ]]; then
+              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}." >&2
+              exit 1
+            fi
+            stale_seed=true
+            market_as_of="$(jq -er '.market_as_of' "${seed}")"
+          else
+            market_as_of="$(jq -er '.market_as_of' <<< "${live_meta}")"
+          fi
+          python -m tools.validate_ai_screening_public \
+            --artifact "${seed}" \
+            --expected-generation "${generation}" \
+            --expected-market-as-of "${market_as_of}"
+          if jq -e '.review_mode == "opencode_native_company_research_review"' "${seed}" >/dev/null; then
+            python -m tools.audit_ai_company_research_reviews --artifact "${seed}"
+            jq -e '
+              .source_audit.available == true
+              and .source_audit.audit_contract_version == 3
+              and .source_audit.audit_passed == true
+              and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
+              and (.source_audit.projection_sha256 | test("^[0-9a-f]{64}$"))
+              and .source_audit.projection_company_count == .candidate_total
+              and (.source_audit.projection_claim_count | type) == "number"
+              and (.source_audit.projection_search_finding_count | type) == "number"
+              and (.source_audit.projection_source_reference_count | type) == "number"
+              and (.source_audit.projection_unique_url_count | type) == "number"
+              and .source_audit.projection_claim_count == .source_audit.claim_count
+              and .source_audit.projection_source_reference_count >= .source_audit.projection_unique_url_count
+              and .source_audit.projection_unique_url_count == (.source_audit.canonical_urls | length)
+              and .source_audit.failed == 0
+              and .source_audit.invalid_claim_url_count == 0
+              and .source_audit.claim_count >= .candidate_total
+              and (.source_audit.semantic_claim_count | type) == "number"
+              and (.source_audit.semantic_passed_count | type) == "number"
+              and .source_audit.semantic_failed_count == 0
+              and .source_audit.semantic_unverified_count == 0
+              and (.source_audit.canonical_urls | type) == "array"
+              and (.source_audit.source_bindings | type) == "array"
+              and (.source_audit.company_coverage | type) == "array"
+              and (.source_audit.company_coverage | length) == .candidate_total
+              and all(.source_audit.company_coverage[];
+                (.referenced_no_source_finding_ids | type) == "array"
+                and (.referenced_no_source_finding_ids | length) == 0
+                and (.semantic_claim_count == .semantic_passed_count + .semantic_failed_count + .semantic_unverified_count)
+                and .semantic_failed_count == 0
+                and .semantic_unverified_count == 0
+              )
+            ' "${seed}" >/dev/null
+          fi
+          if [[ "${stale_seed}" == "true" ]]; then
+            echo "Unchanged stale AI screening seed passed the current Worker contract; leaving that historical overlay untouched."
+            exit 0
+          fi
+          echo "generation=${generation}" >> "${GITHUB_OUTPUT}"
+          echo "market_as_of=${market_as_of}" >> "${GITHUB_OUTPUT}"
+          echo "upload=true" >> "${GITHUB_OUTPUT}"
+          echo "AI screening seed passed generation, coverage, source-audit and size preflight before deployment."
 
       - name: Deploy the quant-market-refresh worker
         if: steps.stale.outputs.skip != 'true'
@@ -166,6 +256,22 @@ jobs:
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy --keep-vars 2>&1 | tee "$RUNNER_TEMP/dispatcher-deploy.log"
           grep -E "Current Version ID" "$RUNNER_TEMP/dispatcher-deploy.log"
 
+      - name: Upload the optional generation-bound AI screening overlay
+        id: ai_overlay
+        if: steps.stale.outputs.skip != 'true' && steps.ai_preflight.outputs.upload == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
+          generation="${{ steps.ai_preflight.outputs.generation }}"
+          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "quant-market-data/ai-screening/${generation}.json" \
+            --file "${seed}" --remote --content-type application/json
+          printf '%s' "${generation}" > "$RUNNER_TEMP/ai-screening-generation"
+          echo "uploaded=true" >> "${GITHUB_OUTPUT}"
+
       - name: Deploy the Cloudflare Pages worker
         if: steps.stale.outputs.skip != 'true'
         env:
@@ -187,57 +293,12 @@ jobs:
             --commit-dirty=false 2>&1 | tee "$RUNNER_TEMP/pages-deploy.log"
           grep -E "Deployment complete" "$RUNNER_TEMP/pages-deploy.log"
 
-      - name: Upload the optional generation-bound AI screening overlay
-        id: ai_overlay
-        if: steps.stale.outputs.skip != 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
-          seed_changed=false
-          resolved_sha="${{ steps.resolve.outputs.sha }}"
-          if git rev-parse --verify "${resolved_sha}^" >/dev/null 2>&1 && ! git diff --quiet "${resolved_sha}^" "${resolved_sha}" -- "${seed}"; then
-            seed_changed=true
-          fi
-          echo "seed_changed=${seed_changed}" >> "${GITHUB_OUTPUT}"
-          if [[ ! -f "${seed}" ]]; then
-            echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
-            exit 0
-          fi
-          generation="$(jq -er '.snapshot_generation' "${seed}")"
-          if [[ ! "${generation}" =~ ^[0-9a-f]{16}$ ]]; then
-            echo "AI screening seed has an invalid generation id." >&2
-            exit 1
-          fi
-          live_meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
-          live_generation="$(jq -er '.generation_id' <<< "${live_meta}")"
-          if [[ "${live_generation}" != "${generation}" ]]; then
-            if [[ "${seed_changed}" == "true" ]]; then
-              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}." >&2
-              exit 1
-            fi
-            echo "Unchanged AI screening seed targets ${generation}, while the published site serves ${live_generation}; skipping stale overlay."
-            exit 0
-          fi
-          market_as_of="$(jq -er '.market_as_of' <<< "${live_meta}")"
-          python -m tools.validate_ai_screening_public \
-            --artifact "${seed}" \
-            --expected-generation "${generation}" \
-            --expected-market-as-of "${market_as_of}"
-          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "quant-market-data/ai-screening/${generation}.json" \
-            --file "${seed}" --remote --content-type application/json
-          printf '%s' "${generation}" > "$RUNNER_TEMP/ai-screening-generation"
-          echo "uploaded=true" >> "${GITHUB_OUTPUT}"
-
       - name: Verify the deployed site
         if: steps.stale.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ steps.ai_overlay.outputs.seed_changed }}" == "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
+          if [[ "${{ steps.ai_preflight.outputs.seed_changed }}" == "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
             echo "The changed AI screening seed was not uploaded." >&2
             exit 1
           fi
@@ -297,6 +358,44 @@ jobs:
                   (.web_search_attempted_count >= 0
                    and .web_search_attempted_count <= .candidate_total
                    and .reviewed_without_web_search == (.candidate_total - .web_search_attempted_count))
+                 elif .review_mode == "opencode_native_company_research_review" then
+                   (.web_search_attempted_count == .candidate_total
+                    and .web_search_event_verified_count == .candidate_total
+                    and .research_source_urls_verified_count == .candidate_total
+                    and .reviewed_without_web_search == 0
+                    and .type_pair_web_search_attempted_count == .type_pair_candidate_total
+                    and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
+                    and .type_pair_research_source_urls_verified_count == .type_pair_candidate_total
+                    and .full_coverage_web_search == true
+                    and .source_audit.available == true
+                    and .source_audit.audit_contract_version == 3
+                    and .source_audit.audit_passed == true
+                    and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
+                    and (.source_audit.merged_sha256 | test("^[0-9a-f]{64}$"))
+                    and (.source_audit.projection_sha256 | test("^[0-9a-f]{64}$"))
+                    and .source_audit.projection_company_count == .candidate_total
+                    and (.source_audit.projection_claim_count | type) == "number"
+                    and (.source_audit.projection_search_finding_count | type) == "number"
+                    and (.source_audit.projection_source_reference_count | type) == "number"
+                    and (.source_audit.projection_unique_url_count | type) == "number"
+                    and .source_audit.projection_claim_count == .source_audit.claim_count
+                    and .source_audit.projection_source_reference_count >= .source_audit.projection_unique_url_count
+                    and .source_audit.projection_unique_url_count == (.source_audit.canonical_urls | length)
+                    and .source_audit.invalid_claim_url_count == 0
+                    and .source_audit.failed == 0
+                    and .source_audit.semantic_failed_count == 0
+                    and .source_audit.semantic_unverified_count == 0
+                    and .source_audit.semantic_claim_count == .source_audit.semantic_passed_count
+                    and (.source_audit.canonical_urls | type) == "array"
+                    and (.source_audit.source_bindings | type) == "array"
+                    and (.source_audit.company_coverage | type) == "array"
+                    and (.source_audit.company_coverage | length) == .candidate_total
+                    and all(.source_audit.company_coverage[];
+                      (.referenced_no_source_finding_ids | type) == "array"
+                      and (.referenced_no_source_finding_ids | length) == 0
+                      and .semantic_failed_count == 0
+                      and .semantic_unverified_count == 0
+                    ))
                 else
                   (.web_search_attempted_count == .candidate_total
                    and .web_search_event_verified_count == .candidate_total

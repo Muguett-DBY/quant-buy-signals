@@ -1,8 +1,9 @@
-"""Attach same-generation deterministic figures to public AI review cards.
+"""Attach same-generation neutral company facts to public AI review cards.
 
 This is deliberately a data-layer enrichment, not a second scoring pass.  It
-keeps the model action and score unchanged while making every explanation
-auditable from the snapshot that produced the candidate list.
+keeps the model action, score, and model-written reasons unchanged while
+making the separate quantitative-facts field auditable from the snapshot that
+produced the candidate list.
 """
 
 from __future__ import annotations
@@ -27,22 +28,11 @@ def _unique(values: list[Any], limit: int = 8) -> list[str]:
 
 
 def _packet_facts(company: Mapping[str, Any], packet: Mapping[str, Any], market_as_of: str) -> list[str]:
-    type_key = str(packet.get("type_key") or company.get("primary_type") or "")
-    type_keys = packet.get("type_keys")
-    if not isinstance(type_keys, list):
-        type_keys = [type_key]
-    keys = [type_key, *[str(value) for value in type_keys if str(value) != type_key]]
-    raw: list[str] = []
-    for key in dict.fromkeys(keys):
-        raw.extend(quantitative_facts(company, key, market_as_of=market_as_of))
-    # Keep valuation first, then dimension-level figures from every triggered
-    # or near-triggered type.  This makes a type1+type2 card show both its
-    # discount/FCF evidence and the industry/price-temperature evidence.
-    valuation = [value for value in raw if value.startswith("估值快照：")]
-    dimensions = [value for value in raw if value.startswith("确定性 ") and "-" in value]
-    scores = [value for value in raw if value.startswith("确定性 ") and "-" not in value]
-    history = [value for value in raw if value.startswith("年度财务历史覆盖")]
-    return _unique([*valuation, *dimensions, *scores, *history])
+    # ``packet`` is retained in the helper signature because callers from the
+    # previous pair-aware enrichment pass still supply it.  The facts are now
+    # company-level and must not vary with a candidate type or status.
+    del packet
+    return _unique(quantitative_facts(company, "", market_as_of=market_as_of))
 
 
 def enrich(payload: Mapping[str, Any], context_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -72,11 +62,10 @@ def enrich(payload: Mapping[str, Any], context_payload: Mapping[str, Any]) -> di
         review = packet.get("ai_review")
         if not isinstance(review, dict):
             raise ValueError(f"AI review missing for {code}")
-        old_facts = review.get("quantitative_facts") if isinstance(review.get("quantitative_facts"), list) else []
-        facts = _unique([*facts, *old_facts])
+        # Rebuild this field from the same-generation snapshot.  Merging a
+        # legacy/model-provided list could reintroduce type labels, statuses,
+        # or rule scores into an otherwise neutral company-facts field.
         review["quantitative_facts"] = facts
-        old_strengths = review.get("key_strengths") if isinstance(review.get("key_strengths"), list) else []
-        review["key_strengths"] = _unique([*facts, *old_strengths], limit=8)
         enriched += 1
         if (
             str(review.get("ai_action") or "") == "priority_buy"

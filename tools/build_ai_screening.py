@@ -1,8 +1,8 @@
 """Build and merge a local, source-grounded AI screening packet.
 
-The packet is intentionally smaller than the raw catalogue.  It preserves the
-deterministic result for the reviewed type and a compact summary of the other
-types; the model is never allowed to rewrite the seven-type calculation.
+The packet is intentionally smaller than the raw catalogue.  It preserves all
+deterministic candidate types for one company and a compact summary of the
+other types; the model is never allowed to rewrite the seven-type calculation.
 """
 
 from __future__ import annotations
@@ -17,10 +17,16 @@ from typing import Any, Mapping
 from tools.ai_screening_contract import (
     REVIEW_SCHEMA_VERSION,
     candidate_identity_sha256,
+    group_candidates_by_company,
     select_candidates,
     validate_review,
+    valuation_snapshot_errors,
 )
 from tools.ai_quantitative_facts import quantitative_facts
+from tools.ai_company_research_provenance import (
+    load_research_provenance_context,
+    validate_review_set_provenance,
+)
 
 
 _PATCH7_RULE_FILE = "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
@@ -52,7 +58,13 @@ _PATCH7_TYPE5_APPENDIX_MARKER = "补丁7 方法论附录｜强周期产业底部
 _PATCH7_SELL_GATE_MARKER = "附录：卖出闸门协议（四硬一软）"
 _MAX_RULE_CHARS = 12_000
 _FULL_COVERAGE_REVIEW_MODES = frozenset(
-    {"local_codex_review", "opencode_web_review", "opencode_mixed_review", "opencode_native_web_search_review"}
+    {
+        "local_codex_review",
+        "opencode_web_review",
+        "opencode_mixed_review",
+        "opencode_native_web_search_review",
+        "opencode_native_company_research_review",
+    }
 )
 
 
@@ -204,9 +216,11 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
 
 
 def _compact_company(
-    company: Mapping[str, Any], selected_type: str, *, market_as_of: str | None = None
+    company: Mapping[str, Any], selected_type: str | list[str], *, market_as_of: str | None = None
 ) -> dict[str, Any]:
     """Keep the model packet small without hiding deterministic context."""
+    selected_types = [selected_type] if isinstance(selected_type, str) else list(dict.fromkeys(selected_type))
+    selected_type_set = set(selected_types)
     fields = (
         "code",
         "name",
@@ -229,7 +243,7 @@ def _compact_company(
     if isinstance(types, dict):
         other: dict[str, Any] = {}
         for key, value in types.items():
-            if key == selected_type or not isinstance(value, dict):
+            if key in selected_type_set or not isinstance(value, dict):
                 continue
             decision = value.get("decision") if isinstance(value.get("decision"), dict) else {}
             other[str(key)] = {
@@ -242,7 +256,7 @@ def _compact_company(
             }
         compact["other_type_summary"] = other
     active_types = [
-        selected_type,
+        *selected_types,
         *[str(value) for value in (company.get("buy_types") or []) if str(value)],
         *[str(value) for value in (company.get("conditional_types") or []) if str(value)],
     ]
@@ -267,9 +281,25 @@ def build_input(
     review_mode: str | None = None,
 ) -> dict[str, Any]:
     snapshot = _load_json(snapshot_path)
-    snapshot_generation = generation or snapshot.get("generation") or snapshot.get("generation_id")
-    snapshot_market_as_of = market_as_of or snapshot.get("market_as_of")
-    candidates = select_candidates(snapshot)
+    source_generation = str(snapshot.get("generation") or snapshot.get("generation_id") or "").strip()
+    source_market_as_of = str(snapshot.get("market_as_of") or "").strip()
+    requested_generation = str(generation or "").strip()
+    requested_market_as_of = str(market_as_of or "").strip()
+    if requested_generation and source_generation and requested_generation != source_generation:
+        raise ValueError(
+            f"generation override conflicts with snapshot: {requested_generation}/{source_generation}"
+        )
+    if requested_market_as_of and source_market_as_of and requested_market_as_of != source_market_as_of:
+        raise ValueError(
+            f"market_as_of override conflicts with snapshot: {requested_market_as_of}/{source_market_as_of}"
+        )
+    snapshot_generation = requested_generation or source_generation
+    snapshot_market_as_of = requested_market_as_of or source_market_as_of
+    if not snapshot_generation or not snapshot_market_as_of:
+        raise ValueError("snapshot must carry generation and market_as_of")
+    candidate_pairs = select_candidates(snapshot)
+    type_pair_universe_identity_sha256 = candidate_identity_sha256(candidate_pairs)
+    candidates = group_candidates_by_company(candidate_pairs)
     candidate_universe_sha256 = candidate_identity_sha256(candidates)
     if offset < 0:
         raise ValueError("offset must be non-negative")
@@ -281,9 +311,21 @@ def build_input(
     chunks = _rule_chunks(rules_root)
     packets: list[dict[str, Any]] = []
     selected_rule_hashes: dict[str, str] = {}
-    for candidate in selected:
+    for raw_candidate in selected:
+        candidate = dict(raw_candidate)
         company = candidate.pop("company", {})
-        rule_context = _relevant_rules(chunks, candidate["type_key"])
+        type_keys = candidate.get("type_keys")
+        if not isinstance(type_keys, list) or not type_keys:
+            type_keys = [candidate["type_key"]]
+        rule_context: list[dict[str, str]] = []
+        seen_rules: set[tuple[str, str, str]] = set()
+        for type_key in type_keys:
+            for rule in _relevant_rules(chunks, str(type_key)):
+                identity = (rule["source_id"], rule["line_start"], rule["heading"])
+                if identity in seen_rules:
+                    continue
+                seen_rules.add(identity)
+                rule_context.append(rule)
         for rule in rule_context:
             source_id = rule["source_id"]
             digest = rule["source_sha256"]
@@ -296,11 +338,17 @@ def build_input(
                 "generation": snapshot_generation,
                 "market_as_of": snapshot_market_as_of,
                 "rule_context": rule_context,
-                "company_context": _compact_company(company, candidate["type_key"], market_as_of=snapshot_market_as_of),
+                "company_context": _compact_company(company, type_keys, market_as_of=snapshot_market_as_of),
                 "ai_review": None,
             }
         )
-    queue_full_coverage = offset == 0 and len(packets) == len(candidates)
+    selected_type_pair_count = sum(int(packet.get("type_pair_count", 1) or 1) for packet in packets)
+    queue_full_coverage = (
+        bool(candidates)
+        and offset == 0
+        and len(packets) == len(candidates)
+        and selected_type_pair_count == len(candidate_pairs)
+    )
     candidate_identity_digest = candidate_identity_sha256(packets)
     payload = {
         "schema_version": REVIEW_SCHEMA_VERSION,
@@ -313,6 +361,9 @@ def build_input(
         "rule_source_sha256": dict(sorted(selected_rule_hashes.items())),
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
+        "type_pair_candidate_count": selected_type_pair_count,
+        "type_pair_candidate_total": len(candidate_pairs),
+        "type_pair_candidate_identity_sha256": type_pair_universe_identity_sha256,
         "candidate_offset": offset,
         "candidate_identity_sha256": candidate_identity_digest,
         "candidate_universe_identity_sha256": candidate_universe_sha256,
@@ -336,6 +387,9 @@ def build_input(
         "index_contract": payload["index_contract"],
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
+        "type_pair_candidate_count": payload["type_pair_candidate_count"],
+        "type_pair_candidate_total": payload["type_pair_candidate_total"],
+        "type_pair_candidate_identity_sha256": payload["type_pair_candidate_identity_sha256"],
         "candidate_offset": offset,
         "candidate_identity_sha256": payload["candidate_identity_sha256"],
         "candidate_universe_identity_sha256": payload["candidate_universe_identity_sha256"],
@@ -352,20 +406,65 @@ def build_input(
     return manifest
 
 
-def merge_reviews(input_path: Path, review_path: Path, out_path: Path) -> None:
+def merge_reviews(
+    input_path: Path,
+    review_path: Path,
+    out_path: Path,
+    *,
+    research_path: Path | None = None,
+    knowledge_path: Path | None = None,
+    protocol_path: Path | None = None,
+    research_as_of: str | None = None,
+) -> None:
     payload = json.loads(input_path.read_text(encoding="utf-8"))
+    company_research_review = payload.get("review_mode") == "opencode_native_company_research_review"
+    if research_as_of and not company_research_review:
+        payload["research_as_of"] = str(research_as_of)
     reviews: dict[tuple[str, str], dict[str, Any]] = {}
     for line in review_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         review = json.loads(line)
-        errors = validate_review(review)
+        errors = validate_review(
+            review,
+            require_company_research_fields=company_research_review,
+        )
         if errors:
             raise ValueError(f"invalid review: {','.join(errors)}")
+        if company_research_review:
+            snapshot_errors = valuation_snapshot_errors(
+                review,
+                expected_security_code=str(review.get("security_code") or ""),
+                expected_snapshot_generation=str(payload.get("snapshot_generation") or ""),
+                expected_market_as_of=str(payload.get("market_as_of") or ""),
+            )
+            if snapshot_errors:
+                raise ValueError(f"invalid review valuation snapshot: {','.join(snapshot_errors)}")
         key = (str(review.get("security_code")), str(review.get("type_key")))
         if key in reviews:
             raise ValueError(f"duplicate review: {key}")
         reviews[key] = review
+    packet_keys = {
+        (str(packet.get("security_code")), str(packet.get("type_key")))
+        for packet in payload.get("packets", [])
+    }
+    extra = sorted(set(reviews) - packet_keys)
+    if extra:
+        raise ValueError(f"reviews outside candidate queue: {extra[:8]}")
+
+    if payload.get("review_mode") == "opencode_native_company_research_review":
+        if not all((research_path, knowledge_path, protocol_path, research_as_of)):
+            raise ValueError(
+                "company research merge requires research, knowledge, protocol and research_as_of provenance inputs"
+            )
+        context = load_research_provenance_context(
+            input_path,
+            research_path,  # type: ignore[arg-type]
+            knowledge_path,  # type: ignore[arg-type]
+            protocol_path,  # type: ignore[arg-type]
+            research_as_of=str(research_as_of),
+        )
+        validate_review_set_provenance(list(reviews.values()), context)
     for packet in payload.get("packets", []):
         key = (str(packet.get("security_code")), str(packet.get("type_key")))
         packet["ai_review"] = reviews.get(key)
@@ -391,6 +490,10 @@ def main() -> int:
     parser.add_argument("--generation")
     parser.add_argument("--review-mode")
     parser.add_argument("--review-jsonl", type=Path)
+    parser.add_argument("--research", type=Path)
+    parser.add_argument("--knowledge", type=Path)
+    parser.add_argument("--protocol", type=Path)
+    parser.add_argument("--research-as-of")
     args = parser.parse_args()
     build_input(
         args.snapshot,
@@ -403,7 +506,15 @@ def main() -> int:
         review_mode=args.review_mode,
     )
     if args.review_jsonl:
-        merge_reviews(args.out / "ai-screening-input.json", args.review_jsonl, args.out / "ai-screening.json")
+        merge_reviews(
+            args.out / "ai-screening-input.json",
+            args.review_jsonl,
+            args.out / "ai-screening.json",
+            research_path=args.research,
+            knowledge_path=args.knowledge,
+            protocol_path=args.protocol,
+            research_as_of=args.research_as_of,
+        )
     return 0
 
 

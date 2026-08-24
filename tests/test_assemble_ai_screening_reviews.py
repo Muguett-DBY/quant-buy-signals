@@ -14,7 +14,7 @@ def _candidate(code: str) -> dict[str, str]:
 
 
 def _review(code: str, *, searched: bool) -> dict[str, object]:
-    return {
+    review: dict[str, object] = {
         "schema_version": 2,
         "security_code": code,
         "type_key": "type1",
@@ -24,9 +24,24 @@ def _review(code: str, *, searched: bool) -> dict[str, object]:
         "ai_action": "watchlist" if not searched else "priority_buy",
         "confidence": "low" if not searched else "medium",
         "summary": "观察，等待进一步核验。" if not searched else "当前建议买入，仍需控制仓位。",
-        "key_strengths": ["候选规则状态"],
-        "risk_flags": ["仍需跟踪"],
-        "claims": [] if not searched else [{"statement": "正式报告", "source_ref": "https://example.com/report"}],
+        "key_strengths": ["公司经营质量值得继续核验"],
+        "risk_flags": ["下游需求仍需跟踪"],
+        "claims": (
+            []
+            if not searched
+            else [
+                {
+                    "statement": "2025年度营业收入 120 亿元",
+                    "source_ref": "https://example.com/report#revenue",
+                    "support": "supports",
+                },
+                {
+                    "statement": "2025年度经营现金流 18 亿元",
+                    "source_ref": "https://example.com/report#cashflow",
+                    "support": "supports",
+                },
+            ]
+        ),
         "model": MODEL,
         "effort": "low",
         "web_search_performed": searched,
@@ -36,6 +51,9 @@ def _review(code: str, *, searched: bool) -> dict[str, object]:
         "web_search_verified_claim_urls": ["https://example.com/report"] if searched else [],
         "web_search_dropped_claim_url_count": 0,
     }
+    if searched:
+        review["quantitative_facts"] = ["2025年度营业收入 120 亿元", "2025年度经营现金流 18 亿元"]
+    return review
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

@@ -237,6 +237,9 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     upload_ai = next(
         step for step in steps if "Upload the optional generation-bound AI screening overlay" in step["name"]
     )
+    preflight_ai = next(
+        step for step in steps if "Preflight the optional generation-bound AI screening overlay" in step["name"]
+    )
     assert upload_ai["env"] == {
         "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
@@ -244,11 +247,36 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     assert "r2 object put" in upload_ai["run"]
     assert upload_ai["id"] == "ai_overlay"
     assert "quant-market-data/ai-screening/${generation}.json" in upload_ai["run"]
-    assert "AI screening seed targets" in upload_ai["run"]
-    assert "seed_changed=${seed_changed}" in upload_ai["run"]
-    assert "Changed AI screening seed targets" in upload_ai["run"]
+    assert preflight_ai["id"] == "ai_preflight"
+    assert steps.index(preflight_ai) < steps.index(refresh)
+    assert steps.index(preflight_ai) < steps.index(dispatcher)
+    assert steps.index(preflight_ai) < steps.index(pages)
+    assert steps.index(upload_ai) < steps.index(pages)
+    assert "python -m tools.validate_ai_screening_public" in preflight_ai["run"]
+    assert "33554432" in preflight_ai["run"]
+    assert ".source_audit.audit_passed == true" in preflight_ai["run"]
+    assert ".source_audit.audit_contract_version == 3" in preflight_ai["run"]
+    assert ".source_audit.projection_sha256" in preflight_ai["run"]
+    assert ".source_audit.projection_company_count == .candidate_total" in preflight_ai["run"]
+    assert ".source_audit.projection_claim_count" in preflight_ai["run"]
+    assert ".source_audit.projection_search_finding_count" in preflight_ai["run"]
+    assert ".source_audit.projection_source_reference_count" in preflight_ai["run"]
+    assert ".source_audit.projection_unique_url_count" in preflight_ai["run"]
+    assert ".source_audit.semantic_failed_count == 0" in preflight_ai["run"]
+    assert ".source_audit.semantic_unverified_count == 0" in preflight_ai["run"]
+    assert ".source_audit.company_coverage" in preflight_ai["run"]
+    assert ".referenced_no_source_finding_ids" in preflight_ai["run"]
+    assert ".source_audit.audit_sha256" in preflight_ai["run"]
+    assert "AI screening seed targets" in preflight_ai["run"]
+    assert "seed_changed=${seed_changed}" in preflight_ai["run"]
+    assert "Changed AI screening seed targets" in preflight_ai["run"]
+    assert "stale_seed=true" in preflight_ai["run"]
+    assert "stale AI screening seed passed the current Worker contract" in preflight_ai["run"]
+    assert preflight_ai["run"].index("python -m tools.validate_ai_screening_public") < preflight_ai["run"].index(
+        "stale AI screening seed passed the current Worker contract"
+    )
     assert 'echo "uploaded=true"' in upload_ai["run"]
-    assert "steps.ai_overlay.outputs.seed_changed" in verify["run"]
+    assert "steps.ai_preflight.outputs.seed_changed" in verify["run"]
     assert "steps.ai_overlay.outputs.uploaded" in verify["run"]
     assert "ai-screening-generation" in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
@@ -259,11 +287,14 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     assert ".type_pair_unreviewed_count == 0" in verify["run"]
     assert '.review_mode == "local_codex_review"' in verify["run"]
     assert '.review_mode == "opencode_mixed_review"' in verify["run"]
+    assert '.review_mode == "opencode_native_company_research_review"' in verify["run"]
     assert ".reviewed_without_web_search == (.candidate_total - .web_search_attempted_count)" in verify["run"]
     assert ".web_search_attempted_count == .candidate_total" in verify["run"]
     assert ".web_search_event_verified_count == .candidate_total" in verify["run"]
     assert ".type_pair_web_search_attempted_count == .type_pair_candidate_total" in verify["run"]
     assert ".type_pair_web_search_event_verified_count == .type_pair_candidate_total" in verify["run"]
+    assert ".research_source_urls_verified_count == .candidate_total" in verify["run"]
+    assert ".type_pair_research_source_urls_verified_count == .type_pair_candidate_total" in verify["run"]
     assert ".type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total" in verify["run"]
 
 

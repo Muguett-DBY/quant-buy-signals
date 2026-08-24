@@ -26,10 +26,22 @@ def _review(code: str, type_key: str) -> dict[str, object]:
         "buy_attractiveness_score": 65,
         "ai_action": "priority_buy",
         "confidence": "medium",
-        "summary": "当前证据与类型规则一致。",
-        "key_strengths": [],
-        "risk_flags": [],
-        "claims": [],
+        "summary": "当前盈利和现金流支持买入，但下游需求仍可能波动。",
+        "quantitative_facts": ["2025年度营业收入 120 亿元", "2025年度经营现金流 18 亿元"],
+        "key_strengths": ["2025年度收入和现金流均保持正值"],
+        "risk_flags": ["下游需求波动可能压低盈利"],
+        "claims": [
+            {
+                "statement": "2025年度营业收入 120 亿元",
+                "source_ref": "https://example.com/report#revenue",
+                "support": "supports",
+            },
+            {
+                "statement": "2025年度经营现金流 18 亿元",
+                "source_ref": "https://example.com/report#cashflow",
+                "support": "supports",
+            },
+        ],
     }
 
 

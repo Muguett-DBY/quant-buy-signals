@@ -1,8 +1,10 @@
-"""Build short, period-labelled quantitative facts for AI screening cards.
+"""Build short, period-labelled company facts for AI screening cards.
 
-The deterministic snapshot already contains the figures used by the seven-type
-rules.  Keeping those figures beside the model opinion prevents a generic
-announcement title from being presented as a financial reason.
+These facts are a neutral snapshot of the company.  They are deliberately
+separate from the deterministic candidate status and from the model's
+investment opinion: a card may show the same price or annual-history fact for
+any candidate type without implying that a rule was triggered or that a score
+supports the AI conclusion.
 """
 
 from __future__ import annotations
@@ -46,7 +48,10 @@ def _annual_end_year(company: Mapping[str, Any]) -> int | None:
     if not isinstance(history, list):
         return None
     years = [
-        int(item["end_year"]) for item in history if isinstance(item, Mapping) and isinstance(item.get("end_year"), int)
+        int(item.get("end_year", item.get("year")))
+        for item in history
+        if isinstance(item, Mapping)
+        and isinstance(item.get("end_year", item.get("year")), int)
     ]
     return max(years) if years else None
 
@@ -68,7 +73,17 @@ def quantitative_facts(
     *,
     market_as_of: str | None = None,
 ) -> list[str]:
-    """Return numeric facts already present in the deterministic company detail."""
+    """Return neutral numeric facts already present in the company snapshot.
+
+    ``type_key`` remains part of the call signature for packet-building
+    compatibility, but it must not change the facts or appear in their text.
+    Candidate status, rule dimensions, and rule scores belong to the separate
+    rule context and are never copied into this field.
+    """
+
+    # The packet builder still passes the active type for compatibility with
+    # older input artifacts.  Neutral facts intentionally do not depend on it.
+    del type_key
 
     facts: list[str] = []
     as_of = str(market_as_of or "").strip()
@@ -91,23 +106,6 @@ def quantitative_facts(
     if valuation:
         suffix = f"（交易日 {as_of}）" if as_of else ""
         facts.append("估值快照：" + "；".join(valuation) + suffix)
-
-    type_result = (company.get("types") or company.get("type_results") or {}).get(type_key, {})
-    if isinstance(type_result, Mapping):
-        reasons = type_result.get("reasons") or type_result.get("sub_score_reasons") or {}
-        if isinstance(reasons, Mapping):
-            for dimension, reason in reasons.items():
-                if str(dimension).startswith("_"):
-                    continue
-                text = str(reason or "").strip()
-                if text and _NUMBER_RE.search(text):
-                    suffix = f"；快照交易日 {as_of}" if as_of else ""
-                    facts.append(f"确定性 {type_key}-{dimension}：{text}{suffix}")
-        score = _number(type_result.get("score"))
-        status = str(type_result.get("status") or "").strip()
-        if score is not None:
-            suffix = f"；快照交易日 {as_of}" if as_of else ""
-            facts.append(f"确定性 {type_key}：{score:.3f} 分，状态 {status or '未标注'}{suffix}")
 
     end_year = _annual_end_year(company)
     if end_year is not None:

@@ -586,9 +586,13 @@ const JSON_HEADERS={...BASE_SECURITY_HEADERS,"content-type":"application/json; c
 const MAX_MANIFEST_BYTES=1024*1024;
 const MAX_COMPRESSED_ASSET_BYTES=8*1024*1024;
 const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;
-const MAX_AI_SCREENING_BYTES=8*1024*1024;
+// The AI overlay is a single generation-bound JSON object. Keep its dedicated
+// ceiling well below the 128 MiB isolate limit while allowing the full company
+// research artifact; R2 and Wrangler have materially higher upload limits.
+const MAX_AI_SCREENING_BYTES=32*1024*1024;
 const AI_SCREENING_SCHEMA_VERSION=2;
 const AI_SCREENING_ARTIFACT_KIND="ai_screening_overlay";
+const AI_SOURCE_AUDIT_CONTRACT_VERSION=3;
 // Pages advanced mode deploys this Worker as one file, so the official closure
 // periods from tools/china_a_share_trading_calendar.json are embedded here.
 // Add each newly published exchange calendar explicitly; unlisted years fall
@@ -620,6 +624,8 @@ const AI_ACTION_VERDICTS=Object.freeze({priority_buy:Object.freeze(["confirmed"]
 const AI_ACTION_REVIEW_ACTIONS=Object.freeze({priority_buy:Object.freeze(["keep"]),watchlist:Object.freeze(["keep","demote","manual_review"]),avoid:Object.freeze(["demote","manual_review"]),insufficient_evidence:Object.freeze(["manual_review"])});
 const AI_BUY_DECISION_RE=/(?:AI独立|当前|现在|现阶段|本轮|综合判断|结论为)?(?:明确|强烈|积极|优先|仍然|依然|维持|直接)?(?:建议|推荐)(?:立即|现在|当前|积极|优先|逢低|分批|逐步)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段|本轮)?(?:可以|可|值得|适合|应当|应该)(?:立即|现在|当前|逢低|分批|逐步)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:具备|存在)(?:买入|配置)(?:价值|机会)|(?:当前|现在|现阶段)(?:属于|是|构成)(?:明确)?(?:买点|买入机会|建仓机会)|(?:AI|本轮|最终|综合)?结论(?:为|是|：|:)?(?:建议)?(?:买入|建仓|配置)|(?:建议|可以|可|适合)(?:开始|逐步|逢低|分批)?(?:布局|介入|低吸)/g;
 const AI_NON_BUY_DECISION_RE=/(?:当前|现在|现阶段|本轮|综合判断)?(?:明确|仍然|依然|暂时)?(?:不建议|不推荐|不宜|不应|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:尚不构成|不构成|并非|不是)(?:合适的)?(?:买点|买入机会|买入时点)|(?:建议|应当|应该|宜)(?:继续)?(?:观望|等待|回避)|(?:维持|列为|归入|仅作|应列入)(?:继续)?观察|(?:暂不|暂缓|推迟|不宜|不应|不可|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:暂不具备|尚不具备|不具备)(?:买入|配置)(?:价值|条件)|(?:当前|现在|现阶段)?(?:没有|缺乏)(?:明确)?(?:买点|买入机会)|(?:当前|现在|现阶段)?不值得(?:立即|现在|当前)?(?:买入|建仓|配置)|(?:建议|应当|应该)(?:持币)?(?:继续)?观望|(?:建议|应当|应该)(?:卖出|减仓|清仓)/g;
+const AI_RULE_REASON_RE=/\btype\s*[1-7](?:\s*[-_/]\s*[0-9a-z]+)?\b|类型\s*[1-7]|第\s*[一二三四五六七1-7]\s*(?:种|类)(?:买入)?(?:情况|类型)?|七种买入情况|确定性(?:规则|筛选|评分|分数|状态)?|(?:筛选|买入|七类|模型)规则(?:分数|评分|状态|触发|达标)?|(?:候选|符合|遵循|按照|依据|按)规则|规则(?:分数|评分|状态|基础|结果|候选|口径|参考|入选|已触发|未触发|达标)|(?:筛选|模型|买入)(?:分数|评分|状态)|(?:已|未|尚未)触发|(?:接近|尚未|未|已)?达标|候选(?:池|来源)|入池|估值买入区|强周期底部|长坡厚[雪学]|可持续高增长|两热一冷|年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]|\b(?:triggered|conditional|insufficient_evidence)\b/i;
+function aiReviewHasRuleReason(review){return [review?.summary,...(Array.isArray(review?.key_strengths)?review.key_strengths:[]),...(Array.isArray(review?.risk_flags)?review.risk_flags:[]),...(Array.isArray(review?.quantitative_facts)?review.quantitative_facts:[])].some(value=>typeof value==="string"&&AI_RULE_REASON_RE.test(value))}
 function aiHasUnqualifiedDecision(text,pattern,buyDecision){for(const clause of String(text||"").split(/[。！？!?；;\n]+/)){for(const match of clause.matchAll(pattern)){const matchIndex=Number(match.index||0),prefix=clause.slice(Math.max(0,matchIndex-32),matchIndex),suffix=clause.slice(matchIndex+String(match[0]||"").length);if(/(?:若|如果|待|一旦|除非|只有|前提(?:是|为)|条件(?:是|为)|回落至?|跌至|低于|高于|改善后|确认后|触发后|满足后|兑现后|企稳后|完成后|之后|后再|再考虑)[^，,。！？!?；;]{0,24}[，,]?$/.test(prefix))continue;if(buyDecision&&/(?:不|暂不|并不|并非|未|尚未|不能|不可|不构成|不足以|难以|避免|谨慎)(?:据此|直接|立即|现在|当前)?$/.test(prefix))continue;if(buyDecision&&/(?:不具备|暂不具备|尚不具备|不满足|暂不满足|尚不满足|未满足|不足以支持|无法确认|未能确认|无法支持|未能支持|尚未达到|未达到|不符合|无法形成|未形成|尚未形成)[^，,。！？!?；;]{0,24}$/.test(prefix))continue;if(buyDecision&&/(?:券商|机构|分析师|研报|媒体|第三方)(?:明确|强烈)?$/.test(prefix))continue;if(buyDecision&&/^(?:条件|资格|基础|依据|空间|理由)?(?:完全|仍然|尚未|暂不|不具备|不满足|不足|无法|未能|不能|不可|不构成|不支持|未达到|尚未达到)/.test(suffix))continue;return true}}return false}
 function aiDecisionTextConflicts(action,text){return action==="priority_buy"?aiHasUnqualifiedDecision(text,AI_NON_BUY_DECISION_RE,false):["watchlist","avoid","insufficient_evidence"].includes(action)?aiHasUnqualifiedDecision(text,AI_BUY_DECISION_RE,true):false}
 function aiReviewDecisionValid(review,action,score){
@@ -633,64 +639,363 @@ function aiReviewDecisionValid(review,action,score){
   if(recommendation&&recommendation!==(expected==="recommend_buy"?"recommend_buy":"do_not_recommend_buy"))return false;
   const label=String(review?.recommendation_label||""),labelPrefix=action==="priority_buy"?"建议买":action==="avoid"?"不建议":"观察";
   if(label&&(!label.startsWith(labelPrefix)||aiDecisionTextConflicts(action,label)))return false;
-  if(aiDecisionTextConflicts(action,String(review?.summary||"")))return false;
-  if(action==="priority_buy")return score>=60;
-  if(action==="watchlist")return score<70;
+  const decisionTexts=[review?.summary,...(Array.isArray(review?.key_strengths)?review.key_strengths:[]),...(Array.isArray(review?.risk_flags)?review.risk_flags:[])];
+  if(decisionTexts.some(text=>aiDecisionTextConflicts(action,String(text||""))))return false;
+  if(action==="priority_buy")return score>=70;
+  if(action==="watchlist")return score>=50&&score<70;
   return score<50;
 }
 function validAiReviewDescriptorList(value,maxItems,maxLength){return Array.isArray(value)&&value.length>0&&value.length<=maxItems&&value.every(item=>typeof item==="string"&&item.trim()===item&&item.length>0&&item.length<=maxLength)&&new Set(value).size===value.length}
-function validAiScreeningArtifact(value,generation){
-  if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.review_schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
-  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",nativeReview=reviewMode==="opencode_native_web_search_review",partialSearchReview=localReview||mixedReview,externalFull=fullCoverage&&!partialSearchReview;
-  if(String(value.market_as_of||"")!==String(generation?.market_as_of||"")||!/^\d{4}-\d{2}-\d{2}$/.test(String(value.market_as_of||""))||!Array.isArray(packets)||packets.length>2000||value.candidate_total!==packets.length||value.type_pair_unique_company_count!==packets.length||value.reviewed_count!==packets.length)return false;
+const AI_ECONOMIC_PROFILE_FIELDS=Object.freeze(["business_model","moat","cycle","fcf_outlook","governance"]);
+const AI_BUSINESS_SOURCE_QUALITIES=new Set(["current_primary","stale_primary","secondary_only","not_found"]);
+const AI_BUSINESS_SOURCE_UNCERTAINTY_RE=/未.{0,24}一手|无一手|只有二手|仅有二手|仅由.{0,16}二手|二手来源|二手研报|尚待一手|待一手|无法核验|尚未核验|资料过时|业务口径待核验/;
+const AI_VALUATION_SCENARIOS=Object.freeze(["bear","base","bull"]);
+const AI_UNAVAILABLE_VALUATION_METHODS=new Set(["not_reliably_estimable","not_reliably_estimated","unavailable","none"]);
+const AI_NATIVE_COMPANY_RESEARCH_PROFILES=Object.freeze({
+  "opencode-go/muse-spark-1.2-contributor":Object.freeze({effort:"xhigh",retrieval_backend:"reasonix-native-server-web-search",retrieval_model:"opencode-go-muse/muse-spark-1.2-contributor",retrieval_effort:"xhigh"}),
+  "opencode-go/deepseek-v4-flash":Object.freeze({effort:"max",retrieval_backend:"reasonix-native-server-web-search",retrieval_model:"opencode-go-deepseek-responses/deepseek-v4-flash",retrieval_effort:"max"}),
+  "opencode-go/ox-alpha-free":Object.freeze({effort:"max",retrieval_backend:"opencode-native-client-websearch",retrieval_model:"opencode-go/ox-alpha-free",retrieval_effort:"max"}),
+  "opencode/muse-spark-1.2-contributor-free":Object.freeze({effort:"xhigh",retrieval_backend:"opencode-native-client-websearch",retrieval_model:"opencode/muse-spark-1.2-contributor-free",retrieval_effort:"xhigh"}),
+});
+const AI_ECONOMIC_CATEGORIES=new Set(["deep_value","turnaround","compounder","cyclical","growth","venture","quality_equity","other"]);
+function validAiNativeCompanyResearchProfile(review){const profile=AI_NATIVE_COMPANY_RESEARCH_PROFILES[String(review?.model||"")];return !!profile&&review.effort===profile.effort&&review.retrieval_backend===profile.retrieval_backend&&review.retrieval_model===profile.retrieval_model&&review.retrieval_effort===profile.retrieval_effort&&review.native_search_completed===true}
+function validAiDate(value){if(typeof value!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const parsed=new Date(value+"T00:00:00Z");return !Number.isNaN(parsed.valueOf())&&parsed.toISOString().slice(0,10)===value}
+function canonicalAiValuationSnapshotNumber(value){if(value===null||value===undefined||value==="")return null;if(typeof value!=="number"||!Number.isFinite(value))return undefined;const text=value.toFixed(8).replace(/0+$/,"").replace(/\.$/,"");return text==="-0"||text===""?"0":text}
+async function validAiValuationSnapshot(snapshot,valuation,securityCode,snapshotGeneration,marketAsOf){
+  if(!snapshot||typeof snapshot!=="object"||Array.isArray(snapshot)||snapshot.contract_version!==1||String(snapshot.security_code||"")!==securityCode||String(snapshot.snapshot_generation||"")!==snapshotGeneration||String(snapshot.market_as_of||"")!==marketAsOf||String(valuation?.as_of||"")!==marketAsOf)return false;
+  const fields=["current_price","pe","pb","market_cap"],canonical={contract_version:snapshot.contract_version,current_price:canonicalAiValuationSnapshotNumber(snapshot.current_price),market_as_of:String(snapshot.market_as_of||""),market_cap:canonicalAiValuationSnapshotNumber(snapshot.market_cap),pb:canonicalAiValuationSnapshotNumber(snapshot.pb),pe:canonicalAiValuationSnapshotNumber(snapshot.pe),security_code:String(snapshot.security_code||""),snapshot_generation:String(snapshot.snapshot_generation||"")};
+  if(canonical.current_price===undefined||Number(snapshot.current_price)<=0||fields.some(field=>canonicalAiValuationSnapshotNumber(snapshot[field])===undefined||canonicalAiValuationSnapshotNumber(snapshot[field])!==canonicalAiValuationSnapshotNumber(valuation?.[field])))return false;
+  const declared=String(snapshot.canonical_sha256||"");if(!/^[0-9a-f]{64}$/.test(declared))return false;
+  return declared===await sha256Hex(new TextEncoder().encode(JSON.stringify(canonical)));
+}
+function validAiValuation(valuation,marketAsOf,action){
+  const numeric=value=>typeof value==="number"&&Number.isFinite(value),plain=value=>value&&typeof value==="object"&&!Array.isArray(value),close=(actual,expected,absolute)=>Math.abs(actual-expected)<=Math.max(absolute,Math.abs(expected)*0.01);
+  if(!plain(valuation)||valuation.as_of!==marketAsOf||!numeric(valuation.current_price)||valuation.current_price<=0||typeof valuation.method!=="string"||!valuation.method.trim()||valuation.method.length>80||AI_RULE_REASON_RE.test(valuation.method)||typeof valuation.basis!=="string"||!valuation.basis.trim()||valuation.basis.length>1000||AI_RULE_REASON_RE.test(valuation.basis))return false;
+  const method=valuation.method.trim().toLowerCase(),metrics=[valuation.pe,valuation.pb,valuation.market_cap,valuation.margin_of_safety].filter(value=>value!==null&&value!==undefined);
+  if(!metrics.every(numeric))return false;
+  if(AI_UNAVAILABLE_VALUATION_METHODS.has(method))return action!=="priority_buy"&&(valuation.scenarios===null||plain(valuation.scenarios)&&Object.keys(valuation.scenarios).length===0)&&valuation.margin_of_safety===null&&valuation.safety_margin_band===null;
+  if(!new Set(["gordon_fcf_per_share","normalized_earnings_multiple","book_value_multiple"]).has(method)||!plain(valuation.scenarios))return false;
+  const multiple=Number(valuation.multiple_basis?.value),anchor=Number(valuation.normalization_anchor?.per_share);
+  const values={},gordonCashFlows={},gordonGrowths={},gordonDiscounts={};
+  for(const [index,scenario] of AI_VALUATION_SCENARIOS.entries()){
+    const item=valuation.scenarios[scenario];
+    if(!plain(item)||!numeric(item.value_per_share)||item.value_per_share<=0||!numeric(item.upside_pct))return false;
+    const expectedUpside=(item.value_per_share/valuation.current_price-1)*100;
+    if(!close(item.upside_pct,expectedUpside,0.35))return false;
+    const assumptionFields=["normalized_fcf_per_share","discount_rate_pct","terminal_growth_rate_pct","equity_adjustment_per_share","normalized_eps","target_pe","book_value_per_share","target_pb"];
+    if(assumptionFields.some(field=>item[field]!==null&&item[field]!==undefined&&!numeric(item[field])))return false;
+    if(method==="gordon_fcf_per_share"){
+      if(["normalized_fcf_per_share","discount_rate_pct","terminal_growth_rate_pct","equity_adjustment_per_share"].some(field=>!numeric(item[field])))return false;
+      const cashFlow=item.normalized_fcf_per_share,discount=item.discount_rate_pct,growth=item.terminal_growth_rate_pct,adjustment=item.equity_adjustment_per_share;
+      if(cashFlow<=0||discount<6||discount>20||growth< -3||growth>5||discount-growth<3||adjustment!==0)return false;
+      const expectedValue=cashFlow*(1+growth/100)/((discount-growth)/100)+adjustment;
+      if(expectedValue<=0||!close(item.value_per_share,expectedValue,0.05))return false;
+      gordonCashFlows[scenario]=cashFlow;gordonGrowths[scenario]=growth;gordonDiscounts[scenario]=discount;
+    }else if(method==="normalized_earnings_multiple"){
+      const factor=[0.7,1,1.3][index];
+      if(!numeric(item.normalized_eps)||item.normalized_eps<=0||!numeric(item.target_pe)||item.target_pe<=0||item.equity_adjustment_per_share!==0||!Number.isFinite(multiple)||multiple<=0||!close(item.target_pe,multiple*factor,0.01)||!close(item.value_per_share,item.normalized_eps*item.target_pe,0.05))return false;
+    }else if(method==="book_value_multiple"){
+      const factor=[0.7,1,1.3][index];
+      if(!numeric(item.book_value_per_share)||item.book_value_per_share<=0||!numeric(item.target_pb)||item.target_pb<=0||!Number.isFinite(multiple)||multiple<=0||!Number.isFinite(anchor)||anchor<=0||!close(item.book_value_per_share,anchor,0.005)||!close(item.target_pb,multiple*factor,0.01)||!close(item.value_per_share,item.book_value_per_share*item.target_pb,0.05))return false;
+    }
+    values[scenario]=item.value_per_share;
+  }
+  if(!(values.bear<=values.base&&values.base<=values.bull))return false;
+  if(method==="gordon_fcf_per_share"&&!(gordonCashFlows.bear<=gordonCashFlows.base&&gordonCashFlows.base<=gordonCashFlows.bull&&gordonGrowths.bear<=gordonGrowths.base&&gordonGrowths.base<=gordonGrowths.bull&&gordonDiscounts.bear>=gordonDiscounts.base&&gordonDiscounts.base>=gordonDiscounts.bull))return false;
+  if(!numeric(valuation.margin_of_safety))return false;
+  const expectedMargin=(values.bear-valuation.current_price)/values.bear*100,expectedBand=expectedMargin>=20?"deep":expectedMargin>=8?"adequate":expectedMargin>0?"thin":"negative";
+  if(!close(valuation.margin_of_safety,expectedMargin,0.35)||["gordon_fcf_per_share","normalized_earnings_multiple","book_value_multiple"].includes(method)&&valuation.safety_margin_band!==expectedBand)return false;
+  return true;
+}
+function aiHasMaterialMinorityInterestRisk(review){
+  const profile=review?.economic_profile||{},texts=[review?.summary,...(review?.key_strengths||[]),...(review?.risk_flags||[]),...AI_ECONOMIC_PROFILE_FIELDS.map(field=>profile[field]),...(review?.claims||[]).map(item=>item?.statement),...(review?.search_findings||[]).map(item=>item?.finding)];
+  for(const sentence of texts.map(String).join("\n").split(/[。；;\n]+/)){
+    if(!/(?:少数股东|少数权益|非全资|minority\s+interest)/i.test(sentence)||/(?:未发现|不存在|并无|没有|无).{0,12}(?:重大|显著|大额)?(?:少数股东|少数权益|非全资)/i.test(sentence))continue;
+    if(/(?:核心|主要|重要|主力|利润核心).{0,24}(?:子公司|业务).{0,48}(?:少数股东|少数权益|非全资)|(?:少数股东|少数权益).{0,48}(?:核心|主要|重要|近半|重大|显著|大额|占比|占|归母口径|无法可靠|不能可靠|需打折)|(?:归母口径|归属于母公司股东).{0,36}(?:现金流|自由现金流).{0,24}(?:无法|不能|需打折|不可靠)/i.test(sentence)||/(?:[2-4]\d(?:\.\d+)?)\s*%/.test(sentence)&&/(?:子公司|股权|利润|损益|现金流)/.test(sentence))return true;
+  }
+  return false;
+}
+function aiHasStaleCurrentPeriod(review){
+  const years=(Array.isArray(review?.freshness_years)?review.freshness_years:[]).filter(Number.isInteger),asOf=String(review?.valuation?.as_of||review?.research_as_of||""),asOfYear=/^((?:19|20)\d{2})-/.exec(asOf);
+  if(!years.length&&asOfYear)years.push(Number(asOfYear[1]));
+  if(!years.length)return false;
+  const latest=Math.max(...years),profile=review?.economic_profile||{},texts=[review?.summary,...(review?.key_strengths||[]),...(review?.risk_flags||[]),...AI_ECONOMIC_PROFILE_FIELDS.map(field=>profile[field]),review?.valuation?.basis];
+  const pattern=/(?:最新(?:一期|实际|可得|披露)?|当前(?:一期|实际|可得|报告期|财报|数据)|当期|最近一期)[^。；;\n]{0,24}((?:19|20)\d{2})|((?:19|20)\d{2})年?[^。；;\n]{0,18}(?:是|为)?(?:最新(?:一期|实际)?|当前(?:一期|实际|报告期|财报|数据)|当期|最近一期)/g;
+  return texts.some(text=>Array.from(String(text||"").matchAll(pattern)).some(match=>Number(match[1]||match[2])<latest));
+}
+function validAiCompanyResearch(review,marketAsOf,researchAsOf){
+  const profile=review?.economic_profile,valuation=review?.valuation;
+  if(review?.research_as_of!==researchAsOf||!validAiDate(researchAsOf)||researchAsOf<marketAsOf||!profile||typeof profile!=="object"||!valuation||typeof valuation!=="object")return false;
+  if(!AI_ECONOMIC_CATEGORIES.has(String(review?.economic_category||"")))return false;
+  const components=review?.score_components,adjustments=review?.calibration_adjustments,numeric=value=>typeof value==="number"&&Number.isFinite(value),close=(actual,expected,absolute)=>Math.abs(actual-expected)<=Math.max(absolute,Math.abs(expected)*0.01);
+  if(!components||typeof components!=="object"||!numeric(components.risk_adjusted_expected_return)||!numeric(components.evidence_confidence)||components.risk_adjusted_expected_return<0||components.risk_adjusted_expected_return>100||components.evidence_confidence<0||components.evidence_confidence>100||!adjustments||typeof adjustments!=="object")return false;
+  const adjustmentFields=["raw_score","source_penalty","freshness_penalty","pre_band_score","action_band_min","action_band_max","final_score"];
+  if(adjustmentFields.some(field=>!numeric(adjustments[field]))||typeof adjustments.source_quality!=="string"||!adjustments.source_quality||!["current_or_recent","historical","undated"].includes(String(adjustments.freshness_status||""))||typeof adjustments.band_clamped!=="boolean"||!close(adjustments.final_score,Number(review.buy_attractiveness_score),0.11)||!close(adjustments.raw_score,components.risk_adjusted_expected_return,0.51))return false;
+  const expectedSourcePenalty={verified_https:0,source_found:2,searched_no_source:5,not_searched:8}[adjustments.source_quality],expectedFreshnessPenalty={current_or_recent:0,historical:8,undated:5}[String(adjustments.freshness_status||"")];
+  if(expectedSourcePenalty===undefined||Math.abs(adjustments.source_penalty-expectedSourcePenalty)>0.01||Math.abs(adjustments.freshness_penalty-expectedFreshnessPenalty)>0.01||String(review.freshness_status||"")!==String(adjustments.freshness_status||"")||!numeric(review.freshness_penalty)||Math.abs(review.freshness_penalty-adjustments.freshness_penalty)>0.01||!close(adjustments.pre_band_score,adjustments.raw_score-adjustments.source_penalty-adjustments.freshness_penalty,0.11))return false;
+  const expectedBand={priority_buy:[70,100],watchlist:[50,69],avoid:[0,49],insufficient_evidence:[0,49]}[String(review.ai_action||"")];
+  if(!expectedBand||Math.abs(adjustments.action_band_min-expectedBand[0])>0.01||Math.abs(adjustments.action_band_max-expectedBand[1])>0.01||!close(adjustments.final_score,Math.min(expectedBand[1],Math.max(expectedBand[0],adjustments.pre_band_score)),0.11)||adjustments.band_clamped!==(Math.abs(adjustments.final_score-adjustments.pre_band_score)>0.05))return false;
+  const findings=review.search_findings, findingIds=new Set();
+  if(!Array.isArray(findings)||findings.length<1||findings.length>16)return false;
+  for(const finding of findings){const id=String(finding?.id||"");if(!finding||typeof finding!=="object"||!id||findingIds.has(id)||typeof finding.query!=="string"||!finding.query.trim()||typeof finding.finding!=="string"||!finding.finding.trim()||(finding.url!==null&&finding.url!==undefined&&finding.url!==""&&!/^https:\/\//i.test(String(finding.url))))return false;findingIds.add(id)}
+  const claims=Array.isArray(review.claims)?review.claims:[],factIds=new Set();
+  for(const claim of claims){const factId=String(claim?.fact_id||""),searchId=String(claim?.search_finding_id||"");if((!!factId)===(!!searchId)||factId&&factIds.has(factId)||searchId&&!findingIds.has(searchId))return false;if(factId)factIds.add(factId)}
+  const bindingIds=(value)=>{if(!value||typeof value!=="object"||!Array.isArray(value.fact_ids)||!Array.isArray(value.search_finding_ids))return false;const facts=value.fact_ids.map(String),searches=value.search_finding_ids.map(String);return facts.length===new Set(facts).size&&searches.length===new Set(searches).size&&facts.every(id=>factIds.has(id))&&searches.every(id=>findingIds.has(id))};
+  const bindings=review.evidence_bindings;
+  if(!bindings||typeof bindings!=="object"||!bindingIds(bindings.summary)||!Array.isArray(bindings.strengths)||bindings.strengths.length!==review.key_strengths.length||bindings.strengths.some(binding=>!bindingIds(binding))||!Array.isArray(bindings.risks)||bindings.risks.length!==review.risk_flags.length||bindings.risks.some(binding=>!bindingIds(binding))||!bindings.economic_profile||typeof bindings.economic_profile!=="object"||AI_ECONOMIC_PROFILE_FIELDS.some(field=>!bindingIds(bindings.economic_profile[field]))||!bindingIds(bindings.valuation))return false;
+  const valuationEvidence=valuation.evidence_ids,valuationBinding=bindings.valuation;
+  if(!Array.isArray(valuationEvidence)||valuationEvidence.length<1||valuationEvidence.length!==new Set(valuationEvidence).size||valuationEvidence.some(id=>typeof id!=="string"||!id.trim()||!factIds.has(id))||valuation.normalization_anchor!==null&&valuation.normalization_anchor!==undefined&&typeof valuation.normalization_anchor!=="object"||valuation.multiple_basis!==null&&valuation.multiple_basis!==undefined&&typeof valuation.multiple_basis!=="object")return false;
+  if(valuationBinding.fact_ids.length!==valuationEvidence.length||valuationEvidence.some(id=>!valuationBinding.fact_ids.map(String).includes(id)))return false;
+  const anchor=valuation.normalization_anchor;
+  if(anchor&&(!Number.isFinite(Number(anchor.total))&&anchor.total!==null&&anchor.total!==undefined&&anchor.total!==""||!Number.isFinite(Number(anchor.share_count))&&anchor.share_count!==null&&anchor.share_count!==undefined&&anchor.share_count!==""||!Number.isFinite(Number(anchor.per_share))&&anchor.per_share!==null&&anchor.per_share!==undefined&&anchor.per_share!==""||typeof anchor.metric!=="string"||!anchor.metric.trim()||anchor.years!==undefined&&anchor.years!==null&&(!Array.isArray(anchor.years)||anchor.years.some(year=>!Number.isInteger(year)||year<1900||year>2100))))return false;
+  const multiple=valuation.multiple_basis;
+  if(multiple&&((typeof multiple.metric!=="string"||!multiple.metric.trim())||multiple.value!==null&&multiple.value!==undefined&&multiple.value!==""&&!Number.isFinite(Number(multiple.value))))return false;
+  const multipleSearchId=String(valuation.multiple_basis?.search_finding_id||"");
+  if(multipleSearchId&&!valuationBinding.search_finding_ids.map(String).includes(multipleSearchId))return false;
+  if(AI_ECONOMIC_PROFILE_FIELDS.some(field=>typeof profile[field]!=="string"||!profile[field].trim()||profile[field].length>600||AI_RULE_REASON_RE.test(profile[field])))return false;
+  const sourceQuality=String(profile.business_model_source_quality||""),uncertainty=profile.business_model_uncertainty;
+  if(!AI_BUSINESS_SOURCE_QUALITIES.has(sourceQuality)||typeof uncertainty!=="string"||uncertainty.length>600||AI_RULE_REASON_RE.test(uncertainty)||sourceQuality!=="current_primary"&&!AI_BUSINESS_SOURCE_UNCERTAINTY_RE.test(String(profile.business_model||"")+" "+uncertainty))return false;
+  const sourceIds=profile.business_model_source_ids,businessSources=profile.business_model_sources;
+  const searchedNoSource=sourceQuality==="not_found",sourceStatus=String(profile.business_model_source_status||""),action=String(review?.ai_action||""),category=String(review?.final_category||""),recommendation=String(review?.final_recommendation||"");
+  if(!Array.isArray(sourceIds)||sourceIds.length>16||!searchedNoSource&&sourceIds.length<1||sourceIds.some(id=>typeof id!=="string"||!id.trim())||new Set(sourceIds).size!==sourceIds.length||!Array.isArray(businessSources)||businessSources.length!==sourceIds.length||searchedNoSource&&sourceIds.length!==0||sourceStatus!==(searchedNoSource?"searched_no_source":"source_found")||searchedNoSource&&!['watchlist','avoid','insufficient_evidence'].includes(action)||searchedNoSource&&(category==="recommend_buy"||recommendation==="recommend_buy"))return false;
+  const claimSources=new Map();
+  for(const claim of review.claims||[]){const id=String(claim?.search_finding_id||"");if(!id)continue;if(claimSources.has(id))return false;claimSources.set(id,String(claim?.source_ref||""))}
+  const publicSourceIds=new Set();
+  for(const source of businessSources){const id=String(source?.id||""),ref=String(source?.source_ref||"");if(!id||!sourceIds.includes(id)||publicSourceIds.has(id)||(sourceQuality!=="not_found"&&(!claimSources.has(id)||claimSources.get(id)!==ref))||(sourceQuality==="not_found"&&ref))return false;publicSourceIds.add(id)}
+  if(publicSourceIds.size!==sourceIds.length||sourceQuality!=="not_found"&&!businessSources.some(source=>String(source?.source_ref||"").toLowerCase().startsWith("https://")))return false;
+  if(String(valuation.method||"").toLowerCase()==="gordon_fcf_per_share"&&aiHasMaterialMinorityInterestRisk(review))return false;
+  if(aiHasStaleCurrentPeriod(review))return false;
+  return validAiValuation(valuation,marketAsOf,String(review?.ai_action||""));
+}
+function canonicalSourceUrls(value){
+  const text=String(value??""),urls=[],start=/https?:\/\//ig;
+  for(const match of text.matchAll(start)){
+    const tail=text.slice(Number(match.index||0));let end=tail.length;
+    for(let index=0;index<tail.length;index++){
+      const character=tail[index];
+      if(" <>\"'\ufffd\u3000\r\n\t".includes(character)||"（）【】《》「」『』，。；：！？、".includes(character)||(0x2e80<=character.codePointAt(0)&&character.codePointAt(0)<=0x9fff&&/\.(?:pdf|html?|aspx?|php|docx?|xlsx?|csv)(?:[?#][^\s]*)?$/i.test(tail.slice(0,index)))){end=index;break}
+    }
+    let token=tail.slice(0,end).trim().replace(/[.,;:!?，。；：！？、]+$/g,"");
+    for(const pair of [["(",")"],["[","]"],["{","}"],["（","）"],["【","】"],["《","》"]])while(token.endsWith(pair[1])&&token.split(pair[1]).length-1>token.split(pair[0]).length-1)token=token.slice(0,-1).trimEnd();
+    let parsed;try{parsed=new URL(token)}catch{continue}
+    if(!/^https?:$/.test(parsed.protocol)||parsed.username||parsed.password)continue;
+    const scheme=parsed.protocol.slice(0,-1).toLowerCase(),authority=parsed.host.toLowerCase(),raw=token.match(/^[a-z]+:\/\/[^/?#]+(.*)$/i);
+    const canonical=scheme+"://"+authority+(raw?raw[1]:"");
+    if(!urls.includes(canonical))urls.push(canonical)
+  }
+  return urls
+}
+function claimSourceUrls(claim){
+  const values=[claim?.source_ref,claim?.source_context];
+  if(Array.isArray(claim?.source_refs))values.push(...claim.source_refs);
+  const urls=[];for(const value of values)for(const url of canonicalSourceUrls(value))if(!urls.includes(url))urls.push(url);return urls
+}
+function findingSourceUrl(finding){return canonicalSourceUrls(finding?.url)[0]||""}
+function reviewCanonicalUrls(review){
+  const urls=[];
+  for(const claim of Array.isArray(review?.claims)?review.claims:[])for(const url of claimSourceUrls(claim))if(!urls.includes(url))urls.push(url);
+  for(const finding of Array.isArray(review?.search_findings)?review.search_findings:[]){const url=findingSourceUrl(finding);if(url&&!urls.includes(url))urls.push(url)}
+  return urls
+}
+function publicSourceText(value,limit){return Array.from(String(value||"").trim()).slice(0,limit).join("")}
+function publicClaimSourceFields(claim){
+  const rawSources=[],singular=String(claim?.source_ref||"").trim();if(singular)rawSources.push(singular);
+  if(Array.isArray(claim?.source_refs))for(const value of claim.source_refs){const text=String(value||"").trim();if(text)rawSources.push(text)}
+  let rawSource=rawSources[0]||"";const rawContext=String(claim?.source_context||"").trim();if(!rawSource)rawSource=rawContext;
+  const urls=[],candidates=[...rawSources,...(rawContext&&!rawSources.includes(rawContext)?[rawContext]:[])];
+  for(const candidate of candidates.length?candidates:(rawSource?[rawSource]:[]))for(const url of canonicalSourceUrls(candidate))if(!urls.includes(url))urls.push(url);
+  let context=rawContext||rawSource;if(!canonicalSourceUrls(context).length)context=publicSourceText(context,240);
+  return {source_ref:urls[0]||"",source_context:context,source_refs:urls}
+}
+function publicSourceSemanticProjection(value){
+  const companies=[],publishFindings=String(value?.review_mode||"")==="opencode_native_company_research_review";
+  for(const packet of Array.isArray(value?.packets)?value.packets:[]){
+    const review=packet?.ai_review;if(!review||typeof review!=="object"||Array.isArray(review))continue;
+    const findings=publishFindings&&Array.isArray(review.search_findings)?review.search_findings:[],findingRows=[],findingsById=new Map();
+    findings.forEach((finding,findingIndex)=>{
+      if(!finding||typeof finding!=="object"||Array.isArray(finding))return;
+      const id=publicSourceText(finding.id,120);if(id)findingsById.set(id,finding);
+      findingRows.push({finding_index:findingIndex,id,query:publicSourceText(finding.query,240),title:publicSourceText(finding.title,300),url:findingSourceUrl(finding)||null,published_at:publicSourceText(finding.published_at,32)||null,report_period:publicSourceText(finding.report_period,80)||null,finding:publicSourceText(finding.finding,600),stance:publicSourceText(finding.stance,16),source_kind:publicSourceText(finding.source_kind,48),source_quality:publicSourceText(finding.source_quality,32)})
+    });
+    const claimRows=[];(Array.isArray(review.claims)?review.claims:[]).forEach((claim,claimIndex)=>{
+      if(!claim||typeof claim!=="object"||Array.isArray(claim))return;
+      const sources=publicClaimSourceFields(claim),findingId=publicSourceText(claim.search_finding_id,120),linked=findingsById.get(findingId)||{};
+      claimRows.push({claim_index:claimIndex,statement:publicSourceText(claim.statement,600),source_ref:sources.source_ref,source_context:sources.source_context,source_refs:sources.source_refs,support:publicSourceText(claim.support,16),fact_id:publicSourceText(claim.fact_id,120),search_finding_id:findingId,source_kind:publicSourceText(claim.source_kind,48),linked_published_at:publicSourceText(linked.published_at,32)||null,linked_report_period:publicSourceText(linked.report_period,80)||null,linked_source_kind:publicSourceText(linked.source_kind,48)})
+    });
+    companies.push({security_code:publicSourceText(packet.security_code,16),name:publicSourceText(packet.name,160),type_key:publicSourceText(packet.type_key,16),claims:claimRows,search_findings:findingRows})
+  }
+  companies.sort((left,right)=>left.security_code!==right.security_code?(left.security_code<right.security_code?-1:1):left.type_key!==right.type_key?(left.type_key<right.type_key?-1:1):left.name===right.name?0:left.name<right.name?-1:1);
+  return {companies}
+}
+function canonicalJson(value){
+  if(value===null)return "null";
+  if(Array.isArray(value))return `[${value.map(canonicalJson).join(",")}]`;
+  if(typeof value==="object"){const keys=Object.keys(value).sort();return `{${keys.map(key=>`${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`}
+  return JSON.stringify(value)
+}
+async function sourceSemanticProjectionDigest(value){
+  const projection=publicSourceSemanticProjection(value),claims=projection.companies.flatMap(company=>company.claims),findings=projection.companies.flatMap(company=>company.search_findings),references=claims.flatMap(claim=>claim.source_refs);
+  for(const finding of findings)if(finding.url)references.push(finding.url);
+  return {projection_sha256:await sha256Hex(new TextEncoder().encode(canonicalJson(projection))),projection_company_count:projection.companies.length,projection_claim_count:claims.length,projection_search_finding_count:findings.length,projection_source_reference_count:references.length,projection_unique_url_count:new Set(references).size}
+}
+function sourceBindingKey(binding){return JSON.stringify([String(binding?.security_code||""),String(binding?.name||""),String(binding?.type_key||""),binding?.claim_index??null,binding?.finding_index??null,String(binding?.search_finding_id||""),String(binding?.url||""),String(binding?.kind||"")])}
+function sourceBindingCounts(bindings){const counts=new Map();for(const binding of bindings){const key=sourceBindingKey(binding);counts.set(key,(counts.get(key)||0)+1)}return counts}
+function sameSourceBindingCounts(expected,actual){if(expected.size!==actual.size)return false;for(const [key,count] of expected)if(actual.get(key)!==count)return false;return true}
+function sameStringSet(left,right){return left.size===right.size&&[...left].every(value=>right.has(value))}
+function nativeSourcePacketContract(packets){
+  const urls=new Set(),bindings=[],coverage=new Map();
+  for(const packet of packets){
+    const review=packet?.ai_review;if(!review||typeof review!=="object")continue;
+    const code=String(packet?.security_code||""),name=String(packet?.name||packet?.security_name||""),typeKey=String(packet?.type_key||""),reviewUrls=reviewCanonicalUrls(review);
+    for(const url of reviewUrls)urls.add(url);
+    const findings=Array.isArray(review.search_findings)?review.search_findings:[],findingsById=new Map(),referenced=new Set(),searchedNoSource=new Set(),referencedNoSource=new Set(),claimIdsWithUrls=new Set();
+    findings.forEach(finding=>{const id=String(finding?.id||"").trim();if(id)findingsById.set(id,finding)});
+    for(const [claimIndex,claim] of (Array.isArray(review.claims)?review.claims:[]).entries()){
+      const findingId=String(claim?.search_finding_id||"").trim(),claimUrls=claimSourceUrls(claim);
+      for(const url of claimUrls)bindings.push({security_code:code,name,type_key:typeKey,claim_index:claimIndex,search_finding_id:findingId,url,kind:"claim"});
+      if(!findingId)continue;
+      referenced.add(findingId);
+      if(claimUrls.length)claimIdsWithUrls.add(findingId);else if(!findingSourceUrl(findingsById.get(findingId))){searchedNoSource.add(findingId);referencedNoSource.add(findingId)}
+    }
+    findings.forEach((finding,findingIndex)=>{
+      const findingId=String(finding?.id||"").trim(),url=findingSourceUrl(finding);
+      if(findingId&&!url&& !claimIdsWithUrls.has(findingId)){searchedNoSource.add(findingId);if(referenced.has(findingId))referencedNoSource.add(findingId)}
+      if(!url)return;
+      if(findingId)referenced.add(findingId);
+      bindings.push({security_code:code,name,type_key:typeKey,claim_index:null,finding_index:findingIndex,search_finding_id:findingId,url,kind:"search_finding"});
+    });
+    coverage.set(code,{referenced_finding_ids:referenced,searched_no_source_finding_ids:searchedNoSource,referenced_no_source_finding_ids:referencedNoSource,canonical_url_count:reviewUrls.length});
+  }
+  return {urls,bindings,coverage}
+}
+async function validAiNativeCompanySourceAudit(audit,packets){
+  if(!audit||audit.audit_contract_version!==AI_SOURCE_AUDIT_CONTRACT_VERSION||audit.audit_passed!==true)return false;
+  const projection=await sourceSemanticProjectionDigest({review_mode:"opencode_native_company_research_review",packets});
+  if(Object.entries(projection).some(([field,value])=>audit[field]!==value))return false;
+  if(audit.claim_count!==projection.projection_claim_count||projection.projection_source_reference_count<projection.projection_unique_url_count)return false;
+  const semanticFields=["semantic_claim_count","semantic_passed_count","semantic_failed_count","semantic_unverified_count"],semanticCounts=Object.fromEntries(semanticFields.map(field=>[field,audit[field]]));
+  if(semanticFields.some(field=>!Number.isInteger(semanticCounts[field])||semanticCounts[field]<0)||semanticCounts.semantic_claim_count!==semanticCounts.semantic_passed_count+semanticCounts.semantic_failed_count+semanticCounts.semantic_unverified_count||semanticCounts.semantic_failed_count!==0||semanticCounts.semantic_unverified_count!==0)return false;
+  const canonical=audit.canonical_urls;
+  if(!Array.isArray(canonical)||new Set(canonical).size!==canonical.length||canonical.some(url=>typeof url!=="string"||!/\S/.test(url)||url.trim()!==url||!/^https?:\/\/\S+$/i.test(url)))return false;
+  if(canonical.length!==projection.projection_unique_url_count)return false;
+  const current=nativeSourcePacketContract(packets);
+  if(canonical.length!==current.urls.size||canonical.some(url=>!current.urls.has(url)))return false;
+  if(!Array.isArray(audit.source_bindings)||!sameSourceBindingCounts(sourceBindingCounts(current.bindings),sourceBindingCounts(audit.source_bindings)))return false;
+  const coverage=audit.company_coverage;
+  if(!Array.isArray(coverage)||coverage.length!==packets.length)return false;
+  const packetCodes=new Set(packets.map(packet=>String(packet?.security_code||""))),seenCodes=new Set();
+  let semanticTotal=0;
+  for(const item of coverage){
+    const code=String(item?.security_code||"");
+    if(!packetCodes.has(code)||seenCodes.has(code)||!Array.isArray(item?.referenced_finding_ids)||!Array.isArray(item?.searched_no_source_finding_ids)||!Array.isArray(item?.referenced_no_source_finding_ids)||item.referenced_no_source_finding_ids.length||!["pass","searched_no_source"].includes(String(item?.status||"")))return false;
+    const counts=Object.fromEntries(semanticFields.map(field=>[field,item[field]]));
+    if(semanticFields.some(field=>!Number.isInteger(counts[field])||counts[field]<0)||counts.semantic_claim_count!==counts.semantic_passed_count+counts.semantic_failed_count+counts.semantic_unverified_count||counts.semantic_failed_count!==0||counts.semantic_unverified_count!==0)return false;
+    if(item.referenced_finding_ids.length&&item.all_referenced_findings_semantic_pass!==true)return false;
+    const expected=current.coverage.get(code);
+    if(!expected||!sameStringSet(new Set(item.referenced_finding_ids),expected.referenced_finding_ids)||!sameStringSet(new Set(item.searched_no_source_finding_ids),expected.searched_no_source_finding_ids)||!sameStringSet(new Set(item.referenced_no_source_finding_ids),expected.referenced_no_source_finding_ids)||item.canonical_url_count!==expected.canonical_url_count)return false;
+    seenCodes.add(code);semanticTotal+=counts.semantic_claim_count;
+  }
+  return seenCodes.size===packetCodes.size&&semanticTotal===semanticCounts.semantic_claim_count;
+}
+async function canonicalAiCandidateIdentity(packets){
+  const pairs=[],seenPairs=new Set();
+  for(const packet of packets){
+    const code=String(packet?.security_code||packet?.code||"").trim(),candidateTypes=packet?.candidate_types;
+    let typeKeys;
+    if(Array.isArray(candidateTypes)){
+      typeKeys=candidateTypes.filter(value=>value&&typeof value==="object"&&!Array.isArray(value)).map(value=>String(value.type_key||value.type||"").trim());
+      if(Array.isArray(packet?.type_keys)){
+        const declared=[...new Set(packet.type_keys.map(value=>String(value).trim()))],fromTypes=[...new Set(typeKeys)];
+        if(declared.length!==fromTypes.length||declared.some(type=>!fromTypes.includes(type)))return "";
+      }
+    }else typeKeys=Array.isArray(packet?.type_keys)?packet.type_keys.map(value=>String(value).trim()):[String(packet?.type_key||packet?.type||"").trim()];
+    const uniqueTypes=[...new Set(typeKeys)];
+    if(!code||uniqueTypes.length<1||uniqueTypes.some(type=>!/^type[1-7]$/.test(type)))return "";
+    uniqueTypes.sort((left,right)=>Number(left.slice(4))-Number(right.slice(4)));
+    for(const type of uniqueTypes){const identity=code+"\0"+type;if(seenPairs.has(identity))return "";seenPairs.add(identity);pairs.push([code,type])}
+  }
+  pairs.sort((left,right)=>left[0]===right[0]?Number(left[1].slice(4))-Number(right[1].slice(4)):left[0]<right[0]?-1:1);
+  return sha256Hex(new TextEncoder().encode(pairs.map(([code,type])=>code+"\0"+type+"\n").join("")));
+}
+const AI_ACTION_ORDER=Object.freeze({priority_buy:0,watchlist:1,avoid:2,insufficient_evidence:3});
+function compareAiPacketOrder(left,right){
+  const leftReview=left?.ai_review||{},rightReview=right?.ai_review||{},scoreDifference=Number(rightReview.buy_attractiveness_score)-Number(leftReview.buy_attractiveness_score);
+  if(scoreDifference!==0)return scoreDifference;
+  const actionDifference=(AI_ACTION_ORDER[String(leftReview.ai_action)]??9)-(AI_ACTION_ORDER[String(rightReview.ai_action)]??9);
+  if(actionDifference!==0)return actionDifference;
+  const leftCode=String(left?.security_code||""),rightCode=String(right?.security_code||"");
+  if(leftCode!==rightCode)return leftCode<rightCode?-1:1;
+  const leftType=String(left?.type_key||""),rightType=String(right?.type_key||"");
+  return leftType===rightType?0:leftType<rightType?-1:1;
+}
+async function validAiScreeningArtifact(value,generation){
+  if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.review_schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||value.full_coverage_final_recommendation!==true||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
+  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",nativeCompanyResearch=reviewMode==="opencode_native_company_research_review",nativeReview=reviewMode==="opencode_native_web_search_review"||nativeCompanyResearch,partialSearchReview=localReview||mixedReview,externalFull=fullCoverage&&!partialSearchReview;
+  if(String(value.market_as_of||"")!==String(generation?.market_as_of||"")||!validAiDate(String(value.market_as_of||""))||nativeCompanyResearch&&(!validAiDate(String(value.research_as_of||""))||String(value.research_as_of)<String(value.market_as_of))||!Array.isArray(packets)||packets.length>2000||value.candidate_total!==packets.length||value.type_pair_unique_company_count!==packets.length||value.reviewed_count!==packets.length)return false;
   const pairTotal=value.type_pair_candidate_total,pairExpected=value.type_pair_expected_total,pairReviewed=value.type_pair_reviewed_count,pairUnreviewed=value.type_pair_unreviewed_count,attempted=value.attempted_review_count,unreviewed=value.unreviewed_candidate_count,needsReview=value.attempted_needs_review_count;
-  const candidateIdentity=String(value.candidate_identity_sha256||""),universeIdentity=String(value.candidate_universe_identity_sha256||"");
-  if((candidateIdentity&&!/^[0-9a-f]{64}$/.test(candidateIdentity))||(universeIdentity&&!/^[0-9a-f]{64}$/.test(universeIdentity))||(fullCoverage&&(!candidateIdentity||candidateIdentity!==universeIdentity)))return false;
+  const identityFields=["candidate_identity_sha256","candidate_universe_identity_sha256","type_pair_candidate_identity_sha256","type_pair_universe_identity_sha256"],computedIdentity=await canonicalAiCandidateIdentity(packets);
+  if(!computedIdentity||identityFields.some(field=>String(value[field]||"")!==computedIdentity))return false;
   const validCount=(count,maximum)=>Number.isInteger(count)&&count>=0&&count<=maximum;
-  if(!Number.isInteger(pairTotal)||pairTotal<packets.length||!validCount(pairReviewed,pairTotal)||!validCount(pairUnreviewed,pairTotal)||pairReviewed+pairUnreviewed!==pairTotal||!validCount(attempted,packets.length)||!validCount(unreviewed,packets.length)||attempted+unreviewed!==packets.length||!validCount(needsReview,attempted))return false;
-  const pairSearchAttempted=value.type_pair_web_search_attempted_count,pairSearchCompleted=value.type_pair_web_search_completed_count,pairSearchEvents=value.type_pair_web_search_event_verified_count,pairClaimUrls=value.type_pair_web_search_claim_urls_verified_count,pairDroppedClaimUrls=value.type_pair_web_search_dropped_claim_url_count,companySearchAttempted=value.web_search_attempted_count,companySearchCompleted=value.web_search_completed_count,companySearchEvents=value.web_search_event_verified_count,companyClaimUrls=value.web_search_claim_urls_verified_count,companyDroppedClaimUrls=value.web_search_dropped_claim_url_count;
-  if(!validCount(pairSearchAttempted,pairReviewed)||!validCount(pairSearchCompleted,pairSearchAttempted)||!validCount(pairSearchEvents,pairSearchAttempted)||!validCount(pairClaimUrls,pairSearchEvents)||!validCount(pairDroppedClaimUrls,pairTotal*16)||!validCount(companySearchAttempted,attempted)||!validCount(companySearchCompleted,companySearchAttempted)||!validCount(companySearchEvents,companySearchAttempted)||!validCount(companyClaimUrls,companySearchEvents)||!validCount(companyDroppedClaimUrls,packets.length*16))return false;
+  if((externalFull||mixedReview)&&(!value.source_audit||value.source_audit.available!==true||value.source_audit.invalid_claim_url_count!==0||Number(value.source_audit.failed||0)!==0))return false;
+  if(nativeCompanyResearch){const audit=value.source_audit,checked=audit.checked,ok=audit.ok,failed=audit.failed,blocked=audit.blocked,invalid=audit.invalid??0;if(audit.audit_passed!==true||!await validAiNativeCompanySourceAudit(audit,packets)||!Number.isInteger(audit.claim_count)||audit.claim_count<packets.length||!/^[0-9a-f]{64}$/.test(String(audit.merged_sha256||""))||!/^[0-9a-f]{64}$/.test(String(audit.audit_sha256||""))||![checked,ok,failed,blocked,invalid].every(item=>Number.isInteger(item)&&item>=0)||checked!==ok+failed+blocked+invalid)return false}
+  if(!Number.isInteger(pairTotal)||pairTotal<packets.length||value.type_pair_unique_company_count!==packets.length||!validCount(pairReviewed,pairTotal)||!validCount(pairUnreviewed,pairTotal)||pairReviewed+pairUnreviewed!==pairTotal||!validCount(attempted,packets.length)||!validCount(unreviewed,packets.length)||attempted+unreviewed!==packets.length||!validCount(needsReview,attempted)||value.completed_review_count!==attempted||value.pending_review_count!==unreviewed||!validCount(value.type_pair_needs_review_count,pairReviewed))return false;
+  const pairSearchAttempted=value.type_pair_web_search_attempted_count,pairSearchCompleted=value.type_pair_web_search_completed_count,pairSearchEvents=value.type_pair_web_search_event_verified_count,pairClaimUrls=value.type_pair_web_search_claim_urls_verified_count,pairResearchSources=value.type_pair_research_source_urls_verified_count??0,pairDroppedClaimUrls=value.type_pair_web_search_dropped_claim_url_count,companySearchAttempted=value.web_search_attempted_count,companySearchCompleted=value.web_search_completed_count,companySearchEvents=value.web_search_event_verified_count,companyClaimUrls=value.web_search_claim_urls_verified_count,companyResearchSources=value.research_source_urls_verified_count??0,companyDroppedClaimUrls=value.web_search_dropped_claim_url_count;
+  if(!validCount(pairSearchAttempted,pairReviewed)||!validCount(pairSearchCompleted,pairSearchAttempted)||!validCount(pairSearchEvents,pairSearchAttempted)||!validCount(pairClaimUrls,pairSearchEvents)||!validCount(pairResearchSources,pairReviewed)||!validCount(pairDroppedClaimUrls,pairTotal*16)||!validCount(companySearchAttempted,attempted)||!validCount(companySearchCompleted,companySearchAttempted)||!validCount(companySearchEvents,companySearchAttempted)||!validCount(companyClaimUrls,companySearchEvents)||!validCount(companyResearchSources,attempted)||!validCount(companyDroppedClaimUrls,packets.length*16))return false;
   if(fullCoverage){
     if(value.candidate_offset!==0||pairExpected!==pairTotal||pairReviewed!==pairTotal||pairUnreviewed!==0||unreviewed!==0||attempted!==packets.length||!validAiReviewDescriptorList(value.review_models,16,120)||!validAiReviewDescriptorList(value.review_efforts,16,32))return false;
-    if(externalFull&&(pairSearchAttempted!==pairTotal||pairSearchEvents!==pairTotal||pairClaimUrls!==pairTotal||companySearchAttempted!==packets.length||companySearchEvents!==packets.length||companyClaimUrls!==packets.length||value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true))return false;
-    if(nativeReview&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="opencode-go/muse-spark-1.2-contributor"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="xhigh"))return false;
+    if(externalFull&&(pairSearchAttempted!==pairTotal||pairSearchEvents!==pairTotal||companySearchAttempted!==packets.length||companySearchEvents!==packets.length||value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true))return false;
+    if(nativeCompanyResearch&&(pairResearchSources!==pairTotal||companyResearchSources!==packets.length))return false;
+    if(externalFull&&!nativeCompanyResearch&&(pairClaimUrls!==pairTotal||companyClaimUrls!==packets.length))return false;
+    if(nativeReview&&!nativeCompanyResearch&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="opencode-go/muse-spark-1.2-contributor"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="xhigh"))return false;
+    if(nativeCompanyResearch&&(value.review_models.some(model=>!AI_NATIVE_COMPANY_RESEARCH_PROFILES[model])||value.review_efforts.some(effort=>!Object.values(AI_NATIVE_COMPANY_RESEARCH_PROFILES).some(profile=>profile.effort===effort))))return false;
     if(partialSearchReview&&(companySearchAttempted<0||companySearchAttempted>packets.length||value.reviewed_without_web_search!==packets.length-companySearchAttempted))return false;
   }
-  const seenCodes=new Set(),seenRanks=new Set();
+  const seenCodes=new Set(),seenRanks=new Set(),actualReviewModels=new Set(),actualReviewEfforts=new Set();
   const actualActions={priority_buy:0,watchlist:0,avoid:0,insufficient_evidence:0},actualCategories={recommend_buy:0,observe:0,do_not_recommend:0};
-  let actualAttempted=0,actualUnreviewed=0,actualNeedsReview=0,actualPairTotal=0,actualSearchAttempted=0,actualSearchCompleted=0,actualSearchEvents=0,actualClaimUrls=0,actualDroppedClaimUrls=0;
-  for(const packet of packets){
+  const actualVerdicts={confirmed:0,caution:0,misclassified:0,missed_candidate:0,needs_review:0},actualPairVerdicts={confirmed:0,caution:0,misclassified:0,missed_candidate:0,needs_review:0};
+  let actualAttempted=0,actualUnreviewed=0,actualNeedsReview=0,actualPairNeedsReview=0,actualPairTotal=0,actualSearchAttempted=0,actualPairSearchAttempted=0,actualSearchCompleted=0,actualPairSearchCompleted=0,actualSearchEvents=0,actualPairSearchEvents=0,actualClaimUrls=0,actualPairClaimUrls=0,actualResearchSources=0,actualResearchSourcePairs=0,actualDroppedClaimUrls=0,actualPairDroppedClaimUrls=0;
+  for(const [packetIndex,packet] of packets.entries()){
     const code=String(packet?.security_code||""),type=String(packet?.type_key||""),typeKeys=packet?.type_keys,pairCount=packet?.type_pair_count,rank=packet?.ai_rank,review=packet?.ai_review;
-    if(!/^[036]\d{5}$/.test(code)||!/^type[1-7]$/.test(type)||seenCodes.has(code)||!Array.isArray(typeKeys)||typeKeys.length<1||typeKeys.length>7||typeKeys.some(item=>typeof item!=="string"||!/^type[1-7]$/.test(item))||new Set(typeKeys).size!==typeKeys.length||!typeKeys.includes(type)||!Number.isInteger(pairCount)||pairCount!==typeKeys.length||!Number.isInteger(rank)||rank<1||rank>packets.length||seenRanks.has(rank)||!review||typeof review!=="object")return false;
+    if(!/^[036]\d{5}$/.test(code)||!/^type[1-7]$/.test(type)||seenCodes.has(code)||!Array.isArray(typeKeys)||typeKeys.length<1||typeKeys.length>7||typeKeys.some(item=>typeof item!=="string"||!/^type[1-7]$/.test(item))||new Set(typeKeys).size!==typeKeys.length||!typeKeys.includes(type)||!Number.isInteger(pairCount)||pairCount!==typeKeys.length||rank!==packetIndex+1||seenRanks.has(rank)||!review||typeof review!=="object")return false;
     const model=String(review.model||""),effort=String(review.effort||""),verdict=String(review.verdict||""),recommendedAction=String(review.recommended_action||""),action=String(review.ai_action||""),score=Number(review.buy_attractiveness_score),category=String(review.final_category||""),recommendation=String(review.final_recommendation||""),label=review.recommendation_label,summary=review.summary;
-    if(!["confirmed","caution","misclassified","missed_candidate","needs_review"].includes(verdict)||!["keep","demote","manual_review"].includes(recommendedAction)||!["priority_buy","watchlist","avoid","insufficient_evidence"].includes(action)||!Number.isFinite(score)||score<0||score>100||!["recommend_buy","observe","do_not_recommend"].includes(category)||!["recommend_buy","do_not_recommend_buy"].includes(recommendation)||typeof label!=="string"||!label.trim()||typeof summary!=="string"||!["high","medium","low"].includes(String(review.confidence))||typeof review.ai_independent!=="boolean"||!Array.isArray(review.key_strengths)||review.key_strengths.length>8||review.key_strengths.some(item=>typeof item!=="string")||!validAiReviewDescriptorList(review.quantitative_facts,8,240)||!Array.isArray(review.risk_flags)||review.risk_flags.length>12||review.risk_flags.some(item=>typeof item!=="string")||!Array.isArray(review.claims)||review.claims.length>12)return false;
+    if(!["confirmed","caution","misclassified","missed_candidate","needs_review"].includes(verdict)||!["keep","demote","manual_review"].includes(recommendedAction)||!["priority_buy","watchlist","avoid","insufficient_evidence"].includes(action)||!Number.isFinite(score)||score<0||score>100||!["recommend_buy","observe","do_not_recommend"].includes(category)||!["recommend_buy","do_not_recommend_buy"].includes(recommendation)||typeof label!=="string"||!label.trim()||typeof summary!=="string"||!["high","medium","low"].includes(String(review.confidence))||typeof review.ai_independent!=="boolean"||!Array.isArray(review.key_strengths)||review.key_strengths.length>8||review.key_strengths.some(item=>typeof item!=="string")||!validAiReviewDescriptorList(review.quantitative_facts,8,240)||!Array.isArray(review.risk_flags)||review.risk_flags.length>12||review.risk_flags.some(item=>typeof item!=="string")||!Array.isArray(review.claims)||review.claims.length>(nativeCompanyResearch?32:12))return false;
+    if(packetIndex>0&&compareAiPacketOrder(packets[packetIndex-1],packet)>0)return false;
+    if(aiReviewHasRuleReason(review))return false;
     if(fullCoverage&&nativeReview&&review.quantitative_facts.some(item=>!/\d/.test(item)))return false;
     if(fullCoverage&&nativeReview&&action==="priority_buy"&&review.quantitative_facts.filter(item=>/\d/.test(item)).length<2)return false;
     if(!aiReviewDecisionValid(review,action,score))return false;
     if(fullCoverage&&(!value.review_models.includes(model)||!value.review_efforts.includes(effort)))return false;
     if(fullCoverage&&localReview&&((model==="opencode-go/ox-alpha-free"&&effort!=="max")||(model==="opencode-go/muse-spark-1.2-contributor"&&effort!=="xhigh")))return false;
-    if(fullCoverage&&nativeReview&&(model!=="opencode-go/muse-spark-1.2-contributor"||effort!=="xhigh"||review.retrieval_backend!=="reasonix-native-server-web-search"||review.retrieval_model!=="opencode-go-muse/muse-spark-1.2-contributor"||review.retrieval_effort!=="xhigh"||review.native_search_completed!==true||review.official_fetch_completed!==true))return false;
+    if(fullCoverage&&nativeReview&&!nativeCompanyResearch&&(model!=="opencode-go/muse-spark-1.2-contributor"||effort!=="xhigh"||review.retrieval_backend!=="reasonix-native-server-web-search"||review.retrieval_model!=="opencode-go-muse/muse-spark-1.2-contributor"||review.retrieval_effort!=="xhigh"||review.native_search_completed!==true||review.official_fetch_completed!==true))return false;
+    if(fullCoverage&&nativeCompanyResearch&&!validAiNativeCompanyResearchProfile(review))return false;
+    if(nativeCompanyResearch&&(!validAiCompanyResearch(review,String(value.market_as_of),String(value.research_as_of))||!await validAiValuationSnapshot(review.valuation_snapshot,review.valuation,code,String(value.snapshot_generation),String(value.market_as_of))))return false;
     const freshness=String(review.freshness_status||""),freshnessYears=review.freshness_years,freshnessPenalty=Number(review.freshness_penalty);
     if(!["current_or_recent","historical","undated"].includes(freshness)||!Array.isArray(freshnessYears)||freshnessYears.length>12||freshnessYears.some(year=>!Number.isInteger(year)||year<1900||year>2100)||!Number.isFinite(freshnessPenalty)||freshnessPenalty<0||freshnessPenalty>20||((freshness==="historical"||freshness==="undated")&&!((model==="opencode-go/ox-alpha-free"||model==="opencode-go/muse-spark-1.2-contributor")&&review.web_search_performed!==true)&&(action==="priority_buy"||category==="recommend_buy"||recommendation==="recommend_buy")))return false;
     const sourceRefs=[];
-    for(const claim of review.claims){if(!claim||typeof claim!=="object"||typeof claim.statement!=="string"||typeof claim.source_ref!=="string"||(claim.source_ref&&!/^https?:\/\//i.test(claim.source_ref)))return false;if(claim.source_ref)sourceRefs.push(claim.source_ref)}
-    const searchPerformed=review.web_search_performed,eventVerified=review.web_search_event_verified,claimUrlsVerified=review.web_search_claim_urls_verified,webVerified=review.web_search_verified,queryCount=review.web_search_query_count,verifiedUrlCount=review.web_search_verified_claim_url_count,droppedUrlCount=review.web_search_dropped_claim_url_count;
-    if(typeof searchPerformed!=="boolean"||typeof eventVerified!=="boolean"||typeof claimUrlsVerified!=="boolean"||typeof webVerified!=="boolean"||!Number.isInteger(queryCount)||queryCount<0||queryCount>16||!Number.isInteger(verifiedUrlCount)||verifiedUrlCount<0||verifiedUrlCount>16||!Number.isInteger(droppedUrlCount)||droppedUrlCount<0||droppedUrlCount>16||eventVerified&&!searchPerformed||claimUrlsVerified&&!eventVerified||eventVerified&&queryCount<1||!eventVerified&&(queryCount!==0||droppedUrlCount!==0)||!claimUrlsVerified&&verifiedUrlCount!==0||webVerified&&(!searchPerformed||!sourceRefs.some(source=>source.toLowerCase().startsWith("https://")))||externalFull&&(!searchPerformed||!eventVerified||!claimUrlsVerified))return false;
-    if(model==="pending-local-opencode-go"){if(verdict!=="needs_review"||action!=="insufficient_evidence"||score!==0)return false;actualUnreviewed++}else{actualAttempted++;if(verdict==="needs_review")actualNeedsReview++}
-    if(searchPerformed)actualSearchAttempted++;
-    if(webVerified)actualSearchCompleted++;
-    if(eventVerified)actualSearchEvents++;
-    if(claimUrlsVerified)actualClaimUrls++;
-    actualDroppedClaimUrls+=droppedUrlCount;
+    for(const claim of review.claims){if(!claim||typeof claim!=="object"||typeof claim.statement!=="string"||typeof claim.source_ref!=="string"||(claim.source_ref&&!(nativeCompanyResearch?/^https:\/\//i:/^https?:\/\//i).test(claim.source_ref))||nativeCompanyResearch&&Array.isArray(claim.source_refs)&&claim.source_refs.some(source=>typeof source!=="string"||!/^https:\/\//i.test(source)))return false;if(claim.source_ref)sourceRefs.push(claim.source_ref)}
+    const searchPerformed=review.web_search_performed,eventVerified=review.web_search_event_verified,claimUrlsVerified=review.web_search_claim_urls_verified,researchSourcesVerified=review.research_source_urls_verified,webVerified=review.web_search_verified,queryCount=review.web_search_query_count,verifiedUrlCount=review.web_search_verified_claim_url_count,droppedUrlCount=review.web_search_dropped_claim_url_count;
+    if(typeof searchPerformed!=="boolean"||typeof eventVerified!=="boolean"||typeof claimUrlsVerified!=="boolean"||(researchSourcesVerified!==undefined&&typeof researchSourcesVerified!=="boolean")||typeof webVerified!=="boolean"||!Number.isInteger(queryCount)||queryCount<0||queryCount>16||!Number.isInteger(verifiedUrlCount)||verifiedUrlCount<0||verifiedUrlCount>16||!Number.isInteger(droppedUrlCount)||droppedUrlCount<0||droppedUrlCount>16||eventVerified&&!searchPerformed||claimUrlsVerified&&!eventVerified||researchSourcesVerified===true&&sourceRefs.length===0||eventVerified&&queryCount<1||!eventVerified&&(queryCount!==0||droppedUrlCount!==0)||!claimUrlsVerified&&verifiedUrlCount!==0||webVerified&&(!searchPerformed||!sourceRefs.some(source=>source.toLowerCase().startsWith("https://")))||externalFull&&(!searchPerformed||!eventVerified)||nativeCompanyResearch&&researchSourcesVerified!==true||externalFull&&!nativeCompanyResearch&&!claimUrlsVerified)return false;
+    if(model==="pending-local-opencode-go"){if(verdict!=="needs_review"||action!=="insufficient_evidence"||score!==0)return false;actualUnreviewed++}else{actualAttempted++;if(verdict==="needs_review"){actualNeedsReview++;actualPairNeedsReview+=pairCount}}
+    actualVerdicts[verdict]++;actualPairVerdicts[verdict]+=pairCount;
+    if(searchPerformed){actualSearchAttempted++;actualPairSearchAttempted+=pairCount}
+    if(webVerified){actualSearchCompleted++;actualPairSearchCompleted+=pairCount}
+    if(eventVerified){actualSearchEvents++;actualPairSearchEvents+=pairCount}
+    if(claimUrlsVerified){actualClaimUrls++;actualPairClaimUrls+=pairCount}
+    if(researchSourcesVerified===true){actualResearchSources++;actualResearchSourcePairs+=pairCount}
+    actualDroppedClaimUrls+=droppedUrlCount;actualPairDroppedClaimUrls+=droppedUrlCount*pairCount;
     actualActions[action]++;
     actualCategories[category]++;
     actualPairTotal+=pairCount;
+    actualReviewModels.add(model);
+    actualReviewEfforts.add(effort);
     seenCodes.add(code);
     seenRanks.add(rank);
   }
-  if(seenRanks.size!==packets.length||actualPairTotal!==pairTotal||actualAttempted!==attempted||actualUnreviewed!==unreviewed||actualNeedsReview!==needsReview||actualSearchAttempted!==companySearchAttempted||actualSearchCompleted!==companySearchCompleted||actualSearchEvents!==companySearchEvents||actualClaimUrls!==companyClaimUrls||actualDroppedClaimUrls!==companyDroppedClaimUrls)return false;
+  if(seenRanks.size!==packets.length||actualPairTotal!==pairTotal||actualAttempted!==attempted||actualUnreviewed!==unreviewed||actualNeedsReview!==needsReview||actualPairNeedsReview!==value.type_pair_needs_review_count||actualSearchAttempted!==companySearchAttempted||actualPairSearchAttempted!==pairSearchAttempted||actualSearchCompleted!==companySearchCompleted||value.web_source_verified_count!==actualSearchCompleted||actualPairSearchCompleted!==pairSearchCompleted||actualSearchEvents!==companySearchEvents||actualPairSearchEvents!==pairSearchEvents||actualClaimUrls!==companyClaimUrls||actualPairClaimUrls!==pairClaimUrls||actualResearchSources!==companyResearchSources||actualResearchSourcePairs!==pairResearchSources||actualDroppedClaimUrls!==companyDroppedClaimUrls||actualPairDroppedClaimUrls!==pairDroppedClaimUrls)return false;
+  if(nativeCompanyResearch&&(actualReviewModels.size!==value.review_models.length||actualReviewEfforts.size!==value.review_efforts.length||value.review_models.some(model=>!actualReviewModels.has(model))||value.review_efforts.some(effort=>!actualReviewEfforts.has(effort))))return false;
   for(const action of Object.keys(actualActions)){if(Number(value.ai_action_counts?.[action]||0)!==actualActions[action])return false}
   for(const category of Object.keys(actualCategories)){if(Number(value.final_category_counts?.[category]||0)!==actualCategories[category])return false}
+  for(const verdict of Object.keys(actualVerdicts)){if(Number(value.verdict_counts?.[verdict]||0)!==actualVerdicts[verdict]||Number(value.type_pair_verdict_counts?.[verdict]||0)!==actualPairVerdicts[verdict])return false}
   if(Number(value.priority_buy_count||0)!==actualActions.priority_buy||Number(value.watchlist_count||0)!==actualActions.watchlist||Number(value.avoid_count||0)!==actualActions.avoid||Number(value.insufficient_evidence_count||0)!==actualActions.insufficient_evidence)return false;
   if(fullCoverage&&(actualActions.insufficient_evidence!==0||Number(value.recommend_buy_count||0)!==actualActions.priority_buy||Number(value.do_not_recommend_buy_count||0)!==actualActions.watchlist+actualActions.avoid))return false;
   return true;
@@ -699,8 +1004,10 @@ async function aiScreeningArtifact(env,generation){
   if(!generation)return null;
   const object=await env.DATA_BUCKET.get("ai-screening/"+generation.generation_id+".json");
   if(!object||object.size<1||object.size>MAX_AI_SCREENING_BYTES)return null;
-  let value;try{value=JSON.parse(new TextDecoder().decode(await object["arrayBuffer"]()))}catch{return null}
-  return validAiScreeningArtifact(value,generation)?value:null;
+  let bytes,value;try{bytes=await object["arrayBuffer"]();if(bytes.byteLength!==object.size)return null;value=JSON.parse(new TextDecoder().decode(bytes))}catch{return null}
+  if(!await validAiScreeningArtifact(value,generation))return null;
+  const digest=await sha256Hex(bytes);
+  return{value,etag:'"'+digest+'"'};
 }
 async function currentGeneration(env,generationId=""){if(generationId)return await env.DB.prepare("SELECT * FROM generations WHERE generation_id=?").bind(generationId).first();return await env.DB.prepare("SELECT g.* FROM current_generation c JOIN generations g ON g.generation_id=c.generation_id WHERE c.singleton=1").first()}
 async function sha256Hex(bytes){const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("")}
@@ -822,16 +1129,383 @@ function generationMethodologyVersion(manifest){return String(manifest?.provenan
 async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,securedResponse(hit))}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
 function aiScreeningPageResponse(request){
   const nonce=cspNonce();
-  const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI筛查 · 三类结论</title><style nonce="${nonce}">:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--bg:#f5f7fb;--panel:#fff;--blue:#1d4ed8;--green:#147a46;--amber:#996515;--red:#a12626}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}.wrap{max-width:1240px;margin:auto;padding:20px 20px 54px}.hero,.card,.stat,.notice{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}.hero{display:flex;justify-content:space-between;gap:24px;align-items:end}.hero h1{margin:0 0 6px;font-size:clamp(28px,4vw,44px)}.hero p{margin:0;color:var(--muted);max-width:820px}.back{display:inline-block;margin-bottom:12px;color:var(--blue);font-weight:700;text-decoration:none}.meta,.stats,.toolbar,.scoreline,.badges{display:flex;flex-wrap:wrap;gap:8px}.meta{justify-content:flex-end;color:var(--muted);font-size:12px}.meta span,.stat{padding:8px 11px;border-radius:10px;background:#eef4f7}.stats{margin:18px 0}.stat{min-width:150px}.stat b{display:block;font-size:24px}.stat small{color:var(--muted)}.toolbar{margin:18px 0;align-items:center}.toolbar label{display:flex;gap:8px;align-items:center;color:var(--muted)}.toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:inherit}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}.card{padding:18px}.top{display:flex;justify-content:space-between;gap:12px}.top strong{font-size:18px}.top small,.rule,.review-meta,.confidence{color:var(--muted);font-size:12px}.scoreline{align-items:center;margin:12px 0}.score{font-size:32px;font-weight:800;color:var(--blue)}.category,.badge{padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.category.recommend_buy{background:#def4e5;color:var(--green)}.category.observe{background:#fff0c7;color:var(--amber)}.category.do_not_recommend{background:#ffe0e0;color:var(--red)}.badge.current_or_recent{background:#e0f2fe;color:#075985}.badge.historical{background:#fef3c7;color:#92400e}.badge.undated{background:#e2e8f0;color:#475569}.badge.independent{background:#dcfce7;color:#166534}.section{margin-top:12px}.section h3{margin:0 0 5px;font-size:13px}.section ul{margin:5px 0;padding-left:20px}.claim{margin-top:7px;padding:7px 9px;border-left:3px solid #bfdbfe;background:#f8fbff;font-size:12px}.claim a{color:var(--blue);overflow-wrap:anywhere}.notice{margin:16px 0;color:var(--muted);font-size:12px}.empty{padding:32px;text-align:center;color:var(--muted)}.pager{display:flex;justify-content:space-between;margin-top:14px;color:var(--muted)}.pager button{border:0;border-radius:8px;padding:8px 11px}.pager button:disabled{opacity:.45}@media(max-width:700px){.hero{display:block}.meta{justify-content:flex-start;margin-top:12px}.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 36px}}</style></head><body><main class="wrap"><a class="back" href="/">← 返回主看板</a><section class="hero"><div><p>AI SECOND-PASS RESEARCH</p><h1>AI筛查</h1><p>所有已达标或接近达标的候选统一给出“建议买、观察、不建议”三类结论。AI结合模板知识库、最新资料与反证做第二轮复核，不改写确定性规则，也不会自动下单。</p></div><div class="meta" id="meta"><span>正在读取…</span></div></section><section class="stats" id="stats"></section><div class="notice">页面直接展示资料时效、实际复核模型与推理档位、OpenCode 搜索事件证明和可点击来源状态。历史或未标注资料不能进入建议买；“仅声明已搜索”不等于运行时搜索事件已核验。</div><section class="toolbar"><label>最终结论<select id="category"><option value="all">全部</option><option value="recommend_buy">建议买</option><option value="observe">观察</option><option value="do_not_recommend">不建议</option></select></label><label>确定性类型<select id="type"><option value="all">全部类型</option><option>type1</option><option>type2</option><option>type3</option><option>type4</option><option>type5</option><option>type6</option><option>type7</option></select></label></section><section class="grid" id="grid"><p class="empty">正在读取 AI 筛查结果…</p></section><nav class="pager" id="pager" hidden><span id="pageInfo"></span><span><button id="prev">上一页</button> <button id="next">下一页</button></span></nav></main><script nonce="${nonce}">const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');const labels={recommend_buy:'建议买',observe:'观察',do_not_recommend:'不建议'};const pageSize=30;let page=1,payload={packets:[]};function category(review){const explicit=String(review?.final_category||'');if(labels[explicit])return explicit;const action=String(review?.ai_action||'');return action==='priority_buy'?'recommend_buy':action==='avoid'?'do_not_recommend':'observe'}function modelLabel(model){return model==='opencode-go/ox-alpha-free'?'Ox Alpha Free（'+model+'）':String(model||'—')}function freshnessLabel(review){const status=String(review?.freshness_status||'undated'),years=Array.isArray(review?.freshness_years)?review.freshness_years.filter(Number.isInteger):[],latest=years.length?Math.max(...years):null;if(status==='current_or_recent')return latest?'最新实际报告期：'+latest+'年':'最新实际报告期：已识别';if(status==='historical')return latest?'历史资料，最新实际报告期：'+latest+'年':'历史资料';return '未标注实际报告期'}function searchLabel(review){if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true&&review?.web_search_verified===true)return '搜索事件已核验 · 保留引用已绑定搜索结果 · 含可点击 HTTPS 来源';if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true)return '搜索事件已核验 · 保留引用已绑定搜索结果 · 暂无 HTTPS 来源';if(review?.web_search_event_verified===true)return '搜索事件已核验 · 引用链接未完成核验';if(review?.web_search_performed===true)return '仅模型声明已搜索 · 无运行事件证明';return payload.review_mode==='local_codex_review'?'本地全量复核 · 未逐家公司联网':payload.review_mode==='opencode_mixed_review'?'Ox Alpha Free 本地复核 · 本条未执行联网搜索':'未完成联网搜索'}function rows(){const wanted=document.querySelector('#category').value,type=document.querySelector('#type').value;return(payload.packets||[]).filter(packet=>{const review=packet.ai_review||{},types=Array.isArray(packet.type_keys)?packet.type_keys:[packet.type_key];return(wanted==='all'||category(review)===wanted)&&(type==='all'||types.includes(type))})}function list(values,title,fallback){const items=Array.isArray(values)&&values.length?values:[fallback];return'<div class="section"><h3>'+title+'</h3><ul>'+items.slice(0,8).map(value=>'<li>'+esc(value)+'</li>').join('')+'</ul></div>'}function claims(review){return Array.isArray(review?.claims)?review.claims.slice(0,8).map(claim=>{const source=String(claim?.source_ref||''),link=/^https?:\\/\\//i.test(source)?' · <a rel="noreferrer" target="_blank" href="'+esc(source)+'">来源</a>':'';return'<div class="claim">'+esc(claim?.statement||'')+link+'</div>'}).join(''):''}function card(packet){const review=packet.ai_review||{},det=packet.deterministic||{},group=category(review),types=Array.isArray(packet.type_keys)?packet.type_keys:[packet.type_key],freshness=String(review.freshness_status||'undated'),independent=review.ai_independent===true?'<span class="badge independent">AI独立建议 · 接近达标</span>':'',reasonTitle=group==='recommend_buy'?'建议买理由':group==='observe'?'观察理由':'不建议理由',reasonValues=group==='recommend_buy'?review.key_strengths:review.risk_flags,quantitativeFacts=Array.isArray(review.quantitative_facts)?review.quantitative_facts:[],queryCount=Number(review.web_search_query_count||0),urlCount=Number(review.web_search_verified_claim_url_count||0),droppedCount=Number(review.web_search_dropped_claim_url_count||0);return'<article class="card"><div class="top"><strong>#'+esc(packet.ai_rank||'—')+' '+esc(packet.name||packet.security_code)+'</strong><small>'+esc(packet.security_code)+' · '+esc(types.join(' / '))+'</small></div><div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="category '+group+'">'+labels[group]+'</span><span class="confidence">AI置信度：'+esc(review.confidence||'—')+'</span></div><div class="badges"><span class="badge '+esc(freshness)+'">'+esc(freshnessLabel(review))+'</span>'+independent+'</div><div class="rule">确定性规则：'+esc(det.status||'—')+' · 规则分数：'+esc(det.score??det.score_upper_bound??'—')+' · '+esc(searchLabel(review))+'</div><div class="review-meta">复核模型：'+esc(modelLabel(review.model))+' · 推理档位：'+esc(review.effort||'—')+' · 搜索查询：'+esc(queryCount)+' · 已核验引用：'+esc(urlCount)+' · 已移除未绑定引用：'+esc(droppedCount)+'</div><p>'+esc(review.summary||'暂无 AI 说明')+'</p>'+list(quantitativeFacts,'量化依据（同代际数据）','暂无可安全展示的量化事实')+list(reasonValues,reasonTitle,'仍需结合原始报告核对')+claims(review)+'</article>'}function render(){const all=rows(),pages=Math.max(1,Math.ceil(all.length/pageSize));page=Math.min(page,pages);const visible=all.slice((page-1)*pageSize,page*pageSize);document.querySelector('#grid').innerHTML=visible.length?visible.map(card).join(''):'<p class="empty">当前筛选没有候选。</p>';document.querySelector('#pager').hidden=all.length===0;document.querySelector('#pageInfo').textContent=all.length?'显示 '+((page-1)*pageSize+1)+'–'+Math.min(page*pageSize,all.length)+' / '+all.length:'';document.querySelector('#prev').disabled=page<=1;document.querySelector('#next').disabled=page>=pages}function renderMeta(value){const models=Array.isArray(value.review_models)?value.review_models.map(modelLabel).join(' / '):'—',efforts=Array.isArray(value.review_efforts)?value.review_efforts.join(' / '):'—',mode=value.review_mode==='local_codex_review'?'本地全量二次复核':value.review_mode==='opencode_mixed_review'?'Ox Alpha Free 混合复核（联网事件 + 本地复核）':'逐家公司 OpenCode 联网复核';document.querySelector('#meta').innerHTML='<span>数据代际 '+esc(value.snapshot_generation||'—')+'</span><span>交易日 '+esc(value.market_as_of||'—')+'</span><span>'+esc(mode)+'</span><span>复核模型 '+esc(models)+'</span><span>推理档位 '+esc(efforts)+'</span><span>真实搜索事件 '+esc(value.web_search_event_verified_count||0)+' / '+esc(value.candidate_total||0)+'</span><span>已移除未绑定引用 '+esc(value.web_search_dropped_claim_url_count||0)+'</span><span>类型复核对 '+esc(value.type_pair_reviewed_count||0)+' / '+esc(value.type_pair_candidate_total||0)+'</span>'}async function load(){try{const response=await fetch('/api/ai-screening'),value=await response.json();if(!response.ok)throw new Error(value.error||'暂无结果');payload=value;const counts=value.final_category_counts||{};renderMeta(value);document.querySelector('#stats').innerHTML='<div class="stat"><b>'+esc(counts.recommend_buy??value.priority_buy_count??0)+'</b><small>建议买</small></div><div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+'</b><small>观察</small></div><div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+'</b><small>不建议</small></div><div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+' / '+esc(value.candidate_total||0)+'</b><small>真实搜索事件</small></div><div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+'</b><small>非当前/未标注资料</small></div>';render()}catch(error){document.querySelector('#meta').innerHTML='<span>AI筛查结果暂未发布</span>';document.querySelector('#grid').innerHTML='<p class="empty">'+esc(error.message||'暂无结果')+'。确定性网站结果不受影响。</p>'}}document.querySelector('#category').addEventListener('change',()=>{page=1;render()});document.querySelector('#type').addEventListener('change',()=>{page=1;render()});document.querySelector('#prev').addEventListener('click',()=>{page-=1;render()});document.querySelector('#next').addEventListener('click',()=>{page+=1;render()});load();</script></main></body></html>`;
-  const displayHtml=html
-    .replace("function modelLabel(model){return model==='opencode-go/ox-alpha-free'?'Ox Alpha Free（'+model+'）':String(model||'—')}","function modelLabel(model){if(model==='opencode-go/ox-alpha-free')return 'Ox Alpha Free（'+model+'）';if(model==='opencode-go/muse-spark-1.2-contributor')return 'Muse Spark 1.2（'+model+'）';return String(model||'—')}")
-    .replace('Ox Alpha Free 本地复核 · 本条未执行联网搜索','OpenCode Go 本地复核 · 本条未执行联网搜索')
-    .replace('Ox Alpha Free 混合复核（联网事件 + 本地复核）','OpenCode Go 混合复核（联网事件 + 本地复核）')
-    .replace('逐家公司 OpenCode 联网复核','逐家公司 Muse Spark 原生 web_search 复核')
-    .replace('页面直接展示资料时效、实际复核模型与推理档位、OpenCode 搜索事件证明和可点击来源状态。','页面直接展示资料时效、Muse Spark 原生 web_search 事件证明、实际推理档位和可点击来源状态。')
-    .replace('历史或未标注资料不能进入建议买；','联网复核的历史或未标注资料不能进入建议买；本地 OpenCode Go 的独立建议买会保留，但会明确显示未联网和时效扣分；');
+  const html=`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI筛查 · 三类结论</title>
+  <style nonce="${nonce}">
+    :root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--bg:#f5f7fb;--panel:#fff;--blue:#1d4ed8;--green:#147a46;--amber:#996515;--red:#a12626}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+    .wrap{max-width:1240px;margin:auto;padding:20px 20px 54px}
+    .hero,.card,.stat,.notice{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}
+    .hero{display:flex;justify-content:space-between;gap:24px;align-items:end}
+    .hero h1{margin:0 0 6px;font-size:clamp(28px,4vw,44px)}
+    .hero p{margin:0;color:var(--muted);max-width:820px}
+    .back{display:inline-block;margin-bottom:12px;color:var(--blue);font-weight:700;text-decoration:none}
+    .meta,.stats,.toolbar,.scoreline,.badges{display:flex;flex-wrap:wrap;gap:8px}
+    .meta{justify-content:flex-end;color:var(--muted);font-size:12px}
+    .meta span,.stat{padding:8px 11px;border-radius:10px;background:#eef4f7}
+    .stats{margin:18px 0}
+    .stat{min-width:150px}
+    .stat b{display:block;font-size:24px}
+    .stat small{color:var(--muted)}
+    .toolbar{margin:18px 0;align-items:center}
+    .toolbar label{display:flex;gap:8px;align-items:center;color:var(--muted)}
+    .toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:inherit}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+    .card{padding:18px}
+    .top{display:flex;justify-content:space-between;gap:12px}
+    .top strong{font-size:18px}
+    .top small,.rule,.review-meta,.confidence{color:var(--muted);font-size:12px}
+    .scoreline{align-items:center;margin:12px 0}
+    .score{font-size:32px;font-weight:800;color:var(--blue)}
+    .category,.badge{padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}
+    .category.recommend_buy{background:#def4e5;color:var(--green)}
+    .category.observe{background:#fff0c7;color:var(--amber)}
+    .category.do_not_recommend{background:#ffe0e0;color:var(--red)}
+    .badge.current_or_recent{background:#e0f2fe;color:#075985}
+    .badge.historical{background:#fef3c7;color:#92400e}
+    .badge.undated{background:#e2e8f0;color:#475569}
+    .badge.independent{background:#dcfce7;color:#166534}
+    .section{margin-top:12px}
+    .section h3{margin:0 0 5px;font-size:13px}
+    .section ul{margin:5px 0;padding-left:20px}
+    .claim{margin-top:7px;padding:7px 9px;border-left:3px solid #bfdbfe;background:#f8fbff;font-size:12px}
+    .claim a{color:var(--blue);overflow-wrap:anywhere}
+    .notice{margin:16px 0;color:var(--muted);font-size:12px}
+    .empty{padding:32px;text-align:center;color:var(--muted)}
+    .pager{display:flex;justify-content:space-between;margin-top:14px;color:var(--muted)}
+    .pager button{border:0;border-radius:8px;padding:8px 11px}
+    .pager button:disabled{opacity:.45}
+    .candidate-rules{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
+    .candidate-rules summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:700}
+    .candidate-rule{margin-top:8px}
+    .ai-research>p{margin:6px 0}
+    .research-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:7px}
+    .research-item{padding:9px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e7edf5;font-size:13px}
+    .research-item b{display:block;margin-bottom:3px;font-size:12px;color:var(--muted)}
+    .evidence-links{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+    .evidence-link{display:inline-block;padding:2px 6px;border-radius:999px;background:#e0f2fe;color:#075985;font-size:11px;text-decoration:none}
+    .evidence-link.missing{background:#fef3c7;color:#92400e}
+    .score-components{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-top:7px}
+    .score-component{padding:8px 9px;border:1px solid #dbeafe;border-radius:9px;background:#f8fbff}
+    .score-component b{display:block;color:var(--muted);font-size:11px}
+    .finding{margin-top:7px;padding:8px 9px;border:1px solid #e7edf5;border-radius:9px;background:#fafcff;font-size:12px}
+    .finding-meta{color:var(--muted);font-size:11px;margin-bottom:3px}
+    .scenario-detail{display:flex;justify-content:space-between;gap:10px;margin-top:3px}.scenario-up{color:#137333}.scenario-down{color:#b42318}
+    .source-section{margin-top:12px}
+    @media(max-width:700px){.hero{display:block}.meta{justify-content:flex-start;margin-top:12px}.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 36px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <a class="back" href="/">← 返回主看板</a>
+    <section class="hero">
+      <div>
+        <p>AI SECOND-PASS RESEARCH</p>
+        <h1>AI筛查</h1>
+        <p>规则候选池只决定研究范围。AI逐家公司分析商业模式、现金流、估值、行业与治理，并独立给出“建议买、观察、不建议”；规则是否触发不构成 AI 买入理由，也不阻止 AI 对候选升降级。</p>
+      </div>
+      <div class="meta" id="meta"><span>正在读取…</span></div>
+    </section>
+    <section class="stats" id="stats"></section>
+    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。页面另行展示原生搜索事件证明与公司财务来源核验；“仅声明已搜索”不等于运行时搜索事件已核验。</div>
+    <section class="toolbar">
+      <label>最终结论
+        <select id="category">
+          <option value="all">全部</option>
+          <option value="recommend_buy">建议买</option>
+          <option value="observe">观察</option>
+          <option value="do_not_recommend">不建议</option>
+        </select>
+      </label>
+      <label>确定性类型
+        <select id="type">
+          <option value="all">全部类型</option>
+          <option>type1</option><option>type2</option><option>type3</option><option>type4</option>
+          <option>type5</option><option>type6</option><option>type7</option>
+        </select>
+      </label>
+    </section>
+    <section class="grid" id="grid"><p class="empty">正在读取 AI 筛查结果…</p></section>
+    <nav class="pager" id="pager" hidden>
+      <span id="pageInfo"></span>
+      <span><button id="prev">上一页</button> <button id="next">下一页</button></span>
+    </nav>
+  </main>
+  <script nonce="${nonce}">
+    const AI_RULE_REASON_RE=/${AI_RULE_REASON_RE.source}/i;
+    const esc=value=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+    const labels={recommend_buy:"建议买",observe:"观察",do_not_recommend:"不建议"};
+    const pageSize=30;
+    let page=1;
+    let payload={packets:[]};
+
+    function category(review){
+      const explicit=String(review?.final_category||"");
+      if(labels[explicit])return explicit;
+      const action=String(review?.ai_action||"");
+      return action==="priority_buy"?"recommend_buy":action==="avoid"?"do_not_recommend":"observe";
+    }
+    function modelLabel(model){
+      if(model==="opencode-go/ox-alpha-free")return "Ox Alpha Free（"+model+"）";
+      if(model==="opencode-go/muse-spark-1.2-contributor")return "Muse Spark 1.2（"+model+"）";
+      if(model==="opencode-go/deepseek-v4-flash")return "DeepSeek V4 Flash（OpenCode Go）";
+      return String(model||"—");
+    }
+    function freshnessLabel(review){
+      const status=String(review?.freshness_status||"undated");
+      const years=Array.isArray(review?.freshness_years)?review.freshness_years.filter(Number.isInteger):[];
+      const latest=years.length?Math.max(...years):null;
+      if(status==="current_or_recent")return latest?"最新实际报告期："+latest+"年":"最新实际报告期：已识别";
+      if(status==="historical")return latest?"历史资料，最新实际报告期："+latest+"年":"历史资料";
+      return "未标注实际报告期";
+    }
+    function searchLabel(review){
+      if(review?.web_search_event_verified===true&&review?.research_source_urls_verified===true)return "原生搜索事件已核验 · 财报来源已核验";
+      if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true)return "原生搜索事件已核验 · 搜索引用已核验（旧版）";
+      if(review?.web_search_event_verified===true)return "原生搜索事件已核验 · 财报来源未核验";
+      if(review?.web_search_performed===true)return "仅模型声明已搜索 · 无运行事件证明";
+      if(payload.review_mode==="local_codex_review")return "本地全量复核 · 未逐家公司联网";
+      if(payload.review_mode==="opencode_mixed_review")return "OpenCode Go 本地复核 · 本条未执行联网搜索";
+      return "未完成联网搜索";
+    }
+    function reviewModeLabel(value){
+      if(value.review_mode==="local_codex_review")return "本地全量二次复核";
+      if(value.review_mode==="opencode_mixed_review")return "OpenCode Go 混合复核（联网事件 + 本地复核）";
+      if(value.review_mode==="opencode_native_company_research_review")return "逐家公司原生搜索 + 财报来源核验";
+      return "逐家公司 Muse Spark 原生 web_search 复核";
+    }
+    function isHttpSource(value){
+      const source=String(value||"").toLowerCase();
+      return source.startsWith("https://")||source.startsWith("http://");
+    }
+    function displayedClaims(review){
+      return Array.isArray(review?.claims)?review.claims.slice(0,24):[];
+    }
+    function rows(){
+      const wanted=document.querySelector("#category").value;
+      const type=document.querySelector("#type").value;
+      return (payload.packets||[]).filter(packet=>{
+        const review=packet.ai_review||{};
+        const types=Array.isArray(packet.type_keys)?packet.type_keys:[packet.type_key];
+        return (wanted==="all"||category(review)===wanted)&&(type==="all"||types.includes(type));
+      });
+    }
+    function list(values,title,fallback){
+      const items=Array.isArray(values)&&values.length?values:[fallback];
+      return '<div class="section"><h3>'+title+"</h3><ul>"+items.slice(0,8).map(value=>"<li>"+esc(value)+"</li>").join("")+"</ul></div>";
+    }
+    function claims(review){
+      return displayedClaims(review).map(claim=>{
+        const source=String(claim?.source_ref||"");
+        const link=isHttpSource(source)?' · <a rel="noreferrer" target="_blank" href="'+esc(source)+'">来源</a>':"";
+        const stance=String(claim?.support||"")==="supports"?"支持":String(claim?.support||"")==="contradicts"?"反证":"背景";
+        const identity=claim?.fact_id?"事实 "+String(claim.fact_id):claim?.search_finding_id?"搜索 "+String(claim.search_finding_id):"来源";
+        return '<div class="claim"><b>'+esc(stance)+" · "+esc(identity)+"</b> "+esc(claim?.statement||"")+link+"</div>";
+      }).join("");
+    }
+    function isRuleText(value){
+      return AI_RULE_REASON_RE.test(String(value||""));
+    }
+    function unique(values){
+      return Array.from(new Set((Array.isArray(values)?values:[]).map(value=>String(value??"").trim()).filter(Boolean)));
+    }
+    function evidenceLinks(review,binding){
+      if(!binding||typeof binding!=="object")return "";
+      const claimsByFact=new Map((Array.isArray(review?.claims)?review.claims:[]).filter(claim=>claim?.fact_id).map(claim=>[String(claim.fact_id),claim]));
+      const findingsById=new Map((Array.isArray(review?.search_findings)?review.search_findings:[]).map(finding=>[String(finding?.id||""),finding]));
+      const links=[];
+      for(const id of Array.isArray(binding.fact_ids)?binding.fact_ids:[]){
+        const claim=claimsByFact.get(String(id)),source=String(claim?.source_ref||"");
+        links.push(isHttpSource(source)?'<a class="evidence-link" rel="noreferrer" target="_blank" href="'+esc(source)+'">事实 '+esc(id)+"</a>":'<span class="evidence-link missing">事实 '+esc(id)+"</span>");
+      }
+      for(const id of Array.isArray(binding.search_finding_ids)?binding.search_finding_ids:[]){
+        const finding=findingsById.get(String(id)),source=String(finding?.url||""),label=String(finding?.title||finding?.report_period||id);
+        links.push(isHttpSource(source)?'<a class="evidence-link" rel="noreferrer" target="_blank" href="'+esc(source)+'">搜索 '+esc(label)+"</a>":'<span class="evidence-link missing">搜索 '+esc(label)+"</span>");
+      }
+      return links.length?'<div class="evidence-links">'+links.join("")+"</div>":"";
+    }
+    function boundReasonList(review,field,title,fallback){
+      const values=Array.isArray(review?.[field])?review[field]:[],bindings=review?.evidence_bindings?.[field];
+      if(!Array.isArray(bindings))return list(values.filter(value=>!isRuleText(value)),title,fallback);
+      const items=values.map((value,index)=>({value,binding:bindings[index]})).filter(item=>!isRuleText(item.value));
+      return '<div class="section"><h3>'+title+'</h3><ul>'+(items.length?items.slice(0,8).map(item=>'<li>'+esc(item.value)+evidenceLinks(review,item.binding)+"</li>").join(""):'<li>'+esc(fallback)+"</li>")+'</ul></div>';
+    }
+    function boundSummary(review){
+      const summary=aiSummary(review),binding=review?.evidence_bindings?.summary;
+      return '<p>'+esc(summary)+evidenceLinks(review,binding)+"</p>";
+    }
+    function scoreComponents(review){
+      const components=review?.score_components,adjustments=review?.calibration_adjustments;
+      if(!components||typeof components!=="object")return "";
+      const values=[
+        ["风险调整预期回报",components.risk_adjusted_expected_return,"分"],
+        ["证据置信度",components.evidence_confidence,"分"],
+        ["原始 AI 分",adjustments?.raw_score,"分"],
+        ["来源扣分",adjustments?.source_penalty,"分"],
+        ["财务时效扣分",adjustments?.freshness_penalty,"分"],
+        ["校准后最终分",adjustments?.final_score??review.buy_attractiveness_score,"分"],
+      ].filter(item=>item[1]!==null&&item[1]!==undefined&&Number.isFinite(Number(item[1])));
+      const band=adjustments?'<div class="research-item"><b>动作分数区间</b>'+esc(compactNumber(adjustments.action_band_min))+"—"+esc(compactNumber(adjustments.action_band_max))+" 分；"+(adjustments.band_clamped?"已执行区间截断":"未执行区间截断")+"</div>":"";
+      return '<div class="section"><h3>AI分数构成与校准</h3><div class="score-components">'+values.map(item=>'<div class="score-component"><b>'+item[0]+"</b>"+esc(compactNumber(item[1]))+item[2]+"</div>").join("")+band+"</div></div>";
+    }
+    function searchFindings(review){
+      const findings=Array.isArray(review?.search_findings)?review.search_findings:[];
+      if(!findings.length)return "";
+      const rows=findings.slice(0,16).map(finding=>{
+        const source=String(finding?.url||""),searchedNoSource=!isHttpSource(source),link=isHttpSource(source)?' · <a rel="noreferrer" target="_blank" href="'+esc(source)+'">查看来源</a>':" · 已搜索但未找到可引用来源（searched_no_source）";
+        const meta=[finding?.title,finding?.report_period||finding?.published_at,finding?.source_kind].filter(Boolean).join(" · ");
+        return '<div class="finding"><div class="finding-meta">'+esc(meta||String(finding?.id||""))+"</div><div>查询："+esc(finding?.query||"—")+"</div><div>"+esc(finding?.finding||"—")+link+"</div></div>";
+      }).join("");
+      return '<details class="source-section"><summary>逐条搜索核验记录（'+esc(findings.length)+"）</summary>"+rows+"</details>";
+    }
+    function aiSummary(review){
+      const clauses=String(review?.summary||"").split(/[。！？!?；;\\n]+/).map(value=>value.trim()).filter(Boolean);
+      const filtered=clauses.filter(value=>!isRuleText(value));
+      return filtered.join("；")||"AI未提供独立于规则候选条件之外的补充判断。";
+    }
+    function compactNumber(value){
+      const number=Number(value);
+      if(!Number.isFinite(number))return "—";
+      return Math.abs(number)>=10000?number.toLocaleString("zh-CN",{maximumFractionDigits:2}):number.toLocaleString("zh-CN",{maximumFractionDigits:3});
+    }
+    function economicProfile(review){
+      const profile=review?.economic_profile;
+      if(!profile||typeof profile!=="object")return "";
+      const labels={business_model:"商业模式",moat:"护城河与反证",cycle:"周期位置",fcf_outlook:"自由现金流展望",governance:"治理与资本配置"};
+      const bindings=review?.evidence_bindings?.economic_profile||{};
+      const items=Object.entries(labels).filter(([field])=>String(profile[field]||"").trim()).map(([field,label])=>'<div class="research-item"><b>'+label+'</b>'+esc(profile[field])+evidenceLinks(review,bindings[field])+"</div>");
+      const qualityLabels={current_primary:"当期一手资料",stale_primary:"过往一手资料",secondary_only:"仅二手资料",not_found:"未找到可用来源"},quality=String(profile.business_model_source_quality||""),sourceStatus=String(profile.business_model_source_status||"");
+      if(quality)items.push('<div class="research-item"><b>业务口径来源质量</b>'+esc(qualityLabels[quality]||quality)+"</div>");
+      if(sourceStatus)items.push('<div class="research-item"><b>业务口径搜索状态</b>'+esc(sourceStatus==="searched_no_source"?"已搜索但未找到可引用来源（searched_no_source）":sourceStatus)+"</div>");
+      const businessSources=Array.isArray(profile.business_model_sources)?profile.business_model_sources:[];
+      if(businessSources.length){
+        const sourceRows=businessSources.map(source=>{const ref=String(source?.source_ref||""),link=isHttpSource(ref)?'<a rel="noreferrer" target="_blank" href="'+esc(ref)+'">查看原始资料</a>':'无可点击原始资料';return '<li>'+esc(source?.statement||source?.id||"业务资料")+' · '+link+"</li>"}).join("");
+        items.push('<div class="research-item"><b>主营业务资料</b><ul>'+sourceRows+"</ul></div>");
+      }
+      if(String(profile.business_model_uncertainty||"").trim())items.push('<div class="research-item"><b>业务口径不确定性</b>'+esc(profile.business_model_uncertainty)+"</div>");
+      return items.length?'<div class="section"><h3>公司商业画像</h3><div class="research-grid">'+items.join("")+"</div></div>":"";
+    }
+    function valuationResearch(review){
+      const valuation=review?.valuation;
+      if(!valuation||typeof valuation!=="object")return "";
+      const methodLabels={gordon_fcf_per_share:"Gordon 自由现金流/股",normalized_earnings_multiple:"正常化收益 PE",book_value_multiple:"账面价值 PB",scenario_multiple:"情景倍数法",multiple:"情景倍数法",not_reliably_estimable:"暂无法可靠估值",not_reliably_estimated:"暂无法可靠估值",unavailable:"暂无法可靠估值",none:"暂无法可靠估值"};
+      const method=String(valuation.method||"").trim(),methodLabel=methodLabels[method.toLowerCase()]||method||"—";
+      const metrics=[
+        ["估值方法",methodLabel,""],
+        ["收盘价",valuation.current_price,"元"],
+        ["PE",valuation.pe,"倍"],
+        ["PB",valuation.pb,"倍"],
+        ["总市值",Number.isFinite(Number(valuation.market_cap))?Number(valuation.market_cap)/1e8:null,"亿元"],
+        ["悲观安全边际",valuation.margin_of_safety,"%"],
+        ["安全边际档位",{deep:"深",adequate:"足够",thin:"偏薄",negative:"为负"}[String(valuation.safety_margin_band||"")]||valuation.safety_margin_band,""]
+      ].filter(([label,value])=>label==="估值方法"||label==="安全边际档位"?Boolean(value):value!==null&&value!==undefined&&Number.isFinite(Number(value)));
+      const values=metrics.map(([label,value,unit])=>'<div class="research-item"><b>'+label+'</b>'+esc(label==="估值方法"||label==="安全边际档位"?value:compactNumber(value)+unit)+"</div>").join("");
+      const scenarioLabels={bear:"悲观情景",base:"中性情景",bull:"乐观情景"},scenarios=valuation.scenarios&&typeof valuation.scenarios==="object"?valuation.scenarios:{};
+      const scenarioCards=Object.entries(scenarioLabels).map(([key,label])=>{
+        const scenario=scenarios[key],value=Number(scenario?.value_per_share),upside=Number(scenario?.upside_pct);
+        if(!Number.isFinite(value)||!Number.isFinite(upside))return "";
+        const upsideText=(upside>0?"+":"")+compactNumber(upside)+"%",upsideClass=upside>=0?"scenario-up":"scenario-down";
+        return '<div class="research-item"><b>'+label+'</b><span class="scenario-detail"><span>每股价值 '+esc(compactNumber(value))+" 元</span><span class="+upsideClass+">相对现价 "+esc(upsideText)+"</span></span></div>";
+      }).join("");
+      const basis=String(valuation.basis||"").trim()?'<div class="research-item"><b>估值依据</b>'+esc(valuation.basis)+"</div>":"";
+      const evidence=Array.isArray(valuation.evidence_ids)&&valuation.evidence_ids.length?'<div class="research-item"><b>估值事实</b>'+esc(valuation.evidence_ids.join("、"))+evidenceLinks(review,review?.evidence_bindings?.valuation)+"</div>":"";
+      const anchor=valuation.normalization_anchor&&typeof valuation.normalization_anchor==="object"?'<div class="research-item"><b>正常化估值锚</b>'+esc(String(valuation.normalization_anchor.metric||"—"))+" · 年份 "+esc((valuation.normalization_anchor.years||[]).join("、"))+" · 每股 "+esc(compactNumber(valuation.normalization_anchor.per_share))+" 元</div>":"";
+      const multiple=valuation.multiple_basis&&typeof valuation.multiple_basis==="object"?'<div class="research-item"><b>同行/历史估值基准</b>'+esc(String(valuation.multiple_basis.metric||"—"))+" 中位数 "+esc(compactNumber(valuation.multiple_basis.value))+" 倍"+(valuation.multiple_basis.search_finding_id?" · 搜索记录 "+esc(valuation.multiple_basis.search_finding_id):"")+"</div>":"";
+      return values||scenarioCards||basis||evidence||anchor||multiple?'<div class="section"><h3>估值与安全边际（收盘日 '+esc(valuation.as_of||"—")+'）</h3><div class="research-grid">'+values+scenarioCards+basis+evidence+anchor+multiple+"</div></div>":"";
+    }
+    function card(packet){
+      const review=packet.ai_review||{};
+      const deterministic=packet.deterministic||{};
+      const group=category(review);
+      const types=Array.isArray(packet.type_keys)?packet.type_keys:[packet.type_key];
+      const freshness=String(review.freshness_status||"undated");
+      const independent=review.ai_independent===true?'<span class="badge independent">AI独立判断</span>':"";
+      const quantitativeFacts=Array.isArray(review.quantitative_facts)?review.quantitative_facts:[];
+      const keyStrengths=Array.isArray(review.key_strengths)?review.key_strengths:[];
+      const riskFlags=Array.isArray(review.risk_flags)?review.risk_flags:[];
+      const companyFacts=quantitativeFacts.filter(value=>!isRuleText(value));
+      const ruleFacts=unique(quantitativeFacts.concat(keyStrengths,riskFlags).filter(value=>isRuleText(value)));
+      const queryCount=Number(review.web_search_query_count||0);
+      const urlCount=displayedClaims(review).filter(claim=>isHttpSource(claim?.source_ref)).length;
+      const droppedCount=Number(review.web_search_dropped_claim_url_count||0);
+      const sourceMarkup=claims(review)||'<div class="claim">暂无已核验公司资料来源</div>';
+      const categoryLabels={deep_value:"深度价值",turnaround:"困境反转",compounder:"复利成长",cyclical:"周期",growth:"成长",venture:"早期/风险投资",quality_equity:"优质股权",other:"其他"};
+      const economicCategory=categoryLabels[String(review.economic_category||"")]||String(review.economic_category||"");
+      return '<article class="card">'+
+        '<div class="top"><strong>#'+esc(packet.ai_rank||"—")+" "+esc(packet.name||packet.security_code)+"</strong><small>"+esc(packet.security_code)+"</small></div>"+
+        '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="category '+group+'">'+labels[group]+'</span><span class="confidence">AI置信度：'+esc(review.confidence||"—")+'</span>'+(economicCategory?'<span class="badge">经济类别：'+esc(economicCategory)+"</span>":"")+"</div>"+
+        '<div class="badges"><span class="badge '+esc(freshness)+'">'+esc(freshnessLabel(review))+"</span>"+independent+"</div>"+
+        '<div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
+        '<section class="ai-research"><div class="section"><h3>AI为什么这样判断</h3>'+boundSummary(review)+boundReasonList(review,"key_strengths","AI补充判断","暂无 AI 独立补充判断")+"</div>"+
+        scoreComponents(review)+economicProfile(review)+valuationResearch(review)+
+        list(companyFacts,"公司量化事实","暂无可安全展示的公司量化事实")+
+        boundReasonList(review,"risk_flags","主要反证与风险","暂无已记录的主要反证与风险")+searchFindings(review)+
+        '<details class="candidate-rules"><summary>为何进入规则候选池</summary><div class="rule candidate-rule">规则候选类型：'+esc(types.filter(Boolean).join(" / ")||"—")+" · 确定性状态："+esc(deterministic.status||"—")+" · 规则分数："+esc(deterministic.score??deterministic.score_upper_bound??"—")+"</div>"+
+        list(ruleFacts,"规则候选依据","暂无可展示的规则候选依据")+
+        '</details><div class="source-section"><h3>公司资料与来源</h3>'+sourceMarkup+"</div></section></article>";
+    }
+    function render(){
+      const all=rows();
+      const pages=Math.max(1,Math.ceil(all.length/pageSize));
+      page=Math.min(page,pages);
+      const visible=all.slice((page-1)*pageSize,page*pageSize);
+      document.querySelector("#grid").innerHTML=visible.length?visible.map(card).join(""):'<p class="empty">当前筛选没有候选。</p>';
+      document.querySelector("#pager").hidden=all.length===0;
+      document.querySelector("#pageInfo").textContent=all.length?"显示 "+((page-1)*pageSize+1)+"–"+Math.min(page*pageSize,all.length)+" / "+all.length:"";
+      document.querySelector("#prev").disabled=page<=1;
+      document.querySelector("#next").disabled=page>=pages;
+    }
+    function renderMeta(value){
+      const models=Array.isArray(value.review_models)?value.review_models.map(modelLabel).join(" / "):"—";
+      const efforts=Array.isArray(value.review_efforts)?value.review_efforts.join(" / "):"—";
+      document.querySelector("#meta").innerHTML=
+        "<span>数据代际 "+esc(value.snapshot_generation||"—")+"</span>"+
+        "<span>收盘数据日 "+esc(value.market_as_of||"—")+"</span>"+
+        "<span>公司研究日 "+esc(value.research_as_of||"—")+"</span>"+
+        "<span>"+esc(reviewModeLabel(value))+"</span>"+
+        "<span>复核模型 "+esc(models)+"</span>"+
+        "<span>推理档位 "+esc(efforts)+"</span>"+
+        "<span>原生搜索事件 "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";
+    }
+    async function load(){
+      try{
+        const response=await fetch("/api/ai-screening");
+        const value=await response.json();
+        if(!response.ok)throw new Error(value.error||"暂无结果");
+        payload=value;
+        const counts=value.final_category_counts||{};
+        renderMeta(value);
+        document.querySelector("#stats").innerHTML=
+          '<div class="stat"><b>'+esc(counts.recommend_buy??value.priority_buy_count??0)+"</b><small>建议买</small></div>"+
+          '<div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+"</b><small>观察</small></div>"+
+          '<div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+"</b><small>不建议</small></div>"+
+          '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>原生搜索事件</small></div>"+
+          '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源核验</small></div>"+
+          '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
+        render();
+      }catch(error){
+        document.querySelector("#meta").innerHTML="<span>AI筛查结果暂未发布</span>";
+        document.querySelector("#grid").innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+"。确定性网站结果不受影响。</p>";
+      }
+    }
+
+    document.querySelector("#category").addEventListener("change",()=>{page=1;render()});
+    document.querySelector("#type").addEventListener("change",()=>{page=1;render()});
+    document.querySelector("#prev").addEventListener("click",()=>{page-=1;render()});
+    document.querySelector("#next").addEventListener("click",()=>{page+=1;render()});
+    load();
+  </script>
+</body>
+</html>`;
   const policy="default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src data:; object-src 'none'; script-src 'nonce-"+nonce+"'; script-src-attr 'none'; style-src 'nonce-"+nonce+"'; style-src-attr 'none'";
-  return headSafeResponse(request,new Response(displayHtml,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
+  return headSafeResponse(request,new Response(html,{headers:{...BASE_SECURITY_HEADERS,"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":policy}}));
 }
 export default{
   async fetch(request,env){
@@ -847,9 +1521,11 @@ export default{
       if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
       const generation=await currentGeneration(env,requestedGeneration);
       if(path==="/api/ai-screening"){
-        const artifact=await aiScreeningArtifact(env,generation);
-        if(!artifact)return headSafeResponse(request,json({available:false,error:"AI复核结果尚未发布，确定性筛选不受影响",generation_id:generation?.generation_id||null},404));
-        return headSafeResponse(request,json(artifact,200,{"cache-control":requestedGeneration?"public, max-age=31536000, immutable":"no-store"}));
+        const artifactRecord=await aiScreeningArtifact(env,generation);
+        if(!artifactRecord)return headSafeResponse(request,json({available:false,error:"AI复核结果尚未发布，确定性筛选不受影响",generation_id:generation?.generation_id||null},404));
+        const cacheControl=requestedGeneration?"public, max-age=31536000, immutable":"public, max-age=60, stale-while-revalidate=300";
+        if(request.headers.get("if-none-match")===artifactRecord.etag)return new Response(null,{status:304,headers:{...BASE_SECURITY_HEADERS,"cache-control":cacheControl,etag:artifactRecord.etag}});
+        return headSafeResponse(request,json(artifactRecord.value,200,{"cache-control":cacheControl,etag:artifactRecord.etag}));
       }
       if(path==="/api/health"){
         const deep=url.searchParams.get("deep")==="1",freshness=tradingDataFreshness(generation?.market_as_of,generation?.data_timestamp_utc),recordOk=generationRecordHealthy(generation),deepState=deep?await deepGenerationHealth(env,generation):{ok:true,...uncheckedDeepHealth()},{ok:integrityOk,...deepFields}=deepState;

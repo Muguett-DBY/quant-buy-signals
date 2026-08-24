@@ -2,8 +2,10 @@
 
 This audit does not decide whether a claim is financially correct.  It verifies
 the narrower release facts that can be checked mechanically: every claimed URL
-is public HTTP(S), the resource responds (or explicitly rate-limits the audit),
-and the report records which links came from exchange/disclosure domains.
+is public HTTP(S), the resource is reachable, and web-search claims point to the
+same finding URL and do not relabel an old HTML article as a newer disclosure.
+Contract v3 also hashes the exact claim/finding semantics that publication can
+expose, so changing cited prose while retaining a URL cannot reuse an audit.
 """
 
 from __future__ import annotations
@@ -12,13 +14,22 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import re
 import socket
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
+
+from tools.ai_source_urls import (
+    canonical_urls,
+    claim_source_urls,
+    finding_source_url,
+)
 
 
 _OFFICIAL_DOMAIN_SUFFIXES = (
@@ -30,6 +41,497 @@ _OFFICIAL_DOMAIN_SUFFIXES = (
 )
 _BLOCKED_HTTP_STATUSES = frozenset({401, 403, 407, 429})
 _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
+AUDIT_CONTRACT_VERSION = 3
+
+
+def _public_text(value: Any, limit: int) -> str:
+    """Apply the same scalar text projection used by publication."""
+
+    return str(value or "").strip()[:limit]
+
+
+def _public_claim_source_fields(claim: Mapping[str, Any]) -> tuple[str, str, list[str]]:
+    """Return the source fields that survive ``publish_ai_screening``."""
+
+    raw_sources: list[str] = []
+    singular_source = str(claim.get("source_ref") or "").strip()
+    if singular_source:
+        raw_sources.append(singular_source)
+    source_refs = claim.get("source_refs")
+    if isinstance(source_refs, list):
+        raw_sources.extend(str(value).strip() for value in source_refs if str(value).strip())
+    raw_source = raw_sources[0] if raw_sources else ""
+    raw_context = str(claim.get("source_context") or "").strip()
+    if not raw_source:
+        raw_source = raw_context
+
+    public_urls: list[str] = []
+    candidates = raw_sources + ([raw_context] if raw_context and raw_context not in raw_sources else [])
+    for candidate in candidates or ([raw_source] if raw_source else []):
+        for url in canonical_urls(candidate):
+            if url not in public_urls:
+                public_urls.append(url)
+    context = raw_context if raw_context else raw_source
+    if not canonical_urls(context):
+        context = _public_text(context, 240)
+    return (public_urls[0] if public_urls else ""), context, public_urls
+
+
+def public_source_semantic_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Project exactly the claim/finding semantics that the public review keeps.
+
+    This intentionally excludes scores and recommendation prose.  It binds the
+    published company identity to every claim statement and search finding,
+    including their canonical URLs, date/period metadata and source kinds.  The
+    same function can be applied to a merged artifact or its public projection.
+    """
+
+    packets = payload.get("packets")
+    if not isinstance(packets, list):
+        raise ValueError("AI screening packets are missing")
+    publish_search_findings = (
+        str(payload.get("review_mode") or "") == "opencode_native_company_research_review"
+    )
+    companies: list[dict[str, Any]] = []
+    for packet in packets:
+        if not isinstance(packet, Mapping):
+            raise ValueError("AI screening packet is not an object")
+        review = packet.get("ai_review")
+        if not isinstance(review, Mapping):
+            continue
+
+        raw_findings = review.get("search_findings") if publish_search_findings else []
+        findings = raw_findings if isinstance(raw_findings, list) else []
+        finding_rows: list[dict[str, Any]] = []
+        findings_by_id: dict[str, Mapping[str, Any]] = {}
+        for finding_index, finding in enumerate(findings):
+            if not isinstance(finding, Mapping):
+                continue
+            finding_id = _public_text(finding.get("id"), 120)
+            if finding_id:
+                findings_by_id[finding_id] = finding
+            finding_rows.append(
+                {
+                    "finding_index": finding_index,
+                    "id": finding_id,
+                    "query": _public_text(finding.get("query"), 240),
+                    "title": _public_text(finding.get("title"), 300),
+                    "url": finding_source_url(finding) or None,
+                    "published_at": _public_text(finding.get("published_at"), 32) or None,
+                    "report_period": _public_text(finding.get("report_period"), 80) or None,
+                    "finding": _public_text(finding.get("finding"), 600),
+                    "stance": _public_text(finding.get("stance"), 16),
+                    "source_kind": _public_text(finding.get("source_kind"), 48),
+                    "source_quality": _public_text(finding.get("source_quality"), 32),
+                }
+            )
+
+        raw_claims = review.get("claims")
+        claims = raw_claims if isinstance(raw_claims, list) else []
+        claim_rows: list[dict[str, Any]] = []
+        for claim_index, claim in enumerate(claims):
+            if not isinstance(claim, Mapping):
+                continue
+            source_ref, source_context, source_refs = _public_claim_source_fields(claim)
+            finding_id = _public_text(claim.get("search_finding_id"), 120)
+            linked_finding = findings_by_id.get(finding_id, {})
+            claim_rows.append(
+                {
+                    "claim_index": claim_index,
+                    "statement": _public_text(claim.get("statement"), 600),
+                    "source_ref": source_ref,
+                    "source_context": source_context,
+                    "source_refs": source_refs,
+                    "support": _public_text(claim.get("support"), 16),
+                    "fact_id": _public_text(claim.get("fact_id"), 120),
+                    "search_finding_id": finding_id,
+                    "source_kind": _public_text(claim.get("source_kind"), 48),
+                    "linked_published_at": _public_text(linked_finding.get("published_at"), 32) or None,
+                    "linked_report_period": _public_text(linked_finding.get("report_period"), 80) or None,
+                    "linked_source_kind": _public_text(linked_finding.get("source_kind"), 48),
+                }
+            )
+
+        companies.append(
+            {
+                "security_code": _public_text(packet.get("security_code"), 16),
+                "name": _public_text(packet.get("name"), 160),
+                "type_key": _public_text(packet.get("type_key"), 16),
+                "claims": claim_rows,
+                "search_findings": finding_rows,
+            }
+        )
+    companies.sort(key=lambda item: (item["security_code"], item["type_key"], item["name"]))
+    return {"companies": companies}
+
+
+def source_semantic_projection_sha256(payload: Mapping[str, Any]) -> tuple[str, dict[str, int]]:
+    """Return the canonical public-source projection digest and comparable counts."""
+
+    projection = public_source_semantic_projection(payload)
+    canonical = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    companies = projection["companies"]
+    claims = [claim for company in companies for claim in company["claims"]]
+    findings = [finding for company in companies for finding in company["search_findings"]]
+    source_references = [url for claim in claims for url in claim["source_refs"]]
+    source_references.extend(finding["url"] for finding in findings if finding["url"])
+    counts = {
+        "projection_company_count": len(companies),
+        "projection_claim_count": len(claims),
+        "projection_search_finding_count": len(findings),
+        "projection_source_reference_count": len(source_references),
+        "projection_unique_url_count": len(set(source_references)),
+    }
+    return hashlib.sha256(canonical).hexdigest(), counts
+
+
+class _PublishedDateParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta_dates: list[str] = []
+        self.time_dates: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {key.casefold(): str(value or "") for key, value in attrs}
+        if tag.casefold() == "meta":
+            key = (values.get("property") or values.get("name") or values.get("itemprop") or "").casefold()
+            if key in {"article:published_time", "datepublished", "pubdate", "publishdate"}:
+                self.meta_dates.append(values.get("content", ""))
+        elif tag.casefold() == "time" and values.get("datetime"):
+            self.time_dates.append(values["datetime"])
+
+
+class _VisibleTextParser(HTMLParser):
+    """Extract enough visible HTML text for a small source identity check."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title_parts: list[str] = []
+        self.text_parts: list[str] = []
+        self._title_depth = 0
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        folded = tag.casefold()
+        if folded == "title":
+            self._title_depth += 1
+        if folded in {"script", "style", "noscript", "template"}:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        folded = tag.casefold()
+        if folded == "title":
+            self._title_depth = max(0, self._title_depth - 1)
+        if folded in {"script", "style", "noscript", "template"}:
+            self._skip_depth = max(0, self._skip_depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._title_depth:
+            self.title_parts.append(data)
+        self.text_parts.append(data)
+
+
+def _date_value(value: Any) -> date | None:
+    text = str(value or "").strip()
+    match = re.search(r"(?<!\d)(20\d{2})[-/]([01]\d)[-/]([0-3]\d)(?!\d)", text)
+    if not match:
+        match = re.search(r"(?<!\d)(20\d{2})([01]\d)([0-3]\d)(?:\d{4,6})?(?!\d)", text)
+    if not match:
+        match = re.search(r"(?<!\d)(20\d{2})年([01]?\d)月([0-3]?\d)日", text)
+    if not match:
+        return None
+    try:
+        return date(*(int(part) for part in match.groups()))
+    except ValueError:
+        return None
+
+
+def _report_period_end(value: Any) -> date | None:
+    text = str(value or "").strip()
+    exact = _date_value(text)
+    if exact:
+        return exact
+    year_match = re.search(r"(?<!\d)(20\d{2})(?!\d)", text)
+    if not year_match:
+        return None
+    year = int(year_match.group(1))
+    folded = text.casefold().replace(" ", "")
+    if "q1" in folded or "一季" in folded:
+        return date(year, 3, 31)
+    if "h1" in folded or "上半年" in folded or "半年度" in folded or "中报" in folded or "q2" in folded:
+        return date(year, 6, 30)
+    if "q3" in folded or "三季" in folded:
+        return date(year, 9, 30)
+    if "h2" in folded or "q4" in folded or "年度" in folded or "年报" in folded:
+        return date(year, 12, 31)
+    if re.fullmatch(r"20\d{2}年?", folded):
+        return date(year, 12, 31)
+    month_match = re.search(r"20\d{2}[-/年]([01]?\d)(?:月)?$", folded)
+    if month_match:
+        month = int(month_match.group(1))
+        next_month = date(year + (month == 12), month % 12 + 1, 1)
+        return date.fromordinal(next_month.toordinal() - 1)
+    return None
+
+
+def _article_published_date(body: bytes, content_type: str) -> date | None:
+    if "html" not in content_type.casefold():
+        return None
+    charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1).strip("\"'") if charset_match else "utf-8"
+    try:
+        text = body.decode(charset, errors="replace")
+    except LookupError:
+        text = body.decode("utf-8", errors="replace")
+
+    # Structured article metadata outranks dates in navigation and live widgets.
+    json_ld_dates = re.findall(r'["\']datePublished["\']\s*:\s*["\']([^"\']+)', text, re.IGNORECASE)
+    for raw in json_ld_dates:
+        if parsed := _date_value(raw):
+            return parsed
+
+    parser = _PublishedDateParser()
+    parser.feed(text)
+    for raw in parser.meta_dates:
+        if parsed := _date_value(raw):
+            return parsed
+
+    # AASTOCKS pages expose the article timestamp in ``newsDT`` while also
+    # rendering today's date elsewhere.  It must win over generic <time> tags.
+    news_dates = re.findall(r"\bnewsDT\s*=\s*[\"']([^\"']+)", text, re.IGNORECASE)
+    for raw in news_dates:
+        if parsed := _date_value(raw):
+            return parsed
+
+    for raw in parser.time_dates:
+        if parsed := _date_value(raw):
+            return parsed
+    return None
+
+
+def _html_visible_text(body: bytes, content_type: str) -> tuple[str, str]:
+    """Return normalized visible text and title for HTML-only checks."""
+
+    charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1).strip("\"'") if charset_match else "utf-8"
+    try:
+        text = body.decode(charset, errors="replace")
+    except LookupError:
+        text = body.decode("utf-8", errors="replace")
+    parser = _VisibleTextParser()
+    try:
+        parser.feed(text)
+    except Exception:  # pragma: no cover - malformed pages should fail closed below
+        return "", ""
+    visible = re.sub(r"\s+", "", "".join(parser.text_parts)).casefold()
+    title = re.sub(r"\s+", "", "".join(parser.title_parts)).casefold()
+    return visible, title
+
+
+def _normalised_company_name(value: Any) -> str:
+    text = re.sub(r"\s+", "", str(value or "")).casefold()
+    # These suffixes are legal-company boilerplate and are poor identity
+    # anchors on disclosure pages.  Keep the original name as a fallback.
+    for suffix in ("股份有限公司", "有限责任公司", "有限公司", "集团股份", "集团", "控股"):
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)]
+            break
+    return text
+
+
+def _report_period_tokens(value: Any) -> set[str]:
+    raw = str(value or "").strip().casefold().replace(" ", "")
+    if not raw:
+        return set()
+    year_match = re.search(r"(20\d{2})", raw)
+    if not year_match:
+        return {raw}
+    year = year_match.group(1)
+    tokens = {raw, year}
+    if "q1" in raw or "一季" in raw:
+        tokens.update({f"{year}q1", f"{year}年一季度", f"{year}年第一季度", f"{year}年3月31日"})
+    elif "q2" in raw or "h1" in raw or "上半年" in raw or "半年度" in raw or "中报" in raw:
+        tokens.update(
+            {f"{year}q2", f"{year}h1", f"{year}年上半年", f"{year}年半年度", f"{year}年中报", f"{year}年6月30日"}
+        )
+    elif "q3" in raw or "三季" in raw:
+        tokens.update({f"{year}q3", f"{year}年三季度", f"{year}年前三季度", f"{year}年9月30日"})
+    elif "q4" in raw or "h2" in raw or "年度" in raw or "年报" in raw:
+        tokens.update({f"{year}q4", f"{year}h2", f"{year}年度", f"{year}年年报", f"{year}年12月31日"})
+    parsed = _date_value(raw)
+    if parsed:
+        tokens.update({parsed.isoformat(), f"{parsed.year}年{parsed.month}月{parsed.day}日"})
+    raw_tokens = {token for token in tokens if token}
+    return raw_tokens | {re.sub(r"[\s./-]", "", token) for token in raw_tokens}
+
+
+def _claim_numbers(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> set[str]:
+    numbers: set[str] = set()
+    for value in (claim.get("statement"), finding.get("finding")):
+        for match in re.findall(r"(?<![A-Za-z0-9])[-+]?\d+(?:\.\d+)?", str(value or "")):
+            raw = match.lstrip("+")
+            unsigned = raw.lstrip("-")
+            if unsigned.isdigit() and (1900 <= int(unsigned) <= 2100 or len(unsigned) == 6):
+                continue
+            numbers.add(raw)
+    return numbers
+
+
+def _source_text(body: bytes, content_type: str) -> str:
+    """Decode a small JSON/text provenance body for the fact gate."""
+
+    charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1).strip("\"'") if charset_match else "utf-8"
+    try:
+        text = body.decode(charset, errors="replace")
+    except LookupError:
+        text = body.decode("utf-8", errors="replace")
+    if "json" in content_type.casefold():
+        try:
+            return json.dumps(json.loads(text), ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            # Keep the raw response so malformed JSON fails the same identity /
+            # period-or-field gate instead of being silently accepted.
+            return text
+    return text
+
+
+def _structured_period_tokens(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> set[str]:
+    tokens: set[str] = set()
+    for value in (
+        claim.get("report_period"),
+        finding.get("report_period"),
+        claim.get("statement"),
+        finding.get("finding"),
+    ):
+        tokens.update(_report_period_tokens(value))
+    return tokens
+
+
+def _period_matches(text: str, tokens: set[str]) -> bool:
+    """Match a declared period without letting a bare year mask a mismatch."""
+
+    if not tokens:
+        return False
+    compact_text = re.sub(r"[\s./-]", "", text).casefold()
+    # ``_report_period_tokens`` intentionally includes a year fallback for
+    # year-only claims.  Once a quarter/half/year-end/date token exists, use
+    # those specific forms so a different period in the same year cannot pass.
+    detailed = {
+        token
+        for token in tokens
+        if not re.fullmatch(r"20\d{2}年?", str(token).casefold())
+    }
+    candidates = detailed or tokens
+    return any(re.sub(r"[\s./-]", "", str(token)).casefold() in compact_text for token in candidates if token)
+
+
+def _structured_field_tokens(url: str) -> set[str]:
+    try:
+        params = parse_qs(urlparse(url).query)
+    except ValueError:
+        return set()
+    fields: set[str] = set()
+    for value in params.get("columns", []):
+        fields.update(
+            token.casefold()
+            for token in re.split(r"[,\s]+", value)
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token)
+        )
+    return fields
+
+
+def _structured_number_match(text: str, numbers: set[str]) -> bool:
+    compact = re.sub(r"[,\s]", "", text)
+    for number in numbers:
+        token = re.sub(r"[,\s]", "", number)
+        if token and token in compact:
+            return True
+        if "." in token:
+            integer, fraction = token.split(".", 1)
+            if fraction.rstrip("0") and f"{integer}.{fraction.rstrip('0')}" in compact:
+                return True
+    return False
+
+
+def _structured_source_issues(
+    body: bytes,
+    content_type: str,
+    *,
+    url: str,
+    security_code: str,
+    name: str,
+    claim: Mapping[str, Any],
+    finding: Mapping[str, Any],
+) -> list[str]:
+    """Check JSON/text fact provenance without requiring an HTML page."""
+
+    text = _source_text(body, content_type)
+    visible = re.sub(r"\s+", "", text).casefold()
+    if not visible:
+        return ["structured source body is empty"]
+    code = re.sub(r"\s+", "", str(security_code or "")).casefold()
+    normal_name = _normalised_company_name(name)
+    if not ((code and code in visible) or (normal_name and normal_name in visible)):
+        return ["structured source body does not match company code or normalized company name"]
+    period_match = _period_matches(text, _structured_period_tokens(claim, finding))
+    number_match = _structured_number_match(visible, _claim_numbers(claim, finding))
+    field_match = any(field in visible for field in _structured_field_tokens(url))
+    if not (period_match or number_match or field_match):
+        return ["structured source body does not match report period or fact number/field"]
+    return []
+
+
+def _html_semantic_issues(
+    body: bytes,
+    content_type: str,
+    *,
+    security_code: str,
+    name: str,
+    report_period: Any,
+    claim: Mapping[str, Any],
+    finding: Mapping[str, Any],
+) -> list[str]:
+    """Run the deliberately small HTML identity/content gate."""
+
+    visible, title = _html_visible_text(body, content_type)
+    if not visible:
+        return ["HTML body has no visible text"]
+    charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1).strip("\"'") if charset_match else "utf-8"
+    try:
+        raw_text = body.decode(charset, errors="replace").casefold()
+    except LookupError:
+        raw_text = body.decode("utf-8", errors="replace").casefold()
+    first_text = f"{title}{visible[:600]}"
+    if re.search(
+        r"(?:<title[^>]*>\s*(?:404|page\s*not\s*found|not\s*found)|(?:404|page\s*not\s*found|not\s*found|页面不存在|内容不存在|找不到页面|链接失效))",
+        first_text,
+    ) or re.search(r"(?:id|class)\s*=\s*[\"'][^\"']*(?:404|not[-_ ]?found)[^\"']*[\"']", raw_text):
+        return ["HTML appears to be a soft-404 page"]
+    if re.search(
+        r"(?:captcha|verify\s+you\s+are\s+human|人机验证|验证码|安全验证|<input[^>]+(?:captcha|验证码))",
+        f"{first_text}{raw_text}",
+    ):
+        return ["HTML appears to be a login or CAPTCHA challenge"]
+    if re.search(r"(?:登录|登陆|sign\s*in|log\s*in|login|authentication required)", title) or re.search(
+        r"<form[^>]+(?:login|sign[-_ ]?in)", raw_text
+    ):
+        return ["HTML appears to be a login page"]
+
+    code = re.sub(r"\s+", "", str(security_code or "")).casefold()
+    normal_name = _normalised_company_name(name)
+    if not ((code and code in visible) or (normal_name and normal_name in visible)):
+        return ["HTML正文未匹配公司代码或规范化公司名"]
+
+    period_match = _period_matches("".join((title, visible)), _report_period_tokens(report_period))
+    numbers = _claim_numbers(claim, finding)
+    number_match = bool(numbers and any(number in visible for number in numbers))
+    if not period_match and not number_match:
+        return ["HTML正文未匹配报告期或关键数字"]
+    return []
 
 
 class UnsafeUrlError(ValueError):
@@ -115,15 +617,20 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
             with opener.open(request, timeout=timeout) as response:
                 body = response.read(max_bytes)
                 status = int(response.status or 200)
+                content_type = str(response.headers.get("content-type") or "")[:160]
                 return {
                     **base,
                     "result": "ok" if 200 <= status < 400 else "failed",
+                    "reachability": "reachable" if 200 <= status < 400 else "failed",
+                    "body_retrieved": 200 <= status < 400,
                     "status": status,
                     "final_url": current_url,
                     "redirect_count": redirect_count,
                     "resolved_addresses": resolved_addresses,
-                    "content_type": str(response.headers.get("content-type") or "")[:160],
+                    "content_type": content_type,
                     "bytes_checked": len(body),
+                    # Consumed by ``audit`` and removed before serialization.
+                    "_body": body,
                 }
         except urllib.error.HTTPError as error:
             status = int(error.code)
@@ -134,6 +641,8 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                     return {
                         **base,
                         "result": "failed",
+                        "reachability": "failed",
+                        "body_retrieved": False,
                         "status": status,
                         "error": "redirect response has no Location header",
                     }
@@ -141,28 +650,44 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                     return {
                         **base,
                         "result": "failed",
+                        "reachability": "failed",
+                        "body_retrieved": False,
                         "status": status,
                         "error": f"redirect limit exceeded ({max_redirects})",
                     }
                 current_url = urljoin(current_url, location)
                 redirect_count += 1
                 continue
+            result = "blocked" if status in _BLOCKED_HTTP_STATUSES else "failed"
+            reason = str(error.reason or error)[:240]
+            error.close()
             return {
                 **base,
-                "result": "blocked" if status in _BLOCKED_HTTP_STATUSES else "failed",
+                "result": result,
+                "reachability": result,
+                "body_retrieved": False,
                 "status": status,
-                "error": str(error.reason or error)[:240],
+                "error": reason,
             }
         except UnsafeUrlError as error:
             return {
                 **base,
                 "result": "invalid",
+                "reachability": "invalid",
+                "body_retrieved": False,
                 "status": 0,
                 "final_url": current_url,
                 "error": str(error)[:240],
             }
         except (OSError, urllib.error.URLError, ValueError) as error:
-            return {**base, "result": "failed", "status": 0, "error": str(error)[:240]}
+            return {
+                **base,
+                "result": "failed",
+                "reachability": "failed",
+                "body_retrieved": False,
+                "status": 0,
+                "error": str(error)[:240],
+            }
 
 
 def audit(
@@ -178,61 +703,539 @@ def audit(
     packets = payload.get("packets")
     if not isinstance(packets, list):
         raise ValueError("AI screening packets are missing")
+    projection_sha256, projection_counts = source_semantic_projection_sha256(payload)
     references: dict[str, set[tuple[str, str]]] = {}
+    detailed_bindings: dict[str, list[dict[str, Any]]] = {}
+    semantic_claims: list[dict[str, Any]] = []
+    semantic_issues: list[dict[str, str]] = []
+    semantic_failed_keys: set[int] = set()
+    semantic_unverified_keys: set[int] = set()
+    # Avoid counting the same company's published source twice when a finding
+    # is both selected by a claim and emitted in ``search_findings``.  The URL
+    # remains bound to the company; different companies are never collapsed.
+    semantic_claim_urls: set[tuple[str, str]] = set()
     claim_count = 0
+    semantic_claim_count = 0
     invalid_claim_urls: list[dict[str, str]] = []
+    company_states: dict[str, dict[str, Any]] = {}
+    finding_ids_with_claim_urls: dict[str, set[str]] = {}
+
+    def company_state(code: str, name: str) -> dict[str, Any]:
+        state = company_states.setdefault(
+            code,
+            {
+                "security_code": code,
+                "name": name,
+                "has_review": False,
+                "type_keys": set(),
+                "finding_ids": set(),
+                "referenced_finding_ids": set(),
+                "searched_no_source_finding_ids": set(),
+                "referenced_no_source_finding_ids": set(),
+                "semantic_keys": set(),
+                "semantic_passed_keys": set(),
+                "semantic_failed_keys": set(),
+                "semantic_unverified_keys": set(),
+                "urls": set(),
+            },
+        )
+        if name and not state["name"]:
+            state["name"] = name
+        return state
+
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("AI screening packet is not an object")
+        packet_code = str(packet.get("security_code") or "").strip()
+        packet_name = str(packet.get("name") or packet.get("security_name") or "").strip()
+        packet_type_key = str(packet.get("type_key") or "").strip()
         review = packet.get("ai_review")
         if not isinstance(review, Mapping):
+            state = company_state(packet_code, packet_name)
+            state["type_keys"].add(packet_type_key)
             continue
-        code = str(packet.get("security_code") or "")
-        type_key = str(packet.get("type_key") or "")
+        code = packet_code
+        name = packet_name
+        type_key = packet_type_key
+        state = company_state(code, name)
+        state["has_review"] = True
+        state["type_keys"].add(type_key)
+        findings = review.get("search_findings") if isinstance(review.get("search_findings"), list) else []
+        findings_by_id = {
+            str(finding.get("id") or "").strip(): finding
+            for finding in findings
+            if isinstance(finding, Mapping) and str(finding.get("id") or "").strip()
+        }
+        for finding in findings:
+            if not isinstance(finding, Mapping):
+                continue
+            finding_id = str(finding.get("id") or "").strip()
+            if finding_id:
+                state["finding_ids"].add(finding_id)
         claims = review.get("claims") if isinstance(review.get("claims"), list) else []
-        for claim in claims:
+        for claim_index, claim in enumerate(claims):
             if not isinstance(claim, Mapping):
                 continue
             claim_count += 1
-            raw = claim.get("source_ref") or claim.get("source_context")
-            url = _public_http_url(raw)
-            if not url:
-                invalid_claim_urls.append({"security_code": code, "type_key": type_key, "source": str(raw or "")[:240]})
+            finding_id = str(claim.get("search_finding_id") or "").strip()
+            finding = findings_by_id.get(finding_id)
+            claim_urls = claim_source_urls(claim)
+            if finding_id:
+                state["referenced_finding_ids"].add(finding_id)
+                # A finding without a URL is a completed search attempt, not
+                # semantic evidence.  Keep it visible as searched_no_source.
+                if not claim_urls:
+                    if not finding or not finding_source_url(finding):
+                        state["searched_no_source_finding_ids"].add(finding_id)
+                        state["referenced_no_source_finding_ids"].add(finding_id)
+                    continue
+                finding_ids_with_claim_urls.setdefault(code, set()).add(finding_id)
+                finding_url = finding_source_url(finding) if finding else ""
+                for url in claim_urls:
+                    public_url = _public_http_url(url)
+                    binding = {
+                        "security_code": code,
+                        "name": name,
+                        "type_key": type_key,
+                        "claim_index": claim_index,
+                        "search_finding_id": finding_id,
+                        "url": url,
+                        "kind": "claim",
+                    }
+                    detailed_bindings.setdefault(url, []).append(binding)
+                    state["urls"].add(url)
+                    semantic_key = semantic_claim_count
+                    semantic_claim_count += 1
+                    state["semantic_keys"].add(semantic_key)
+                    semantic_claim_urls.add((code, url))
+                    if not public_url:
+                        references.setdefault(url, set()).add((code, type_key))
+                        semantic_claims.append(
+                            {
+                                "key": semantic_key,
+                                "security_code": code,
+                                "name": name,
+                                "type_key": type_key,
+                                "claim_index": claim_index,
+                                "finding_index": None,
+                                "search_finding_id": finding_id,
+                                "url": url,
+                                "published_at": finding.get("published_at") if finding else None,
+                                "report_period": finding.get("report_period") if finding else None,
+                                "claim": claim,
+                                "finding": finding or {},
+                            }
+                        )
+                        continue
+                    references.setdefault(url, set()).add((code, type_key))
+                    if not finding or finding_url != url:
+                        semantic_failed_keys.add(semantic_key)
+                        state["semantic_failed_keys"].add(semantic_key)
+                        semantic_issues.append(
+                            {
+                                "security_code": code,
+                                "name": name,
+                                "type_key": type_key,
+                                "claim_index": str(claim_index),
+                                "search_finding_id": finding_id,
+                                "source": url,
+                                "reason": "claim search_finding_id is missing or points to a different URL",
+                            }
+                        )
+                        continue
+                    semantic_claims.append(
+                        {
+                            "key": semantic_key,
+                            "security_code": code,
+                            "name": name,
+                            "type_key": type_key,
+                            "claim_index": claim_index,
+                            "finding_index": None,
+                            "search_finding_id": finding_id,
+                            "url": url,
+                            "published_at": finding.get("published_at"),
+                            "report_period": finding.get("report_period"),
+                            "claim": claim,
+                            "finding": finding,
+                        }
+                    )
                 continue
+            # Structured/fact claims can legitimately use local evidence IDs,
+            # but a cited URL is still a published source and must pass the
+            # same semantic gate.  Do not let a local fact ID make a PDF or a
+            # login page look like a semantic pass.
+            if not claim_urls:
+                continue
+            for url in claim_urls:
+                binding = {
+                    "security_code": code,
+                    "name": name,
+                    "type_key": type_key,
+                    "claim_index": claim_index,
+                    "search_finding_id": finding_id,
+                    "url": url,
+                    "kind": "claim",
+                }
+                detailed_bindings.setdefault(url, []).append(binding)
+                state["urls"].add(url)
+                references.setdefault(url, set()).add((code, type_key))
+                semantic_key = semantic_claim_count
+                semantic_claim_count += 1
+                state["semantic_keys"].add(semantic_key)
+                semantic_claim_urls.add((code, url))
+                semantic_claims.append(
+                    {
+                        "key": semantic_key,
+                        "security_code": code,
+                        "name": name,
+                        "type_key": type_key,
+                        "claim_index": claim_index,
+                        "finding_index": None,
+                        "search_finding_id": "",
+                        "url": url,
+                        "published_at": None,
+                        "report_period": None,
+                        "claim": claim,
+                        "finding": {},
+                    }
+                )
+
+        # Search findings are themselves published in native company research;
+        # audit their URLs even when no prose claim selected that finding.
+        for finding_index, finding in enumerate(findings):
+            if not isinstance(finding, Mapping):
+                continue
+            url = finding_source_url(finding)
+            if not url:
+                finding_id = str(finding.get("id") or "").strip()
+                if finding_id and finding_id not in finding_ids_with_claim_urls.get(code, set()):
+                    state["searched_no_source_finding_ids"].add(finding_id)
+                    if finding_id in state["referenced_finding_ids"]:
+                        state["referenced_no_source_finding_ids"].add(finding_id)
+                continue
+            public_url = _public_http_url(url)
+            finding_id = str(finding.get("id") or "").strip()
+            if finding_id:
+                # Search findings are part of native company research even
+                # when no prose claim selected them; bind their published URL
+                # to the company-level coverage contract as well.
+                state["referenced_finding_ids"].add(finding_id)
+            binding = {
+                "security_code": code,
+                "name": name,
+                "type_key": type_key,
+                "claim_index": None,
+                "finding_index": finding_index,
+                "search_finding_id": finding_id,
+                "url": url,
+                "kind": "search_finding",
+            }
+            detailed_bindings.setdefault(url, []).append(binding)
+            state["urls"].add(url)
+            if public_url:
+                references.setdefault(public_url, set()).add((code, type_key))
+            else:
+                invalid_claim_urls.append(
+                    {
+                        "security_code": code,
+                        "name": name,
+                        "type_key": type_key,
+                        "claim_index": "",
+                        "search_finding_id": finding_id,
+                        "source": url,
+                        "reason": "URL is not public HTTP(S)",
+                    }
+                )
             references.setdefault(url, set()).add((code, type_key))
+            if (code, url) not in semantic_claim_urls:
+                semantic_key = semantic_claim_count
+                semantic_claim_count += 1
+                state["semantic_keys"].add(semantic_key)
+                semantic_claim_urls.add((code, url))
+                semantic_claims.append(
+                    {
+                        "key": semantic_key,
+                        "security_code": code,
+                        "name": name,
+                        "type_key": type_key,
+                        "claim_index": None,
+                        "finding_index": finding_index,
+                        "search_finding_id": finding_id,
+                        "url": url,
+                        "published_at": finding.get("published_at"),
+                        "report_period": finding.get("report_period"),
+                        "claim": {
+                            "statement": finding.get("finding"),
+                            "source_ref": url,
+                        },
+                        "finding": finding,
+                    }
+                )
+
+    def checked_url(url: str) -> dict[str, Any]:
+        result = _check_url(url, timeout=timeout, max_bytes=max_bytes)
+        if not _public_http_url(url):
+            result.update(
+                {
+                    "result": "invalid",
+                    "reachability": "invalid",
+                    "body_retrieved": False,
+                    "status": 0,
+                    "error": result.get("error") or "URL is not public HTTP(S)",
+                }
+            )
+        return result
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
         results = list(
             executor.map(
-                lambda url: _check_url(url, timeout=timeout, max_bytes=max_bytes),
+                checked_url,
                 sorted(references),
             )
         )
+    result_by_url = {str(result["url"]): result for result in results}
+    published_at_mismatch_count = 0
+    report_period_after_publication_count = 0
+    blocked_semantic_claim_count = 0
+    html_date_checked_count = 0
+    for claim in semantic_claims:
+        result = result_by_url[claim["url"]]
+        common = {
+            key: str(claim[key])
+            for key in ("security_code", "name", "type_key", "claim_index", "finding_index", "search_finding_id")
+        }
+        if result.get("result") != "ok":
+            semantic_failed_keys.add(int(claim["key"]))
+            company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+            if result.get("result") == "blocked":
+                blocked_semantic_claim_count += 1
+            semantic_issues.append(
+                {
+                    **common,
+                    "source": str(claim["url"]),
+                    "reason": f"source body unavailable for semantic verification ({result.get('result')})",
+                }
+            )
+            continue
+        content_type = str(result.get("content_type") or "")
+        body = result.get("_body")
+        is_html = "html" in content_type.casefold()
+        is_web_search_claim = bool(claim.get("search_finding_id") or claim.get("finding_index") is not None)
+        if not is_html and not is_web_search_claim and isinstance(body, bytes):
+            content_type_folded = content_type.casefold()
+            stripped = body.lstrip()
+            is_structured_text = (
+                "json" in content_type_folded
+                or content_type_folded.startswith("text/")
+                or "javascript" in content_type_folded
+                or stripped.startswith((b"{", b"["))
+            )
+            if is_structured_text:
+                structured_issues = _structured_source_issues(
+                    body,
+                    content_type,
+                    url=str(claim["url"]),
+                    security_code=claim["security_code"],
+                    name=claim["name"],
+                    claim=claim["claim"],
+                    finding=claim["finding"],
+                )
+                if structured_issues:
+                    semantic_failed_keys.add(int(claim["key"]))
+                    company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+                    semantic_issues.extend(
+                        {**common, "source": str(claim["url"]), "reason": reason}
+                        for reason in structured_issues
+                    )
+                continue
+        if not is_html or not isinstance(body, bytes):
+            semantic_unverified_keys.add(int(claim["key"]))
+            company_states[claim["security_code"]]["semantic_unverified_keys"].add(int(claim["key"]))
+            semantic_issues.append(
+                {
+                    **common,
+                    "source": str(claim["url"]),
+                    "reason": "source is reachable but semantic verification is unverified (non-HTML body)",
+                }
+            )
+            continue
+        finding = claim["finding"]
+        html_issues = _html_semantic_issues(
+            body,
+            content_type,
+            security_code=claim["security_code"],
+            name=claim["name"],
+            report_period=claim.get("report_period"),
+            claim=claim["claim"],
+            finding=finding,
+        )
+        if html_issues:
+            semantic_failed_keys.add(int(claim["key"]))
+            company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+            semantic_issues.extend({**common, "source": str(claim["url"]), "reason": reason} for reason in html_issues)
+        actual_date = _article_published_date(body, content_type) if is_html and isinstance(body, bytes) else None
+        declared_date = _date_value(claim.get("published_at"))
+        period_end = _report_period_end(claim.get("report_period"))
+        if is_html and (declared_date or actual_date):
+            html_date_checked_count += 1
+        if is_html and declared_date and actual_date != declared_date:
+            semantic_failed_keys.add(int(claim["key"]))
+            company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+            published_at_mismatch_count += 1
+            semantic_issues.append(
+                {
+                    **common,
+                    "source": str(claim["url"]),
+                    "reason": (
+                        f"declared published_at {declared_date.isoformat()} does not match article date "
+                        f"{actual_date.isoformat() if actual_date else 'unavailable'}"
+                    ),
+                }
+            )
+        if is_html and period_end and actual_date and period_end > actual_date:
+            semantic_failed_keys.add(int(claim["key"]))
+            company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+            report_period_after_publication_count += 1
+            semantic_issues.append(
+                {
+                    **common,
+                    "source": str(claim["url"]),
+                    "reason": (
+                        f"report period ends {period_end.isoformat()} after article date {actual_date.isoformat()}"
+                    ),
+                }
+            )
+
     for result in results:
+        result["canonical_url"] = result["url"]
+        result.pop("_body", None)
         result["references"] = [
             {"security_code": code, "type_key": type_key} for code, type_key in sorted(references[result["url"]])
         ]
+        result["bindings"] = detailed_bindings.get(result["url"], [])
+        # The detailed issues are the authoritative per-claim status.  Keep a
+        # compact URL-level status for operators without duplicating issue text.
+        url_failed = result.get("result") != "ok" or any(
+            issue.get("source") == result["url"] and "non-HTML" not in issue.get("reason", "")
+            for issue in semantic_issues
+        )
+        url_unverified = any(issue.get("source") == result["url"] and "unverified" in issue.get("reason", "") for issue in semantic_issues)
+        result["semantic_status"] = "failed" if url_failed else "unverified" if url_unverified else "pass"
         if result["result"] == "invalid":
-            invalid_claim_urls.extend(
-                {
-                    "security_code": code,
-                    "type_key": type_key,
-                    "source": result["url"][:240],
-                    "reason": str(result.get("error") or "unsafe destination")[:240],
+            for binding in result.get("bindings", []):
+                item: dict[str, Any] = {
+                    "security_code": binding.get("security_code", ""),
+                    "type_key": binding.get("type_key", ""),
+                    "source": result["url"],
+                    "reason": str(result.get("error") or "unsafe destination"),
                 }
-                for code, type_key in sorted(references[result["url"]])
-            )
+                if binding.get("name"):
+                    item["name"] = binding["name"]
+                if binding.get("claim_index") is not None and binding.get("search_finding_id"):
+                    item["claim_index"] = binding["claim_index"]
+                if binding.get("search_finding_id"):
+                    item["search_finding_id"] = binding["search_finding_id"]
+                invalid_claim_urls.append(item)
     counts = {key: sum(result["result"] == key for result in results) for key in ("ok", "failed", "blocked", "invalid")}
+    semantic_failed_count = len(semantic_failed_keys)
+    semantic_unverified_count = len(semantic_unverified_keys)
+    for state in company_states.values():
+        state["semantic_passed_keys"] = state["semantic_keys"] - state["semantic_failed_keys"] - state["semantic_unverified_keys"]
+    company_coverage: list[dict[str, Any]] = []
+    for code in sorted(company_states):
+        state = company_states[code]
+        referenced = sorted(state["referenced_finding_ids"])
+        failed = len(state["semantic_failed_keys"])
+        unverified = len(state["semantic_unverified_keys"])
+        passed = len(state["semantic_passed_keys"])
+        if not state["has_review"]:
+            status = "no_review"
+        elif failed:
+            status = "failed"
+        elif unverified:
+            status = "unverified"
+        elif state["searched_no_source_finding_ids"]:
+            status = "searched_no_source"
+        else:
+            status = "pass"
+        company_coverage.append(
+            {
+                "security_code": code,
+                "name": state["name"],
+                "has_review": state["has_review"],
+                "type_keys": sorted(state["type_keys"]),
+                "finding_count": len(state["finding_ids"]),
+                "referenced_finding_ids": referenced,
+                "searched_no_source_finding_ids": sorted(state["searched_no_source_finding_ids"]),
+                "referenced_no_source_finding_ids": sorted(state["referenced_no_source_finding_ids"]),
+                "canonical_url_count": len(state["urls"]),
+                "semantic_claim_count": len(state["semantic_keys"]),
+                "semantic_passed_count": passed,
+                "semantic_failed_count": failed,
+                "semantic_unverified_count": unverified,
+                "all_referenced_findings_semantic_pass": (
+                    bool(referenced)
+                    and not state["referenced_no_source_finding_ids"]
+                    and failed == 0
+                    and unverified == 0
+                ),
+                "status": status,
+            }
+        )
+    invalid_claim_urls = list(
+        {
+            (
+                str(item.get("security_code") or ""),
+                str(item.get("type_key") or ""),
+                str(item.get("claim_index") or ""),
+                str(item.get("search_finding_id") or ""),
+                str(item.get("source") or ""),
+                str(item.get("reason") or ""),
+            ): item
+            for item in invalid_claim_urls
+        }.values()
+    )
+    audit_passed = (
+        not invalid_claim_urls
+        and counts["failed"] == 0
+        and counts["invalid"] == 0
+        and semantic_failed_count == 0
+        and semantic_unverified_count == 0
+    )
     report = {
+        "audit_contract_version": AUDIT_CONTRACT_VERSION,
         "merged_sha256": hashlib.sha256(merged_bytes).hexdigest(),
+        "projection_sha256": projection_sha256,
+        **projection_counts,
         "snapshot_generation": payload.get("snapshot_generation"),
         "market_as_of": payload.get("market_as_of"),
         "checked": len(results),
         **counts,
+        # ``ok`` remains in the report for the existing publish contract.
+        # ``reachable`` is the explicit reachability name used by operators.
+        "reachable": counts["ok"],
+        "body_retrieved_count": sum(bool(result.get("body_retrieved")) for result in results),
+        "canonical_urls": sorted(detailed_bindings),
+        "audit_passed": audit_passed,
         "claim_count": claim_count,
+        "semantic_claim_count": semantic_claim_count,
+        "semantic_passed_count": semantic_claim_count - semantic_failed_count - semantic_unverified_count,
+        "semantic_failed_count": semantic_failed_count,
+        "semantic_unverified_count": semantic_unverified_count,
+        "semantic_issue_count": len(semantic_issues),
+        "semantic_html_date_checked_count": html_date_checked_count,
+        "published_at_mismatch_count": published_at_mismatch_count,
+        "report_period_after_publication_count": report_period_after_publication_count,
+        "blocked_semantic_claim_count": blocked_semantic_claim_count,
         "invalid_claim_url_count": len(invalid_claim_urls),
         "official_market_domain_count": sum(bool(result["official_market_domain"]) for result in results),
         "invalid_claim_urls": invalid_claim_urls,
+        "semantic_issues": semantic_issues,
+        "source_bindings": [
+            binding for url in sorted(detailed_bindings) for binding in detailed_bindings[url]
+        ],
+        "company_coverage": company_coverage,
+        "company_coverage_by_code": {item["security_code"]: item for item in company_coverage},
         "results": results,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,8 +1260,13 @@ def main() -> int:
         timeout=args.timeout,
         max_bytes=args.max_bytes,
     )
-    print(json.dumps({key: report[key] for key in ("checked", "ok", "failed", "blocked")}, sort_keys=True))
-    return 1 if report["invalid_claim_url_count"] else 0
+    print(
+        json.dumps(
+            {key: report[key] for key in ("checked", "reachable", "blocked", "failed", "invalid", "audit_passed")},
+            sort_keys=True,
+        )
+    )
+    return 0 if report["audit_passed"] else 1
 
 
 if __name__ == "__main__":
