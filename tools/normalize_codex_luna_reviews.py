@@ -53,7 +53,10 @@ def build(source: Path, output: Path) -> dict[str, int]:
                 }
             )
         prior_claims = value.get("claims") if isinstance(value.get("claims"), list) else []
-        value["claims"] = [*prior_claims, *web_claims][:32]
+        # The local Codex overlay keeps a compact, bounded claim set.  Native
+        # company-research artifacts have a separate 32-claim contract; this
+        # shard is deliberately the smaller local contract consumed by Pages.
+        value["claims"] = [*prior_claims, *web_claims][:12]
         value["search_findings"] = findings
         value["web_search_performed"] = True
         value["web_search_verified"] = False
