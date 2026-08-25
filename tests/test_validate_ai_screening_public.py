@@ -267,7 +267,9 @@ def test_checked_in_seed_contains_full_semantic_review_and_checked_promotions() 
     packets = payload["packets"]
     assert len(packets) == 998
     assert all(isinstance(packet["ai_review"].get("semantic_review"), dict) for packet in packets)
-    assert {packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"} == {
+    assert {
+        packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"
+    } == {
         "603444",
         "601128",
         "600926",

@@ -26,7 +26,7 @@ _MATERIAL_RISK_RE = re.compile(
     r"收入复合增速\s*-|营业收入同比下降|归母净利润同比下降|自由现金流为\s*-|"
     r"经营活动现金流为\s*-|现金流同比下滑\s*-|PE\s*[3-9]\d|PE\s*2\d\.\d{2,}\s*倍.*偏高|"
     r"PB\s*[5-9]\d|PB\s*4\d\.\d{2,}\s*倍.*偏高"
- )
+)
 _NEGATIVE_FLOW_RE = re.compile(r"(?:经营活动现金流|自由现金流)(?:[^。；\n]{0,30})-\d")
 _MISSING_SOURCE_RE = re.compile(r"未找到可绑定|没有找到可绑定|无法验证.*公司|缺少可直接核验")
 _PE_RE = re.compile(r"PE[^0-9]{0,8}(\d+(?:\.\d+)?)")
@@ -92,7 +92,13 @@ def _claims(review: Mapping[str, Any], code: str) -> dict[str, int | bool]:
         kind = str(claim.get("source_kind") or "")
         if kind in {"company_filing", "financial_portal_filing", "exchange_or_regulator", "codex_web_search"}:
             direct += 1
-    return {"claim_count": len(claims), "https_count": https, "code_bound_https_count": bound, "direct_source_count": direct, "has_company_source": bound > 0}
+    return {
+        "claim_count": len(claims),
+        "https_count": https,
+        "code_bound_https_count": bound,
+        "direct_source_count": direct,
+        "has_company_source": bound > 0,
+    }
 
 
 def _metrics(packet: Mapping[str, Any], review: Mapping[str, Any]) -> dict[str, float | None]:
@@ -119,7 +125,9 @@ def _metrics(packet: Mapping[str, Any], review: Mapping[str, Any]) -> dict[str, 
     return result
 
 
-def _financial_review(text: str, metrics: Mapping[str, float | None], risks: list[str], evidence: Mapping[str, Any]) -> tuple[bool, list[str], float]:
+def _financial_review(
+    text: str, metrics: Mapping[str, float | None], risks: list[str], evidence: Mapping[str, Any]
+) -> tuple[bool, list[str], float]:
     pe, pb = metrics.get("pe"), metrics.get("pb")
     profit, revenue = metrics.get("interim_profit_growth"), metrics.get("interim_revenue_growth")
     roe, capital, npl = _match_number(_ROE_RE, text), _match_number(_CAPITAL_RE, text), _match_number(_NPL_RE, text)
@@ -153,9 +161,17 @@ def _financial_review(text: str, metrics: Mapping[str, float | None], risks: lis
     return not reasons, min(score, 100.0), reasons
 
 
-def _industrial_review(packet: Mapping[str, Any], review: Mapping[str, Any], metrics: Mapping[str, float | None], risks: list[str], evidence: Mapping[str, Any]) -> tuple[bool, list[str], float]:
+def _industrial_review(
+    packet: Mapping[str, Any],
+    review: Mapping[str, Any],
+    metrics: Mapping[str, float | None],
+    risks: list[str],
+    evidence: Mapping[str, Any],
+) -> tuple[bool, list[str], float]:
     pe, pb, roic, fcf = (metrics.get(k) for k in ("pe", "pb", "roic", "fcf_margin"))
-    annual, profit, revenue = (metrics.get(k) for k in ("annual_profit_growth", "interim_profit_growth", "interim_revenue_growth"))
+    annual, profit, revenue = (
+        metrics.get(k) for k in ("annual_profit_growth", "interim_profit_growth", "interim_revenue_growth")
+    )
     reasons: list[str] = []
     if review.get("quality_gate", {}).get("hard_block") is True:
         reasons.extend(str(v) for v in review.get("quality_gate", {}).get("reasons", [])[:3])
@@ -188,7 +204,15 @@ def _industrial_review(packet: Mapping[str, Any], review: Mapping[str, Any], met
     score = 45.0
     score += 12 if pe is not None and pe <= 15 else 8 if pe is not None and pe <= 20 else 0
     score += 10 if pb is not None and pb <= 1.5 else 6 if pb is not None and pb <= 2.5 else 0
-    score += 12 if roic is not None and roic >= 20 else 8 if roic is not None and roic >= 15 else 4 if roic is not None and roic >= 12 else 0
+    score += (
+        12
+        if roic is not None and roic >= 20
+        else 8
+        if roic is not None and roic >= 15
+        else 4
+        if roic is not None and roic >= 12
+        else 0
+    )
     score += 10 if fcf is not None and fcf >= 20 else 6 if fcf is not None and fcf >= 10 else 0
     score += 8 if profit is not None and profit >= 20 else 4 if profit is not None and profit >= 10 else 0
     score += 5 if revenue is not None and revenue >= 10 else 0
@@ -259,8 +283,16 @@ def build_report(data: Mapping[str, Any], kb_root: Path | None = None) -> dict[s
     packets = data.get("packets") if isinstance(data.get("packets"), list) else []
     rows = [review_packet(packet) for packet in packets if isinstance(packet, Mapping)]
     counts = Counter(row["deep_review_conclusion"] for row in rows)
-    promotions = [row for row in rows if row["deep_review_conclusion"] == "recommend_buy" and row["current_category"] != "recommend_buy"]
-    demotions = [row for row in rows if row["deep_review_conclusion"] != "recommend_buy" and row["current_category"] == "recommend_buy"]
+    promotions = [
+        row
+        for row in rows
+        if row["deep_review_conclusion"] == "recommend_buy" and row["current_category"] != "recommend_buy"
+    ]
+    demotions = [
+        row
+        for row in rows
+        if row["deep_review_conclusion"] != "recommend_buy" and row["current_category"] == "recommend_buy"
+    ]
     return {
         "schema_version": 1,
         "review_version": VERSION,
@@ -268,7 +300,8 @@ def build_report(data: Mapping[str, Any], kb_root: Path | None = None) -> dict[s
         "market_as_of": data.get("market_as_of"),
         "candidate_total": len(rows),
         "reviewed_count": len(rows),
-        "full_coverage": len(rows) == int(data.get("candidate_total") or len(rows)) and int(data.get("candidate_offset") or 0) == 0,
+        "full_coverage": len(rows) == int(data.get("candidate_total") or len(rows))
+        and int(data.get("candidate_offset") or 0) == 0,
         "knowledge_base_root": str(kb_root) if kb_root else None,
         "counts": dict(counts),
         "promotion_count": len(promotions),
@@ -292,7 +325,15 @@ def main() -> int:
     with args.output.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
-    print(json.dumps({key: report[key] for key in ("candidate_total", "reviewed_count", "counts", "promotion_count", "demotion_count")}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                key: report[key]
+                for key in ("candidate_total", "reviewed_count", "counts", "promotion_count", "demotion_count")
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

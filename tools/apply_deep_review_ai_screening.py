@@ -136,7 +136,9 @@ OVERRIDES: dict[str, dict[str, Any]] = {
             "ROE 14.05%、不良率 0.75%—0.76%、拨备覆盖率 438.10%，资产质量较稳。",
             "2026年一季度净利润同比 +11.10%，2025年现金分红每10股合计 2.70元。",
         ],
-        "risks": ["资本充足率约 12.64%，净息差和区域银行信用周期仍需持续跟踪；银行现金流不可与工业企业自由现金流直接比较。"],
+        "risks": [
+            "资本充足率约 12.64%，净息差和区域银行信用周期仍需持续跟踪；银行现金流不可与工业企业自由现金流直接比较。"
+        ],
         "source_urls": [
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12168007&stockid=601128",
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12167995&stockid=601128",
@@ -161,7 +163,9 @@ OVERRIDES: dict[str, dict[str, Any]] = {
         "note": "独立核对杭州银行 2026 年一季报与 2025 年年报后升级；评分低于常熟银行以反映息差风险。",
     },
     "300515": {
-        "source_urls": ["https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508835&stockid=300515"],
+        "source_urls": [
+            "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12508835&stockid=300515"
+        ],
         "note": "保持观察：2026年中报收入 +19.60%、净利润 +42.80%，但经营现金流仅约为净利润的 28%，且披露 8500 万元到期未兑付理财产品并按 100% 计提坏账，不能升级建议买。",
     },
     "002517": {
@@ -176,7 +180,10 @@ OVERRIDES: dict[str, dict[str, Any]] = {
 
 def _apply_override(review: dict[str, Any], semantic: dict[str, Any], override: Mapping[str, Any], code: str) -> None:
     category = str(override.get("category") or review.get("final_category") or semantic["conclusion"])
-    action = str(override.get("action") or ("priority_buy" if category == "recommend_buy" else "watchlist" if category == "observe" else "avoid"))
+    action = str(
+        override.get("action")
+        or ("priority_buy" if category == "recommend_buy" else "watchlist" if category == "observe" else "avoid")
+    )
     semantic.update(
         {
             "review_status": "confirmed" if category == "recommend_buy" else "reviewed_keep",
@@ -199,7 +206,9 @@ def _apply_override(review: dict[str, Any], semantic: dict[str, Any], override: 
     if "category" in override:
         review["final_category"] = category
         review["final_recommendation"] = "recommend_buy" if category == "recommend_buy" else "do_not_recommend_buy"
-        review["recommendation_label"] = "建议买" if category == "recommend_buy" else "观察" if category == "observe" else "不建议"
+        review["recommendation_label"] = (
+            "建议买" if category == "recommend_buy" else "观察" if category == "observe" else "不建议"
+        )
         review["ai_action"] = action
         review["recommended_action"] = "keep" if category in {"recommend_buy", "observe"} else "demote"
         review["verdict"] = "confirmed" if category == "recommend_buy" else "caution"
@@ -254,7 +263,11 @@ def apply(data: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[dict[str,
         "full_coverage": True,
         "applied_override_codes": applied,
         "semantic_counts": {
-            category: sum(1 for packet in packets if packet.get("ai_review", {}).get("semantic_review", {}).get("conclusion") == category)
+            category: sum(
+                1
+                for packet in packets
+                if packet.get("ai_review", {}).get("semantic_review", {}).get("conclusion") == category
+            )
             for category in ("recommend_buy", "observe", "do_not_recommend")
         },
     }
