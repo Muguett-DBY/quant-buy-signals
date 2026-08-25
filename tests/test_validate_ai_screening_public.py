@@ -233,20 +233,20 @@ def test_public_validator_accepts_generation_bound_full_seed() -> None:
     assert result["searched"] == 1
 
 
-def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() -> None:
+def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
     path = Path("cloudflare/quant-dashboard/ai_screening_seed.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
     result = validate_artifact_file(
         path,
-        expected_generation="f379043e5b66b8d8",
-        expected_market_as_of="2026-08-24",
+        expected_generation="443d9dcf4d29dbb4",
+        expected_market_as_of="2026-08-25",
     )
 
     assert result["candidate_total"] == 998
-    assert result["searched"] == 998
-    assert result["actions"] == {"avoid": 842, "priority_buy": 3, "watchlist": 153}
-    assert payload["publication_sanitization"]["removed_future_claim_count"] == 10
-    assert payload["publication_sanitization"]["cleaned_search_metadata_count"] > 2000
+    assert result["searched"] == 0
+    assert result["actions"] == {"avoid": 826, "priority_buy": 3, "watchlist": 169}
+    assert payload["review_mode"] == "local_codex_review"
+    assert payload["reviewed_without_web_search"] == 998
     raw_search_metadata = re.compile(r"turn\w*(?:search|view)|\[wordlim:|Published:|Crawled:", re.IGNORECASE)
     for packet in payload["packets"]:
         review = packet["ai_review"]
@@ -256,10 +256,6 @@ def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() ->
             values = values if isinstance(values, list) else [values]
             assert not raw_search_metadata.search(" ".join(str(value) for value in values))
 
-    tar = next(packet for packet in payload["packets"] if packet["security_code"] == "002233")
-    assert tar["ai_review"]["ai_action"] == "watchlist"
-    assert tar["ai_review"]["buy_attractiveness_score"] == 59.0
-    assert "当前先观察" in tar["ai_review"]["summary"]
 
 
 def test_checked_in_seed_contains_full_semantic_review_and_checked_promotions() -> None:

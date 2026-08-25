@@ -84,7 +84,7 @@ def _base_reason(row: Mapping[str, Any], packet: Mapping[str, Any]) -> tuple[lis
     return strengths, reasons[:8]
 
 
-def _semantic_review(packet: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
+def _semantic_review(packet: Mapping[str, Any], row: Mapping[str, Any], *, candidate_total: int) -> dict[str, Any]:
     review = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     category = str(row.get("deep_review_conclusion") or row.get("current_category") or "observe")
     strengths, reasons = _base_reason(row, packet)
@@ -93,7 +93,7 @@ def _semantic_review(packet: Mapping[str, Any], row: Mapping[str, Any]) -> dict[
         status = "reviewed_change_pending"
     return {
         "version": VERSION,
-        "scope": "all_998_candidates",
+        "scope": f"all_{candidate_total}_candidates",
         "review_status": status,
         "conclusion": category,
         "score": float(row.get("deep_review_score") or review.get("buy_attractiveness_score") or 0),
@@ -116,23 +116,46 @@ def _semantic_review(packet: Mapping[str, Any], row: Mapping[str, Any]) -> dict[
 OVERRIDES: dict[str, dict[str, Any]] = {
     "603444": {
         "score": 84.0,
-        "summary": "603444 吉比特建议买（全量语义复核确认）：2026年中报收入同比增长48.01%，归母净利润增长69.31%，经营现金流增长18.22%，简化自由现金流增长17.91%，ROIC 33.76%，PE 15.29倍。PB 4.53倍是主要反证，只有在持续高增长和现金回报兑现时才有足够安全边际；因此保留建议买，但不是无条件追高。",
+        "summary": "603444 吉比特建议买（全量语义复核确认）：2026年中报收入同比增长48.01%，归母净利润增长69.31%，经营现金流增长18.22%，简化自由现金流增长17.91%，ROIC 33.76%，周二收盘 PE 15.47 倍。PB 4.58 倍是主要反证，只有在持续高增长和现金回报兑现时才有足够安全边际；因此保留建议买，但不是无条件追高。",
         "strengths": [
             "2026年中报收入 +48.01%、归母净利润 +69.31%，增长与现金流方向一致。",
-            "ROIC 33.76%、自由现金流率 45.0%，资本回报和现金转换强。",
-            "PE 15.29倍低于行业中位数 34.37倍。",
+            "2025年 ROIC 33.76%、2026年中报自由现金流率约 45.0%，资本回报和现金转换强。",
+            "2026-08-25 收盘 PE 15.47 倍，低于行业中位数 34.37 倍。",
         ],
-        "risks": ["PB 4.53倍偏高，若增长或现金回报回落，估值安全边际会迅速收窄。"],
-        "source_urls": [],
+        "risks": ["周二收盘 PB 4.58 倍偏高，若增长或现金回报回落，估值安全边际会迅速收窄。"],
+        "source_urls": [
+            "https://quant.custard.top/api/company/603444?generation_id=443d9dcf4d29dbb4",
+            "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12492209&stockid=603444",
+        ],
+        "claims": [
+            {
+                "fact_id": "valuation",
+                "statement": "603444 2026-08-25 收盘 PE 15.47 倍、PB 4.58 倍。",
+                "source_ref": "https://quant.custard.top/api/company/603444?generation_id=443d9dcf4d29dbb4",
+                "support": "supports",
+            },
+            {
+                "fact_id": "latest_income",
+                "statement": "603444 2026年中报收入同比 +48.01%，归母净利润同比 +69.31%。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12492209&stockid=603444",
+                "support": "supports",
+            },
+            {
+                "fact_id": "latest_cashflow",
+                "statement": "603444 2026年中报经营活动现金流同比 +18.22%，简化自由现金流率约 45.0%。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12492209&stockid=603444",
+                "support": "supports",
+            },
+        ],
         "note": "当前唯一生产建议买经逐家公司事实复核后保留，但评分由 89 下调至 84 以反映 PB 风险。",
     },
     "601128": {
         "category": "recommend_buy",
         "action": "priority_buy",
         "score": 86.0,
-        "summary": "601128 常熟银行建议买（银行专用口径复核）：PE 4.97倍、PB 0.64倍；2025年ROE 14.05%、净息差 2.53%、不良率 0.76%，2026年一季度收入增长 6.74%、净利润增长 11.10%，最新不良率约 0.75%、拨备覆盖率 438.10%、资本充足率 12.64%。银行经营现金流不按制造业 FCF 解读；低估值、资产质量和盈利稳定性共同支持建议买，但仍需跟踪息差与资本补充。",
+        "summary": "601128 常熟银行建议买（银行专用口径复核）：周二收盘 PE 4.98 倍、PB 0.64 倍；2025年ROE 14.05%、净息差 2.53%、不良率 0.76%，2026年一季度收入增长 6.74%、净利润增长 11.10%，最新不良率约 0.75%、拨备覆盖率 438.10%、资本充足率 12.64%。银行经营现金流不按制造业 FCF 解读；低估值、资产质量和盈利稳定性共同支持建议买，但仍需跟踪息差与资本补充。",
         "strengths": [
-            "PE 4.97倍、PB 0.64倍，估值显著低于多数成长股。",
+            "2026-08-25 收盘 PE 4.98 倍、PB 0.64 倍，估值显著低于多数成长股。",
             "ROE 14.05%、不良率 0.75%—0.76%、拨备覆盖率 438.10%，资产质量较稳。",
             "2026年一季度净利润同比 +11.10%，2025年现金分红每10股合计 2.70元。",
         ],
@@ -140,8 +163,29 @@ OVERRIDES: dict[str, dict[str, Any]] = {
             "资本充足率约 12.64%，净息差和区域银行信用周期仍需持续跟踪；银行现金流不可与工业企业自由现金流直接比较。"
         ],
         "source_urls": [
+            "https://quant.custard.top/api/company/601128?generation_id=443d9dcf4d29dbb4",
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12168007&stockid=601128",
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12167995&stockid=601128",
+        ],
+        "claims": [
+            {
+                "fact_id": "valuation",
+                "statement": "601128 2026-08-25 收盘 PE 4.98 倍、PB 0.64 倍。",
+                "source_ref": "https://quant.custard.top/api/company/601128?generation_id=443d9dcf4d29dbb4",
+                "support": "supports",
+            },
+            {
+                "fact_id": "capital_quality",
+                "statement": "601128 2025年 ROE 14.05%、不良贷款率 0.76%；2026年一季度归母净利润同比 +11.10%。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12168007&stockid=601128",
+                "support": "supports",
+            },
+            {
+                "fact_id": "dividend",
+                "statement": "601128 2025年度现金分红方案每10股合计 2.70 元。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12167995&stockid=601128",
+                "support": "supports",
+            },
         ],
         "note": "独立核对常熟银行 2026 年一季报与 2025 年分红材料后升级；不是由规则触发或工业 FCF 误判推动。",
     },
@@ -149,16 +193,37 @@ OVERRIDES: dict[str, dict[str, Any]] = {
         "category": "recommend_buy",
         "action": "priority_buy",
         "score": 82.0,
-        "summary": "600926 杭州银行建议买（银行专用口径复核）：PE 6.32倍、PB 0.87倍；2025年ROE 14.65%、不良率 0.76%、拨备覆盖率 481.39%、资本充足率 14.37%，2026年一季度收入增长 4.29%、净利润增长 10.09%，贷款/存款分别增长 7.57%/5.50%。净息差 1.36%是主要风险；在低估值、稳健资产质量和盈利仍保持双位数增长的组合下，给出建议买但低于常熟银行的评分。",
+        "summary": "600926 杭州银行建议买（银行专用口径复核）：周二收盘 PE 6.25 倍、PB 0.86 倍；2025年ROE 14.65%、不良率 0.76%、拨备覆盖率 481.39%、资本充足率 14.37%，2026年一季度收入增长 4.29%、净利润增长 10.09%，贷款/存款分别增长 7.57%/5.50%。净息差 1.36%是主要风险；在低估值、稳健资产质量和盈利仍保持双位数增长的组合下，给出建议买但低于常熟银行的评分。",
         "strengths": [
-            "PE 6.32倍、PB 0.87倍，估值处于银行可接受偏低区间。",
+            "2026-08-25 收盘 PE 6.25 倍、PB 0.86 倍，估值处于银行可接受偏低区间。",
             "ROE 14.65%、不良率 0.76%、拨备覆盖率 481.39%、资本充足率 14.37%。",
             "2026年一季度净利润同比 +10.09%，贷款/存款保持增长。",
         ],
         "risks": ["净息差约 1.36%、公司贷款占比较高，利率和信用周期可能压缩盈利；银行经营现金流不按工业 FCF 解读。"],
         "source_urls": [
+            "https://quant.custard.top/api/company/600926?generation_id=443d9dcf4d29dbb4",
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12154327&stockid=600926",
             "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12154354&stockid=600926",
+        ],
+        "claims": [
+            {
+                "fact_id": "valuation",
+                "statement": "600926 2026-08-25 收盘 PE 6.25 倍、PB 0.86 倍。",
+                "source_ref": "https://quant.custard.top/api/company/600926?generation_id=443d9dcf4d29dbb4",
+                "support": "supports",
+            },
+            {
+                "fact_id": "capital_quality",
+                "statement": "600926 2025年 ROE 14.65%、不良贷款率 0.76%、资本充足率 14.37%；2026年一季度归母净利润同比 +10.09%。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12154327&stockid=600926",
+                "support": "supports",
+            },
+            {
+                "fact_id": "annual_quality",
+                "statement": "600926 2025年拨备覆盖率 481.39%，净息差 1.36% 是主要风险。",
+                "source_ref": "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12154354&stockid=600926",
+                "support": "supports",
+            },
         ],
         "note": "独立核对杭州银行 2026 年一季报与 2025 年年报后升级；评分低于常熟银行以反映息差风险。",
     },
@@ -225,8 +290,11 @@ def _apply_override(review: dict[str, Any], semantic: dict[str, Any], override: 
         review["summary"] = str(override["summary"])
     if override.get("strengths"):
         review["key_strengths"] = list(override["strengths"])
+        review["quantitative_facts"] = list(override["strengths"])
     if override.get("risks"):
         review["risk_flags"] = list(override["risks"])
+    if override.get("claims"):
+        review["claims"] = copy.deepcopy(list(override["claims"]))
 
 
 def apply(data: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -247,7 +315,7 @@ def apply(data: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[dict[str,
         review = packet.get("ai_review")
         if not isinstance(review, dict):
             raise ValueError(f"missing ai review: {code}")
-        semantic = _semantic_review(packet, row)
+        semantic = _semantic_review(packet, row, candidate_total=len(packets))
         override = OVERRIDES.get(code)
         if override:
             _apply_override(review, semantic, override, code)
