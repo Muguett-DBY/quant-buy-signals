@@ -1980,6 +1980,9 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "const finalHtml=" not in source
     assert ".replace(" not in page_function
     assert "AI为什么这样判断" in source
+    assert "ai-review-details" in source
+    assert "查看完整 AI 解释" in source
+    assert "代码：" in source
     assert "公司量化事实" in source
     assert "公司商业画像" in source
     assert "估值与安全边际" in source
@@ -2695,6 +2698,11 @@ const renderedCard = pageApi.card({
 });
 const candidateDetails = renderedCard.match(/<details class="candidate-rules">[\s\S]*?<\/details>/)?.[0] || "";
 const defaultCard = renderedCard.replace(candidateDetails, "");
+assert.ok(renderedCard.includes('<article class="card ai-card">'));
+assert.ok(renderedCard.includes("<strong>审计样本</strong>"));
+assert.ok(renderedCard.includes("代码：600000"));
+assert.ok(renderedCard.includes('<details class="ai-review-details">'));
+assert.ok(renderedCard.includes("查看完整 AI 解释"));
 assert.ok(defaultCard.includes("AI独立判断"));
 assert.ok(!defaultCard.includes("接近达标"));
 assert.ok(defaultCard.includes("原生搜索事件已核验 · 财报来源已核验"));

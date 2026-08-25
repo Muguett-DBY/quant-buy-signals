@@ -1157,6 +1157,17 @@ function aiScreeningPageResponse(request){
     .toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:inherit}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
     .card{padding:18px}
+    .ai-card{padding:14px}
+    .ai-card .top{align-items:flex-start}
+    .ai-card .top>div{min-width:0}
+    .ai-card .top strong{display:block;overflow-wrap:anywhere}
+    .ai-card .top small{display:block;margin-top:2px}
+    .ai-review-details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+    .ai-review-details>summary{display:flex;justify-content:space-between;gap:12px;align-items:center;cursor:pointer;color:var(--blue);font-weight:700;list-style:none}
+    .ai-review-details>summary::-webkit-details-marker{display:none}
+    .ai-review-details>summary:after{content:"＋";font-size:18px;line-height:1}
+    .ai-review-details[open]>summary:after{content:"－"}
+    .ai-review-details .review-meta{margin-top:10px}
     .top{display:flex;justify-content:space-between;gap:12px}
     .top strong{font-size:18px}
     .top small,.rule,.review-meta,.confidence{color:var(--muted);font-size:12px}
@@ -1442,18 +1453,18 @@ function aiScreeningPageResponse(request){
       const sourceMarkup=claims(review)||'<div class="claim">暂无已核验公司资料来源</div>';
       const categoryLabels={deep_value:"深度价值",turnaround:"困境反转",compounder:"复利成长",cyclical:"周期",growth:"成长",venture:"早期/风险投资",quality_equity:"优质股权",other:"其他"};
       const economicCategory=categoryLabels[String(review.economic_category||"")]||String(review.economic_category||"");
-      return '<article class="card">'+
-        '<div class="top"><strong>#'+esc(packet.ai_rank||"—")+" "+esc(packet.name||packet.security_code)+"</strong><small>"+esc(packet.security_code)+"</small></div>"+
-        '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="category '+group+'">'+labels[group]+'</span><span class="confidence">AI置信度：'+esc(review.confidence||"—")+'</span>'+(economicCategory?'<span class="badge">经济类别：'+esc(economicCategory)+"</span>":"")+"</div>"+
+      return '<article class="card ai-card">'+
+        '<div class="top"><div><strong>'+esc(packet.name||"—")+'</strong><small>代码：'+esc(packet.security_code||"—")+'</small></div><span class="category '+group+'">'+labels[group]+'</span></div>'+
+        '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="confidence">AI买入吸引力分 · 置信度：'+esc(review.confidence||"—")+'</span></div>'+
         '<div class="badges"><span class="badge '+esc(freshness)+'">'+esc(freshnessLabel(review))+"</span>"+independent+"</div>"+
-        '<div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
+        '<details class="ai-review-details"><summary>查看完整 AI 解释</summary><div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
         '<section class="ai-research"><div class="section"><h3>AI为什么这样判断</h3>'+boundSummary(review)+boundReasonList(review,"key_strengths","AI补充判断","暂无 AI 独立补充判断")+"</div>"+
         scoreComponents(review)+economicProfile(review)+valuationResearch(review)+
         list(companyFacts,"公司量化事实","暂无可安全展示的公司量化事实")+
         boundReasonList(review,"risk_flags","主要反证与风险","暂无已记录的主要反证与风险")+searchFindings(review)+
         '<details class="candidate-rules"><summary>为何进入规则候选池</summary><div class="rule candidate-rule">规则候选类型：'+esc(types.filter(Boolean).join(" / ")||"—")+" · 确定性状态："+esc(deterministic.status||"—")+" · 规则分数："+esc(deterministic.score??deterministic.score_upper_bound??"—")+"</div>"+
         list(ruleFacts,"规则候选依据","暂无可展示的规则候选依据")+
-        '</details><div class="source-section"><h3>公司资料与来源</h3>'+sourceMarkup+"</div></section></article>";
+        '</details><div class="source-section"><h3>公司资料与来源</h3>'+sourceMarkup+"</div></section></details></article>";
     }
     function render(){
       const all=rows();
