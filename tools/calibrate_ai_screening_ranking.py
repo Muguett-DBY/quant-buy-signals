@@ -21,6 +21,7 @@ from tools.ai_screening_contract import (
     LOCAL_REVIEW_MODELS,
     LOCAL_OPENCODE_MODELS,
     REVIEW_SCHEMA_VERSION,
+    _RULE_REASON_LEAK_RE,
     candidate_identity_sha256,
     decision_text_conflicts,
     native_company_research_profile_matches,
@@ -28,6 +29,19 @@ from tools.ai_screening_contract import (
     validate_review,
 )
 from tools.ai_quantitative_facts import has_numeric_fact
+
+
+# The Pages reader has a deliberately broad release-boundary check so a
+# search snippet cannot masquerade as an AI reason.  Keep the local projection
+# aligned with that check while leaving the stricter research-contract regex
+# unchanged for native company-research artifacts.
+_RELEASE_RULE_REASON_RE = re.compile(
+    _RULE_REASON_LEAK_RE.pattern
+    + r"|(?:已|未|尚未)触发|(?:接近|尚未|未|已)?达标|"
+    + r"候选(?:池|来源)|估值买入区|强周期底部|长坡厚[雪学]|可持续高增长|两热一冷|"
+    + r"年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]",
+    re.IGNORECASE,
+)
 
 
 def _action_safe_summary(summary: str, action: str) -> str:
@@ -884,6 +898,13 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         model_strengths if native_company_research else list(dict.fromkeys([*model_strengths, *claim_strengths]))[:8]
     )
     risk_flags = [str(value)[:240] for value in (source.get("risk_flags") or []) if str(value).strip()][:8]
+    if not native_company_research:
+        # Search snippets occasionally repeat the deterministic pool language
+        # (for example “入池”) even though the underlying financial fact is
+        # valid.  Keep the fact in claims, but never expose that admission
+        # wording as an AI reason; the Pages reader rejects it by contract.
+        strengths = [value for value in strengths if not _RELEASE_RULE_REASON_RE.search(value)]
+        risk_flags = [value for value in risk_flags if not _RELEASE_RULE_REASON_RE.search(value)]
     if not risk_flags and not native_company_research:
         risk_flags = ["当前排序沿用已完成的 AI 复核摘要，尚未对所有候选重新发起外部检索"]
     if freshness["status"] != "current_or_recent" and not native_company_research:
@@ -925,6 +946,8 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     if not independent_company_research:
         summary = f"AI买入吸引力 {score:.1f} 分（{source_note}；{freshness['note']}）。{summary}"
     summary = _action_safe_summary(summary, action)
+    if not native_company_research:
+        summary = normalise_decision_text(_RELEASE_RULE_REASON_RE.sub("", summary))
     quality_reasons = quality_gate["reasons"]
     if quality_reasons:
         reason_text = "；".join(str(reason).rstrip("。；") for reason in quality_reasons[:3])
