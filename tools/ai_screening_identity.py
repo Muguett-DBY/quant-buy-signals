@@ -168,8 +168,14 @@ def sanitise_review_identity(review: Mapping[str, Any], security_code: str) -> t
                     stats["removed_cross_company_text_count"] += context_removed
                     if context:
                         stats["cleaned_cross_company_text_count"] += 1
-            item["statement"] = statement
-            item["source_context"] = context
+            if isinstance(claim.get("statement"), str):
+                item["statement"] = statement
+            else:
+                item.pop("statement", None)
+            if isinstance(raw_context, str):
+                item["source_context"] = context
+            else:
+                item.pop("source_context", None)
             if statement:
                 new_claims.append(item)
             elif statement_removed:
