@@ -29,6 +29,7 @@ from tools.ai_screening_contract import (
     validate_review,
 )
 from tools.ai_quantitative_facts import has_numeric_fact
+from tools.ai_screening_identity import sanitise_review_identity, sanitise_text
 
 
 # The Pages reader has a deliberately broad release-boundary check so a
@@ -783,13 +784,52 @@ def _calibration_adjustments(
     }
 
 
-def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[str, Any]:
-    source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
+def _review(
+    packet: Mapping[str, Any],
+    market_as_of: str | None = None,
+    sanitization_stats: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    raw_source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
+    security_code = str(packet.get("security_code") or "")
+    source, identity_stats = sanitise_review_identity(raw_source, security_code)
+    if sanitization_stats is not None:
+        for key, value in identity_stats.items():
+            sanitization_stats[key] = sanitization_stats.get(key, 0) + value
+    # The quality gate reads the generation-bound context as well as the AI
+    # prose.  Keep that input identity-bound without altering the published
+    # deterministic packet.
+    review_packet = dict(packet)
+    review_packet["ai_review"] = source
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else None
+    if context is not None:
+        clean_context = dict(context)
+        for field in ("quantitative_facts", "key_strengths", "risk_flags"):
+            values = context.get(field)
+            if not isinstance(values, list):
+                continue
+            clean_values: list[str] = []
+            for value in values:
+                if not isinstance(value, str):
+                    continue
+                cleaned_value, removed, _ = sanitise_text(value, security_code)
+                if removed:
+                    if sanitization_stats is not None:
+                        sanitization_stats["removed_cross_company_text_count"] = (
+                            sanitization_stats.get("removed_cross_company_text_count", 0) + removed
+                        )
+                        if cleaned_value:
+                            sanitization_stats["cleaned_cross_company_text_count"] = (
+                                sanitization_stats.get("cleaned_cross_company_text_count", 0) + 1
+                            )
+                if cleaned_value:
+                    clean_values.append(cleaned_value)
+            clean_context[field] = clean_values
+        review_packet["company_context"] = clean_context
     native_company_research = native_company_research_profile_matches(source)
     verdict = str(source.get("verdict") or "needs_review")
     freshness = _freshness(source, market_as_of)
-    score = _calibrated_score(packet, verdict, market_as_of)
-    quality_gate = _quality_gate(packet, source)
+    score = _calibrated_score(review_packet, verdict, market_as_of)
+    quality_gate = _quality_gate(review_packet, source)
     web_verified = _web_search_verified(source)
     source_action = str(source.get("ai_action") or "")
     if source_action == "avoid" or verdict == "misclassified":
@@ -830,7 +870,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     elif action in {"avoid", "insufficient_evidence"}:
         score = min(score, 49.0)
     calibration_adjustments = _calibration_adjustments(
-        packet,
+        review_packet,
         verdict=verdict,
         action=action,
         final_score=score,
@@ -864,7 +904,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         str(value)[:240] for value in (source.get("key_strengths") or []) if isinstance(value, str) and value.strip()
     ]
     raw_quantitative = source.get("quantitative_facts") if isinstance(source.get("quantitative_facts"), list) else []
-    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    context = review_packet.get("company_context") if isinstance(review_packet.get("company_context"), Mapping) else {}
     context_quantitative = (
         context.get("quantitative_facts") if isinstance(context.get("quantitative_facts"), list) else []
     )
@@ -1080,10 +1120,19 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
     review_mode = str(source.get("review_mode") or "")
     company_research_review = review_mode == "opencode_native_company_research_review"
     output_packets: list[dict[str, Any]] = []
+    identity_sanitization = {
+        "removed_cross_company_claim_count": 0,
+        "removed_cross_company_text_count": 0,
+        "cleaned_cross_company_text_count": 0,
+    }
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("packet is not an object")
-        review = _review(packet, str(source.get("market_as_of") or ""))
+        review = _review(
+            packet,
+            str(source.get("market_as_of") or ""),
+            sanitization_stats=identity_sanitization,
+        )
         if validate_review(
             review,
             require_company_research_fields=company_research_review,
@@ -1106,11 +1155,16 @@ def calibrate(source_path: Path, output_path: Path) -> dict[str, int]:
             ranking_source = "local-codex-review-v1"
     else:
         ranking_source = "opencode-web-search-review-calibrated-independent-buy-v8"
+    publication_sanitization = dict(source.get("publication_sanitization") or {})
+    publication_sanitization.setdefault("contract_version", 2)
+    for key, value in identity_sanitization.items():
+        publication_sanitization[key] = int(publication_sanitization.get(key, 0) or 0) + value
     output = {
         **source,
         "schema_version": REVIEW_SCHEMA_VERSION,
         "ranking_source": ranking_source,
         "full_coverage_final_recommendation": requested_full_coverage and complete_queue,
+        "publication_sanitization": publication_sanitization,
         "packets": output_packets,
     }
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

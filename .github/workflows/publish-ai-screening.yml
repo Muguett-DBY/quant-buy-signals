@@ -14,6 +14,9 @@ on:
       - tools/ai_screening_contract.py
       - tools/validate_ai_screening_public.py
       - tools/calibrate_ai_screening_ranking.py
+      - tools/ai_screening_identity.py
+      - tools/audit_ai_screening_full.py
+      - tools/sanitize_ai_screening_identity.py
       - tools/build_codex_luna_review.py
       - tools/ai_company_research_knowledge.md
       - tools/ai_screening_dual_channel_contract.py
@@ -21,6 +24,7 @@ on:
       - tests/test_ai_screening_contract.py
       - tests/test_validate_ai_screening_public.py
       - tests/test_ai_screening_release_contract.py
+      - tests/test_ai_screening_identity_audit.py
       - tests/test_build_codex_luna_review.py
       - tests/test_ai_screening_dual_channel_contract.py
       - tests/test_sanitize_codex_luna_reviews.py
@@ -63,6 +67,7 @@ jobs:
             tests/test_ai_screening_contract.py \
             tests/test_validate_ai_screening_public.py \
             tests/test_ai_screening_release_contract.py \
+            tests/test_ai_screening_identity_audit.py \
             tests/test_build_codex_luna_review.py \
             tests/test_ai_screening_dual_channel_contract.py \
             tests/test_sanitize_codex_luna_reviews.py \
@@ -93,6 +98,11 @@ jobs:
             --artifact "${seed}" \
             --expected-generation "${generation}" \
             --expected-market-as-of "${market_as_of}"
+          python -m tools.audit_ai_screening_full \
+            --artifact "${seed}" \
+            --expected-generation "${generation}" \
+            --expected-market-as-of "${market_as_of}" \
+            --expected-count "$(jq -er '.candidate_total' "${seed}")"
           jq -e '
             .review_mode == "local_codex_review"
             and .full_coverage_final_recommendation == true
