@@ -152,13 +152,23 @@ jobs:
         run: |
           set -euo pipefail
           generation="${{ steps.preflight.outputs.generation }}"
-          response="$(curl --fail --silent --show-error "https://quant.custard.top/api/ai-screening?generation_id=${generation}")"
-          jq -e --arg generation "${generation}" '
-            .snapshot_generation == $generation
-            and .review_mode == "local_codex_review"
-            and .full_coverage_final_recommendation == true
-            and .reviewed_count == .candidate_total
-            and .type_pair_reviewed_count == .type_pair_candidate_total
-            and .type_pair_unreviewed_count == 0
-            and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
-          ' <<< "${response}" >/dev/null
+          endpoint="https://quant.custard.top/api/ai-screening?generation_id=${generation}"
+          for attempt in 1 2 3 4 5 6; do
+            if response="$(curl --fail --silent --show-error "${endpoint}" 2>/dev/null)" && jq -e --arg generation "${generation}" '
+              .snapshot_generation == $generation
+              and .review_mode == "local_codex_review"
+              and .full_coverage_final_recommendation == true
+              and .reviewed_count == .candidate_total
+              and .type_pair_reviewed_count == .type_pair_candidate_total
+              and .type_pair_unreviewed_count == 0
+              and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+            ' <<< "${response}" >/dev/null; then
+              echo "Published AI API verified on attempt ${attempt}."
+              exit 0
+            fi
+            if [[ "${attempt}" -lt 6 ]]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "Published AI API did not become generation-bound and contract-valid after six attempts." >&2
+          exit 1
