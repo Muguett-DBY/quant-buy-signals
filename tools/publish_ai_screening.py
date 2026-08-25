@@ -678,6 +678,58 @@ def _public_review(
         "freshness_note": _text(review.get("freshness_note"), 180),
         **_public_company_research(review, claims),
     }
+    # Keep the independent calibration visible for the legacy/local review
+    # path as well.  Without this envelope a 69/89/95 number looks like an
+    # opaque model assertion and the user cannot see why valuation or current
+    # cash-flow evidence changed the action.
+    components = review.get("score_components")
+    if isinstance(components, Mapping):
+        public_review["score_components"] = {
+            field: float(components[field])
+            for field in ("risk_adjusted_expected_return", "evidence_confidence")
+            if components.get(field) not in (None, "")
+        }
+    adjustments = review.get("calibration_adjustments")
+    if isinstance(adjustments, Mapping):
+        public_review["calibration_adjustments"] = {
+            key: adjustments[key]
+            for key in (
+                "raw_score",
+                "source_penalty",
+                "freshness_penalty",
+                "pre_band_score",
+                "action_band_min",
+                "action_band_max",
+                "final_score",
+                "source_quality",
+                "freshness_status",
+                "band_clamped",
+                "verdict",
+                "quality_gate_version",
+                "quality_gate_applied",
+                "quality_penalty",
+                "quality_cap",
+                "quality_hard_block",
+                "quality_reasons",
+                "quality_metrics",
+            )
+            if key in adjustments
+        }
+    quality_gate = review.get("quality_gate")
+    if isinstance(quality_gate, Mapping):
+        public_review["quality_gate"] = {
+            "version": _text(quality_gate.get("version"), 80),
+            "applied": quality_gate.get("applied") is True,
+            "penalty": float(quality_gate.get("penalty", 0.0) or 0.0),
+            "cap": float(quality_gate["cap"]) if quality_gate.get("cap") not in (None, "") else None,
+            "hard_block": quality_gate.get("hard_block") is True,
+            "reasons": [_text(value, 240) for value in quality_gate.get("reasons", [])[:8]],
+            "metrics": {
+                str(key): float(value) if isinstance(value, (int, float)) else value
+                for key, value in (quality_gate.get("metrics") or {}).items()
+                if value is not None
+            },
+        }
     if require_company_research_fields:
         public_review.update(
             {
@@ -1188,6 +1240,19 @@ def build_artifact(
         "ranking_version": RANKING_VERSION,
         "freshness_counts": dict(sorted(freshness_counts.items())),
         "ranking_source": _text(source.get("ranking_source"), 120),
+        # Preserve the release-boundary sanitization ledger so the website
+        # artifact records which search snippets/claims were discarded before
+        # scoring.  This is audit metadata only; it never changes a verdict.
+        **(
+            {
+                "publication_sanitization": {
+                    str(key): value
+                    for key, value in source["publication_sanitization"].items()
+                }
+            }
+            if isinstance(source.get("publication_sanitization"), Mapping)
+            else {}
+        ),
         "source_audit": source_audit,
         "packets": public_packets,
     }

@@ -1363,10 +1363,14 @@ function aiScreeningPageResponse(request){
         ["原始 AI 分",adjustments?.raw_score,"分"],
         ["来源扣分",adjustments?.source_penalty,"分"],
         ["财务时效扣分",adjustments?.freshness_penalty,"分"],
+        ["财务质量复核扣分",adjustments?.quality_penalty??review?.quality_gate?.penalty,"分"],
         ["校准后最终分",adjustments?.final_score??review.buy_attractiveness_score,"分"],
       ].filter(item=>item[1]!==null&&item[1]!==undefined&&Number.isFinite(Number(item[1])));
       const band=adjustments?'<div class="research-item"><b>动作分数区间</b>'+esc(compactNumber(adjustments.action_band_min))+"—"+esc(compactNumber(adjustments.action_band_max))+" 分；"+(adjustments.band_clamped?"已执行区间截断":"未执行区间截断")+"</div>":"";
-      return '<div class="section"><h3>AI分数构成与校准</h3><div class="score-components">'+values.map(item=>'<div class="score-component"><b>'+item[0]+"</b>"+esc(compactNumber(item[1]))+item[2]+"</div>").join("")+band+"</div></div>";
+      const gate=review?.quality_gate&&typeof review.quality_gate==="object"?review.quality_gate:{};
+      const reasons=Array.isArray(gate.reasons)?gate.reasons.filter(Boolean):[];
+      const gateMarkup=reasons.length?'<div class="research-item"><b>财务复核门槛</b>'+(gate.hard_block?"已触发：":"提示：")+esc(reasons.join("；"))+"</div>":"";
+      return '<div class="section"><h3>AI分数构成与校准</h3><div class="score-components">'+values.map(item=>'<div class="score-component"><b>'+item[0]+"</b>"+esc(compactNumber(item[1]))+item[2]+"</div>").join("")+band+gateMarkup+"</div></div>";
     }
     function searchFindings(review){
       const findings=Array.isArray(review?.search_findings)?review.search_findings:[];

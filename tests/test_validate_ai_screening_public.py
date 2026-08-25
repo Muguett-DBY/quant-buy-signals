@@ -244,7 +244,7 @@ def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() ->
 
     assert result["candidate_total"] == 998
     assert result["searched"] == 998
-    assert result["actions"] == {"avoid": 629, "priority_buy": 11, "watchlist": 358}
+    assert result["actions"] == {"avoid": 842, "priority_buy": 1, "watchlist": 155}
     assert payload["publication_sanitization"]["removed_future_claim_count"] == 10
     assert payload["publication_sanitization"]["cleaned_search_metadata_count"] > 2000
     raw_search_metadata = re.compile(r"turn\w*(?:search|view)|\[wordlim:|Published:|Crawled:", re.IGNORECASE)
@@ -258,8 +258,8 @@ def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() ->
 
     tar = next(packet for packet in payload["packets"] if packet["security_code"] == "002233")
     assert tar["ai_review"]["ai_action"] == "watchlist"
-    assert tar["ai_review"]["buy_attractiveness_score"] == 54.0
-    assert "简化自由现金流为 -0.14亿元" in tar["ai_review"]["summary"]
+    assert tar["ai_review"]["buy_attractiveness_score"] == 59.0
+    assert "当前先观察" in tar["ai_review"]["summary"]
 
 
 @pytest.mark.parametrize(

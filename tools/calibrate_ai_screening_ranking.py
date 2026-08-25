@@ -5,8 +5,8 @@ claims for every candidate.  This small calibration layer adds the numeric
 ranking requested by the website without inventing new company facts.  The AI
 opinion and the deterministic seven-type result are intentionally separate:
 the latter remains visible as candidate context, but never changes the AI
-score or blocks an AI action.  Only source provenance and report freshness are
-used as evidence-quality adjustments.
+score or blocks an AI action.  Source provenance, report freshness, and a
+facts-only financial-quality gate are used as evidence-quality adjustments.
 """
 
 from __future__ import annotations
@@ -39,7 +39,21 @@ def _action_safe_summary(summary: str, action: str) -> str:
         # the displayed action unambiguous for the three-way UI.
         summary = summary.replace("优先观察标的", "优先候选标的").replace("观察标的", "候选标的")
     if action == "watchlist":
+        summary = re.sub(
+            r"(?:当前)?结论\s*[:：]\s*(?:建议买入|建议买|可买|可以买)",
+            "当前结论：观察（暂不建议买）",
+            summary,
+        )
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
+        summary = re.sub(r"(?<!不)(?:当前)?可谨慎分批买入", "当前先观察，暂不建议买入", summary)
+        summary = re.sub(r"(?<!不)建议买入", "暂不建议买入", summary)
+        summary = re.sub(r"(?<!不)建议买", "暂不建议买", summary)
+        summary = re.sub(r"(?<!不)可以买", "暂不构成买点", summary)
+    elif action == "avoid":
+        summary = re.sub(r"(?<!不)(?:当前)?可谨慎分批买入", "当前不建议买入", summary)
+        summary = re.sub(r"(?<!不)建议买入", "不建议买入", summary)
+        summary = re.sub(r"(?<!不)建议买", "不建议买", summary)
+        summary = re.sub(r"(?<!不)可以买", "暂不构成买点", summary)
     if action == "priority_buy" or not decision_text_conflicts(action, summary):
         return summary
     for old, new in (
@@ -51,6 +65,8 @@ def _action_safe_summary(summary: str, action: str) -> str:
         ("值得买", "暂不建议买"),
         ("可以买", "暂不构成买点"),
         ("可买", "暂不可买"),
+        ("当前可谨慎分批买入", "当前先观察，暂不建议买入"),
+        ("当前可买入", "当前先观察，暂不建议买入"),
     ):
         summary = summary.replace(old, new)
     summary = normalise_decision_text(summary)
@@ -74,6 +90,19 @@ def _action_safe_summary(summary: str, action: str) -> str:
             )
         )
     return summary
+
+
+def _identity_safe_summary(summary: str, packet: Mapping[str, Any]) -> str:
+    """Keep a standalone card self-identifying when model prose omitted it."""
+
+    code = str(packet.get("security_code") or "").strip()
+    name = str(packet.get("name") or "").strip()
+    if not name:
+        return summary
+    if (code and code in summary) or (name and name in summary):
+        return summary
+    identity = f"{name}（{code}）" if name and code else name or code or "本公司"
+    return f"{identity}：{summary}" if summary else f"{identity}：本次暂无可读复核摘要。"
 
 
 def _number(value: Any) -> float | None:
@@ -174,6 +203,285 @@ _FORECAST_MARKERS = re.compile(
     re.IGNORECASE,
 )
 _YEAR_RE = re.compile(r"(?<!\d)(20(?:1[5-9]|2[0-9]))(?!\d)")
+
+# The model's raw score is useful as a starting opinion, but it is not a
+# financial quality check.  In particular, a capped 95 can hide a very high
+# PB, a weak latest report, or a cash-flow reversal.  These helpers extract
+# only facts already present in the generation-bound packet/review and apply a
+# small, deterministic second pass before an opinion reaches the public score.
+_QUALITY_GATE_VERSION = "financial-quality-gate-v1"
+_QUALITY_NUMBER = r"[-+]?\d+(?:\.\d+)?"
+_QUALITY_REPORT_PREFIX = r"2026\s*年(?:中报|半年报|一季报|三季报)"
+
+
+def _quality_text(packet: Mapping[str, Any], source: Mapping[str, Any]) -> str:
+    values: list[str] = []
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    values.extend(str(value) for value in context.get("quantitative_facts", []) if isinstance(value, str))
+    for field in ("summary", "key_strengths", "risk_flags", "quantitative_facts"):
+        raw = source.get(field)
+        if isinstance(raw, list):
+            values.extend(str(value) for value in raw if isinstance(value, str))
+        elif isinstance(raw, str):
+            values.append(raw)
+    claims = source.get("claims")
+    if isinstance(claims, list):
+        values.extend(
+            str(claim.get("statement"))
+            for claim in claims
+            if isinstance(claim, Mapping) and isinstance(claim.get("statement"), str)
+        )
+    return "；".join(value for value in values if value.strip())
+
+
+def _quality_float(pattern: str, text: str, *, flags: int = 0) -> float | None:
+    match = re.search(pattern, text, flags)
+    if not match:
+        return None
+    return _number(match.group(1).replace("−", "-"))
+
+
+def _quality_growth(
+    text: str,
+    label: str,
+    *,
+    period_prefix: str | None = None,
+    allow_fallback: bool = True,
+) -> float | None:
+    """Read a signed YoY percentage, treating ``下降`` as negative."""
+
+    prefix = period_prefix or _QUALITY_REPORT_PREFIX
+    pattern = (
+        rf"{prefix}[^。\n]{{0,220}}?{label}[^。\n]{{0,80}}?"
+        rf"(?:同比\s*)?(?:(增长|上升|下降|减少)\s*)?({_QUALITY_NUMBER})%"
+    )
+    match = re.search(pattern, text)
+    if not match and allow_fallback:
+        # Some source snippets omit the report prefix but still bind the
+        # percentage to the named metric.  Keep the fallback narrow so that
+        # an unrelated percentage cannot become a current-report signal.
+        match = re.search(
+            rf"{label}[^。\n]{{0,80}}?(?:同比\s*)?(?:(增长|上升|下降|减少)\s*)?({_QUALITY_NUMBER})%",
+            text,
+        )
+    if not match:
+        return None
+    value = _number(match.group(2).replace("−", "-"))
+    if value is None:
+        return None
+    if match.group(1) in {"下降", "减少"} and value > 0:
+        return -value
+    return value
+
+
+def _quality_metrics(packet: Mapping[str, Any], source: Mapping[str, Any]) -> dict[str, float | None]:
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    text = _quality_text(packet, source)
+
+    def context_number(field: str) -> float | None:
+        value = _number(context.get(field))
+        return value if value is not None and value > 0 else None
+
+    pe = context_number("pe")
+    pb = context_number("pb")
+    if pe is None:
+        pe = _quality_float(rf"\bPE\s*({_QUALITY_NUMBER})\s*倍", text, flags=re.IGNORECASE)
+    if pb is None:
+        pb = _quality_float(rf"\bPB\s*({_QUALITY_NUMBER})\s*倍", text, flags=re.IGNORECASE)
+    pe_median = _quality_float(
+        rf"\bPE\s*{_QUALITY_NUMBER}\s*倍[^。；\n]{{0,36}}?同业中位数\s*({_QUALITY_NUMBER})\s*倍",
+        text,
+        flags=re.IGNORECASE,
+    )
+    pb_median = _quality_float(
+        rf"\bPB\s*{_QUALITY_NUMBER}\s*倍[^。；\n]{{0,36}}?同业中位数\s*({_QUALITY_NUMBER})\s*倍",
+        text,
+        flags=re.IGNORECASE,
+    )
+    roic = _quality_float(rf"ROIC[^0-9+\-−]*({_QUALITY_NUMBER})%", text, flags=re.IGNORECASE)
+    fcf_margin = _quality_float(rf"自由现金流率\s*({_QUALITY_NUMBER})%", text)
+    return {
+        "pe": pe,
+        "pb": pb,
+        "pe_median": pe_median,
+        "pb_median": pb_median,
+        "pb_stretch_ratio": pb / pb_median if pb is not None and pb_median and pb_median > 0 else None,
+        "roic": roic,
+        "fcf_margin": fcf_margin,
+        "annual_profit_growth": _quality_growth(
+            text,
+            "归母净利润",
+            period_prefix=r"2025\s*年",
+            allow_fallback=False,
+        ),
+        "interim_revenue_growth": _quality_growth(text, "营业收入", allow_fallback=False),
+        "interim_profit_growth": _quality_growth(text, "归母净利润", allow_fallback=False),
+        "interim_ocf_growth": _quality_growth(text, "经营活动现金流净额", allow_fallback=False),
+        "interim_fcf_growth": _quality_growth(text, "简化自由现金流", allow_fallback=False),
+    }
+
+
+def _quality_gate(packet: Mapping[str, Any], source: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply an independent, facts-only quality gate to legacy AI reviews.
+
+    Native company-research artifacts already carry a fully linked thesis and
+    their own calibrated score contract.  The gate below is therefore for the
+    legacy/local review path that previously treated a raw model score as a
+    recommendation.  It is intentionally conservative: a missing current
+    report or a material valuation/cash-flow contradiction can demote a buy to
+    observation, while a deterministic rule status never promotes it.
+    """
+
+    if native_company_research_profile_matches(source):
+        return {
+            "version": _QUALITY_GATE_VERSION,
+            "applied": False,
+            "penalty": 0.0,
+            "cap": None,
+            "hard_block": False,
+            "reasons": [],
+            "metrics": {},
+        }
+
+    # The legacy contract also supports deliberately minimal unit-test and
+    # replay packets that contain only claims.  Do not invent a financial gate
+    # for those records; the gate is meaningful only when the packet carries
+    # the generation-bound market snapshot that the live queue provides.
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    has_snapshot = any(
+        _number(context.get(field)) is not None and _number(context.get(field)) > 0
+        for field in ("price", "pe", "pb", "market_cap")
+    )
+    if not has_snapshot:
+        return {
+            "version": _QUALITY_GATE_VERSION,
+            "applied": False,
+            "penalty": 0.0,
+            "cap": None,
+            "hard_block": False,
+            "reasons": [],
+            "metrics": {},
+        }
+
+    metrics = _quality_metrics(packet, source)
+    penalty = 0.0
+    cap: float | None = None
+    hard_reasons: list[str] = []
+    reasons: list[str] = []
+
+    def penalize(points: float, reason: str, *, hard: bool = False) -> None:
+        nonlocal penalty
+        penalty += points
+        reasons.append(reason)
+        if hard:
+            hard_reasons.append(reason)
+
+    pe = metrics["pe"]
+    pb = metrics["pb"]
+    pe_median = metrics["pe_median"]
+    pb_stretch = metrics["pb_stretch_ratio"]
+    roic = metrics["roic"]
+    fcf_margin = metrics["fcf_margin"]
+    annual_profit_growth = metrics["annual_profit_growth"]
+    interim_profit_growth = metrics["interim_profit_growth"]
+    interim_revenue_growth = metrics["interim_revenue_growth"]
+    interim_cashflow_growths = [
+        value for value in (metrics["interim_ocf_growth"], metrics["interim_fcf_growth"]) if value is not None
+    ]
+
+    if pe is not None:
+        if pe > 35:
+            penalize(12.0, f"PE {pe:.2f} 倍已明显偏高，当前盈利兑现不足时安全边际不足。", hard=True)
+        elif pe > 25:
+            penalize(7.0, f"PE {pe:.2f} 倍不低，买入需要更强且可持续的增长证据。", hard=True)
+        if pe_median and pe / pe_median > 1.2:
+            penalize(
+                min(8.0, round((pe / pe_median - 1.2) * 12, 1)),
+                f"PE {pe:.2f} 倍高于同业中位数 {pe_median:.2f} 倍，估值溢价削弱安全边际。",
+                hard=pe / pe_median > 1.5,
+            )
+    if pb is not None:
+        if pb > 5:
+            penalize(10.0, f"PB {pb:.2f} 倍过高，不能只凭盈利增长确认安全边际。", hard=True)
+        elif pb > 4:
+            penalize(6.0, f"PB {pb:.2f} 倍偏高，需要更强的长期资本回报来支撑。")
+        if pb_stretch and pb_stretch > 1.5:
+            penalize(
+                min(10.0, round((pb_stretch - 1.5) * 8, 1)),
+                f"PB 约为同业中位数的 {pb_stretch:.1f} 倍，资产估值溢价偏大。",
+                hard=pb_stretch >= 1.8,
+            )
+    if fcf_margin is not None and fcf_margin < 5:
+        penalize(5.0, f"自由现金流率仅 {fcf_margin:.1f}%，现金回报偏薄。", hard=fcf_margin < 3)
+    if roic is not None and roic < 10:
+        penalize(5.0, f"ROIC 仅 {roic:.2f}%，资本回报尚不足以抵消估值风险。", hard=roic < 5)
+    if annual_profit_growth is not None and annual_profit_growth < 0:
+        penalize(8.0, f"2025 年归母净利润同比下降 {annual_profit_growth:.1f}%。", hard=True)
+    elif annual_profit_growth is not None and annual_profit_growth < 5:
+        penalize(4.0, f"2025 年归母净利润同比仅增长 {annual_profit_growth:.1f}%，增长缓慢。")
+    if interim_profit_growth is not None:
+        if interim_profit_growth < 0:
+            penalize(12.0, f"最新中期归母净利润同比下降 {interim_profit_growth:.1f}%。", hard=True)
+        elif interim_profit_growth < 10:
+            penalize(
+                7.0,
+                f"最新中期归母净利润同比仅增长 {interim_profit_growth:.1f}%，尚未形成强增长确认。",
+                hard=True,
+            )
+        elif interim_profit_growth > 100 and pe is not None and pe > 20:
+            penalize(6.0, "最新中期利润增速超过100%且 PE 仍高，存在低基数或一次性增长风险。", hard=True)
+    if interim_revenue_growth is not None and interim_revenue_growth < 0:
+        penalize(6.0, f"最新中期营业收入同比下降 {interim_revenue_growth:.1f}%。", hard=True)
+    if interim_cashflow_growths:
+        weakest_cashflow = min(interim_cashflow_growths)
+        if weakest_cashflow < 0:
+            penalize(
+                6.0,
+                f"最新中期现金流同比下滑 {weakest_cashflow:.1f}%，现金趋势未确认。",
+                hard=True,
+            )
+    risk_values: list[str] = []
+    for field in ("summary", "risk_flags", "key_strengths"):
+        raw = source.get(field)
+        if isinstance(raw, list):
+            risk_values.extend(str(value) for value in raw if isinstance(value, str))
+        elif isinstance(raw, str):
+            risk_values.append(raw)
+    risk_text = " ".join(risk_values)
+    material_risk = re.search(r"非经常|一次性|股权转让收益|公允价值收益|资产处置收益|资产减值|商誉减值", risk_text)
+    if material_risk:
+        penalize(5.0, "报告摘要含一次性收益或资产减值风险，需剔除非经常因素后再判断。", hard=True)
+
+    # A buy requires a current operating checkpoint.  This prevents a single
+    # annual snapshot or a high raw model score from becoming a next-day buy.
+    source_action = str(source.get("ai_action") or "")
+    if source_action == "priority_buy":
+        if interim_profit_growth is None:
+            penalize(7.0, "缺少最新中期归母净利润同比数据，无法形成当前买入确认。", hard=True)
+        if not interim_cashflow_growths:
+            penalize(5.0, "缺少最新中期现金流同比数据，无法确认利润的现金兑现。", hard=True)
+        if pe is None and pb is None:
+            penalize(8.0, "缺少可用 PE/PB，无法确认买入安全边际。", hard=True)
+
+    if hard_reasons:
+        # A hard contradiction is still an observation rather than an
+        # automatic sell signal, but it must sit visibly below the top of the
+        # observation band; otherwise every downgraded 95-point review ties at
+        # 69 and the page recreates the old false-confidence ranking.
+        cap = 64.0
+    return {
+        "version": _QUALITY_GATE_VERSION,
+        "applied": True,
+        "penalty": round(penalty, 1),
+        "cap": cap,
+        "hard_block": bool(hard_reasons),
+        "reasons": list(dict.fromkeys(reasons))[:8],
+        "metrics": {
+            key: round(value, 3) if isinstance(value, float) else value
+            for key, value in metrics.items()
+            if value is not None
+        },
+    }
 
 
 def _fact_dimension_kind(claim: Mapping[str, Any]) -> str:
@@ -352,6 +660,7 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     source_quality = _source_quality(source)
     freshness = _freshness(source, market_as_of)
+    quality_gate = _quality_gate(packet, source)
     model_score = _number(source.get("buy_attractiveness_score"))
     source_penalty = {
         "verified_https": 0.0,
@@ -363,7 +672,14 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str
         # The model score remains the ranking source.  Candidate status is
         # deliberately absent here: a triggered rule may be downgraded by AI,
         # and a conditional/near-threshold candidate may be upgraded by AI.
-        score = model_score - source_penalty - float(freshness["penalty"])
+        score = (
+            model_score
+            - source_penalty
+            - float(freshness["penalty"])
+            - float(quality_gate["penalty"])
+        )
+        if quality_gate["cap"] is not None:
+            score = min(score, float(quality_gate["cap"]))
         if str(source.get("ai_action") or "") in {"avoid", "insufficient_evidence"} or verdict == "misclassified":
             return round(max(0.0, min(49.0, score)), 1)
         return round(max(0.0, min(100.0, score)), 1)
@@ -388,6 +704,9 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str
     else:
         score = max(20.0, min(58.0, 30.0 - penalty))
 
+    score -= float(quality_gate["penalty"])
+    if quality_gate["cap"] is not None:
+        score = min(score, float(quality_gate["cap"]))
     return round(max(0.0, min(100.0, score - source_penalty - float(freshness["penalty"]))), 1)
 
 
@@ -404,6 +723,7 @@ def _calibration_adjustments(
     source = packet.get("ai_review") if isinstance(packet.get("ai_review"), Mapping) else {}
     source_quality = _source_quality(source)
     freshness = _freshness(source, market_as_of)
+    quality_gate = _quality_gate(packet, source)
     raw_score = _number(source.get("buy_attractiveness_score"))
     source_penalty = {
         "verified_https": 0.0,
@@ -417,7 +737,17 @@ def _calibration_adjustments(
         raw_score = None
         pre_band_score = None
     else:
-        pre_band_score = round(raw_score - source_penalty - float(freshness["penalty"]), 1)
+        pre_band_score = round(
+            raw_score
+            - source_penalty
+            - float(freshness["penalty"])
+            - float(quality_gate["penalty"]),
+            1,
+        )
+        # Keep this as the score before any hard quality cap.  The cap is a
+        # separate, explainable decision and ``band_clamped`` must show it;
+        # otherwise the UI would claim no post-model clamp happened while a
+        # hard financial gate actually lowered the published score.
     if action == "priority_buy":
         band_min, band_max = 70.0, 100.0
     elif action == "watchlist":
@@ -437,6 +767,13 @@ def _calibration_adjustments(
         "freshness_status": freshness["status"],
         "band_clamped": abs(float(final_score) - unclamped) > 0.05,
         "verdict": verdict,
+        "quality_gate_version": quality_gate["version"],
+        "quality_gate_applied": quality_gate["applied"],
+        "quality_penalty": quality_gate["penalty"],
+        "quality_cap": quality_gate["cap"],
+        "quality_hard_block": quality_gate["hard_block"],
+        "quality_reasons": quality_gate["reasons"],
+        "quality_metrics": quality_gate["metrics"],
     }
 
 
@@ -446,6 +783,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     verdict = str(source.get("verdict") or "needs_review")
     freshness = _freshness(source, market_as_of)
     score = _calibrated_score(packet, verdict, market_as_of)
+    quality_gate = _quality_gate(packet, source)
     web_verified = _web_search_verified(source)
     source_action = str(source.get("ai_action") or "")
     if source_action == "avoid" or verdict == "misclassified":
@@ -454,6 +792,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         verdict == "confirmed"
         and source_action == "priority_buy"
         and score >= 70
+        and not quality_gate["hard_block"]
         and (
             freshness["status"] == "current_or_recent"
             # Local OpenCode Go reviews are explicitly advisory and may be
@@ -586,8 +925,17 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     if not independent_company_research:
         summary = f"AI买入吸引力 {score:.1f} 分（{source_note}；{freshness['note']}）。{summary}"
     summary = _action_safe_summary(summary, action)
+    quality_reasons = quality_gate["reasons"]
+    if quality_reasons:
+        reason_text = "；".join(str(reason).rstrip("。；") for reason in quality_reasons[:3])
+        summary = f"评分复核：{reason_text}。{summary}"
+        risk_flags = list(dict.fromkeys([*quality_reasons, *risk_flags]))[:8]
+    elif action == "priority_buy":
+        summary = f"评分复核：估值、最新盈利和现金流未触发独立否决门槛。{summary}"
     if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
         risk_flags.insert(0, source_note)
+    if not native_company_research:
+        summary = _identity_safe_summary(summary, packet)
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
     recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     recommendation_label = (
@@ -600,6 +948,25 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         else "不建议"
     )
     recommended_action = "keep" if action == "priority_buy" else "demote" if action == "avoid" else "manual_review"
+    source_components = source.get("score_components") if isinstance(source.get("score_components"), Mapping) else {}
+    evidence_confidence = (
+        _number(source_components.get("evidence_confidence")) if native_company_research else None
+    )
+    if evidence_confidence is None:
+        evidence_confidence = max(
+            20.0,
+            min(
+                95.0,
+                80.0
+                - float(calibration_adjustments["source_penalty"])
+                - float(calibration_adjustments["freshness_penalty"])
+                - min(20.0, float(quality_gate["penalty"]) * 0.5),
+            ),
+        )
+    score_components = {
+        "risk_adjusted_expected_return": round(float(score), 1),
+        "evidence_confidence": round(float(evidence_confidence), 1),
+    }
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
@@ -608,7 +975,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         "recommended_action": recommended_action,
         "buy_attractiveness_score": score,
         **({"economic_category": source.get("economic_category")} if "economic_category" in source else {}),
-        **({"score_components": source.get("score_components")} if "score_components" in source else {}),
+        "score_components": score_components,
         "calibration_adjustments": calibration_adjustments,
         "ai_action": action,
         "final_category": _final_category(action),
@@ -620,6 +987,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
         ),
         "confidence": confidence,
         "summary": summary,
+        "quality_gate": quality_gate,
         "key_strengths": strengths,
         **({"quantitative_facts": quantitative_facts} if quantitative_facts else {}),
         "risk_flags": risk_flags,
