@@ -686,12 +686,7 @@ def _calibrated_score(packet: Mapping[str, Any], verdict: str, market_as_of: str
         # The model score remains the ranking source.  Candidate status is
         # deliberately absent here: a triggered rule may be downgraded by AI,
         # and a conditional/near-threshold candidate may be upgraded by AI.
-        score = (
-            model_score
-            - source_penalty
-            - float(freshness["penalty"])
-            - float(quality_gate["penalty"])
-        )
+        score = model_score - source_penalty - float(freshness["penalty"]) - float(quality_gate["penalty"])
         if quality_gate["cap"] is not None:
             score = min(score, float(quality_gate["cap"]))
         if str(source.get("ai_action") or "") in {"avoid", "insufficient_evidence"} or verdict == "misclassified":
@@ -752,10 +747,7 @@ def _calibration_adjustments(
         pre_band_score = None
     else:
         pre_band_score = round(
-            raw_score
-            - source_penalty
-            - float(freshness["penalty"])
-            - float(quality_gate["penalty"]),
+            raw_score - source_penalty - float(freshness["penalty"]) - float(quality_gate["penalty"]),
             1,
         )
         # Keep this as the score before any hard quality cap.  The cap is a
@@ -972,9 +964,7 @@ def _review(packet: Mapping[str, Any], market_as_of: str | None = None) -> dict[
     )
     recommended_action = "keep" if action == "priority_buy" else "demote" if action == "avoid" else "manual_review"
     source_components = source.get("score_components") if isinstance(source.get("score_components"), Mapping) else {}
-    evidence_confidence = (
-        _number(source_components.get("evidence_confidence")) if native_company_research else None
-    )
+    evidence_confidence = _number(source_components.get("evidence_confidence")) if native_company_research else None
     if evidence_confidence is None:
         evidence_confidence = max(
             20.0,

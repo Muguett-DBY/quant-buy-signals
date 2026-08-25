@@ -1244,12 +1244,7 @@ def build_artifact(
         # artifact records which search snippets/claims were discarded before
         # scoring.  This is audit metadata only; it never changes a verdict.
         **(
-            {
-                "publication_sanitization": {
-                    str(key): value
-                    for key, value in source["publication_sanitization"].items()
-                }
-            }
+            {"publication_sanitization": {str(key): value for key, value in source["publication_sanitization"].items()}}
             if isinstance(source.get("publication_sanitization"), Mapping)
             else {}
         ),
