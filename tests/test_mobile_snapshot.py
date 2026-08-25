@@ -337,6 +337,24 @@ def test_company_detail_v2_publishes_all_public_type_meta_without_growing_catalo
     assert "同行样本覆盖八成" not in catalogue_text
 
 
+def test_catalogue_uses_explicit_label_when_no_complete_diagnostic_framework():
+    row = {
+        "code": "000001",
+        "name": "测试公司",
+        "industry": "SOFTWARE",
+        "types": {type_key: {"status": "not_applicable"} for type_key in mobile_snapshot._TYPE_KEYS},
+        "buy_types": [],
+        "primary_type": "",
+        "primary_label": "无触发（不买）",
+    }
+
+    company = mobile_snapshot._catalog_company(row)
+
+    assert company["diagnostic_type"] == ""
+    assert company["diagnostic_score"] is None
+    assert company["diagnostic_label"] == "无可完整诊断框架"
+
+
 def test_company_detail_never_infers_an_annual_range_from_a_count_or_trade_date():
     row = _scores().iloc[0].to_dict()
     row["source_trade_date"] = "2026-07-17"

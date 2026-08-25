@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
@@ -26,13 +27,92 @@ _COMPANY_CODE_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_SEARCH_METADATA_RE = re.compile(
+    r"\s*\(?\s*turn[\w-]+\s*"
+    r"(?:\[wordlim:\s*[^\]]+\]\s*)?"
+    r"(?:Published:\s*[^;；]*[;；]\s*)?"
+    r"(?:Crawled:\s*[^;；]*[;；]\s*)?",
+    re.IGNORECASE,
+)
+_SEARCH_METADATA_TOKEN_RE = re.compile(
+    r"\bturn[\w-]+\s*(?:\[wordlim:\s*[^\]]+\]\s*)?"
+    r"(?:Published:\s*[^;；]*[;；]\s*)?"
+    r"(?:Crawled:\s*[^;；]*[;；]\s*)?",
+    re.IGNORECASE,
+)
+_SEARCH_RESULT_DECISION_RE = re.compile(r"本次公司特定来源\s*\d+\s*条[。；;]?|结论\s*[:：]\s*(?:建议买|观察|不建议)[。；;]?")
+_FUTURE_DATE_RE = re.compile(
+    r"(?<!\d)(20\d\d)[-/年](\d{1,2})(?:[-/月](\d{1,2})日?)?"
+)
 _SOURCE_MARKERS = (
     "联网事实（Codex web_search",
     "联网资料摘要：",
     "联网事实(Codex web_search",
     "公司公开资料：",
     "公司公开资料:",
+    "公开资料：",
+    "公开资料:",
+    "公开资料摘要：",
+    "公开资料摘要:",
 )
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _future_dates(value: Any, cutoff: date | None) -> list[date]:
+    if cutoff is None:
+        return []
+    result: list[date] = []
+    for match in _FUTURE_DATE_RE.finditer(str(value or "")):
+        try:
+            parsed = date(int(match.group(1)), int(match.group(2)), int(match.group(3) or 1))
+        except ValueError:
+            continue
+        if parsed > cutoff:
+            result.append(parsed)
+    return result
+
+
+def _without_search_metadata(value: Any) -> str:
+    """Keep the useful snippet while removing raw tool citation bookkeeping."""
+
+    text = str(value or "").strip()
+    text = _SEARCH_METADATA_RE.sub(" ", text)
+    text = _SEARCH_METADATA_TOKEN_RE.sub(" ", text)
+    text = _SEARCH_RESULT_DECISION_RE.sub(" ", text)
+    text = re.sub(r"(?:联网|公司)资料摘要\s*[:：]\s*", "公开资料：", text)
+    text = re.sub(r"\s+([。；;，,])", r"\1", text)
+    text = re.sub(r"([。；;])\s*([。；;])", r"\1", text)
+    return text.strip(" \t\r\n；;，,")
+
+
+def _without_future_source_prose(value: Any, cutoff: date | None) -> str:
+    """Remove a search-result clause that exposes information after the snapshot."""
+
+    text = _without_search_metadata(value)
+    if not _future_dates(text, cutoff):
+        return text
+    marker_positions = [text.find(marker) for marker in _SOURCE_MARKERS]
+    marker_positions = [position for position in marker_positions if position >= 0]
+    if not marker_positions:
+        return text
+    marker = min(marker_positions)
+    tail_positions = [
+        position
+        for marker_text in ("；主要风险：", ";主要风险：", "。主要风险：")
+        for position in [text.find(marker_text, marker)]
+        if position >= 0
+    ]
+    prefix = text[:marker].rstrip(" \t\r\n；;，,。")
+    if tail_positions:
+        return (prefix + text[min(tail_positions):]).strip()
+    return prefix or "快照日后的公告条目已剔除，未作为本次结论依据。"
 
 
 def _wrong_stock_ids(value: Any, code: str) -> set[str]:
@@ -148,9 +228,12 @@ def sanitize(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
     packets = result.get("packets")
     if not isinstance(packets, list):
         raise ValueError("merged artifact packets are missing")
+    market_cutoff = _parse_iso_date(result.get("market_as_of"))
     changed = 0
     removed_claims = 0
     removed_http_refs = 0
+    removed_future_claims = 0
+    cleaned_search_metadata = 0
     copied_packets: list[dict[str, Any]] = []
     for packet in packets:
         if not isinstance(packet, Mapping):
@@ -166,6 +249,12 @@ def sanitize(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
             if isinstance(claims, list):
                 kept_claims: list[Any] = []
                 for claim in claims:
+                    if (
+                        isinstance(claim, Mapping)
+                        and _future_dates(claim.get("statement"), market_cutoff)
+                    ):
+                        removed_future_claims += 1
+                        continue
                     if not isinstance(claim, Mapping) or not _claim_is_unbound(claim, code):
                         kept_claims.append(claim)
                         continue
@@ -201,11 +290,54 @@ def sanitize(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
                 copied_review["claims"] = normalized_claims
             for field in ("summary", "key_strengths", "risk_flags"):
                 if field in copied_review:
-                    copied_review[field] = _without_unbound_sources(copied_review[field], code, bad_tokens)
+                    values = copied_review[field]
+                    values = _without_unbound_sources(values, code, bad_tokens)
+                    if isinstance(values, list):
+                        cleaned: list[str] = []
+                        for value in values:
+                            before_value = str(value or "")
+                            after_value = _without_future_source_prose(before_value, market_cutoff)
+                            after_value = _without_search_metadata(after_value)
+                            if after_value != before_value:
+                                cleaned_search_metadata += 1
+                            if after_value:
+                                cleaned.append(after_value)
+                        copied_review[field] = cleaned
+                    else:
+                        before_value = str(values or "")
+                        after_value = _without_future_source_prose(before_value, market_cutoff)
+                        after_value = _without_search_metadata(after_value)
+                        if after_value != before_value:
+                            cleaned_search_metadata += 1
+                        copied_review[field] = after_value
             if "quantitative_facts" in copied_review:
-                copied_review["quantitative_facts"] = _without_unbound_sources(
-                    copied_review["quantitative_facts"], code, bad_tokens
-                )
+                values = _without_unbound_sources(copied_review["quantitative_facts"], code, bad_tokens)
+                if not isinstance(values, list):
+                    values = [values]
+                cleaned_facts: list[str] = []
+                for value in values:
+                    before_value = str(value or "")
+                    after_value = _without_search_metadata(before_value)
+                    if after_value != before_value:
+                        cleaned_search_metadata += 1
+                    if after_value:
+                        cleaned_facts.append(after_value)
+                copied_review["quantitative_facts"] = cleaned_facts
+            sanitized_claims: list[Any] = []
+            for claim in copied_review.get("claims", []):
+                if not isinstance(claim, Mapping):
+                    sanitized_claims.append(claim)
+                    continue
+                copied_claim = dict(claim)
+                for field in ("statement", "source_context"):
+                    if field in copied_claim and isinstance(copied_claim[field], str):
+                        before_value = copied_claim[field]
+                        after_value = _without_search_metadata(before_value)
+                        if after_value != before_value:
+                            cleaned_search_metadata += 1
+                        copied_claim[field] = after_value
+                sanitized_claims.append(copied_claim)
+            copied_review["claims"] = sanitized_claims
             profile = copied_review.get("economic_profile")
             if isinstance(profile, Mapping):
                 claims = copied_review.get("claims") if isinstance(copied_review.get("claims"), list) else []
@@ -237,9 +369,11 @@ def sanitize(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
     # changed-review count.  The command-line report exposes the detailed
     # release-boundary counters separately for audit logs.
     result["publication_sanitization"] = {
-        "contract_version": 1,
+        "contract_version": 2,
         "removed_unbound_claim_count": removed_claims,
         "removed_http_source_ref_count": removed_http_refs,
+        "removed_future_claim_count": removed_future_claims,
+        "cleaned_search_metadata_count": cleaned_search_metadata,
     }
     return result, changed
 

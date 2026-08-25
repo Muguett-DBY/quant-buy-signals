@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from tools.sanitize_codex_luna_reviews import (
     _claim_is_unbound,
     sanitize,
@@ -95,7 +97,49 @@ def test_sanitize_removes_bad_claims_and_http_extras_without_touching_scores() -
     assert review["quantitative_facts"] == ["2025年经营现金流为正"]
     assert review["buy_attractiveness_score"] == 69.0
     assert sanitized["publication_sanitization"] == {
-        "contract_version": 1,
+        "contract_version": 2,
         "removed_unbound_claim_count": 1,
         "removed_http_source_ref_count": 1,
+        "removed_future_claim_count": 0,
+        "cleaned_search_metadata_count": 0,
     }
+
+
+def test_sanitize_removes_raw_search_metadata_and_future_result_rows() -> None:
+    payload = {
+        "market_as_of": "2026-08-24",
+        "packets": [
+            {
+                "security_code": "002395",
+                "name": "双象股份",
+                "ai_review": {
+                    "summary": (
+                        "量化快照；公开资料摘要：双象股份公告（ turn42search0 [wordlim: 200] "
+                        "Published: today; Crawled: today; 2026-08-25 半年度报告）。；主要风险：等待核验。"
+                    ),
+                    "key_strengths": ["公开资料：双象股份（ turn42search1 [wordlim: 200] Crawled: today; 2025 年报"],
+                    "risk_flags": ["估值风险"],
+                    "quantitative_facts": ["2025 年经营现金流为正"],
+                    "claims": [
+                        _claim(
+                            statement=(
+                                "双象股份公告（ turn42search0 [wordlim: 200] Crawled: today; "
+                                "2026-08-25 半年度报告"
+                            )
+                        ),
+                        _claim(statement="2025年经营现金流为正。"),
+                    ],
+                },
+            }
+        ],
+    }
+
+    sanitized, changed = sanitize(payload)
+    review = sanitized["packets"][0]["ai_review"]
+    assert changed == 1
+    assert len(review["claims"]) == 1
+    assert "turn42search" not in json.dumps(review, ensure_ascii=False)
+    assert "wordlim" not in json.dumps(review, ensure_ascii=False)
+    assert "2026-08-25" not in review["summary"]
+    assert sanitized["publication_sanitization"]["removed_future_claim_count"] == 1
+    assert sanitized["publication_sanitization"]["cleaned_search_metadata_count"] >= 2

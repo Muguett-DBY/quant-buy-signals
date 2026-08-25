@@ -1129,7 +1129,7 @@ def _catalog_company(row: Mapping[str, Any]) -> dict[str, Any]:
         diagnostic_score, _tie_breaker, diagnostic_type = max(diagnostic_candidates)
         diagnostic_label = TYPE_NAMES[diagnostic_type]
     else:
-        diagnostic_score, diagnostic_type, diagnostic_label = None, "", ""
+        diagnostic_score, diagnostic_type, diagnostic_label = None, "", "无可完整诊断框架"
     raw_industry = str(row.get("industry_code") or row.get("industry") or "").strip()
     return {
         "code": _normalise_code(row.get("code")),
