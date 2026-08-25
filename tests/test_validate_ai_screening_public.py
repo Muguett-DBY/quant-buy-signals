@@ -257,7 +257,6 @@ def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
             assert not raw_search_metadata.search(" ".join(str(value) for value in values))
 
 
-
 def test_checked_in_seed_contains_full_semantic_review_and_checked_promotions() -> None:
     payload = json.loads(Path("cloudflare/quant-dashboard/ai_screening_seed.json").read_text(encoding="utf-8"))
     packets = payload["packets"]
