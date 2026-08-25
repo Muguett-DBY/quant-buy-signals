@@ -40,10 +40,10 @@ _SEARCH_METADATA_TOKEN_RE = re.compile(
     r"(?:Crawled:\s*[^;；]*[;；]\s*)?",
     re.IGNORECASE,
 )
-_SEARCH_RESULT_DECISION_RE = re.compile(r"本次公司特定来源\s*\d+\s*条[。；;]?|结论\s*[:：]\s*(?:建议买|观察|不建议)[。；;]?")
-_FUTURE_DATE_RE = re.compile(
-    r"(?<!\d)(20\d\d)[-/年](\d{1,2})(?:[-/月](\d{1,2})日?)?"
+_SEARCH_RESULT_DECISION_RE = re.compile(
+    r"本次公司特定来源\s*\d+\s*条[。；;]?|结论\s*[:：]\s*(?:建议买|观察|不建议)[。；;]?"
 )
+_FUTURE_DATE_RE = re.compile(r"(?<!\d)(20\d\d)[-/年](\d{1,2})(?:[-/月](\d{1,2})日?)?")
 _SOURCE_MARKERS = (
     "联网事实（Codex web_search",
     "联网资料摘要：",
@@ -111,7 +111,7 @@ def _without_future_source_prose(value: Any, cutoff: date | None) -> str:
     ]
     prefix = text[:marker].rstrip(" \t\r\n；;，,。")
     if tail_positions:
-        return (prefix + text[min(tail_positions):]).strip()
+        return (prefix + text[min(tail_positions) :]).strip()
     return prefix or "快照日后的公告条目已剔除，未作为本次结论依据。"
 
 
@@ -249,10 +249,7 @@ def sanitize(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
             if isinstance(claims, list):
                 kept_claims: list[Any] = []
                 for claim in claims:
-                    if (
-                        isinstance(claim, Mapping)
-                        and _future_dates(claim.get("statement"), market_cutoff)
-                    ):
+                    if isinstance(claim, Mapping) and _future_dates(claim.get("statement"), market_cutoff):
                         removed_future_claims += 1
                         continue
                     if not isinstance(claim, Mapping) or not _claim_is_unbound(claim, code):

@@ -123,8 +123,7 @@ def test_sanitize_removes_raw_search_metadata_and_future_result_rows() -> None:
                     "claims": [
                         _claim(
                             statement=(
-                                "双象股份公告（ turn42search0 [wordlim: 200] Crawled: today; "
-                                "2026-08-25 半年度报告"
+                                "双象股份公告（ turn42search0 [wordlim: 200] Crawled: today; 2026-08-25 半年度报告"
                             )
                         ),
                         _claim(statement="2025年经营现金流为正。"),
