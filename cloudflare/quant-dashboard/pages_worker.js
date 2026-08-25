@@ -1372,6 +1372,21 @@ function aiScreeningPageResponse(request){
       const gateMarkup=reasons.length?'<div class="research-item"><b>财务复核门槛</b>'+(gate.hard_block?"已触发：":"提示：")+esc(reasons.join("；"))+"</div>":"";
       return '<div class="section"><h3>AI分数构成与校准</h3><div class="score-components">'+values.map(item=>'<div class="score-component"><b>'+item[0]+"</b>"+esc(compactNumber(item[1]))+item[2]+"</div>").join("")+band+gateMarkup+"</div></div>";
     }
+    function semanticReview(review){
+      const value=review?.semantic_review;
+      if(!value||typeof value!=="object")return "";
+      const conclusion=String(value.conclusion||"");
+      const label=labels[conclusion]||"\u5df2\u590d\u6838";
+      const facts=Array.isArray(value.quantitative_facts)?value.quantitative_facts.filter(Boolean):[];
+      const reasons=Array.isArray(value.reasons)?value.reasons.filter(Boolean):[];
+      const external=value.external_review&&typeof value.external_review==="object"?value.external_review:{};
+      const urls=Array.isArray(external.source_urls)?external.source_urls.filter(isHttpSource):[];
+      const sourceLinks=urls.length?'<div class="evidence-links">'+urls.map((url,index)=>'<a class="evidence-link" rel="noreferrer" target="_blank" href="'+esc(url)+'">\u72ec\u7acb\u6838\u9a8c\u6765\u6e90 '+(index+1)+"</a>").join("")+"</div>":"";
+      const factsMarkup='<div class="research-grid">'+(facts.length?facts.slice(0,8).map(item=>'<div class="research-item">'+esc(item)+"</div>").join(""):'<div class="research-item">\u6682\u65e0\u53ef\u5b89\u5168\u5c55\u793a\u7684\u91cf\u5316\u4e8b\u5b9e</div>')+"</div>";
+      const reasonsMarkup='<ul>'+(reasons.length?reasons.slice(0,8).map(item=>'<li>'+esc(item)+"</li>").join(""):'<li>\u672a\u53d1\u73b0\u8db3\u4ee5\u6539\u53d8\u5f53\u524d\u7ed3\u8bba\u7684\u53cd\u8bc1\u3002</li>')+'</ul>';
+      const note=String(value.reviewer_note||external.note||"").trim();
+      return '<section class="semantic-review section"><h3>\u5168\u91cf\u9010\u5bb6\u516c\u53f8\u8bed\u4e49\u590d\u6838\uff1a'+esc(label)+' · '+esc(compactNumber(value.score))+'\u5206</h3><p>'+esc(value.basis||"\u5df2\u6309\u516c\u53f8\u4e8b\u5b9e\u3001\u4f30\u503c\u3001\u73b0\u91d1\u6d41\uff0f\u8d44\u672c\u7ea6\u675f\u3001\u884c\u4e1a\u4e0e\u98ce\u9669\u91cd\u65b0\u6838\u5bf9\uff1b\u89c4\u5219\u89e6\u53d1\u4e0d\u662f\u4e70\u5165\u7406\u7531\u3002")+"</p>"+factsMarkup+'<div class="section"><h3>\u4e3a\u4ec0\u4e48\u4fdd\u7559\uff0f\u6539\u53d8\u7ed3\u8bba</h3>'+reasonsMarkup+"</div>"+(note?'<div class="research-item"><b>\u590d\u6838\u5907\u6ce8</b>'+esc(note)+"</div>":"")+sourceLinks+"</section>";
+    }
     function searchFindings(review){
       const findings=Array.isArray(review?.search_findings)?review.search_findings:[];
       if(!findings.length)return "";
@@ -1462,7 +1477,7 @@ function aiScreeningPageResponse(request){
         '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="confidence">AI买入吸引力分 · 置信度：'+esc(review.confidence||"—")+'</span></div>'+
         '<div class="badges"><span class="badge '+esc(freshness)+'">'+esc(freshnessLabel(review))+"</span>"+independent+"</div>"+
         '<details class="ai-review-details"><summary>查看完整 AI 解释</summary><div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
-        '<section class="ai-research"><div class="section"><h3>AI为什么这样判断</h3>'+boundSummary(review)+boundReasonList(review,"key_strengths","AI补充判断","暂无 AI 独立补充判断")+"</div>"+
+        '<section class="ai-research">'+semanticReview(review)+'<div class="section"><h3>AI为什么这样判断</h3>'+boundSummary(review)+boundReasonList(review,"key_strengths","AI补充判断","暂无 AI 独立补充判断")+"</div>"+
         scoreComponents(review)+economicProfile(review)+valuationResearch(review)+
         list(companyFacts,"公司量化事实","暂无可安全展示的公司量化事实")+
         boundReasonList(review,"risk_flags","主要反证与风险","暂无已记录的主要反证与风险")+searchFindings(review)+

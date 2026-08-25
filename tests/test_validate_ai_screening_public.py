@@ -244,7 +244,7 @@ def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() ->
 
     assert result["candidate_total"] == 998
     assert result["searched"] == 998
-    assert result["actions"] == {"avoid": 842, "priority_buy": 1, "watchlist": 155}
+    assert result["actions"] == {"avoid": 842, "priority_buy": 3, "watchlist": 153}
     assert payload["publication_sanitization"]["removed_future_claim_count"] == 10
     assert payload["publication_sanitization"]["cleaned_search_metadata_count"] > 2000
     raw_search_metadata = re.compile(r"turn\w*(?:search|view)|\[wordlim:|Published:|Crawled:", re.IGNORECASE)
@@ -260,6 +260,19 @@ def test_checked_in_seed_is_readable_and_contains_the_tarp_group_correction() ->
     assert tar["ai_review"]["ai_action"] == "watchlist"
     assert tar["ai_review"]["buy_attractiveness_score"] == 59.0
     assert "当前先观察" in tar["ai_review"]["summary"]
+
+
+def test_checked_in_seed_contains_full_semantic_review_and_checked_promotions() -> None:
+    payload = json.loads(Path("cloudflare/quant-dashboard/ai_screening_seed.json").read_text(encoding="utf-8"))
+    packets = payload["packets"]
+    assert len(packets) == 998
+    assert all(isinstance(packet["ai_review"].get("semantic_review"), dict) for packet in packets)
+    assert {packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"} == {
+        "603444",
+        "601128",
+        "600926",
+    }
+    assert all(packet["ai_review"]["semantic_review"]["scope"] == "all_998_candidates" for packet in packets)
 
 
 @pytest.mark.parametrize(

@@ -730,6 +730,37 @@ def _public_review(
                 if value is not None
             },
         }
+    semantic_review = review.get("semantic_review")
+    if isinstance(semantic_review, Mapping):
+        external = semantic_review.get("external_review")
+        external_public = external if isinstance(external, Mapping) else {}
+        public_review["semantic_review"] = {
+            "version": _text(semantic_review.get("version"), 80),
+            "scope": _text(semantic_review.get("scope"), 80),
+            "review_status": _text(semantic_review.get("review_status"), 48),
+            "conclusion": _text(semantic_review.get("conclusion"), 32),
+            "score": float(semantic_review.get("score", 0.0) or 0.0),
+            "confidence": _text(semantic_review.get("confidence"), 16),
+            "basis": _text(semantic_review.get("basis"), 600),
+            "quantitative_facts": [_text(item, 300) for item in semantic_review.get("quantitative_facts", [])[:8]],
+            "reasons": [_text(item, 300) for item in semantic_review.get("reasons", [])[:8]],
+            "metrics": {
+                str(key): float(value) if isinstance(value, (int, float)) else value
+                for key, value in (semantic_review.get("metrics") or {}).items()
+                if value is not None
+            },
+            "knowledge_base": _text(semantic_review.get("knowledge_base"), 160),
+            "reviewer_note": _text(semantic_review.get("reviewer_note"), 600),
+            "external_review": {
+                "performed": external_public.get("performed") is True,
+                "source_urls": [
+                    _text(value, 600)
+                    for value in external_public.get("source_urls", [])[:4]
+                    if isinstance(value, str) and value.startswith("https://")
+                ],
+                "note": _text(external_public.get("note"), 600),
+            },
+        }
     if require_company_research_fields:
         public_review.update(
             {
