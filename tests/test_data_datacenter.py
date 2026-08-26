@@ -60,12 +60,14 @@ def _detailed_cashflow_row(report_date: str, *, code: str = "000001") -> dict:
         "UPDATE_DATE": f"{report_date[:4]}-04-30 00:00:00",
         "CURRENCY": "CNY",
     }
-    row.update({field: None for field in dc._DETAILED_INVESTMENT_FIELDS})
+    row.update({field: None for field in dc._DETAILED_CASHFLOW_VALUE_FIELDS})
     row.update(
         {
             "TOTAL_INVEST_INFLOW": 9_500.0,
             "INVEST_NETCASH_BALANCE": 0.0,
+            "NETCASH_OPERATE": 12_000.0,
             "NETCASH_INVEST": 9_500.0,
+            "NETCASH_FINANCE": -2_000.0,
         }
     )
     return row

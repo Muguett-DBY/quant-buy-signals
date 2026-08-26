@@ -111,6 +111,17 @@ def _semantic_claim_payload(
     }
 
 
+def _pdf_with_text(text: str) -> bytes:
+    import pymupdf
+
+    document = pymupdf.open()
+    try:
+        document.new_page().insert_text((72, 72), text)
+        return document.tobytes()
+    finally:
+        document.close()
+
+
 def _projection_payload(url: str) -> dict[str, object]:
     return {
         "snapshot_generation": "g1",
@@ -598,6 +609,73 @@ def test_source_audit_marks_non_html_fact_claim_unverified(tmp_path, monkeypatch
     assert report["semantic_failed_count"] == 0
     assert report["audit_passed"] is False
     assert report["results"][0]["semantic_status"] == "unverified"
+
+
+def test_source_audit_accepts_real_pdf_with_matching_identity_period_and_fact(tmp_path, monkeypatch) -> None:
+    url = "https://reports.example/real-report.pdf"
+    payload = _semantic_claim_payload(url)
+    review = payload["packets"][0]["ai_review"]
+    review["claims"][0]["statement"] = "2026H1 cash flow 18.5 billion"
+    review["search_findings"][0]["finding"] = "2026H1 cash flow 18.5 billion"
+    merged = tmp_path / "merged.json"
+    merged.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    body = _pdf_with_text("600585 Hailuo Cement 2026H1 cash flow 18.5 billion")
+    monkeypatch.setattr(
+        source_audit,
+        "_check_url",
+        lambda value, **_: {
+            "url": value,
+            "result": "ok",
+            "reachability": "reachable",
+            "body_retrieved": True,
+            "status": 200,
+            "content_type": "application/pdf",
+            "official_market_domain": False,
+            "_body": body,
+        },
+    )
+
+    report = source_audit.audit(merged, tmp_path / "audit.json", workers=1)
+
+    assert report["semantic_claim_count"] == 1
+    assert report["semantic_passed_count"] == 1
+    assert report["semantic_failed_count"] == 0
+    assert report["semantic_unverified_count"] == 0
+    assert report["results"][0]["semantic_status"] == "pass"
+    assert report["audit_passed"] is True
+
+
+def test_source_audit_rejects_parseable_pdf_with_wrong_company_identity(tmp_path, monkeypatch) -> None:
+    url = "https://reports.example/wrong-report.pdf"
+    payload = _semantic_claim_payload(url)
+    review = payload["packets"][0]["ai_review"]
+    review["claims"][0]["statement"] = "2026H1 cash flow 18.5 billion"
+    review["search_findings"][0]["finding"] = "2026H1 cash flow 18.5 billion"
+    merged = tmp_path / "merged.json"
+    merged.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    body = _pdf_with_text("000001 Other Bank 2026H1 cash flow 18.5 billion")
+    monkeypatch.setattr(
+        source_audit,
+        "_check_url",
+        lambda value, **_: {
+            "url": value,
+            "result": "ok",
+            "reachability": "reachable",
+            "body_retrieved": True,
+            "status": 200,
+            "content_type": "application/pdf",
+            "official_market_domain": False,
+            "_body": body,
+        },
+    )
+
+    report = source_audit.audit(merged, tmp_path / "audit.json", workers=1)
+
+    assert report["semantic_passed_count"] == 0
+    assert report["semantic_failed_count"] == 1
+    assert report["semantic_unverified_count"] == 0
+    assert report["results"][0]["semantic_status"] == "failed"
+    assert any("company code" in issue["reason"] for issue in report["semantic_issues"])
 
 
 def test_source_audit_marks_unclaimed_finding_non_html_unverified(tmp_path, monkeypatch) -> None:

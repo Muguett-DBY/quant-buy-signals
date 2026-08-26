@@ -839,6 +839,8 @@ def test_decision_text_collapses_repeated_negation_tokens() -> None:
     assert cleaned == "当前暂不建议买入，纳入观察。"
     assert "不不" not in cleaned
     assert decision_text_conflicts("watchlist", "不能据此直接建议买入。") is False
+    assert decision_text_conflicts("watchlist", "因此暂不进入推荐买入区间。") is False
+    assert decision_text_conflicts("watchlist", "这个分数不等于可直接买入。") is False
     assert decision_text_conflicts("watchlist", "当前建议买入。") is True
     assert decision_text_conflicts("priority_buy", "当前买入逻辑尚未成立，继续等待确认。") is True
     assert decision_text_conflicts("priority_buy", "暂时不考虑买入，等待下一季。") is True

@@ -104,7 +104,7 @@ jobs:
             --expected-market-as-of "${market_as_of}" \
             --expected-count "$(jq -er '.candidate_total' "${seed}")"
           jq -e '
-            .review_mode == "local_codex_review"
+            .review_mode == "codex_luna_web_review"
             and .full_coverage_final_recommendation == true
             and .candidate_offset == 0
             and .reviewed_count == .candidate_total
@@ -112,6 +112,14 @@ jobs:
             and .type_pair_unreviewed_count == 0
             and .insufficient_evidence_count == 0
             and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+            and .web_search_attempted_count == .candidate_total
+            and .web_search_event_verified_count == .candidate_total
+            and .web_search_claim_urls_verified_count == .candidate_total
+            and .reviewed_without_web_search == 0
+            and .full_coverage_web_search == true
+            and .type_pair_web_search_attempted_count == .type_pair_candidate_total
+            and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
+            and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total
           ' "${seed}" >/dev/null
           echo "generation=${generation}" >> "${GITHUB_OUTPUT}"
 
@@ -156,12 +164,20 @@ jobs:
           for attempt in 1 2 3 4 5 6; do
             if response="$(curl --fail --silent --show-error "${endpoint}" 2>/dev/null)" && jq -e --arg generation "${generation}" '
               .snapshot_generation == $generation
-              and .review_mode == "local_codex_review"
+              and .review_mode == "codex_luna_web_review"
               and .full_coverage_final_recommendation == true
               and .reviewed_count == .candidate_total
               and .type_pair_reviewed_count == .type_pair_candidate_total
               and .type_pair_unreviewed_count == 0
               and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+              and .web_search_attempted_count == .candidate_total
+              and .web_search_event_verified_count == .candidate_total
+              and .web_search_claim_urls_verified_count == .candidate_total
+              and .reviewed_without_web_search == 0
+              and .full_coverage_web_search == true
+              and .type_pair_web_search_attempted_count == .type_pair_candidate_total
+              and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
+              and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total
             ' <<< "${response}" >/dev/null; then
               echo "Published AI API verified on attempt ${attempt}."
               exit 0

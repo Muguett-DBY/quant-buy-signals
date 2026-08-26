@@ -624,9 +624,9 @@ const AI_ACTION_VERDICTS=Object.freeze({priority_buy:Object.freeze(["confirmed"]
 const AI_ACTION_REVIEW_ACTIONS=Object.freeze({priority_buy:Object.freeze(["keep"]),watchlist:Object.freeze(["keep","demote","manual_review"]),avoid:Object.freeze(["demote","manual_review"]),insufficient_evidence:Object.freeze(["manual_review"])});
 const AI_BUY_DECISION_RE=/(?:AI独立|当前|现在|现阶段|本轮|综合判断|结论为)?(?:明确|强烈|积极|优先|仍然|依然|维持|直接)?(?:建议|推荐)(?:立即|现在|当前|积极|优先|逢低|分批|逐步)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段|本轮)?(?:可以|可|值得|适合|应当|应该)(?:立即|现在|当前|逢低|分批|逐步)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:具备|存在)(?:买入|配置)(?:价值|机会)|(?:当前|现在|现阶段)(?:属于|是|构成)(?:明确)?(?:买点|买入机会|建仓机会)|(?:AI|本轮|最终|综合)?结论(?:为|是|：|:)?(?:建议)?(?:买入|建仓|配置)|(?:建议|可以|可|适合)(?:开始|逐步|逢低|分批)?(?:布局|介入|低吸)/g;
 const AI_NON_BUY_DECISION_RE=/(?:当前|现在|现阶段|本轮|综合判断)?(?:明确|仍然|依然|暂时)?(?:不建议|不推荐|不宜|不应|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:尚不构成|不构成|并非|不是)(?:合适的)?(?:买点|买入机会|买入时点)|(?:建议|应当|应该|宜)(?:继续)?(?:观望|等待|回避)|(?:维持|列为|归入|仅作|应列入)(?:继续)?观察|(?:暂不|暂缓|推迟|不宜|不应|不可|不适合)(?:立即|现在|当前|直接)?(?:买入|建仓|加仓|配置)|(?:当前|现在|现阶段)?(?:暂不具备|尚不具备|不具备)(?:买入|配置)(?:价值|条件)|(?:当前|现在|现阶段)?(?:没有|缺乏)(?:明确)?(?:买点|买入机会)|(?:当前|现在|现阶段)?不值得(?:立即|现在|当前)?(?:买入|建仓|配置)|(?:建议|应当|应该)(?:持币)?(?:继续)?观望|(?:建议|应当|应该)(?:卖出|减仓|清仓)/g;
-const AI_RULE_REASON_RE=/\btype\s*[1-7](?:\s*[-_/]\s*[0-9a-z]+)?\b|类型\s*[1-7]|第\s*[一二三四五六七1-7]\s*(?:种|类)(?:买入)?(?:情况|类型)?|七种买入情况|确定性(?:规则|筛选|评分|分数|状态)|(?:筛选|买入|七类|模型)规则(?:分数|评分|状态|触发|达标)?|(?:候选|符合|遵循|按照|依据|按)规则|规则(?:分数|评分|状态|基础|结果|候选|口径|参考|入选|已触发|未触发|达标)|(?:筛选|模型|买入)(?:分数|评分|状态)|(?:已|未|尚未)触发|(?:接近|尚未|未|已)?达标|候选(?:池|来源)|入池|估值买入区|强周期底部|长坡厚[雪学]|可持续高增长|两热一冷|年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]|\b(?:triggered|conditional|insufficient_evidence)\b/i;
+const AI_RULE_REASON_RE=/\btype\s*[1-7](?:\s*[-_/]\s*[0-9a-z]+)?\b|类型\s*[1-7]|第\s*[一二三四五六七1-7]\s*(?:种|类)(?:买入(?:情况|类型)?|情况|类型)|七种买入情况|确定性(?:规则|筛选|评分|分数|状态)|(?:筛选|买入|七类|模型)规则(?:分数|评分|状态|触发|达标)?|(?:候选|符合|遵循|按照|依据|按)规则|规则(?:分数|评分|状态|基础|结果|候选|口径|参考|入选|已触发|未触发|达标)|(?:筛选|模型|买入)(?:分数|评分|状态)|(?:已|未|尚未)触发|(?:接近|尚未|未|已)?达标|候选(?:池|来源)|入池|估值买入区|强周期底部|长坡厚[雪学]|可持续高增长|两热一冷|年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]|\b(?:triggered|conditional|insufficient_evidence)\b/i;
 function aiReviewHasRuleReason(review){return [review?.summary,...(Array.isArray(review?.key_strengths)?review.key_strengths:[]),...(Array.isArray(review?.risk_flags)?review.risk_flags:[]),...(Array.isArray(review?.quantitative_facts)?review.quantitative_facts:[])].some(value=>typeof value==="string"&&AI_RULE_REASON_RE.test(value))}
-function aiHasUnqualifiedDecision(text,pattern,buyDecision){for(const clause of String(text||"").split(/[。！？!?；;\n]+/)){for(const match of clause.matchAll(pattern)){const matchIndex=Number(match.index||0),prefix=clause.slice(Math.max(0,matchIndex-32),matchIndex),suffix=clause.slice(matchIndex+String(match[0]||"").length);if(/(?:若|如果|待|一旦|除非|只有|前提(?:是|为)|条件(?:是|为)|回落至?|跌至|低于|高于|改善后|确认后|触发后|满足后|兑现后|企稳后|完成后|之后|后再|再考虑)[^，,。！？!?；;]{0,24}[，,]?$/.test(prefix))continue;if(buyDecision&&/(?:不|暂不|并不|并非|未|尚未|不能|不可|不构成|不足以|难以|避免|谨慎)(?:据此|直接|立即|现在|当前)?$/.test(prefix))continue;if(buyDecision&&/(?:不具备|暂不具备|尚不具备|不满足|暂不满足|尚不满足|未满足|不足以支持|无法确认|未能确认|无法支持|未能支持|尚未达到|未达到|不符合|无法形成|未形成|尚未形成)[^，,。！？!?；;]{0,24}$/.test(prefix))continue;if(buyDecision&&/(?:券商|机构|分析师|研报|媒体|第三方)(?:明确|强烈)?$/.test(prefix))continue;if(buyDecision&&/^(?:条件|资格|基础|依据|空间|理由)?(?:完全|仍然|尚未|暂不|不具备|不满足|不足|无法|未能|不能|不可|不构成|不支持|未达到|尚未达到)/.test(suffix))continue;return true}}return false}
+function aiHasUnqualifiedDecision(text,pattern,buyDecision){for(const clause of String(text||"").split(/[。！？!?；;\n]+/)){for(const match of clause.matchAll(pattern)){const matchIndex=Number(match.index||0),prefix=clause.slice(Math.max(0,matchIndex-32),matchIndex),suffix=clause.slice(matchIndex+String(match[0]||"").length);if(/(?:若|如果|待|一旦|除非|只有|前提(?:是|为)|条件(?:是|为)|回落至?|跌至|低于|高于|改善后|确认后|触发后|满足后|兑现后|企稳后|完成后|之后|后再|再考虑)[^，,。！？!?；;]{0,24}[，,]?$/.test(prefix))continue;if(buyDecision&&/(?:不|暂不|并不|并非|未|尚未|不能|不可|不构成|不足以|难以|避免|谨慎)(?:据此|直接|立即|现在|当前|进入|纳入|列入)?$/.test(prefix))continue;if(buyDecision&&/(?:不等于|并不等于|不代表|并不代表|不意味着)$/.test(prefix))continue;if(buyDecision&&/(?:不能|无法|难以|尚不能|未能)(?:确认|证明|判断|说明)?[^，,。！？!?；;]{0,16}$/.test(prefix))continue;if(buyDecision&&/(?:不具备|暂不具备|尚不具备|不满足|暂不满足|尚不满足|未满足|不足以支持|无法确认|未能确认|无法支持|未能支持|尚未达到|未达到|不符合|无法形成|未形成|尚未形成)[^，,。！？!?；;]{0,24}$/.test(prefix))continue;if(buyDecision&&/(?:券商|机构|分析师|研报|媒体|第三方)(?:明确|强烈)?$/.test(prefix))continue;if(buyDecision&&/^(?:条件|资格|基础|依据|空间|理由)?(?:完全|仍然|尚未|暂不|不具备|不满足|不足|无法|未能|不能|不可|不构成|不支持|未达到|尚未达到)/.test(suffix))continue;return true}}return false}
 function aiDecisionTextConflicts(action,text){return action==="priority_buy"?aiHasUnqualifiedDecision(text,AI_NON_BUY_DECISION_RE,false):["watchlist","avoid","insufficient_evidence"].includes(action)?aiHasUnqualifiedDecision(text,AI_BUY_DECISION_RE,true):false}
 function aiReviewDecisionValid(review,action,score){
   const verdict=String(review?.verdict||""),recommendedAction=String(review?.recommended_action||"");
@@ -930,7 +930,7 @@ function compareAiPacketOrder(left,right){
 }
 async function validAiScreeningArtifact(value,generation){
   if(!value||typeof value!=="object"||value.schema_version!==AI_SCREENING_SCHEMA_VERSION||value.review_schema_version!==AI_SCREENING_SCHEMA_VERSION||value.artifact_kind!==AI_SCREENING_ARTIFACT_KIND||value.ai_is_advisory!==true||value.auto_buy_promotion!==false||value.full_coverage_final_recommendation!==true||String(value.snapshot_generation||"")!==String(generation?.generation_id||""))return false;
-  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",nativeCompanyResearch=reviewMode==="opencode_native_company_research_review",nativeReview=reviewMode==="opencode_native_web_search_review"||nativeCompanyResearch,partialSearchReview=localReview||mixedReview,externalFull=fullCoverage&&!partialSearchReview;
+  const packets=value.packets,fullCoverage=value.full_coverage_final_recommendation===true,reviewMode=String(value.review_mode||""),localReview=reviewMode==="local_codex_review",mixedReview=reviewMode==="opencode_mixed_review",codexLunaReview=reviewMode==="codex_luna_web_review",nativeCompanyResearch=reviewMode==="opencode_native_company_research_review",nativeReview=reviewMode==="opencode_native_web_search_review"||nativeCompanyResearch,partialSearchReview=localReview||mixedReview||codexLunaReview,externalFull=fullCoverage&&!partialSearchReview;
   if(String(value.market_as_of||"")!==String(generation?.market_as_of||"")||!validAiDate(String(value.market_as_of||""))||nativeCompanyResearch&&(!validAiDate(String(value.research_as_of||""))||String(value.research_as_of)<String(value.market_as_of))||!Array.isArray(packets)||packets.length>2000||value.candidate_total!==packets.length||value.type_pair_unique_company_count!==packets.length||value.reviewed_count!==packets.length)return false;
   const pairTotal=value.type_pair_candidate_total,pairExpected=value.type_pair_expected_total,pairReviewed=value.type_pair_reviewed_count,pairUnreviewed=value.type_pair_unreviewed_count,attempted=value.attempted_review_count,unreviewed=value.unreviewed_candidate_count,needsReview=value.attempted_needs_review_count;
   const identityFields=["candidate_identity_sha256","candidate_universe_identity_sha256","type_pair_candidate_identity_sha256","type_pair_universe_identity_sha256"],computedIdentity=await canonicalAiCandidateIdentity(packets);
@@ -944,7 +944,16 @@ async function validAiScreeningArtifact(value,generation){
   if(fullCoverage){
     if(value.candidate_offset!==0||pairExpected!==pairTotal||pairReviewed!==pairTotal||pairUnreviewed!==0||unreviewed!==0||attempted!==packets.length||!validAiReviewDescriptorList(value.review_models,16,120)||!validAiReviewDescriptorList(value.review_efforts,16,32))return false;
     if(externalFull&&(pairSearchAttempted!==pairTotal||pairSearchEvents!==pairTotal||companySearchAttempted!==packets.length||companySearchEvents!==packets.length||value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true))return false;
+    if(codexLunaReview&&(
+      pairSearchAttempted!==pairTotal||pairSearchCompleted!==pairTotal||pairSearchEvents!==pairTotal||pairClaimUrls!==pairTotal||
+      companySearchAttempted!==packets.length||companySearchCompleted!==packets.length||companySearchEvents!==packets.length||companyClaimUrls!==packets.length||
+      value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true||
+      !value.source_audit||value.source_audit.available!==true||value.source_audit.invalid_claim_url_count!==0||
+      !((value.source_audit.audit_passed===true&&Number(value.source_audit.failed||0)===0&&Number(value.source_audit.semantic_failed_count||0)===0&&Number(value.source_audit.semantic_unverified_count||0)===0)||
+        (value.source_audit.network_warnings_allowed===true&&value.source_audit.release_status==="passed_with_source_access_warnings"))
+    ))return false;
     if(nativeCompanyResearch&&(pairResearchSources!==pairTotal||companyResearchSources!==packets.length))return false;
+    if(codexLunaReview&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="codex-luna-max"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="max"))return false;
     if(externalFull&&!nativeCompanyResearch&&(pairClaimUrls!==pairTotal||companyClaimUrls!==packets.length))return false;
     if(nativeReview&&!nativeCompanyResearch&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="opencode-go/muse-spark-1.2-contributor"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="xhigh"))return false;
     if(nativeCompanyResearch&&(value.review_models.some(model=>!AI_NATIVE_COMPANY_RESEARCH_PROFILES[model])||value.review_efforts.some(effort=>!Object.values(AI_NATIVE_COMPANY_RESEARCH_PROFILES).some(profile=>profile.effort===effort))))return false;
@@ -966,6 +975,7 @@ async function validAiScreeningArtifact(value,generation){
     if(!aiReviewDecisionValid(review,action,score))return false;
     if(fullCoverage&&(!value.review_models.includes(model)||!value.review_efforts.includes(effort)))return false;
     if(fullCoverage&&localReview&&((model==="opencode-go/ox-alpha-free"&&effort!=="max")||(model==="opencode-go/muse-spark-1.2-contributor"&&effort!=="xhigh")))return false;
+    if(fullCoverage&&codexLunaReview&&(model!=="codex-luna-max"||effort!=="max"))return false;
     if(fullCoverage&&nativeReview&&!nativeCompanyResearch&&(model!=="opencode-go/muse-spark-1.2-contributor"||effort!=="xhigh"||review.retrieval_backend!=="reasonix-native-server-web-search"||review.retrieval_model!=="opencode-go-muse/muse-spark-1.2-contributor"||review.retrieval_effort!=="xhigh"||review.native_search_completed!==true||review.official_fetch_completed!==true))return false;
     if(fullCoverage&&nativeCompanyResearch&&!validAiNativeCompanyResearchProfile(review))return false;
     if(nativeCompanyResearch&&(!validAiCompanyResearch(review,String(value.market_as_of),String(value.research_as_of))||!await validAiValuationSnapshot(review.valuation_snapshot,review.valuation,code,String(value.snapshot_generation),String(value.market_as_of))))return false;
@@ -1265,6 +1275,7 @@ function aiScreeningPageResponse(request){
       if(model==="opencode-go/ox-alpha-free")return "Ox Alpha Free（"+model+"）";
       if(model==="opencode-go/muse-spark-1.2-contributor")return "Muse Spark 1.2（"+model+"）";
       if(model==="opencode-go/deepseek-v4-flash")return "DeepSeek V4 Flash（OpenCode Go）";
+      if(model==="codex-luna-max")return "Luna Max（codex-luna-max）";
       return String(model||"—");
     }
     function freshnessLabel(review){
@@ -1276,6 +1287,11 @@ function aiScreeningPageResponse(request){
       return "未标注实际报告期";
     }
     function searchLabel(review){
+      if(payload.review_mode==="codex_luna_web_review"){
+        if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true)return "Luna Max 逐家公司联网检索 · HTTPS 引用已核验";
+        if(review?.web_search_performed===true)return "Luna Max 已检索 · 引用核验不完整";
+        return "未完成逐家公司联网检索";
+      }
       if(review?.web_search_event_verified===true&&review?.research_source_urls_verified===true)return "原生搜索事件已核验 · 财报来源已核验";
       if(review?.web_search_event_verified===true&&review?.web_search_claim_urls_verified===true)return "原生搜索事件已核验 · 搜索引用已核验（旧版）";
       if(review?.web_search_event_verified===true)return "原生搜索事件已核验 · 财报来源未核验";
@@ -1292,6 +1308,7 @@ function aiScreeningPageResponse(request){
       if(value.review_mode==="local_codex_review")return "本地全量二次复核";
       if(value.review_mode==="opencode_mixed_review")return "OpenCode Go 混合复核（联网事件 + 本地复核）";
       if(value.review_mode==="opencode_native_company_research_review")return "逐家公司原生搜索 + 财报来源核验";
+      if(value.review_mode==="codex_luna_web_review")return "Luna Max 逐家公司联网复核 + HTTPS 证据";
       return "逐家公司 Muse Spark 原生 web_search 复核";
     }
     function isHttpSource(value){
@@ -1499,6 +1516,13 @@ function aiScreeningPageResponse(request){
     function renderMeta(value){
       const models=Array.isArray(value.review_models)?value.review_models.map(modelLabel).join(" / "):"—";
       const efforts=Array.isArray(value.review_efforts)?value.review_efforts.join(" / "):"—";
+      const searchEventLabel=value.review_mode==="codex_luna_web_review"?"逐家公司联网事件":"原生搜索事件";
+      const audit=value.source_audit&&typeof value.source_audit==="object"?value.source_audit:{};
+      const auditFetchWarnings=Number(audit.failed||0)+Number(audit.blocked||0);
+      const auditSemanticWarnings=Number(audit.semantic_failed_count||0)+Number(audit.semantic_unverified_count||0);
+      const auditLabel=String(audit.release_status||"")==="passed_with_source_access_warnings"
+        ? "来源复取告警 "+auditFetchWarnings+" / "+Number(audit.checked||0)+" URL；内容语义告警 "+auditSemanticWarnings+" 条（不等于未执行逐家公司搜索）"
+        : "来源复取审计通过";
       document.querySelector("#meta").innerHTML=
         "<span>数据代际 "+esc(value.snapshot_generation||"—")+"</span>"+
         "<span>收盘数据日 "+esc(value.market_as_of||"—")+"</span>"+
@@ -1507,8 +1531,9 @@ function aiScreeningPageResponse(request){
         "<span>复核模型 "+esc(models)+"</span>"+
         "<span>推理档位 "+esc(efforts)+"</span>"+
         "<span>Codex搜索尝试 "+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
-        "<span>原生搜索事件 "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        "<span>"+searchEventLabel+" "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        "<span>"+esc(auditLabel)+"</span>"+
         "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";
     }
     async function load(){
@@ -1524,7 +1549,7 @@ function aiScreeningPageResponse(request){
           '<div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+"</b><small>观察</small></div>"+
           '<div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+"</b><small>不建议</small></div>"+
           '<div class="stat"><b>'+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>Codex搜索尝试</small></div>"+
-          '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>原生搜索事件</small></div>"+
+          '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+'</b><small>'+(value.review_mode==="codex_luna_web_review"?"逐家公司联网事件":"原生搜索事件")+'</small></div>'+
           '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源核验</small></div>"+
           '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
         render();

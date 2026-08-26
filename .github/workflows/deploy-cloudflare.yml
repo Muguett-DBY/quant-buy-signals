@@ -354,10 +354,22 @@ jobs:
               and .insufficient_evidence_count == 0
               and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
               and (
-                if (.review_mode == "local_codex_review" or .review_mode == "opencode_mixed_review") then
-                  (.web_search_attempted_count >= 0
-                   and .web_search_attempted_count <= .candidate_total
-                   and .reviewed_without_web_search == (.candidate_total - .web_search_attempted_count))
+                if .review_mode == "codex_luna_web_review" then
+                  (.web_search_attempted_count == .candidate_total
+                   and .web_search_event_verified_count == .candidate_total
+                   and .web_search_claim_urls_verified_count == .candidate_total
+                   and .reviewed_without_web_search == 0
+                   and .type_pair_web_search_attempted_count == .type_pair_candidate_total
+                   and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
+                   and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total
+                   and .full_coverage_web_search == true
+                   and .source_audit.available == true
+                   and .source_audit.invalid_claim_url_count == 0
+                   and ((.source_audit.network_warnings_allowed == true
+                         and .source_audit.release_status == "passed_with_source_access_warnings")
+                        or (.source_audit.failed == 0
+                            and .source_audit.semantic_failed_count == 0
+                            and .source_audit.semantic_unverified_count == 0)))
                  elif .review_mode == "opencode_native_company_research_review" then
                    (.web_search_attempted_count == .candidate_total
                     and .web_search_event_verified_count == .candidate_total

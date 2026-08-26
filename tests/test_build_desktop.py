@@ -473,12 +473,15 @@ def test_ci_smoke_build_never_signs_or_emits_release_manifests(monkeypatch, tmp_
     assert executable_commands == ["--version", "--health-check", "--server-smoke-test"]
 
 
-def test_ci_workflow_uses_the_unpublishable_smoke_mode_without_a_desktop_secret():
+def test_website_ci_explicitly_excludes_the_parked_desktop_build():
     workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml").read_text(encoding="utf-8")
 
-    assert "python -m tools.build_desktop --ci-smoke" in workflow
-    assert "--output-root build/ci-smoke-output" in workflow
-    assert "--work-root build/ci-smoke-work" in workflow
+    assert "--ignore=tests/test_build_desktop.py" in workflow
+    assert "--ignore=tests/test_desktop_installer.py" in workflow
+    assert "--ignore=tests/test_desktop_launcher.py" in workflow
+    assert "--ignore=tests/test_desktop_updater.py" in workflow
+    assert '-m "not desktop and not android and not parked_client"' in workflow
+    assert "python -m tools.build_desktop --ci-smoke" not in workflow
     assert "DS_DCF_DESKTOP_SIGNING_PRIVATE_KEY" not in workflow
 
 

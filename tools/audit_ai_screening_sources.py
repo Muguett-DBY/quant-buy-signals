@@ -4,6 +4,9 @@ This audit does not decide whether a claim is financially correct.  It verifies
 the narrower release facts that can be checked mechanically: every claimed URL
 is public HTTP(S), the resource is reachable, and web-search claims point to the
 same finding URL and do not relabel an old HTML article as a newer disclosure.
+Text-bearing PDFs are parsed with the project's pinned PyMuPDF dependency and
+checked for company identity, report period and cited fact; malformed or
+image-only PDFs remain explicitly unverified.
 Contract v3 also hashes the exact claim/finding semantics that publication can
 expose, so changing cited prose while retaining a URL cannot reuse an audit.
 """
@@ -41,6 +44,12 @@ _OFFICIAL_DOMAIN_SUFFIXES = (
 )
 _BLOCKED_HTTP_STATUSES = frozenset({401, 403, 407, 429})
 _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
+# Keep PDF parsing bounded even when a reachable source is unexpectedly large
+# or contains a very large number of pages.  The HTTP layer already limits the
+# downloaded body; this cap additionally bounds decompressed text retained by
+# PyMuPDF.
+_MAX_PDF_TEXT_CHARS = 2_000_000
+_MAX_PDF_BYTES = 16 * 1024 * 1024
 AUDIT_CONTRACT_VERSION = 3
 
 
@@ -476,6 +485,104 @@ def _structured_source_issues(
     return []
 
 
+def _import_pymupdf():
+    """Load the project's pinned PDF parser lazily for source auditing."""
+
+    try:
+        import pymupdf
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"PyMuPDF is unavailable: {type(exc).__name__}") from exc
+    return pymupdf
+
+
+def _extract_pdf_text(body: bytes) -> tuple[str, str | None]:
+    """Extract bounded text from a PDF, returning an unverified reason on failure.
+
+    A malformed or image-only PDF must not become a semantic pass.  Returning a
+    separate reason lets the audit preserve the existing ``unverified`` status
+    for such sources while treating a successfully parsed but mismatching PDF
+    as a semantic failure.
+    """
+
+    try:
+        pymupdf = _import_pymupdf()
+        document = pymupdf.open(stream=body, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        return "", f"PDF cannot be parsed ({type(exc).__name__})"
+    try:
+        if document.page_count < 1:
+            return "", "PDF has no pages"
+        text_parts: list[str] = []
+        text_length = 0
+        for page in document:
+            page_text = page.get_text("text")
+            if not isinstance(page_text, str):
+                page_text = str(page_text or "")
+            if not page_text:
+                continue
+            remaining = _MAX_PDF_TEXT_CHARS - text_length
+            if remaining <= 0:
+                break
+            text_parts.append(page_text[:remaining])
+            text_length += min(len(page_text), remaining)
+            if text_length >= _MAX_PDF_TEXT_CHARS:
+                break
+        text = "".join(text_parts)
+        if not re.sub(r"\s+", "", text):
+            return "", "PDF has no extractable text"
+        return text, None
+    except Exception as exc:  # noqa: BLE001
+        return "", f"PDF text extraction failed ({type(exc).__name__})"
+    finally:
+        document.close()
+
+
+def _pdf_text_semantic_issues(
+    text: str,
+    *,
+    security_code: str,
+    name: str,
+    claim: Mapping[str, Any],
+    finding: Mapping[str, Any],
+) -> list[str]:
+    """Run the identity, period and fact gate against extracted PDF text."""
+
+    visible = re.sub(r"\s+", "", text).casefold()
+    if not visible:
+        return ["PDF body has no visible text"]
+    code = re.sub(r"\s+", "", str(security_code or "")).casefold()
+    normal_name = _normalised_company_name(name)
+    if not ((code and code in visible) or (normal_name and normal_name in visible)):
+        return ["PDF text does not match company code or normalized company name"]
+    period_match = _period_matches(text, _structured_period_tokens(claim, finding))
+    number_match = _structured_number_match(visible, _claim_numbers(claim, finding))
+    if not (period_match or number_match):
+        return ["PDF text does not match report period or fact number"]
+    return []
+
+
+def _pdf_semantic_issues(
+    body: bytes,
+    *,
+    security_code: str,
+    name: str,
+    claim: Mapping[str, Any],
+    finding: Mapping[str, Any],
+) -> list[str]:
+    """Check a PDF body; extraction failures remain explicitly unverified."""
+
+    text, extraction_reason = _extract_pdf_text(body)
+    if extraction_reason:
+        return [f"PDF text extraction is unverified ({extraction_reason})"]
+    return _pdf_text_semantic_issues(
+        text,
+        security_code=security_code,
+        name=name,
+        claim=claim,
+        finding=finding,
+    )
+
+
 def _html_semantic_issues(
     body: bytes,
     content_type: str,
@@ -607,9 +714,19 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                 },
             )
             with opener.open(request, timeout=timeout) as response:
-                body = response.read(max_bytes)
                 status = int(response.status or 200)
                 content_type = str(response.headers.get("content-type") or "")[:160]
+                is_pdf_response = "pdf" in content_type.casefold() or urlparse(current_url).path.casefold().endswith(
+                    ".pdf"
+                )
+                read_limit = max(max_bytes, _MAX_PDF_BYTES) if is_pdf_response else max_bytes
+                # Reading one extra byte lets us fail closed on a PDF that hit
+                # the safety cap instead of accidentally parsing a recoverable
+                # but incomplete prefix as a complete document.
+                body = response.read(read_limit + 1 if is_pdf_response else read_limit)
+                body_truncated = is_pdf_response and len(body) > read_limit
+                if body_truncated:
+                    body = body[:read_limit]
                 return {
                     **base,
                     "result": "ok" if 200 <= status < 400 else "failed",
@@ -621,6 +738,7 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                     "resolved_addresses": resolved_addresses,
                     "content_type": content_type,
                     "bytes_checked": len(body),
+                    "body_truncated": body_truncated,
                     # Consumed by ``audit`` and removed before serialization.
                     "_body": body,
                 }
@@ -990,8 +1108,77 @@ def audit(
     report_period_after_publication_count = 0
     blocked_semantic_claim_count = 0
     html_date_checked_count = 0
+    # Keep downloaded bodies only until the last claim for that URL has been
+    # semantically checked.  A full 994-company audit can contain thousands
+    # of large PDF/HTML responses; retaining every body until serialization
+    # needlessly grows the process into the gigabytes.
+    last_semantic_position: dict[str, int] = {
+        str(claim["url"]): position for position, claim in enumerate(semantic_claims)
+    }
+    previous_url: str | None = None
+    previous_position = -1
+    # PDF extraction is CPU-heavy for long annual reports.  Keep a small
+    # bounded pipeline ahead of the semantic loop so several documents are
+    # parsed concurrently without retaining every extracted text in memory.
+    pdf_urls: list[str] = []
+    seen_pdf_urls: set[str] = set()
     for claim in semantic_claims:
+        url = str(claim["url"])
+        if url in seen_pdf_urls:
+            continue
+        result = result_by_url[url]
+        body = result.get("_body")
+        content_type = str(result.get("content_type") or "")
+        if result.get("result") == "ok" and isinstance(body, bytes):
+            if "pdf" in content_type.casefold() or body.lstrip().startswith(b"%PDF-"):
+                seen_pdf_urls.add(url)
+                pdf_urls.append(url)
+    pdf_executor = ThreadPoolExecutor(max_workers=min(max(1, workers), 8)) if pdf_urls else None
+    pdf_futures: dict[str, Any] = {}
+    pdf_text_cache: dict[str, tuple[str, str | None]] = {}
+    pdf_remaining: dict[str, int] = {
+        url: sum(1 for claim in semantic_claims if str(claim["url"]) == url) for url in pdf_urls
+    }
+    pdf_next = 0
+
+    def schedule_pdf(url: str) -> None:
+        nonlocal pdf_next
+        if pdf_executor is None or pdf_next >= len(pdf_urls):
+            return
+        next_url = pdf_urls[pdf_next]
+        pdf_next += 1
+        pdf_futures[next_url] = pdf_executor.submit(_extract_pdf_text, result_by_url[next_url]["_body"])
+
+    for _ in range(min(8, len(pdf_urls))):
+        schedule_pdf(pdf_urls[pdf_next] if pdf_next < len(pdf_urls) else "")
+
+    def pdf_text_for(url: str) -> tuple[str, str | None]:
+        cached = pdf_text_cache.get(url)
+        if cached is not None:
+            pdf_remaining[url] -= 1
+            if pdf_remaining[url] <= 0:
+                pdf_text_cache.pop(url, None)
+            return cached
+        future = pdf_futures.pop(url, None)
+        if future is None:
+            schedule_pdf(url)
+            future = pdf_futures.pop(url)
+        extracted = future.result()
+        pdf_text_cache[url] = extracted
+        pdf_remaining[url] -= 1
+        if pdf_remaining[url] <= 0:
+            pdf_text_cache.pop(url, None)
+        schedule_pdf(url)
+        return extracted
+
+    for position, claim in enumerate(semantic_claims):
+        if previous_url is not None and last_semantic_position.get(previous_url) == previous_position:
+            result_by_url[previous_url].pop("_body", None)
         result = result_by_url[claim["url"]]
+        # Mark this claim before any branch below can ``continue``.  The next
+        # iteration will release this URL's body once it was its last claim.
+        previous_url = str(claim["url"])
+        previous_position = position
         common = {
             key: str(claim[key])
             for key in ("security_code", "name", "type_key", "claim_index", "finding_index", "search_finding_id")
@@ -1008,13 +1195,64 @@ def audit(
                     "reason": f"source body unavailable for semantic verification ({result.get('result')})",
                 }
             )
+            previous_url = str(claim["url"])
+            previous_position = position
             continue
         content_type = str(result.get("content_type") or "")
         body = result.get("_body")
-        is_html = "html" in content_type.casefold()
+        content_type_folded = content_type.casefold()
+        is_pdf = "pdf" in content_type_folded or (isinstance(body, bytes) and body.lstrip().startswith(b"%PDF-"))
+        is_html = "html" in content_type_folded and not is_pdf
         is_web_search_claim = bool(claim.get("search_finding_id") or claim.get("finding_index") is not None)
+        if is_pdf and isinstance(body, bytes):
+            if result.get("body_truncated"):
+                semantic_unverified_keys.add(int(claim["key"]))
+                company_states[claim["security_code"]]["semantic_unverified_keys"].add(int(claim["key"]))
+                semantic_issues.append(
+                    {
+                        **common,
+                        "source": str(claim["url"]),
+                        "reason": (
+                            "source is reachable but semantic verification is unverified "
+                            "(non-HTML PDF body; download exceeded the PDF safety cap)"
+                        ),
+                    }
+                )
+                previous_url = str(claim["url"])
+                previous_position = position
+                continue
+            pdf_text, pdf_extraction_reason = pdf_text_for(str(claim["url"]))
+            if pdf_extraction_reason:
+                semantic_unverified_keys.add(int(claim["key"]))
+                company_states[claim["security_code"]]["semantic_unverified_keys"].add(int(claim["key"]))
+                semantic_issues.append(
+                    {
+                        **common,
+                        "source": str(claim["url"]),
+                        "reason": (
+                            "source is reachable but semantic verification is unverified "
+                            f"(non-HTML PDF body; {pdf_extraction_reason})"
+                        ),
+                    }
+                )
+                previous_url = str(claim["url"])
+                previous_position = position
+                continue
+            pdf_issues = _pdf_text_semantic_issues(
+                pdf_text,
+                security_code=claim["security_code"],
+                name=claim["name"],
+                claim=claim["claim"],
+                finding=claim["finding"],
+            )
+            if pdf_issues:
+                semantic_failed_keys.add(int(claim["key"]))
+                company_states[claim["security_code"]]["semantic_failed_keys"].add(int(claim["key"]))
+                semantic_issues.extend(
+                    {**common, "source": str(claim["url"]), "reason": reason} for reason in pdf_issues
+                )
+            continue
         if not is_html and not is_web_search_claim and isinstance(body, bytes):
-            content_type_folded = content_type.casefold()
             stripped = body.lstrip()
             is_structured_text = (
                 "json" in content_type_folded
@@ -1096,6 +1334,14 @@ def audit(
                     ),
                 }
             )
+
+        previous_url = str(claim["url"])
+        previous_position = position
+
+    if previous_url is not None and last_semantic_position.get(previous_url) == previous_position:
+        result_by_url[previous_url].pop("_body", None)
+    if pdf_executor is not None:
+        pdf_executor.shutdown(wait=True)
 
     for result in results:
         result["canonical_url"] = result["url"]

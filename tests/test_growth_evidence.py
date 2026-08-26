@@ -1119,6 +1119,8 @@ def _detailed_annual_row(report_date: str, *, code: str = "000001"):
         "NOTICE_DATE": f"{int(report_date[:4]) + 1}-04-30 00:00:00",
         "UPDATE_DATE": f"{int(report_date[:4]) + 1}-04-30 00:00:00",
         "CURRENCY": "CNY",
+        "NETCASH_OPERATE": None,
+        "NETCASH_FINANCE": None,
     }
     row.update({field: None for field in dc._DETAILED_INVESTMENT_FIELDS})
     row["TOTAL_INVEST_OUTFLOW"] = 10.0

@@ -11,6 +11,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -64,6 +65,7 @@ _FULL_COVERAGE_REVIEW_MODES = frozenset(
         "opencode_mixed_review",
         "opencode_native_web_search_review",
         "opencode_native_company_research_review",
+        "codex_luna_web_review",
     }
 )
 
@@ -215,6 +217,48 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
     return [{**chunk, "text": chunk["text"][:_MAX_RULE_CHARS]} for chunk in selected]
 
 
+def _align_type7_score_bounds(type_key: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep a complete Type 7 score and its zero-width bounds identical.
+
+    Type 7 totals are intentionally kept at three decimal places.  The
+    catalogue's legacy decision-bound serializer rounded both ends of a
+    complete zero-width interval to one decimal place, so a value such as
+    ``7.451`` was paired with ``[7.5, 7.5]``.  That interval is not a genuine
+    uncertainty range: it is the exact score after display rounding.  The AI
+    packet must therefore retain the exact score for all three fields while
+    leaving real (non-zero-width or incomplete) bounds untouched.
+    """
+
+    result = dict(value)
+    if type_key != "type7" or result.get("has_missing_dimensions") is True or result.get("bounded") is True:
+        return result
+
+    def number(raw: Any) -> float | None:
+        if isinstance(raw, bool) or raw is None:
+            return None
+        try:
+            parsed = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    score = number(result.get("score"))
+    lower = number(result.get("score_lower_bound"))
+    upper = number(result.get("score_upper_bound"))
+    if score is None or lower is None or upper is None or lower != upper:
+        return result
+
+    result["score_lower_bound"] = score
+    result["score_upper_bound"] = score
+    decision = result.get("decision")
+    if isinstance(decision, Mapping):
+        decision_copy = dict(decision)
+        decision_copy["score_lower_bound"] = score
+        decision_copy["score_upper_bound"] = score
+        result["decision"] = decision_copy
+    return result
+
+
 def _compact_company(
     company: Mapping[str, Any], selected_type: str | list[str], *, market_as_of: str | None = None
 ) -> dict[str, Any]:
@@ -245,12 +289,13 @@ def _compact_company(
         for key, value in types.items():
             if key in selected_type_set or not isinstance(value, dict):
                 continue
-            decision = value.get("decision") if isinstance(value.get("decision"), dict) else {}
+            compact_value = _align_type7_score_bounds(str(key), value)
+            decision = compact_value.get("decision") if isinstance(compact_value.get("decision"), dict) else {}
             other[str(key)] = {
-                "status": value.get("status"),
-                "score": value.get("score"),
-                "score_lower_bound": decision.get("score_lower_bound"),
-                "score_upper_bound": decision.get("score_upper_bound"),
+                "status": compact_value.get("status"),
+                "score": compact_value.get("score"),
+                "score_lower_bound": compact_value.get("score_lower_bound", decision.get("score_lower_bound")),
+                "score_upper_bound": compact_value.get("score_upper_bound", decision.get("score_upper_bound")),
                 "decision_basis": decision.get("decision_basis"),
                 "veto_state": decision.get("veto_state"),
             }
@@ -295,7 +340,15 @@ def build_input(
     snapshot_market_as_of = requested_market_as_of or source_market_as_of
     if not snapshot_generation or not snapshot_market_as_of:
         raise ValueError("snapshot must carry generation and market_as_of")
-    candidate_pairs = select_candidates(snapshot)
+    candidate_pairs = [
+        {
+            **candidate,
+            "deterministic": _align_type7_score_bounds(
+                str(candidate.get("type_key") or ""), candidate["deterministic"]
+            ),
+        }
+        for candidate in select_candidates(snapshot)
+    ]
     type_pair_universe_identity_sha256 = candidate_identity_sha256(candidate_pairs)
     candidates = group_candidates_by_company(candidate_pairs)
     candidate_universe_sha256 = candidate_identity_sha256(candidates)

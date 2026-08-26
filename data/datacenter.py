@@ -165,7 +165,13 @@ _DETAILED_INVESTMENT_FIELDS = (
     "INVEST_NETCASH_BALANCE",
     "NETCASH_INVEST",
 )
-_DETAILED_CASHFLOW_COLUMNS = ",".join((*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS))
+_DETAILED_CASHFLOW_NET_FIELDS = (
+    "NETCASH_OPERATE",
+    "NETCASH_INVEST",
+    "NETCASH_FINANCE",
+)
+_DETAILED_CASHFLOW_VALUE_FIELDS = tuple(dict.fromkeys((*_DETAILED_INVESTMENT_FIELDS, *_DETAILED_CASHFLOW_NET_FIELDS)))
+_DETAILED_CASHFLOW_COLUMNS = ",".join((*_DETAILED_CASHFLOW_METADATA, *_DETAILED_CASHFLOW_VALUE_FIELDS))
 _INTERIM_REPORT_LABELS = {
     "03-31": ("一季报", "一季报"),
     "06-30": ("中报", "中报"),
@@ -1232,7 +1238,8 @@ _BALANCE_COMMON_COLUMNS = (
 _BALANCE_REPORT_COLUMNS = {
     RPT_BALANCE: (
         _BALANCE_COMMON_COLUMNS + ",MONETARYFUNDS,SHORT_LOAN,LONG_LOAN,BOND_PAYABLE,"
-        "NONCURRENT_LIAB_1YEAR,LEASE_LIAB,SHORT_BOND_PAYABLE"
+        "NONCURRENT_LIAB_1YEAR,LEASE_LIAB,SHORT_BOND_PAYABLE,ACCOUNTS_RECE,INVENTORY,CIP,"
+        "TOTAL_OTHER_RECE"
     ),
     # Bank balance sheets do not expose corporate cash/loan line items.
     RPT_BALANCE_BANK: (_BALANCE_COMMON_COLUMNS + ",BOND_PAYABLE,LEASE_LIAB,BORROW_FUND,LOAN_PBC,SUBBOND_PAYABLE"),
@@ -1474,12 +1481,12 @@ def _validate_detailed_interim_cashflow(
     require_all_dates: bool = True,
 ) -> pd.DataFrame:
     """Validate detailed investing-cash evidence without coercing blanks to zero."""
-    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS}
+    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_CASHFLOW_VALUE_FIELDS}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise DataFetchError(f"{RPT_DETAILED_CASHFLOW} response omitted columns: {missing}")
 
-    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS]].copy()
+    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_CASHFLOW_VALUE_FIELDS]].copy()
     if result.empty:
         result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
         result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
@@ -1532,7 +1539,7 @@ def _validate_detailed_interim_cashflow(
                 raise DataFetchError(f"detailed interim cash-flow contains an invalid {column}")
             result.loc[present, column] = source[present].astype(str).str.slice(0, 10)
 
-    for column in _DETAILED_INVESTMENT_FIELDS:
+    for column in _DETAILED_CASHFLOW_VALUE_FIELDS:
         source = result[column]
         numeric = pd.to_numeric(source, errors="coerce")
         booleans = source.map(lambda value: isinstance(value, bool))
@@ -1596,12 +1603,12 @@ def _validate_detailed_annual_cashflow(
     require_all_dates: bool = True,
 ) -> pd.DataFrame:
     """Validate detailed annual investing-cash evidence without imputing blanks."""
-    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS}
+    required = {*_DETAILED_CASHFLOW_METADATA, *_DETAILED_CASHFLOW_VALUE_FIELDS}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise DataFetchError(f"{RPT_DETAILED_CASHFLOW} response omitted columns: {missing}")
 
-    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_INVESTMENT_FIELDS]].copy()
+    result = frame.loc[:, [*_DETAILED_CASHFLOW_METADATA, *_DETAILED_CASHFLOW_VALUE_FIELDS]].copy()
     if result.empty:
         result["SOURCE_REPORT_NAME"] = RPT_DETAILED_CASHFLOW
         result["SOURCE_REPORT_URL"] = EASTMONEY_DATACENTER_URL
@@ -1651,7 +1658,7 @@ def _validate_detailed_annual_cashflow(
                 raise DataFetchError(f"detailed annual cash-flow contains an invalid {column}")
             result.loc[present, column] = source[present].astype(str).str.slice(0, 10)
 
-    for column in _DETAILED_INVESTMENT_FIELDS:
+    for column in _DETAILED_CASHFLOW_VALUE_FIELDS:
         source = result[column]
         numeric = pd.to_numeric(source, errors="coerce")
         booleans = source.map(lambda value: isinstance(value, bool))

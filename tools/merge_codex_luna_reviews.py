@@ -23,7 +23,13 @@ def _load_jsonl(path: Path) -> dict[str, dict[str, Any]]:
     return rows
 
 
-def merge(input_path: Path, shard_paths: list[Path], output_path: Path) -> dict[str, int]:
+def merge(
+    input_path: Path,
+    shard_paths: list[Path],
+    output_path: Path,
+    *,
+    review_mode: str = "codex_luna_web_review",
+) -> dict[str, int]:
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     packets = payload.get("packets")
     if not isinstance(packets, list):
@@ -57,7 +63,7 @@ def merge(input_path: Path, shard_paths: list[Path], output_path: Path) -> dict[
     if missing:
         raise ValueError(f"shard code is not in candidate queue: {missing[0]}")
     payload["packets"] = copied_packets
-    payload["review_mode"] = "local_codex_review"
+    payload["review_mode"] = review_mode
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"packet_count": len(packets), "replacement_count": replaced, "shard_count": len(replacements)}
 
@@ -66,9 +72,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--review-mode", default="codex_luna_web_review")
     parser.add_argument("shards", type=Path, nargs="+")
     args = parser.parse_args()
-    print(json.dumps(merge(args.input, args.shards, args.out), ensure_ascii=False))
+    print(json.dumps(merge(args.input, args.shards, args.out, review_mode=args.review_mode), ensure_ascii=False))
 
 
 if __name__ == "__main__":

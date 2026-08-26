@@ -31,6 +31,10 @@ LOCAL_OPENCODE_MODELS = frozenset(
 )
 NATIVE_WEB_REVIEW_MODE = "opencode_native_web_search_review"
 NATIVE_COMPANY_RESEARCH_REVIEW_MODE = "opencode_native_company_research_review"
+# Direct Codex/Luna web-tool review.  This is deliberately a separate mode:
+# it proves per-company HTTPS research without pretending that a provider
+# native event or an OpenCode/Reasonix runtime was used.
+CODEX_LUNA_WEB_REVIEW_MODE = "codex_luna_web_review"
 NATIVE_WEB_REVIEW_MODEL = "opencode-go/muse-spark-1.2-contributor"
 NATIVE_WEB_RETRIEVAL_MODEL = "opencode-go-muse/muse-spark-1.2-contributor"
 NATIVE_RETRIEVAL_BACKEND = "reasonix-native-server-web-search"
@@ -341,7 +345,10 @@ _QUALIFIED_DECISION_PREFIX_RE = re.compile(
 )
 _NEGATED_BUY_PREFIX_RE = re.compile(
     r"(?:不|暂不|并不|并非|未|尚未|不能|不可|不构成|不足以|难以|避免|谨慎)"
-    r"(?:据此|直接|立即|现在|当前)?$"
+    r"(?:据此|直接|立即|现在|当前|进入|纳入|列入)?$|"
+    r"(?:不等于|并不等于|不代表|并不代表|不意味着)$|"
+    r"(?:不能|无法|难以|尚不能|未能)(?:确认|证明|判断|说明)?"
+    r"[^，,。！？!?；;]{0,16}$"
 )
 _ATTRIBUTED_BUY_PREFIX_RE = re.compile(
     r"(?:券商|机构|分析师|研报|媒体|第三方|(?:量化|确定性)?模型)(?:明确|强烈)?$"
@@ -412,8 +419,36 @@ _RESEARCH_DIMENSION_TERMS: dict[str, tuple[str, ...]] = {
     "valuation": ("pe", "pb", "ps", "市盈", "市净", "市销", "估值", "股价", "市值", "股息率", "折价"),
     "cashflow": ("现金流", "自由现金流", "经营现金", "资本开支", "fcf"),
     "earnings": ("营收", "收入", "净利", "利润", "毛利", "扣非", "roe", "roic", "eps"),
-    "industry": ("市占率", "市场份额", "销量", "产量", "订单", "供需", "库存", "产能", "行业价格"),
-    "governance": ("分红", "回购", "负债率", "应收", "商誉", "关联交易", "研发投入"),
+    "industry": (
+        "市占率",
+        "市场份额",
+        "销量",
+        "产量",
+        "订单",
+        "供需",
+        "库存",
+        "产能",
+        "行业价格",
+        "利用率",
+        "客座率",
+        "载客率",
+    ),
+    "governance": (
+        "分红",
+        "回购",
+        "负债率",
+        "应收",
+        "商誉",
+        "关联交易",
+        "研发投入",
+        "担保",
+        "资产",
+        "资本",
+        "不良率",
+        "拨备",
+        "净息差",
+        "核心一级",
+    ),
 }
 _SUBSTANTIVE_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9])[-+]?\d+(?:\.\d+)?")
 
@@ -800,7 +835,12 @@ def _claim_has_public_url(claim: Mapping[str, Any]) -> bool:
 
 def _substantive_numbers(value: Any) -> set[str]:
     numbers: set[str] = set()
-    for match in _SUBSTANTIVE_NUMBER_RE.finditer(str(value or "")):
+    # Financial amounts are commonly formatted as ``1,330,270,175.36`` in
+    # one claim and without separators in the corresponding fact.  Treat
+    # thousands separators as presentation only so the source-link check
+    # compares the same numeric value rather than two tokenizations.
+    normalized = re.sub(r"(?<=\d),(?=\d)", "", str(value or ""))
+    for match in _SUBSTANTIVE_NUMBER_RE.finditer(normalized):
         raw = match.group(0).lstrip("+")
         unsigned = raw.lstrip("-")
         try:

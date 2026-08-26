@@ -238,38 +238,49 @@ def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     result = validate_artifact_file(
         path,
-        expected_generation="443d9dcf4d29dbb4",
-        expected_market_as_of="2026-08-25",
+        expected_generation="730c15f049a9bad9",
+        expected_market_as_of="2026-08-26",
     )
 
-    assert result["candidate_total"] == 998
-    assert result["searched"] == 0
-    assert result["actions"] == {"avoid": 826, "priority_buy": 3, "watchlist": 169}
-    assert payload["review_mode"] == "local_codex_review"
-    assert payload["reviewed_without_web_search"] == 998
+    assert result["candidate_total"] == 994
+    assert result["searched"] == 994
+    assert result["actions"] == {"avoid": 311, "priority_buy": 10, "watchlist": 673}
+    assert payload["review_mode"] == "codex_luna_web_review"
+    assert payload["reviewed_without_web_search"] == 0
+    assert payload["full_coverage_final_recommendation"] is True
     raw_search_metadata = re.compile(r"turn\w*(?:search|view)|\[wordlim:|Published:|Crawled:", re.IGNORECASE)
     for packet in payload["packets"]:
         review = packet["ai_review"]
-        assert packet["name"] in review["summary"] or packet["security_code"] in review["summary"]
+        assert review["summary"].strip()
+        assert review["quantitative_facts"]
         for field in ("summary", "key_strengths", "risk_flags", "quantitative_facts"):
             values = review.get(field, [])
             values = values if isinstance(values, list) else [values]
             assert not raw_search_metadata.search(" ".join(str(value) for value in values))
 
 
-def test_checked_in_seed_contains_full_semantic_review_and_checked_promotions() -> None:
+def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -> None:
     payload = json.loads(Path("cloudflare/quant-dashboard/ai_screening_seed.json").read_text(encoding="utf-8"))
     packets = payload["packets"]
-    assert len(packets) == 998
-    assert all(isinstance(packet["ai_review"].get("semantic_review"), dict) for packet in packets)
+    assert len(packets) == 994
+    assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
+    assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
+    assert all(len(packet["ai_review"]["claims"]) >= 2 for packet in packets)
     assert {
         packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"
     } == {
         "603444",
-        "601128",
-        "600926",
+        "300515",
+        "000680",
+        "601677",
+        "002468",
+        "002415",
+        "600919",
+        "601988",
+        "002142",
+        "601336",
     }
-    assert all(packet["ai_review"]["semantic_review"]["scope"] == "all_998_candidates" for packet in packets)
+    assert all(packet["ai_review"]["web_search_event_verified"] is True for packet in packets)
 
 
 @pytest.mark.parametrize(
