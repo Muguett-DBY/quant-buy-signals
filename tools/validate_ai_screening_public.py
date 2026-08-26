@@ -387,9 +387,9 @@ def validate_artifact(
         if _int(source_audit.get("invalid_claim_url_count"), "source_audit.invalid_claim_url_count") != 0:
             raise ValueError("external full AI screening seed has invalid claim URLs")
         failed = _int(source_audit.get("failed", 0), "source_audit.failed")
-        network_warnings_allowed = review_mode == CODEX_LUNA_WEB_REVIEW_MODE and source_audit.get(
-            "network_warnings_allowed"
-        ) is True
+        network_warnings_allowed = (
+            review_mode == CODEX_LUNA_WEB_REVIEW_MODE and source_audit.get("network_warnings_allowed") is True
+        )
         if failed != 0 and not network_warnings_allowed:
             raise ValueError("external full AI screening seed has unreachable claim URLs")
         for field in ("checked", "ok", "blocked"):

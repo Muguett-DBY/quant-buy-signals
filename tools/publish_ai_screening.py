@@ -354,13 +354,7 @@ def _validated_source_audit(
         "network_warnings_allowed": bool(allow_network_warnings),
         "release_status": (
             "passed_with_source_access_warnings"
-            if allow_network_warnings
-            and (
-                failed
-                or blocked
-                or semantic_failed_count
-                or semantic_unverified_count
-            )
+            if allow_network_warnings and (failed or blocked or semantic_failed_count or semantic_unverified_count)
             else "passed"
         ),
         "semantic_html_date_checked_count": _audit_count(audit, "semantic_html_date_checked_count"),

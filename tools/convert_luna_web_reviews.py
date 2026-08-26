@@ -247,11 +247,15 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, str] | str]:
             if (key.endswith("_pct") or "ratio" in key_lower or "growth" in key_lower) and text and "%" not in text:
                 text = f"{text}%"
             elif (
-                key.endswith(("_rmb", "_cny_yuan"))
-                or "cny" in key_lower
-                or "rmb" in key_lower
-                or key_lower.endswith("_yuan")
-            ) and text and not re.search(r"元|万|亿", text):
+                (
+                    key.endswith(("_rmb", "_cny_yuan"))
+                    or "cny" in key_lower
+                    or "rmb" in key_lower
+                    or key_lower.endswith("_yuan")
+                )
+                and text
+                and not re.search(r"元|万|亿", text)
+            ):
                 text = f"{text}元"
             elif "square_meter" in key_lower and text and not re.search(r"平方米|万平", text):
                 text = f"{text}平方米"
@@ -298,7 +302,17 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, str] | str]:
                         metric_parts = [
                             metric_text(str(key), value)
                             for key, value in item.items()
-                            if key not in {"period", "status", "source_date", "source_url", "source", "source_index", "date", "as_of"}
+                            if key
+                            not in {
+                                "period",
+                                "status",
+                                "source_date",
+                                "source_url",
+                                "source",
+                                "source_index",
+                                "date",
+                                "as_of",
+                            }
                             and value is not None
                         ]
                         if metric_parts:
@@ -632,7 +646,10 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         "recommendation_label": action[3],
         "ai_independent": True,
         "economic_category": "other",
-        "score_components": {"risk_adjusted_expected_return": score, "evidence_confidence": 85.0 if _evidence_grade(row) == "high" else 65.0},
+        "score_components": {
+            "risk_adjusted_expected_return": score,
+            "evidence_confidence": 85.0 if _evidence_grade(row) == "high" else 65.0,
+        },
         "confidence": "high" if _evidence_grade(row) == "high" else "medium",
         "calibration_adjustments": {
             "raw_score": score,
@@ -715,16 +732,18 @@ def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dic
     output["queue_full_coverage"] = queue_full_coverage
     output["full_coverage_final_recommendation"] = queue_full_coverage
     research_dates = {
-        _text(row.get("research_as_of"), 10)
-        for row in rows.values()
-        if _text(row.get("research_as_of"), 10)
+        _text(row.get("research_as_of"), 10) for row in rows.values() if _text(row.get("research_as_of"), 10)
     }
     if len(research_dates) == 1:
         output["research_as_of"] = next(iter(research_dates))
     output["packets"] = packets
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"candidate_total": len(packets), "reviewed": len(rows), "recommend_buy": sum(row.get("decision") == "recommend_buy" for row in rows.values())}
+    return {
+        "candidate_total": len(packets),
+        "reviewed": len(rows),
+        "recommend_buy": sum(row.get("decision") == "recommend_buy" for row in rows.values()),
+    }
 
 
 def main() -> int:
