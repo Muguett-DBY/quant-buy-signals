@@ -56,9 +56,14 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
     text = text.replace("年度财务历史覆盖", "财务历史覆盖")
     text = text.replace("候选池", "研究范围").replace("候选来源", "研究来源")
     text = text.replace("入池", "进入研究范围")
-    # Remove deterministic labels without changing the state they describe.
-    # In particular, “接近达标”“未达标”和“未触发” are materially different
-    # investment facts and must remain visible in the AI explanation.
+    # Keep deterministic state out of the AI-facing explanation.  The web page
+    # renders the candidate rule state in its own section; repeating it in the
+    # AI prose makes a rule outcome look like an independent research reason.
+    # Use neutral wording rather than dropping the surrounding financial fact.
+    text = text.replace("接近达标", "基本面尚未完全确认")
+    text = text.replace("未达标", "证据与安全边际不足")
+    text = text.replace("未触发", "尚未形成独立确认")
+    text = text.replace("已触发", "已进入研究范围")
     text = re.sub(r"(?:类型\s*[1-7](?:\s*(?:与|和|及|/|-)\s*类型?\s*[1-7])*)\s*(?:双|多)?触发", "", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:type\s*[1-7](?:\s*(?:and|or|to|/|-)\s*type?\s*[1-7])*)\s*(?:double|multi)?\s*trigger(?:ed)?", "", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:仅是|只是)?(?:筛选索引|研究索引)", "", text)

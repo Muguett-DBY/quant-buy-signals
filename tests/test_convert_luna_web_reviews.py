@@ -207,7 +207,7 @@ def test_sanitize_reason_text_removes_pool_labels_but_keeps_company_facts() -> N
     assert "2026H1收入同比增长32.6%" in result
 
 
-def test_sanitize_reason_text_preserves_trigger_and_threshold_semantics() -> None:
+def test_sanitize_reason_text_removes_trigger_and_threshold_labels() -> None:
     value = "类型1接近达标；类型2未触发；类型3未达标；类型4已触发。"
 
     result = _sanitize_reason_text(value)
@@ -216,10 +216,14 @@ def test_sanitize_reason_text_preserves_trigger_and_threshold_semantics() -> Non
     assert "类型2" not in result
     assert "类型3" not in result
     assert "类型4" not in result
-    assert "接近达标" in result
-    assert "未触发" in result
-    assert "未达标" in result
-    assert "已触发" in result
+    assert "接近达标" not in result
+    assert "未触发" not in result
+    assert "未达标" not in result
+    assert "已触发" not in result
+    assert "基本面尚未完全确认" in result
+    assert "证据与安全边际不足" in result
+    assert "尚未形成独立确认" in result
+    assert "已进入研究范围" in result
 
 
 def test_repair_fact_unit_mentions_corrects_obvious_tenfold_amount_error() -> None:
