@@ -374,14 +374,10 @@ def test_numeric_repair_handles_chinese_suffix_and_skips_per_share() -> None:
             "source_url": "https://example.com/fact",
         }
     ]
-    repaired, records = _repair_fact_unit_mentions(
-        "2026年上半年营业收入372.68亿元但仍需跟踪。", row, field="summary"
-    )
+    repaired, records = _repair_fact_unit_mentions("2026年上半年营业收入372.68亿元但仍需跟踪。", row, field="summary")
     assert "37.27亿元" in repaired
     assert records[0]["old"] == "372.68亿元"
-    summary_repaired, summary_records = _repair_fact_unit_mentions(
-        "2026年上半年收入372.68亿元。", row, field="summary"
-    )
+    summary_repaired, summary_records = _repair_fact_unit_mentions("2026年上半年收入372.68亿元。", row, field="summary")
     assert summary_repaired == "2026年上半年收入37.27亿元。"
     assert summary_records[0]["metric"] == "营业收入"
     untouched, no_records = _repair_fact_unit_mentions("营业收入372.68元/股。", row, field="summary")

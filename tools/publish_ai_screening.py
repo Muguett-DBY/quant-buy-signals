@@ -690,9 +690,7 @@ def _public_review(
         if isinstance(binding, Mapping):
             fact_bindings.append(dict(binding))
     numeric_fact_repairs = [
-        dict(item)
-        for item in review.get("numeric_fact_repairs", [])[:32]
-        if isinstance(item, Mapping)
+        dict(item) for item in review.get("numeric_fact_repairs", [])[:32] if isinstance(item, Mapping)
     ]
     public_findings: list[dict[str, Any]] = []
     if require_company_research_fields:

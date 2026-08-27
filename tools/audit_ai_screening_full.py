@@ -105,9 +105,7 @@ def _financial_fact_audit(review: Mapping[str, Any]) -> tuple[list[str], dict[st
                     # free-form Chinese quotations may legitimately mention
                     # several metrics and must not be judged by one token.
                     inferred_unit = (
-                        _inferred_fact_unit(metric)
-                        if metric and re.fullmatch(r"[A-Za-z0-9_]+", metric)
-                        else None
+                        _inferred_fact_unit(metric) if metric and re.fullmatch(r"[A-Za-z0-9_]+", metric) else None
                     )
                     if inferred_unit and _unit_family(unit) != _unit_family(inferred_unit):
                         counts["binding_unit_mismatch_count"] += 1
@@ -262,7 +260,8 @@ def _audit_packet(
         "score_ok": score_ok and not any(item.endswith("_score_band") for item in errors),
         "financial_facts_ok": not any(
             item.startswith("financial_fact_") or item.startswith("numeric_repair_") for item in errors
-        ) and not any(item.endswith("_mismatch") for item in errors),
+        )
+        and not any(item.endswith("_mismatch") for item in errors),
         "financial_fact_counts": financial_counts,
         "review_ok": not errors,
         "errors": errors,
@@ -312,24 +311,19 @@ def audit_artifact(
         "financial_fact_binding_count": sum(row["financial_fact_counts"]["binding_count"] for row in rows),
         "financial_fact_value_count": sum(row["financial_fact_counts"]["binding_value_count"] for row in rows),
         "financial_fact_missing_unit_count": sum(
-            row["financial_fact_counts"]["binding_missing_unit_count"]
-            for row in rows
+            row["financial_fact_counts"]["binding_missing_unit_count"] for row in rows
         ),
         "financial_fact_unit_mismatch_count": sum(
-            row["financial_fact_counts"]["binding_unit_mismatch_count"]
-            for row in rows
+            row["financial_fact_counts"]["binding_unit_mismatch_count"] for row in rows
         ),
         "financial_fact_missing_period_count": sum(
-            row["financial_fact_counts"]["binding_missing_period_count"]
-            for row in rows
+            row["financial_fact_counts"]["binding_missing_period_count"] for row in rows
         ),
         "financial_fact_unbound_source_count": sum(
-            row["financial_fact_counts"]["binding_unbound_source_count"]
-            for row in rows
+            row["financial_fact_counts"]["binding_unbound_source_count"] for row in rows
         ),
         "quantitative_fact_missing_unit_count": sum(
-            row["financial_fact_counts"]["quantitative_fact_missing_unit_count"]
-            for row in rows
+            row["financial_fact_counts"]["quantitative_fact_missing_unit_count"] for row in rows
         ),
         "numeric_fact_repair_count": sum(row["financial_fact_counts"]["numeric_repair_count"] for row in rows),
         "action_counts": {

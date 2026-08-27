@@ -64,8 +64,15 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
     text = text.replace("未达标", "证据与安全边际不足")
     text = text.replace("未触发", "尚未形成独立确认")
     text = text.replace("已触发", "已进入研究范围")
-    text = re.sub(r"(?:类型\s*[1-7](?:\s*(?:与|和|及|/|-)\s*类型?\s*[1-7])*)\s*(?:双|多)?触发", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?:type\s*[1-7](?:\s*(?:and|or|to|/|-)\s*type?\s*[1-7])*)\s*(?:double|multi)?\s*trigger(?:ed)?", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(?:类型\s*[1-7](?:\s*(?:与|和|及|/|-)\s*类型?\s*[1-7])*)\s*(?:双|多)?触发", "", text, flags=re.IGNORECASE
+    )
+    text = re.sub(
+        r"(?:type\s*[1-7](?:\s*(?:and|or|to|/|-)\s*type?\s*[1-7])*)\s*(?:double|multi)?\s*trigger(?:ed)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"(?:仅是|只是)?(?:筛选索引|研究索引)", "", text)
     text = re.sub(r"分片中的(?:type|类型)状态(?:未作为买入理由)?", "", text, flags=re.IGNORECASE)
     text = text.replace("筛选规则", "研究条件")
@@ -197,8 +204,13 @@ def _inferred_fact_unit(metric: Any) -> str | None:
         return "亿千瓦时"
     if text.endswith("_mwe"):
         return "兆瓦"
-    if text.endswith(("_pct", "_percent")) or "_pct_" in text or any(
-        token in text for token in ("百分比", "占比", "同比", "增长率", "收益率", "净利率", "毛利率", "roe", "率", "比例")
+    if (
+        text.endswith(("_pct", "_percent"))
+        or "_pct_" in text
+        or any(
+            token in text
+            for token in ("百分比", "占比", "同比", "增长率", "收益率", "净利率", "毛利率", "roe", "率", "比例")
+        )
     ):
         return "%"
     # EPS is a per-share amount even when the producer omits the explicit
@@ -226,10 +238,16 @@ def _inferred_fact_unit(metric: Any) -> str | None:
         return "亿股"
     if text.endswith(("_shares", "_shares_approx")) or "股数" in text or "持股" in text:
         return "股"
-    if text in {"stores", "direct_stores", "franchise_stores", "total_stores"} or "store_count" in text or "store_number" in text:
+    if (
+        text in {"stores", "direct_stores", "franchise_stores", "total_stores"}
+        or "store_count" in text
+        or "store_number" in text
+    ):
         return "家"
-    if text.endswith(("_units", "_count")) or "_units_" in text or any(
-        token in text for token in ("agents", "skills", "patents")
+    if (
+        text.endswith(("_units", "_count"))
+        or "_units_" in text
+        or any(token in text for token in ("agents", "skills", "patents"))
     ):
         return "项"
     if text.endswith("_years") or "连续年" in text:
@@ -277,7 +295,11 @@ def _inferred_fact_unit(metric: Any) -> str | None:
     # Match valuation-multiple names as tokens, not substrings.  For example,
     # ``operating_cash_flow`` contains the letters ``pe`` inside
     # ``operating`` and must remain an amount rather than becoming 倍.
-    if text in {"ps", "pcf", "peg"} or re.search(r"(?:^|_)(?:pe|pb|ps|pcf|peg|multiple)(?:_|$)", text) or "倍数" in text:
+    if (
+        text in {"ps", "pcf", "peg"}
+        or re.search(r"(?:^|_)(?:pe|pb|ps|pcf|peg|multiple)(?:_|$)", text)
+        or "倍数" in text
+    ):
         return "倍"
     if "per_passenger_km" in text:
         return "元/客公里"
@@ -355,7 +377,9 @@ def _unit_family(value: Any) -> str:
         return "shares"
     if any(token in normalized for token in ("吨", "ton", "千瓦时", "kwh", "兆瓦", "mwe")):
         return "physical"
-    if any(token in normalized for token in ("元", "人民币", "cny", "rmb", "美元", "usd", "亿", "万", "million", "billion")):
+    if any(
+        token in normalized for token in ("元", "人民币", "cny", "rmb", "美元", "usd", "亿", "万", "million", "billion")
+    ):
         return "money"
     return normalized
 
@@ -477,7 +501,10 @@ def _period_matches(text: str, item: Mapping[str, Any]) -> bool:
     if month == 9:
         return any(token in normalized for token in ("前三季度", "三季度", "q3", "1-9", "1至9", "1—9"))
     # A year-end fact should not be rebound to an explicitly interim sentence.
-    if any(token in normalized for token in ("上半年", "半年度", "半年报", "一季度", "二季度", "三季度", "q1", "q2", "q3", "h1")):
+    if any(
+        token in normalized
+        for token in ("上半年", "半年度", "半年报", "一季度", "二季度", "三季度", "q1", "q2", "q3", "h1")
+    ):
         return any(token in normalized for token in ("年度", "年报", "全年", "fy"))
     return True
 
@@ -523,7 +550,10 @@ def _repair_fact_unit_mentions(text: Any, row: Mapping[str, Any], *, field: str)
         if value is None or raw_factor is None or not metric or abs(value) == 0:
             continue
         lowered_metric = metric.casefold()
-        if any(token in lowered_metric for token in ("同比", "增长", "率", "比例", "占比", "每股", "roe", "pe", "pb", "eps")):
+        if any(
+            token in lowered_metric
+            for token in ("同比", "增长", "率", "比例", "占比", "每股", "roe", "pe", "pb", "eps")
+        ):
             continue
         aliases = _metric_aliases(metric)
         for alias in aliases:
@@ -532,7 +562,8 @@ def _repair_fact_unit_mentions(text: Any, row: Mapping[str, Any], *, field: str)
                 continue
             start = match_alias.start()
             if alias == "收入" and any(
-                token in current[max(0, start - 4) : start] for token in ("海外", "产品", "主营", "其他", "利息", "租赁")
+                token in current[max(0, start - 4) : start]
+                for token in ("海外", "产品", "主营", "其他", "利息", "租赁")
             ):
                 continue
             end = min(len(current), match_alias.end() + 96)
@@ -557,7 +588,14 @@ def _repair_fact_unit_mentions(text: Any, row: Mapping[str, Any], *, field: str)
             scale: Decimal | None = next(
                 (
                     factor
-                    for factor in (Decimal("10"), Decimal("100"), Decimal("1000"), Decimal("0.1"), Decimal("0.01"), Decimal("0.001"))
+                    for factor in (
+                        Decimal("10"),
+                        Decimal("100"),
+                        Decimal("1000"),
+                        Decimal("0.1"),
+                        Decimal("0.01"),
+                        Decimal("0.001"),
+                    )
                     if abs(ratio - factor) <= abs(factor) * Decimal("0.02")
                 ),
                 None,
@@ -721,9 +759,7 @@ def _load_rows(paths: list[Path]) -> dict[str, dict[str, Any]]:
     return rows
 
 
-_REPORT_YEAR_RE = re.compile(
-    r"(?<!\d)((?:19|20)\d{2})(?=(?:年|年度|[-/]\d{1,2}|[HhQq][1-4]|\s*(?:FY|A)\b))"
-)
+_REPORT_YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?=(?:年|年度|[-/]\d{1,2}|[HhQq][1-4]|\s*(?:FY|A)\b))")
 
 
 def _period_years(value: Any) -> set[int]:
@@ -1398,14 +1434,10 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     if not isinstance(positive_values, list) or not any(_text(value) for value in positive_values):
         positive_values = row.get("strengths", [])
     strengths = [
-        _sanitize_reason_text(repaired(value, "key_strengths"), 240)
-        for value in positive_values
-        if _text(value)
+        _sanitize_reason_text(repaired(value, "key_strengths"), 240) for value in positive_values if _text(value)
     ]
     risks = [
-        _sanitize_reason_text(repaired(value, "risk_flags"), 240)
-        for value in row.get("risks", [])
-        if _text(value)
+        _sanitize_reason_text(repaired(value, "risk_flags"), 240) for value in row.get("risks", []) if _text(value)
     ]
     facts = []
     for value in _financial_fact_items(row):
