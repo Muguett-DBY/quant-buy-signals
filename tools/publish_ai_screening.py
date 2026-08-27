@@ -62,6 +62,7 @@ _DETERMINISTIC_FIELDS = (
 _ACTION_PRIORITY = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
 _PUBLIC_ACTIONS = ("priority_buy", "watchlist", "avoid", "insufficient_evidence")
 _PUBLIC_CATEGORIES = ("recommend_buy", "observe", "do_not_recommend")
+_MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)", re.IGNORECASE)
 _NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
 
 
@@ -77,6 +78,7 @@ def _normalise_negative_pe_text(value: Any) -> str:
     """Make loss-making PE readable while retaining the raw numeric value."""
 
     text = _text(value, 1200)
+    text = _MALFORMED_PE_RE.sub("PE", text)
     return _NEGATIVE_PE_RE.sub(r"PE 不适用（原始 PE \1 倍）", text)
 
 
