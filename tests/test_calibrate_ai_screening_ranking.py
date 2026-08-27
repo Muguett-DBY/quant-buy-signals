@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from tools.calibrate_ai_screening_ranking import _action_safe_reason, _action_safe_summary, _review
+from tools.calibrate_ai_screening_ranking import (
+    _RELEASE_RULE_REASON_RE,
+    _action_safe_reason,
+    _action_safe_summary,
+    _review,
+)
 
 
 def _legacy_packet(
@@ -217,6 +222,27 @@ def test_action_safe_reason_rewrites_conflicting_english_label() -> None:
 
     assert "recommend_buy" not in result
     assert "不建议买" in result
+
+
+def test_priority_buy_gate_summary_does_not_look_like_rule_status() -> None:
+    review = _review(
+        _legacy_packet(
+            code="600919",
+            score=95,
+            pe=6.86,
+            pb=0.82,
+            facts=[
+                "600919 2026年中报：营业收入 489.52 亿元，同比 +18.11%",
+                "600919 2026年中报：归母净利润 218.76 亿元，同比 +18.09%",
+                "600919 2026年中报：经营活动现金流净额 100.00 亿元，同比 +18.00%",
+            ],
+        ),
+        "2026-08-27",
+    )
+
+    assert "均未形成独立否决" in review["summary"]
+    assert "未触发独立否决" not in review["summary"]
+    assert not _RELEASE_RULE_REASON_RE.search(review["summary"])
 
 
 def test_financial_quality_gate_keeps_strong_current_cash_generator() -> None:

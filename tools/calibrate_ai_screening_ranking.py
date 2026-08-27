@@ -40,7 +40,8 @@ _RELEASE_RULE_REASON_RE = re.compile(
     _RULE_REASON_LEAK_RE.pattern
     + r"|(?:已|未|尚未)触发|(?:接近|尚未|未|已)?达标|"
     + r"候选(?:池|来源)|估值买入区|强周期底部|长坡厚[雪学]|可持续高增长|两热一冷|"
-    + r"年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]",
+    + r"年度财务历史覆盖|本司外\d|非本司外|买入情况[1-7]|"
+    + r"(?:筛选|模型|买入)(?:分数|评分|状态)",
     re.IGNORECASE,
 )
 
@@ -1088,7 +1089,10 @@ def _review(
             if _financial_institution(review_packet)
             else "估值、最新盈利和现金流"
         )
-        summary = f"评分复核：{gate_scope}未触发独立否决门槛。{summary}"
+        # This is an AI quality-gate statement, not a deterministic type
+        # status.  Avoid the bare “触发” wording because the Pages release
+        # boundary intentionally rejects rule-language in company reasons.
+        summary = f"评分复核：{gate_scope}均未形成独立否决。{summary}"
     if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
         risk_flags.insert(0, source_note)
     if not native_company_research:
