@@ -365,6 +365,7 @@ def _validated_source_audit(
         if isinstance(canonical_urls_value, list)
         else None,
         "company_coverage": coverage if isinstance(coverage, list) else None,
+        "company_source_issues": _source_issue_projection(audit),
         "source_bindings": audit.get("source_bindings") if isinstance(audit.get("source_bindings"), list) else None,
     }
 
@@ -379,15 +380,20 @@ def _source_verification_metadata(
     """Return per-company source status and the number of affected companies.
 
     ``company_coverage`` is the source audit's company-level projection.  Keep
-    the audit status as the public status, while promoting an inconsistent
-    ``pass`` row when its semantic counters contain an actual failure.  A
-    missing/unknown status is deliberately surfaced as ``unverified`` rather
-    than silently treated as a clean source.
+    content mismatches as ``failed`` while exposing access/parse limitations as
+    ``unverified``.  A missing/unknown status is deliberately surfaced as
+    ``unverified`` rather than silently treated as a clean source.  The bounded
+    issue details make the warning actionable in the website without copying
+    the full audit report into every company card.
     """
 
     coverage = source_audit.get("company_coverage")
     if not isinstance(coverage, list):
         return None
+    issue_projection = source_audit.get("company_source_issues")
+    if not isinstance(issue_projection, Mapping):
+        issue_projection = _source_issue_projection(source_audit)
+
     by_code: dict[str, dict[str, Any]] = {}
     for row in coverage:
         if not isinstance(row, Mapping):
@@ -404,20 +410,107 @@ def _source_verification_metadata(
         status = _text(row.get("status"), 16).lower()
         if status not in {"pass", "failed", "unverified"}:
             status = "unverified"
-        if status == "pass" and semantic_failed:
+        projected = issue_projection.get(code)
+        projected = projected if isinstance(projected, Mapping) else {}
+        issue_kinds = set(projected.get("issue_kinds", {}))
+        if "content_mismatch" in issue_kinds:
+            status = "failed"
+        elif issue_kinds & {"access", "unverified"}:
+            # A timeout, block page, or non-text response is not evidence that
+            # the AI search was wrong.  Surface it as unresolved verification,
+            # reserving the red failed state for an actual content mismatch.
+            status = "unverified"
+        elif status == "pass" and semantic_failed:
             status = "failed"
         elif status == "pass" and semantic_unverified:
             status = "unverified"
         issue_count = semantic_failed + semantic_unverified
         if status != "pass" and issue_count == 0:
             issue_count = 1
-        by_code[code] = {"status": status, "issue_count": issue_count}
+        metadata: dict[str, Any] = {"status": status, "issue_count": issue_count}
+        details = projected.get("issues")
+        if details:
+            metadata["issues"] = list(details)
+            metadata["issue_kinds"] = dict(sorted(projected["issue_kinds"].items()))
+        by_code[code] = metadata
 
     affected_company_count = 0
     for code in published_codes:
         if by_code.get(code, {"status": "unverified"})["status"] != "pass":
             affected_company_count += 1
     return by_code, affected_company_count
+
+
+def _source_issue_kind(reason: Any) -> str:
+    lowered_reason = _text(reason, 320).casefold()
+    if "unverified" in lowered_reason:
+        return "unverified"
+    if any(
+        marker in lowered_reason
+        for marker in (
+            "body unavailable",
+            "blocked",
+            "captcha",
+            "login",
+            "soft-404",
+            "no visible text",
+            "timeout",
+            "forbidden",
+        )
+    ):
+        return "access"
+    return "content_mismatch"
+
+
+def _source_issue_projection(source_audit: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build bounded, company-level source warning details for the public card."""
+
+    semantic_issues = source_audit.get("semantic_issues")
+    if not isinstance(semantic_issues, list):
+        return {}
+    details_by_code: dict[str, list[dict[str, Any]]] = {}
+    keys_by_code: dict[str, set[tuple[str, str, str, str, str]]] = {}
+    kinds_by_code: dict[str, Counter[str]] = {}
+    for issue in semantic_issues:
+        if not isinstance(issue, Mapping):
+            continue
+        code = _text(issue.get("security_code"), 32)
+        if not code:
+            continue
+        kind = _source_issue_kind(issue.get("reason"))
+        source_urls = canonical_urls(issue.get("source"))
+        source_url = source_urls[0] if source_urls else ""
+        claim_index = _text(issue.get("claim_index"), 24)
+        finding_index = _text(issue.get("finding_index"), 24)
+        finding_id = _text(issue.get("search_finding_id"), 120)
+        issue_key = (claim_index, finding_index, finding_id, source_url, kind)
+        keys = keys_by_code.setdefault(code, set())
+        if issue_key in keys:
+            continue
+        keys.add(issue_key)
+        kinds_by_code.setdefault(code, Counter())[kind] += 1
+        details = details_by_code.setdefault(code, [])
+        if len(details) >= 4:
+            continue
+        detail: dict[str, Any] = {"kind": kind, "reason": _text(issue.get("reason"), 320)}
+        if source_url:
+            detail["url"] = source_url
+        for field, value in (
+            ("claim_index", claim_index),
+            ("finding_index", finding_index),
+            ("search_finding_id", finding_id),
+            ("type_key", _text(issue.get("type_key"), 32)),
+        ):
+            if value and value.casefold() != "none":
+                detail[field] = value
+        details.append(detail)
+    return {
+        code: {
+            "issues": details_by_code.get(code, []),
+            "issue_kinds": dict(sorted(kinds_by_code.get(code, Counter()).items())),
+        }
+        for code in sorted(kinds_by_code)
+    }
 
 
 def _source_text(value: Any, limit: int = 800) -> str:
@@ -1263,6 +1356,8 @@ def build_artifact(
             )
             review["source_verification_status"] = verification["status"]
             review["source_verification_issue_count"] = verification["issue_count"]
+            review["source_verification_issues"] = list(verification.get("issues", []))
+            review["source_verification_issue_kinds"] = dict(verification.get("issue_kinds", {}))
             if verification["status"] != "pass" and review.get("confidence") == "high":
                 review["confidence"] = "medium"
         source_audit["affected_company_count"] = affected_company_count
@@ -1331,6 +1426,23 @@ def build_artifact(
         "company_deduplication": "company_level_review",
         "review_granularity": "company",
         "candidate_source": "deterministic_rule_pool",
+        "candidate_scope_policy": (
+            "deterministic_triggered_or_near_threshold_only; rule state selects scope, never the AI verdict"
+        ),
+        "ai_decision_policy": (
+            "independent_company_research_three_way; AI may upgrade a near-threshold candidate or downgrade a rule-triggered candidate"
+        ),
+        "knowledge_base_provenance": {
+            "root": rules_root or None,
+            "file_count": rule_file_count if isinstance(rule_file_count, int) else None,
+            "source_sha256": dict(sorted((str(key), str(value)) for key, value in rule_source_sha256.items()))
+            if isinstance(rule_source_sha256, Mapping)
+            else None,
+            "role": "research framework and risk checklist; never a substitute for company facts",
+            "candidate_context_excerpts": bool(
+                any(isinstance(packet.get("rule_context"), list) for packet in packets if isinstance(packet, Mapping))
+            ),
+        },
         "type_pair_candidate_total": published_pair_total,
         "type_pair_candidate_identity_sha256": source_pair_identity_digest,
         "type_pair_expected_total": source_pair_candidate_total,

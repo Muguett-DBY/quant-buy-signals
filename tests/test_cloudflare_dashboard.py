@@ -1969,6 +1969,9 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "公司研究日" in source
     assert "原生搜索事件证明" in source
     assert "公司财务来源核验" in source
+    assert "访问/正文不可用" in source
+    assert "公司、期间或数字不匹配" in source
+    assert "查看来源核验明细" in source
     assert "原生搜索事件已核验 · 财报来源已核验" in source
     assert "仅模型声明已搜索 · 无运行事件证明" in source
     assert "已移除无效来源" in source

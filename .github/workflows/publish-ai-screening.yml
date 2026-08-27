@@ -20,6 +20,8 @@ on:
       - tools/build_codex_luna_review.py
       - tools/ai_company_research_knowledge.md
       - tools/ai_screening_dual_channel_contract.py
+      - tools/publish_ai_screening.py
+      - tools/audit_ai_screening_sources.py
       - tools/sanitize_codex_luna_reviews.py
       - tests/test_ai_screening_contract.py
       - tests/test_validate_ai_screening_public.py

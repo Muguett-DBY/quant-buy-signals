@@ -1196,6 +1196,12 @@ function aiScreeningPageResponse(request){
     .source-verification.pass{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
     .source-verification.failed{border-color:#fecaca;background:#fff1f2;color:#991b1b}
     .source-verification.unverified{border-color:#fde68a;background:#fffbeb;color:#92400e}
+    .source-verification p{margin:3px 0 0}
+    .source-verification details{margin-top:6px}
+    .source-verification summary{cursor:pointer;color:inherit;font-weight:600}
+    .source-verification ul{margin:5px 0 0;padding-left:19px}
+    .source-verification li{margin:3px 0;overflow-wrap:anywhere}
+    .source-verification a{color:inherit;text-decoration:underline}
     .section{margin-top:12px}
     .section h3{margin:0 0 5px;font-size:13px}
     .section ul{margin:5px 0;padding-left:20px}
@@ -1238,7 +1244,7 @@ function aiScreeningPageResponse(request){
       <div class="meta" id="meta"><span>正在读取…</span></div>
     </section>
     <section class="stats" id="stats"></section>
-    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。页面另行展示原生搜索事件证明与公司财务来源核验；“仅声明已搜索”不等于运行时搜索事件已核验。</div>
+    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。候选范围只由规则达标/接近达标决定，AI再独立研究并给出三类结论；规则状态不是 AI 买入理由。页面另行展示原生搜索事件证明、公司财务来源核验与逐家公司搜索记录；来源告警会区分内容不一致和访问/解析未完成，不把后者误写成未搜索。</div>
     <section class="toolbar">
       <label>最终结论
         <select id="category">
@@ -1380,11 +1386,23 @@ function aiScreeningPageResponse(request){
       const rawStatus=String(review?.source_verification_status||"").trim();
       if(!rawStatus)return "";
       const status=["pass","failed","unverified"].includes(rawStatus)?rawStatus:"unverified";
-      const labels={pass:"通过",failed:"存在问题",unverified:"未完成"};
-      const issueCount=Math.max(0,Number(review?.source_verification_issue_count||0));
-      const detail=status==="pass"?"公司级来源语义复核未发现问题。":status==="failed"?"来源内容与公司事实绑定存在告警，请优先复核原始资料。":"来源尚未形成可确认的公司级验证，不能把该分数当作高置信证据。";
+      const labels={pass:"通过",failed:"内容不一致",unverified:"未能自动确认"};
+      const rawCount=Number(review?.source_verification_issue_count||0),issueCount=Number.isFinite(rawCount)?Math.max(0,rawCount):0;
+      const kindLabels={access:"访问/正文不可用",content_mismatch:"公司、期间或数字不匹配",unverified:"正文无法自动解析"};
+      const kindCounts=review?.source_verification_issue_kinds&&typeof review.source_verification_issue_kinds==="object"?review.source_verification_issue_kinds:{};
+      const kindSummary=Object.entries(kindCounts).map(([kind,count])=>kindLabels[kind]?(kindLabels[kind]+" "+Number(count||0)+" 项"):"").filter(Boolean).join("；");
+      const detail=status==="pass"?"公司级来源语义复核未发现问题。":status==="failed"?(kindSummary?"重新获取的来源中有"+kindSummary+"；这表示来源内容没有完全匹配声明，不代表 AI 搜索未执行。":"来源复取内容与公司事实绑定存在问题，建议打开下方明细核对原始资料。"):(kindSummary?"来源"+kindSummary+"；AI 逐家公司检索仍已完成，但这条来源暂不计作完全核验。":"来源访问或正文解析尚未完成；AI 逐家公司检索仍已完成，不能把这条来源当作完全核验。");
       const count=status==="pass"?"": " · "+issueCount+" 项告警";
-      return '<div class="source-verification '+status+'"><b>来源复核：'+labels[status]+count+'</b>'+esc(detail)+"</div>";
+      const issues=Array.isArray(review?.source_verification_issues)?review.source_verification_issues.filter(item=>item&&typeof item==="object").slice(0,4):[];
+      const issueRows=issues.map(item=>{
+        const kind=kindLabels[String(item.kind||"")]||"来源核验";
+        const context=[kind,item.claim_index&&item.claim_index!=="None"?"事实序号 "+item.claim_index:"",item.finding_index&&item.finding_index!=="None"?"搜索序号 "+item.finding_index:""].filter(Boolean).join(" · ");
+        const url=String(item.url||"");
+        const link=isHttpSource(url)?' · <a rel="noreferrer" target="_blank" href="'+esc(url)+'">打开来源</a>':"";
+        return '<li><b>'+esc(context||kind)+"</b>："+esc(item.reason||"未提供具体原因")+link+"</li>";
+      }).join("");
+      const issueMarkup=status!=="pass"?(issues.length?'<details><summary>查看来源核验明细（'+esc(issues.length+(issueCount>issues.length?" / "+issueCount:""))+"）</summary><ul>"+issueRows+"</ul></details>":'<p>本次发布只保留了告警计数，未附逐项明细。</p>'):"";
+      return '<div class="source-verification '+status+'"><b>来源复核：'+labels[status]+count+'</b><p>'+esc(detail)+"</p>"+issueMarkup+"</div>";
     }
     function scoreComponents(review){
       const components=review?.score_components,adjustments=review?.calibration_adjustments;
@@ -1536,8 +1554,10 @@ function aiScreeningPageResponse(request){
       const auditFetchWarnings=Number(audit.failed||0)+Number(audit.blocked||0);
       const auditSemanticWarnings=Number(audit.semantic_failed_count||0)+Number(audit.semantic_unverified_count||0);
       const auditLabel=String(audit.release_status||"")==="passed_with_source_access_warnings"
-        ? "来源复取告警 "+auditFetchWarnings+" / "+Number(audit.checked||0)+" URL；内容语义告警 "+auditSemanticWarnings+" 条（不等于未执行逐家公司搜索）"
+        ? "来源复取告警 "+auditFetchWarnings+" / "+Number(audit.checked||0)+" URL；内容语义告警 "+auditSemanticWarnings+" 条（访问告警与内容不一致分开统计）"
         : "来源复取审计通过";
+      const knowledge=value.knowledge_base_provenance&&typeof value.knowledge_base_provenance==="object"?value.knowledge_base_provenance:{};
+      const knowledgeRoot=String(knowledge.root||"").trim();
       const affectedCompanyLabel=Object.prototype.hasOwnProperty.call(audit,"affected_company_count")
         ? "<span>来源复核受影响公司 "+esc(audit.affected_company_count)+" / "+esc(value.candidate_total||0)+"</span>"
         : "";
@@ -1551,6 +1571,7 @@ function aiScreeningPageResponse(request){
         "<span>Codex搜索尝试 "+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>"+searchEventLabel+" "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        (knowledgeRoot?"<span>研究框架 "+esc(knowledgeRoot)+"（"+esc(knowledge.file_count||0)+" 个文件）</span>":"")+
         "<span>"+esc(auditLabel)+"</span>"+
         affectedCompanyLabel+
         "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";

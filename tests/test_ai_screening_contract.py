@@ -662,6 +662,57 @@ def test_source_verification_metadata_surfaces_failed_and_missing_company_rows()
     assert affected == 3
 
 
+def test_source_verification_metadata_distinguishes_access_from_content_mismatch() -> None:
+    metadata = {
+        "semantic_issues": [
+            {
+                "security_code": "600010",
+                "type_key": "type1",
+                "claim_index": "0",
+                "source": "https://example.test/report.pdf",
+                "reason": "source body unavailable for semantic verification (failed)",
+            },
+            {
+                "security_code": "600010",
+                "type_key": "type1",
+                "claim_index": "1",
+                "source": "https://example.test/report.html",
+                "reason": "HTML正文未匹配报告期或关键数字",
+            },
+            {
+                "security_code": "600011",
+                "type_key": "type2",
+                "claim_index": "0",
+                "source": "https://example.test/blocked.html",
+                "reason": "source body unavailable for semantic verification (blocked)",
+            },
+        ],
+        "company_coverage": [
+            {
+                "security_code": "600010",
+                "status": "failed",
+                "semantic_failed_count": 2,
+                "semantic_unverified_count": 0,
+            },
+            {
+                "security_code": "600011",
+                "status": "failed",
+                "semantic_failed_count": 1,
+                "semantic_unverified_count": 0,
+            },
+        ],
+    }
+
+    coverage, affected = _source_verification_metadata(metadata, {"600010", "600011"})
+
+    assert coverage["600010"]["status"] == "failed"
+    assert coverage["600010"]["issue_kinds"] == {"access": 1, "content_mismatch": 1}
+    assert len(coverage["600010"]["issues"]) == 2
+    assert coverage["600011"]["status"] == "unverified"
+    assert coverage["600011"]["issue_kinds"] == {"access": 1}
+    assert affected == 2
+
+
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:
     monkeypatch.setattr("tools.publish_ai_screening.MAX_PUBLIC_ARTIFACT_BYTES", 32)
 
