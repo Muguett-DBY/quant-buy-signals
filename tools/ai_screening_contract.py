@@ -745,9 +745,9 @@ def has_material_minority_interest_risk(texts: Iterable[Any]) -> bool:
 
 _CURRENT_PERIOD_YEAR_RE = re.compile(
     r"(?:最新(?:一期|实际|可得|披露)?|当前(?:一期|实际|可得|报告期|财报|数据)|当期|最近一期)"
-    r"[^。；;\n]{0,24}((?:19|20)\d{2})|"
-    r"((?:19|20)\d{2})年?[^。；;\n]{0,18}(?:是|为)?"
-    r"(?:最新(?:一期|实际)?|当前(?:一期|实际|报告期|财报|数据)|当期|最近一期)"
+    r"[^。；;\n]{0,24}?(?:仍?是|为|停留在)\s*((?:19|20)\d{2})(?![\d.])|"
+    r"(?<![\d.])((?:19|20)\d{2})(?![\d.])年?[^。；;\n]{0,8}?(?:仍?是|为)\s*"
+    r"(?:最新(?:一期|实际|可得|披露)?|当前(?:一期|实际|可得|报告期|财报|数据)|当期|最近一期)"
 )
 
 
@@ -784,7 +784,11 @@ def stale_current_period_fields(review: Mapping[str, Any]) -> list[str]:
     for field, value in fields:
         for match in _CURRENT_PERIOD_YEAR_RE.finditer(str(value or "")):
             claimed_year = int(match.group(1) or match.group(2))
-            if claimed_year < latest_year:
+            # A one-year lag is normal for an annual report (for example,
+            # 2025 annual figures remain the latest complete year during
+            # 2026).  Only flag prose that presents evidence older than that
+            # normal reporting lag as current/latest.
+            if claimed_year < latest_year - 1:
                 stale.append(field)
                 break
     return stale
