@@ -8525,9 +8525,9 @@ def screen_all_types(
             # without network I/O.
             target = type2_history_request_by_code if type2_needed else other_history_request_by_code
             target[code] = {"code": code, "as_of": as_of}
-    history_requests = [
-        type2_history_request_by_code[code] for code in sorted(type2_history_request_by_code)
-    ] + [other_history_request_by_code[code] for code in sorted(other_history_request_by_code)]
+    history_requests = [type2_history_request_by_code[code] for code in sorted(type2_history_request_by_code)] + [
+        other_history_request_by_code[code] for code in sorted(other_history_request_by_code)
+    ]
     newly_loaded_history_codes: set[str] = set()
     if quality_history_loader is not None and history_requests:
         normalized_loaded = _load_quality_history_batches(
