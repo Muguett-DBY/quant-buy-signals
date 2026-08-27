@@ -445,6 +445,15 @@ def _source_issue_kind(reason: Any) -> str:
     lowered_reason = _text(reason, 320).casefold()
     if "unverified" in lowered_reason:
         return "unverified"
+    # A dynamic HTML landing page often omits the issuer code, report period,
+    # or exact fact even when the URL is the right filing/search result.  That
+    # is a verification limitation, not proof of contradictory content.
+    if (
+        "html正文未匹配" in lowered_reason
+        or "html body does not match" in lowered_reason
+        or "html正文未找到" in lowered_reason
+    ):
+        return "unverified"
     if any(
         marker in lowered_reason
         for marker in (

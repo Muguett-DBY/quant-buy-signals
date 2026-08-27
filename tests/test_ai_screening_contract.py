@@ -664,7 +664,7 @@ def test_source_verification_metadata_surfaces_failed_and_missing_company_rows()
     assert affected == 3
 
 
-def test_source_verification_metadata_distinguishes_access_from_content_mismatch() -> None:
+def test_source_verification_metadata_distinguishes_access_from_unverified_html() -> None:
     metadata = {
         "semantic_issues": [
             {
@@ -707,8 +707,8 @@ def test_source_verification_metadata_distinguishes_access_from_content_mismatch
 
     coverage, affected = _source_verification_metadata(metadata, {"600010", "600011"})
 
-    assert coverage["600010"]["status"] == "failed"
-    assert coverage["600010"]["issue_kinds"] == {"access": 1, "content_mismatch": 1}
+    assert coverage["600010"]["status"] == "unverified"
+    assert coverage["600010"]["issue_kinds"] == {"access": 1, "unverified": 1}
     assert len(coverage["600010"]["issues"]) == 2
     assert coverage["600011"]["status"] == "unverified"
     assert coverage["600011"]["issue_kinds"] == {"access": 1}
