@@ -729,17 +729,13 @@ def test_source_verification_summary_does_not_claim_failed_sources_passed() -> N
 
 
 def test_source_issue_kind_treats_prior_direct_origin_failure_as_access() -> None:
-    assert (
-        _source_issue_kind("source semantic verification failed in the prior direct-origin pass")
-        == "access"
-    )
+    assert _source_issue_kind("source semantic verification failed in the prior direct-origin pass") == "access"
 
 
 def test_source_issue_kind_treats_pdf_fact_parse_gap_as_unverified() -> None:
     assert _source_issue_kind("PDF text does not match report period or fact number") == "unverified"
     assert (
-        _source_issue_kind("structured source body does not match report period or fact number/field")
-        == "unverified"
+        _source_issue_kind("structured source body does not match report period or fact number/field") == "unverified"
     )
 
 

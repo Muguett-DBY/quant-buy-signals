@@ -1334,6 +1334,7 @@ def audit(
                 Path(str(body_path)).unlink()
             except OSError:
                 pass
+
     result_by_url = {str(result["url"]): result for result in results}
     published_at_mismatch_count = 0
     report_period_after_publication_count = 0
@@ -1373,6 +1374,7 @@ def audit(
     pdf_remaining: dict[str, int] = {
         url: sum(1 for claim in semantic_claims if str(claim["url"]) == url) for url in pdf_urls
     }
+
     def schedule_pdf(url: str) -> None:
         """Queue one requested PDF, keeping the executor bounded and lazy."""
 

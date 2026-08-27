@@ -877,9 +877,7 @@ def _public_review(
         "key_strengths": [
             _normalise_negative_pe_text(_text(item, 240)) for item in review.get("key_strengths", [])[:8]
         ],
-        "risk_flags": [
-            _normalise_negative_pe_text(_text(item, 240)) for item in review.get("risk_flags", [])[:12]
-        ],
+        "risk_flags": [_normalise_negative_pe_text(_text(item, 240)) for item in review.get("risk_flags", [])[:12]],
         "claims": claims,
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),

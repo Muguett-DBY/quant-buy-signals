@@ -703,14 +703,17 @@ def test_industry_pdf_claim_does_not_require_issuer_identity() -> None:
         "statement": "2026-04-10协会报告显示新能源乘用车渗透率41.6%",
     }
     finding = {"finding": "2026年1-3月新能源乘用车渗透率41.6%"}
-    assert source_audit._pdf_text_semantic_issues(
-        text,
-        security_code="605228",
-        name="神通科技",
-        claim=claim,
-        finding=finding,
-        require_identity=False,
-    ) == []
+    assert (
+        source_audit._pdf_text_semantic_issues(
+            text,
+            security_code="605228",
+            name="神通科技",
+            claim=claim,
+            finding=finding,
+            require_identity=False,
+        )
+        == []
+    )
 
 
 def test_source_audit_marks_unclaimed_finding_non_html_unverified(tmp_path, monkeypatch) -> None:
