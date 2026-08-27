@@ -265,7 +265,9 @@ def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -
     assert len(packets) == 994
     assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
     assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
-    assert all(len(packet["ai_review"]["claims"]) >= 2 for packet in packets)
+    # Source repair may remove an unprovable auxiliary claim, but every
+    # company must retain at least one independently bound fact.
+    assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
     assert {
         packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"
     } == {

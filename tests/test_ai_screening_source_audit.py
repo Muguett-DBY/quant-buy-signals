@@ -349,6 +349,18 @@ def test_source_audit_accepts_matching_html_article_period(tmp_path, monkeypatch
     assert report["audit_passed"] is True
 
 
+def test_source_audit_matches_financial_facts_across_statement_units() -> None:
+    claim = {"statement": "2025年度营业收入245.009亿元"}
+    numbers = source_audit._claim_numbers(claim, {})
+
+    assert source_audit._structured_number_match(
+        "SECURITY_CODE 000401 REPORT_DATE 2025-12-31 TOTAL_OPERATE_INCOME 24500900000元",
+        numbers,
+        claim=claim,
+        finding={},
+    )
+
+
 def test_source_audit_rejects_claim_finding_url_mismatch(tmp_path, monkeypatch) -> None:
     claim_url = "https://reports.example/company"
     payload = _semantic_claim_payload(claim_url, published_at="2026-08-13", report_period="2026H1")
@@ -961,8 +973,9 @@ def test_source_audit_validates_redirect_dns_before_second_request(monkeypatch) 
     assert result["result"] == "invalid"
     assert result["final_url"] == "http://internal.example/private"
     assert calls == ["https://reports.example/start"]
-    assert len(handlers) == 1
+    assert len(handlers) == 2
     assert isinstance(handlers[0], source_audit._NoRedirectHandler)
+    assert isinstance(handlers[1], source_audit.urllib.request.ProxyHandler)
 
 
 def test_source_audit_manually_follows_public_redirect(monkeypatch) -> None:

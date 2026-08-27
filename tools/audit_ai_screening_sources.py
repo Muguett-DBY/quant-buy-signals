@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import math
 import re
 import socket
 import urllib.error
@@ -25,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from tools.ai_source_urls import (
@@ -48,8 +49,11 @@ _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
 # or contains a very large number of pages.  The HTTP layer already limits the
 # downloaded body; this cap additionally bounds decompressed text retained by
 # PyMuPDF.
-_MAX_PDF_TEXT_CHARS = 2_000_000
-_MAX_PDF_BYTES = 16 * 1024 * 1024
+# Financial statements place the period summary and key facts near the front
+# of the filing.  Keeping the semantic window bounded prevents one malformed
+# or unusually large PDF from monopolising the full-source audit.
+_MAX_PDF_TEXT_CHARS = 800_000
+_MAX_PDF_BYTES = 12 * 1024 * 1024
 AUDIT_CONTRACT_VERSION = 3
 
 
@@ -358,15 +362,52 @@ def _report_period_tokens(value: Any) -> set[str]:
     year = year_match.group(1)
     tokens = {raw, year}
     if "q1" in raw or "一季" in raw:
-        tokens.update({f"{year}q1", f"{year}年一季度", f"{year}年第一季度", f"{year}年3月31日"})
+        tokens.update(
+            {
+                f"{year}q1",
+                f"{year}年一季度",
+                f"{year}年第一季度",
+                f"{year}年3月31日",
+                f"{year}-03-31",
+                f"{year}0331",
+            }
+        )
     elif "q2" in raw or "h1" in raw or "上半年" in raw or "半年度" in raw or "中报" in raw:
         tokens.update(
-            {f"{year}q2", f"{year}h1", f"{year}年上半年", f"{year}年半年度", f"{year}年中报", f"{year}年6月30日"}
+            {
+                f"{year}q2",
+                f"{year}h1",
+                f"{year}年上半年",
+                f"{year}年半年度",
+                f"{year}年中报",
+                f"{year}年6月30日",
+                f"{year}-06-30",
+                f"{year}0630",
+            }
         )
     elif "q3" in raw or "三季" in raw:
-        tokens.update({f"{year}q3", f"{year}年三季度", f"{year}年前三季度", f"{year}年9月30日"})
+        tokens.update(
+            {
+                f"{year}q3",
+                f"{year}年三季度",
+                f"{year}年前三季度",
+                f"{year}年9月30日",
+                f"{year}-09-30",
+                f"{year}0930",
+            }
+        )
     elif "q4" in raw or "h2" in raw or "年度" in raw or "年报" in raw:
-        tokens.update({f"{year}q4", f"{year}h2", f"{year}年度", f"{year}年年报", f"{year}年12月31日"})
+        tokens.update(
+            {
+                f"{year}q4",
+                f"{year}h2",
+                f"{year}年度",
+                f"{year}年年报",
+                f"{year}年12月31日",
+                f"{year}-12-31",
+                f"{year}1231",
+            }
+        )
     parsed = _date_value(raw)
     if parsed:
         tokens.update({parsed.isoformat(), f"{parsed.year}年{parsed.month}月{parsed.day}日"})
@@ -444,7 +485,62 @@ def _structured_field_tokens(url: str) -> set[str]:
     return fields
 
 
-def _structured_number_match(text: str, numbers: set[str]) -> bool:
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"(?P<sign>[+-]?)\s*(?P<number>\d+(?:[,.]\d+)?)\s*"
+    r"(?P<unit>千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|万元|元|"
+    r"亿股|万股|千股|股|万吨|万件|万台|吨|件|台|%|％|倍)"
+)
+_NUMBER_UNIT_FACTORS = {
+    "千亿元": 1e11,
+    "百亿元": 1e10,
+    "十亿元": 1e9,
+    "亿元": 1e8,
+    "千万元": 1e7,
+    "百万元": 1e6,
+    "十万元": 1e5,
+    "万元": 1e4,
+    "千元": 1e3,
+    "百元": 1e2,
+    "元": 1.0,
+    "亿股": 1e8,
+    "万股": 1e4,
+    "千股": 1e3,
+    "股": 1.0,
+    "万吨": 1e4,
+    "万件": 1e4,
+    "万台": 1e4,
+    "吨": 1.0,
+    "件": 1.0,
+    "台": 1.0,
+    "%": 1.0,
+    "％": 1.0,
+    "倍": 1.0,
+}
+
+
+def _number_unit_facts(values: Iterable[Any]) -> list[tuple[float, str]]:
+    facts: list[tuple[float, str]] = []
+    for value in values:
+        for match in _NUMBER_WITH_UNIT_RE.finditer(str(value or "")):
+            try:
+                number = float(match.group("number").replace(",", ""))
+            except ValueError:
+                continue
+            if not math.isfinite(number):
+                continue
+            sign = -1.0 if match.group("sign") == "-" else 1.0
+            unit = match.group("unit")
+            facts.append((sign * number * _NUMBER_UNIT_FACTORS[unit], unit))
+    return facts
+
+
+def _structured_number_match(
+    text: str,
+    numbers: set[str],
+    *,
+    claim: Mapping[str, Any] | None = None,
+    finding: Mapping[str, Any] | None = None,
+) -> bool:
     compact = re.sub(r"[,\s]", "", text)
     for number in numbers:
         token = re.sub(r"[,\s]", "", number)
@@ -453,6 +549,24 @@ def _structured_number_match(text: str, numbers: set[str]) -> bool:
         if "." in token:
             integer, fraction = token.split(".", 1)
             if fraction.rstrip("0") and f"{integer}.{fraction.rstrip('0')}" in compact:
+                return True
+    # Financial statements routinely switch between yuan, ten-thousand yuan
+    # and hundred-million yuan.  Compare explicitly unit-tagged facts after
+    # normalising their units, while retaining the exact-token fast path above.
+    target_facts = _number_unit_facts(
+        [
+            (claim or {}).get("statement"),
+            (finding or {}).get("finding"),
+        ]
+    )
+    body_facts = _number_unit_facts([text])
+    for target, target_unit in target_facts:
+        for actual, actual_unit in body_facts:
+            if target_unit in {"%", "％", "倍"} or actual_unit in {"%", "％", "倍"}:
+                tolerance = max(0.05, abs(target) * 0.002)
+            else:
+                tolerance = max(1.0, abs(target) * 0.002)
+            if abs(target - actual) <= tolerance:
                 return True
     return False
 
@@ -478,7 +592,12 @@ def _structured_source_issues(
     if not ((code and code in visible) or (normal_name and normal_name in visible)):
         return ["structured source body does not match company code or normalized company name"]
     period_match = _period_matches(text, _structured_period_tokens(claim, finding))
-    number_match = _structured_number_match(visible, _claim_numbers(claim, finding))
+    number_match = _structured_number_match(
+        visible,
+        _claim_numbers(claim, finding),
+        claim=claim,
+        finding=finding,
+    )
     field_match = any(field in visible for field in _structured_field_tokens(url))
     if not (period_match or number_match or field_match):
         return ["structured source body does not match report period or fact number/field"]
@@ -555,7 +674,12 @@ def _pdf_text_semantic_issues(
     if not ((code and code in visible) or (normal_name and normal_name in visible)):
         return ["PDF text does not match company code or normalized company name"]
     period_match = _period_matches(text, _structured_period_tokens(claim, finding))
-    number_match = _structured_number_match(visible, _claim_numbers(claim, finding))
+    number_match = _structured_number_match(
+        visible,
+        _claim_numbers(claim, finding),
+        claim=claim,
+        finding=finding,
+    )
     if not (period_match or number_match):
         return ["PDF text does not match report period or fact number"]
     return []
@@ -627,7 +751,12 @@ def _html_semantic_issues(
 
     period_match = _period_matches("".join((title, visible)), _report_period_tokens(report_period))
     numbers = _claim_numbers(claim, finding)
-    number_match = bool(numbers and any(number in visible for number in numbers))
+    number_match = _structured_number_match(
+        visible,
+        numbers,
+        claim=claim,
+        finding=finding,
+    )
     if not period_match and not number_match:
         return ["HTML正文未匹配报告期或关键数字"]
     return []
@@ -700,7 +829,10 @@ def _official_domain(url: str) -> bool:
 
 def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int = 5) -> dict[str, Any]:
     base = {"url": url, "official_market_domain": _official_domain(url)}
-    opener = urllib.request.build_opener(_NoRedirectHandler())
+    # Source verification must observe the public origin directly.  A stale
+    # workstation HTTP(S)_PROXY can otherwise turn a reachable filing into a
+    # local timeout or proxy challenge, producing a false yellow warning.
+    opener = urllib.request.build_opener(_NoRedirectHandler(), urllib.request.ProxyHandler({}))
     current_url = url
     redirect_count = 0
     while True:
