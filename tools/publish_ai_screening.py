@@ -62,7 +62,7 @@ _DETERMINISTIC_FIELDS = (
 _ACTION_PRIORITY = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
 _PUBLIC_ACTIONS = ("priority_buy", "watchlist", "avoid", "insufficient_evidence")
 _PUBLIC_CATEGORIES = ("recommend_buy", "observe", "do_not_recommend")
-_MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)", re.IGNORECASE)
+_MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
 _NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
 
 
