@@ -456,10 +456,42 @@ def _source_issue_kind(reason: Any) -> str:
             "no visible text",
             "timeout",
             "forbidden",
+            # The direct-origin recheck can fail because the publisher cannot
+            # retrieve the same body again.  That is unresolved access, not
+            # proof that the claim contradicts the source.
+            "source semantic verification failed in the prior direct-origin pass",
+            "semantic verification failed in the prior direct-origin pass",
         )
     ):
         return "access"
     return "content_mismatch"
+
+
+def _source_verification_summary(summary: Any, status: str) -> str:
+    """Align the visible provenance sentence with the audited source status.
+
+    The model review is allowed to say that it bound facts to sources, but it
+    must not claim that those sources passed when the release audit marked the
+    company as failed or unresolved.  Keep the original thesis intact and
+    replace only the stale provenance clause.
+    """
+
+    text = _text(summary, 1200)
+    if status == "pass":
+        return text
+    if status == "failed":
+        note = "来源复核提示：部分引用未通过公司、期间或数字匹配，相关事实应以原始公告为准"
+    else:
+        note = "来源复核提示：部分引用因访问或正文解析限制暂未自动确认，不能单独作为事实依据"
+    verified_clause = "公司财务事实来源已绑定并通过来源核验"
+    if verified_clause in text:
+        return text.replace(verified_clause, note, 1)
+    stale_clause = "公司财务事实来源已绑定"
+    if stale_clause in text:
+        return text.replace(stale_clause, note, 1)
+    if text:
+        return f"{note}。{text}"
+    return note + "。"
 
 
 def _source_issue_projection(source_audit: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1358,6 +1390,7 @@ def build_artifact(
             review["source_verification_issue_count"] = verification["issue_count"]
             review["source_verification_issues"] = list(verification.get("issues", []))
             review["source_verification_issue_kinds"] = dict(verification.get("issue_kinds", {}))
+            review["summary"] = _source_verification_summary(review.get("summary"), verification["status"])
             if verification["status"] != "pass" and review.get("confidence") == "high":
                 review["confidence"] = "medium"
         source_audit["affected_company_count"] = affected_company_count

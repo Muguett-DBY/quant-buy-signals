@@ -20,6 +20,8 @@ from tools.enrich_ai_screening_input import enrich
 from tools.publish_ai_screening import (
     _public_artifact_bytes,
     _public_review,
+    _source_issue_kind,
+    _source_verification_summary,
     _source_verification_metadata,
     build_artifact,
 )
@@ -711,6 +713,25 @@ def test_source_verification_metadata_distinguishes_access_from_content_mismatch
     assert coverage["600011"]["status"] == "unverified"
     assert coverage["600011"]["issue_kinds"] == {"access": 1}
     assert affected == 2
+
+
+def test_source_verification_summary_does_not_claim_failed_sources_passed() -> None:
+    summary = "AI买入吸引力 61.0 分（已完成原生搜索，公司财务事实来源已绑定并通过来源核验；资料截至2026年）。"
+
+    failed = _source_verification_summary(summary, "failed")
+    unresolved = _source_verification_summary(summary, "unverified")
+
+    assert "并通过来源核验" not in failed
+    assert "来源复核提示" in failed
+    assert "不能单独作为事实依据" in unresolved
+    assert _source_verification_summary(summary, "pass") == summary
+
+
+def test_source_issue_kind_treats_prior_direct_origin_failure_as_access() -> None:
+    assert (
+        _source_issue_kind("source semantic verification failed in the prior direct-origin pass")
+        == "access"
+    )
 
 
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:
