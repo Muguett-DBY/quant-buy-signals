@@ -226,6 +226,20 @@ def test_sanitize_reason_text_removes_trigger_and_threshold_labels() -> None:
     assert "已进入研究范围" in result
 
 
+def test_date_years_ignores_numeric_values_that_are_not_report_periods() -> None:
+    from tools.convert_luna_web_reviews import _date_years
+
+    row = {
+        "financial_facts": [
+            {"period": "2026H1", "fact": "收入2094.00万元，同比增长20.26%"},
+            {"period": "2025FY", "fact": "经营现金流100000000元"},
+        ],
+        "sources": [{"date": "2026-08-26"}],
+    }
+
+    assert _date_years(row, 2026) == [2025, 2026]
+
+
 def test_repair_fact_unit_mentions_corrects_obvious_tenfold_amount_error() -> None:
     row = _row()
     row["financial_facts"] = [

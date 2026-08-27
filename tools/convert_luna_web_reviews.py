@@ -721,14 +721,33 @@ def _load_rows(paths: list[Path]) -> dict[str, dict[str, Any]]:
     return rows
 
 
-def _date_years(row: Mapping[str, Any]) -> list[int]:
+_REPORT_YEAR_RE = re.compile(
+    r"(?<!\d)((?:19|20)\d{2})(?=(?:年|年度|[-/]\d{1,2}|[HhQq][1-4]|\s*(?:FY|A)\b))"
+)
+
+
+def _period_years(value: Any) -> set[int]:
+    text = _text(value, 1200)
+    years = {int(item) for item in _REPORT_YEAR_RE.findall(text)}
+    if re.fullmatch(r"(?:19|20)\d{2}(?:FY|A)?", text, flags=re.IGNORECASE):
+        years.add(int(text[:4]))
+    return years
+
+
+def _date_years(row: Mapping[str, Any], max_year: int | None = None) -> list[int]:
     years: set[int] = set()
     for value in _financial_fact_items(row):
-        years.update(int(item) for item in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", _text(value, 1200)))
+        if isinstance(value, Mapping):
+            for key in ("period", "date", "report_period", "report_date", "as_of", "source_date"):
+                years.update(_period_years(value.get(key)))
+            years.update(_period_years(value.get("fact")))
+        else:
+            years.update(_period_years(value))
     for source in row.get("sources", []):
         if isinstance(source, Mapping):
-            years.update(int(item) for item in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", _text(source.get("date"))))
-    return sorted(year for year in years if 1900 <= year <= 2100)
+            years.update(_period_years(source.get("date") or source.get("source_date")))
+    upper_bound = max_year if max_year is not None else 2100
+    return sorted(year for year in years if 1900 <= year <= upper_bound)
 
 
 def _period_label(value: Any) -> str:
@@ -1397,7 +1416,8 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     summary = _sanitize_reason_text(repaired(row.get("summary"), "summary"), 1200)
     if decision_text_conflicts(action[0], summary):
         summary = f"{facts[0]} 风险核验：{risks[0]} 独立结论：{action[3]}。"
-    years = _date_years(row) or [int(market_as_of[:4])]
+    market_year = int(market_as_of[:4])
+    years = _date_years(row, market_year) or [market_year]
     latest_year = max(years)
     latest_source_year = max(
         [
