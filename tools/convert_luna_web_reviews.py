@@ -736,16 +736,50 @@ def _period_years(value: Any) -> set[int]:
 
 def _date_years(row: Mapping[str, Any], max_year: int | None = None) -> list[int]:
     years: set[int] = set()
-    for value in _financial_fact_items(row):
-        if isinstance(value, Mapping):
-            for key in ("period", "date", "report_period", "report_date", "as_of", "source_date"):
-                years.update(_period_years(value.get(key)))
-            years.update(_period_years(value.get("fact")))
-        else:
-            years.update(_period_years(value))
-    for source in row.get("sources", []):
-        if isinstance(source, Mapping):
-            years.update(_period_years(source.get("date") or source.get("source_date")))
+    raw = row.get("financial_facts")
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, Mapping):
+                explicit_period = next(
+                    (
+                        item.get(key)
+                        for key in (
+                            "period",
+                            "report_period",
+                            "report_date",
+                            "date_or_period",
+                            "date_or_year",
+                            "as_of",
+                        )
+                        if _text(item.get(key), 80)
+                    ),
+                    "",
+                )
+                fact = _text(item.get("fact"), 1200)
+                metric = _text(item.get("metric"), 300)
+                # A dated price/valuation quote is not a reporting period.
+                if re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", f"{metric} {fact}", flags=re.IGNORECASE):
+                    continue
+                if explicit_period:
+                    years.update(_period_years(explicit_period))
+                    continue
+                fact_years = _period_years(f"{metric} {fact}")
+                if fact_years:
+                    # A fact such as “2025年年报营业收入 …” is more
+                    # authoritative than an ISO date that commonly records
+                    # when the disclosure was published.
+                    years.update(fact_years)
+                    continue
+                date_value = item.get("date")
+                if _text(date_value, 80):
+                    years.update(_period_years(date_value))
+            else:
+                years.update(_period_years(item))
+    elif isinstance(raw, Mapping):
+        for key in raw:
+            match = re.fullmatch(r"fy((?:19|20)\d{2})(?:q[1-4]|h[12])?_.+", str(key), re.IGNORECASE)
+            if match:
+                years.add(int(match.group(1)))
     upper_bound = max_year if max_year is not None else 2100
     return sorted(year for year in years if 1900 <= year <= upper_bound)
 

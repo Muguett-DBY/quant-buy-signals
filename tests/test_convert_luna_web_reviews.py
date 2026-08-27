@@ -233,11 +233,33 @@ def test_date_years_ignores_numeric_values_that_are_not_report_periods() -> None
         "financial_facts": [
             {"period": "2026H1", "fact": "收入2094.00万元，同比增长20.26%"},
             {"period": "2025FY", "fact": "经营现金流100000000元"},
+            {"date": "2026-08-26", "fact": "交易日收盘价10元，PE 8倍。", "source_date": "2026-08-27"},
         ],
         "sources": [{"date": "2026-08-26"}],
     }
 
     assert _date_years(row, 2026) == [2025, 2026]
+
+
+def test_date_years_prefers_report_year_in_fact_over_publication_date() -> None:
+    from tools.convert_luna_web_reviews import _date_years
+
+    row = {
+        "financial_facts": [
+            {"date": "2026-04-23", "fact": "2025年年报营业收入 12.3亿元，经营现金流 2.1亿元"},
+            {"date": "2026-06-30", "fact": "2026年上半年营业收入 7.8亿元"},
+        ]
+    }
+
+    assert _date_years(row, 2026) == [2025, 2026]
+
+
+def test_date_years_uses_non_iso_date_when_fact_has_no_report_year() -> None:
+    from tools.convert_luna_web_reviews import _date_years
+
+    row = {"financial_facts": [{"date": "2026年一季度", "fact": "营业收入 3.2亿元"}]}
+
+    assert _date_years(row, 2026) == [2026]
 
 
 def test_repair_fact_unit_mentions_corrects_obvious_tenfold_amount_error() -> None:
