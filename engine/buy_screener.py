@@ -8500,15 +8500,22 @@ def screen_all_types(
                 other_type_triggered=any(bool(outcome[0]) for outcome in base_outcomes.values()),
             )
 
-    history_request_by_code: dict[str, dict[str, str]] = {}
+    # Type 2's 2d is the only shared-history component that is required by
+    # the two-hot/one-cold model itself.  Keep its requests ahead of Type 5
+    # and Type 7 requests when the publication loader applies its cumulative
+    # network budget; otherwise a deterministic code sort can spend the whole
+    # tranche on lower-priority consumers and leave 2d unexplained.
+    type2_history_request_by_code: dict[str, dict[str, str]] = {}
+    other_history_request_by_code: dict[str, dict[str, str]] = {}
     for m in scored_metrics:
         code = str(m["code"])
         _preliminary_outcome, preliminary_ledger = preliminary_type7_by_code[code]
         as_of = str(m.get("source_trade_date") or "")
+        type2_needed = _type2_history_request_needed(base_outcomes_by_code[code]["type2"])
         if (
             preliminary_ledger.get("history_request_needed") is True
             or _type5_history_request_needed(m, base_outcomes_by_code[code]["type5"])
-            or _type2_history_request_needed(base_outcomes_by_code[code]["type2"])
+            or type2_needed
         ) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", as_of):
             # Presence of a cache record is not proof that both independent
             # components are usable.  A partial capture may legitimately fill
@@ -8516,8 +8523,11 @@ def screen_all_types(
             # or vice versa.  The component-aware loader decides whether the
             # bounded retry is due and otherwise returns the cached record
             # without network I/O.
-            history_request_by_code[code] = {"code": code, "as_of": as_of}
-    history_requests = [history_request_by_code[code] for code in sorted(history_request_by_code)]
+            target = type2_history_request_by_code if type2_needed else other_history_request_by_code
+            target[code] = {"code": code, "as_of": as_of}
+    history_requests = [
+        type2_history_request_by_code[code] for code in sorted(type2_history_request_by_code)
+    ] + [other_history_request_by_code[code] for code in sorted(other_history_request_by_code)]
     newly_loaded_history_codes: set[str] = set()
     if quality_history_loader is not None and history_requests:
         normalized_loaded = _load_quality_history_batches(

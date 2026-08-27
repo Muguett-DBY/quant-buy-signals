@@ -256,6 +256,7 @@ function render(){syncSearchStatus();const t=$("type").value,out=filtered(),page
 function scheduleRender(){cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(()=>{page=0;render()})}
 function changePage(delta){page+=delta;render();$("resultsPanel").scrollIntoView({block:"start"});$("resultMeta").focus({preventScroll:true})}
 function metricText(value,digits=2){const number=finiteNumber(value);return number===null?"—":number.toFixed(digits)}
+function peText(value){const number=finiteNumber(value);if(number===null)return"—";const raw=number.toFixed(2);return number<=0?"亏损/不适用（原始 PE "+raw+"）":raw}
 function marketCapText(value){const number=finiteNumber(value);return number!==null&&number>0?(number/100000000).toLocaleString("zh-CN",{maximumFractionDigits:1})+"亿元":"—"}
 function publicReasonText(value){
   let text=String(value||"").trim();if(!text)return"";
@@ -423,7 +424,7 @@ function renderDetail(r){
   const box=$("detailRows"),fragment=document.createDocumentFragment();
   const facts=document.createElement("div");facts.className="facts";
   const priceText=metricText(r.price);addFact(facts,"收盘价",priceText==="—"?priceText:"¥"+priceText);
-  addFact(facts,"市盈率 PE",metricText(r.pe));
+  addFact(facts,"市盈率 PE",peText(r.pe));
   addFact(facts,"市净率 PB",metricText(r.pb));
   addFact(facts,"总市值",marketCapText(r.market_cap));
   addFact(facts,"行情日期",String(r.source_trade_date||marketAsOf||"—"));
@@ -1457,6 +1458,13 @@ function aiScreeningPageResponse(request){
       if(!Number.isFinite(number))return "—";
       return Math.abs(number)>=10000?number.toLocaleString("zh-CN",{maximumFractionDigits:2}):number.toLocaleString("zh-CN",{maximumFractionDigits:3});
     }
+    function peResearchText(value){
+      if(value===null||value===undefined||value===""||typeof value==="boolean")return "—";
+      const number=Number(value);
+      if(!Number.isFinite(number))return "—";
+      const raw=compactNumber(number);
+      return number<=0?"亏损/不适用（原始 PE "+raw+"）":raw+"倍";
+    }
     function economicProfile(review){
       const profile=review?.economic_profile;
       if(!profile||typeof profile!=="object")return "";
@@ -1482,13 +1490,13 @@ function aiScreeningPageResponse(request){
       const metrics=[
         ["估值方法",methodLabel,""],
         ["收盘价",valuation.current_price,"元"],
-        ["PE",valuation.pe,"倍"],
+        ["PE",valuation.pe,""],
         ["PB",valuation.pb,"倍"],
         ["总市值",Number.isFinite(Number(valuation.market_cap))?Number(valuation.market_cap)/1e8:null,"亿元"],
         ["悲观安全边际",valuation.margin_of_safety,"%"],
         ["安全边际档位",{deep:"深",adequate:"足够",thin:"偏薄",negative:"为负"}[String(valuation.safety_margin_band||"")]||valuation.safety_margin_band,""]
       ].filter(([label,value])=>label==="估值方法"||label==="安全边际档位"?Boolean(value):value!==null&&value!==undefined&&Number.isFinite(Number(value)));
-      const values=metrics.map(([label,value,unit])=>'<div class="research-item"><b>'+label+'</b>'+esc(label==="估值方法"||label==="安全边际档位"?value:compactNumber(value)+unit)+"</div>").join("");
+      const values=metrics.map(([label,value,unit])=>'<div class="research-item"><b>'+label+'</b>'+esc(label==="估值方法"||label==="安全边际档位"?value:label==="PE"?peResearchText(value):compactNumber(value)+unit)+"</div>").join("");
       const scenarioLabels={bear:"悲观情景",base:"中性情景",bull:"乐观情景"},scenarios=valuation.scenarios&&typeof valuation.scenarios==="object"?valuation.scenarios:{};
       const scenarioCards=Object.entries(scenarioLabels).map(([key,label])=>{
         const scenario=scenarios[key],value=Number(scenario?.value_per_share),upside=Number(scenario?.upside_pct);

@@ -4027,6 +4027,103 @@ class TestTypeRules(unittest.TestCase):
         self.assertFalse(bs._type2_history_request_needed(complete))
         self.assertFalse(bs._type2_history_request_needed(not_applicable))
 
+    def test_type2_history_requests_are_prioritised_before_other_history_users(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        def type2_outcome(metric, _benchmarks):
+            if metric["code"] == "000002":
+                return bs._finish(
+                    "type2",
+                    {key: 4.0 for key in bs.TYPE_WEIGHTS["type2"]},
+                    {key: "测试证据" for key in bs.TYPE_WEIGHTS["type2"]},
+                    evidence_complete=False,
+                    missing_dimensions=["2d"],
+                )
+            return neutral_outcome("type2")
+
+        def type7_outcome(
+            metric,
+            _type1,
+            _history_evidence,
+            *,
+            valuation_evidence_complete,
+            type5_outcome=None,
+            other_type_triggered=False,
+        ):
+            self.assertIsInstance(valuation_evidence_complete, bool)
+            return bs._not_applicable("type7", "测试桩不评价第七类"), {
+                "model_id": bs.PATCH6_TYPE7_MODEL_ID,
+                "applicable": False,
+                "classification": {"class_code": "T", "route_complete": True},
+                "decision_gates": {"route_path": {"inputs": {}}},
+                "upper_bound": 0.0,
+                "veto": False,
+                "history_request_needed": False,
+                "research_request_needed": False,
+                "triggered": False,
+            }
+
+        def type5_outcome(metric, _benchmarks, _dcf=None, _history=None):
+            if metric["code"] == "000001":
+                return bs._finish(
+                    "type5",
+                    {"5a": 8.0, "5b": 0.0, "5c": 8.0, "5d": 8.0, "5e": 8.0},
+                    {key: "测试证据" for key in bs.TYPE_WEIGHTS["type5"]} | {"_missing": "缺底部证据"},
+                    evidence_complete=False,
+                    missing_dimensions=["5b"],
+                )
+            return neutral_outcome("type5")
+
+        loader_calls = []
+
+        def history_loader(requests, *, progress_cb):
+            loader_calls.append((requests, progress_cb))
+            return {}
+
+        quotes = pd.DataFrame(
+            [
+                {"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-17"},
+                {"code": "2", "name": "乙", "price": 1.0, "source_trade_date": "2026-07-17"},
+            ]
+        )
+        with (
+            patch.object(bs, "classify_industry", return_value="SOFTWARE"),
+            patch.object(
+                bs,
+                "extract_metrics",
+                side_effect=lambda _fin, quote, _industry: base_metrics(
+                    code=str(quote["code"]).zfill(6),
+                    source_trade_date=str(quote["source_trade_date"]),
+                ),
+            ),
+            patch.object(bs, "enrich_metrics", return_value=({}, {})),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", side_effect=type2_outcome),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", side_effect=type5_outcome),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+            patch.object(bs, "score_type7_quality_equity", side_effect=type7_outcome),
+            patch.object(bs, "_type5_market_bottom_score", return_value=8.0),
+            patch.object(bs, "_type5_financial_bottom_score", return_value=8.0),
+        ):
+            bs.screen_all_types({"1": {}, "2": {}}, quotes, quality_history_loader=history_loader)
+
+        assert loader_calls == [
+            (
+                [
+                    {"code": "000002", "as_of": "2026-07-17"},
+                    {"code": "000001", "as_of": "2026-07-17"},
+                ],
+                None,
+            )
+        ]
+
     def test_quality_history_loader_is_batched_without_dropping_or_duplicating_codes(self):
         requests = [{"code": str(index).zfill(6), "as_of": "2026-07-17"} for index in range(1, 4_503)]
         calls = []

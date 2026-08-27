@@ -70,7 +70,13 @@ _MOBILE_STRUCTURAL_EVIDENCE_GATES = (
     "candidate_recall_ready",
 )
 _QUALITY_HISTORY_BACKFILL_LIMIT = 2_000
-_QUALITY_HISTORY_DECISION_BACKFILL_LIMIT = 500
+# The prefill normally covers most of the market.  The decision-stage loader
+# is cumulative across Type 2/5/7, so give Type 2's 2d first claim on a full
+# thousand-company tranche.  This covers the current generation's roughly
+# eight-hundred Type 2 valuation-history requests while keeping a hard upper
+# bound on upstream requests; genuinely unavailable histories still remain
+# explicit gaps.
+_QUALITY_HISTORY_DECISION_BACKFILL_LIMIT = 1_000
 _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT = 6_000
 # The daily post-close build must publish on time, so the Type 3 network
 # backfill (segment + annual cash-flow) is best-effort: within this budget it

@@ -114,6 +114,71 @@ assert.deepEqual(["C", "T", "N", "W"].map(publicClassName), ["强周期", "强�
     assert "text.textContent=String(value)" not in source
 
 
+def test_dashboard_labels_nonpositive_pe_as_loss_or_not_applicable():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the dashboard PE formatter"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const worker = (await import(url)).default;
+const response = await worker.fetch(new Request("https://dashboard.test/"), {});
+assert.equal(response.status, 200);
+const html = await response.text();
+const scriptMatch = html.match(/<script nonce="[^"]+">\s*([\s\S]*?)\s*<\/script>/);
+assert.ok(scriptMatch, "generated dashboard script was not found");
+const script = scriptMatch[1];
+const start = script.indexOf("function finiteNumber(value)");
+const end = script.indexOf("function publicReasonText", start);
+assert.ok(start >= 0 && end > start, "PE formatter source was not found");
+const { peText } = new Function(script.slice(start, end) + ";return {peText};")();
+assert.equal(peText(-35.03), "亏损/不适用（原始 PE -35.03）");
+assert.equal(peText(0), "亏损/不适用（原始 PE 0.00）");
+assert.equal(peText(12.345), "12.35");
+assert.equal(peText(null), "—");
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert 'addFact(facts,"市盈率 PE",peText(r.pe))' in source
+
+
+def test_ai_screening_labels_nonpositive_pe_as_loss_or_not_applicable():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None, "Node.js is required to execute the AI PE formatter"
+    validator = r"""
+import assert from "node:assert/strict";
+
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const start = source.indexOf("    function compactNumber(value){");
+const end = source.indexOf("    function economicProfile(review){", start);
+assert.ok(start >= 0 && end > start, "AI PE formatter source was not found");
+const { peResearchText } = new Function(source.slice(start, end) + ";return {peResearchText};")();
+assert.equal(peResearchText(-35.03), "亏损/不适用（原始 PE -35.03）");
+assert.equal(peResearchText(0), "亏损/不适用（原始 PE 0）");
+assert.equal(peResearchText(12.345), "12.345倍");
+assert.equal(peResearchText(null), "—");
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
 def test_dashboard_uses_signed_analysis_scope_and_type6_decision_contract():
     source = DASHBOARD.read_text(encoding="utf-8")
     node = shutil.which("node")
