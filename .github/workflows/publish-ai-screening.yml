@@ -22,9 +22,11 @@ on:
       - tools/ai_screening_dual_channel_contract.py
       - tools/publish_ai_screening.py
       - tools/audit_ai_screening_sources.py
+      - tools/convert_luna_web_reviews.py
       - tools/sanitize_codex_luna_reviews.py
       - tests/test_ai_screening_contract.py
       - tests/test_validate_ai_screening_public.py
+      - tests/test_convert_luna_web_reviews.py
       - tests/test_ai_screening_release_contract.py
       - tests/test_ai_screening_identity_audit.py
       - tests/test_build_codex_luna_review.py
@@ -68,8 +70,11 @@ jobs:
           python -m pytest \
             tests/test_ai_screening_contract.py \
             tests/test_validate_ai_screening_public.py \
+            tests/test_convert_luna_web_reviews.py \
             tests/test_ai_screening_release_contract.py \
+            tests/test_ai_screening_source_audit.py \
             tests/test_ai_screening_identity_audit.py \
+            tests/test_calibrate_ai_screening_ranking.py \
             tests/test_build_codex_luna_review.py \
             tests/test_ai_screening_dual_channel_contract.py \
             tests/test_sanitize_codex_luna_reviews.py \

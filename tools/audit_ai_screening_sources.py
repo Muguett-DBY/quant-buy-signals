@@ -19,10 +19,12 @@ import ipaddress
 import json
 import math
 import re
+import shutil
 import socket
+import tempfile
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
@@ -1228,13 +1230,60 @@ def audit(
             )
         return result
 
+    # A full queue can contain thousands of large filing PDFs.  Consume the
+    # mapped results as they arrive and move each body to disk immediately;
+    # retaining ``list(executor.map(...))`` first would briefly hold every
+    # 12MB safety-capped PDF in the Python heap.
+    body_dir = Path(tempfile.mkdtemp(prefix="ds-dcf-source-audit-"))
+    results: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-        results = list(
-            executor.map(
-                checked_url,
-                sorted(references),
-            )
-        )
+        urls = sorted(references)
+        url_iter = iter(enumerate(urls))
+        futures: dict[Any, int] = {}
+
+        def submit_next() -> None:
+            try:
+                index, url = next(url_iter)
+            except StopIteration:
+                return
+            futures[executor.submit(checked_url, url)] = index
+
+        for _ in range(min(len(urls), max(1, workers) * 2)):
+            submit_next()
+        while futures:
+            completed, _pending = wait(tuple(futures), return_when=FIRST_COMPLETED)
+            for future in completed:
+                index = futures.pop(future)
+                result = future.result()
+                body = result.pop("_body", None)
+                if isinstance(body, bytes):
+                    body_path = body_dir / f"{index}.bin"
+                    body_path.write_bytes(body)
+                    result["_body_path"] = str(body_path)
+                results.append(result)
+                submit_next()
+    results.sort(key=lambda result: str(result.get("url") or ""))
+
+    def load_body(result: Mapping[str, Any]) -> bytes | None:
+        body = result.get("_body")
+        if isinstance(body, bytes):
+            return body
+        body_path = result.get("_body_path")
+        if not body_path:
+            return None
+        try:
+            return Path(str(body_path)).read_bytes()
+        except OSError:
+            return None
+
+    def release_body(result: dict[str, Any]) -> None:
+        result.pop("_body", None)
+        body_path = result.pop("_body_path", None)
+        if body_path:
+            try:
+                Path(str(body_path)).unlink()
+            except OSError:
+                pass
     result_by_url = {str(result["url"]): result for result in results}
     published_at_mismatch_count = 0
     report_period_after_publication_count = 0
@@ -1259,30 +1308,43 @@ def audit(
         if url in seen_pdf_urls:
             continue
         result = result_by_url[url]
-        body = result.get("_body")
         content_type = str(result.get("content_type") or "")
-        if result.get("result") == "ok" and isinstance(body, bytes):
-            if "pdf" in content_type.casefold() or body.lstrip().startswith(b"%PDF-"):
-                seen_pdf_urls.add(url)
-                pdf_urls.append(url)
+        is_pdf = "pdf" in content_type.casefold() or urlparse(url).path.casefold().endswith(".pdf")
+        if result.get("result") == "ok" and not is_pdf and not content_type:
+            body = load_body(result)
+            is_pdf = isinstance(body, bytes) and body.lstrip().startswith(b"%PDF-")
+        if result.get("result") == "ok" and is_pdf:
+            seen_pdf_urls.add(url)
+            pdf_urls.append(url)
     pdf_executor = ThreadPoolExecutor(max_workers=min(max(1, workers), 8)) if pdf_urls else None
     pdf_futures: dict[str, Any] = {}
+    pdf_url_set = set(pdf_urls)
     pdf_text_cache: dict[str, tuple[str, str | None]] = {}
     pdf_remaining: dict[str, int] = {
         url: sum(1 for claim in semantic_claims if str(claim["url"]) == url) for url in pdf_urls
     }
-    pdf_next = 0
-
     def schedule_pdf(url: str) -> None:
-        nonlocal pdf_next
-        if pdf_executor is None or pdf_next >= len(pdf_urls):
-            return
-        next_url = pdf_urls[pdf_next]
-        pdf_next += 1
-        pdf_futures[next_url] = pdf_executor.submit(_extract_pdf_text, result_by_url[next_url]["_body"])
+        """Queue one requested PDF, keeping the executor bounded and lazy."""
 
-    for _ in range(min(8, len(pdf_urls))):
-        schedule_pdf(pdf_urls[pdf_next] if pdf_next < len(pdf_urls) else "")
+        if pdf_executor is None or url not in pdf_url_set:
+            return
+        if url in pdf_futures or url in pdf_text_cache:
+            return
+        if pdf_remaining.get(url, 0) <= 0:
+            return
+        body = load_body(result_by_url[url])
+        pdf_futures[url] = pdf_executor.submit(_extract_pdf_text, body or b"")
+
+    def prefetch_pdf_claims(position: int) -> None:
+        """Prefetch only the next few semantic PDFs, never the whole queue."""
+
+        seen: set[str] = set()
+        for candidate in semantic_claims[position : position + 8]:
+            url = str(candidate["url"])
+            if url in seen:
+                continue
+            seen.add(url)
+            schedule_pdf(url)
 
     def pdf_text_for(url: str) -> tuple[str, str | None]:
         cached = pdf_text_cache.get(url)
@@ -1291,21 +1353,25 @@ def audit(
             if pdf_remaining[url] <= 0:
                 pdf_text_cache.pop(url, None)
             return cached
+        schedule_pdf(url)
         future = pdf_futures.pop(url, None)
         if future is None:
-            schedule_pdf(url)
-            future = pdf_futures.pop(url)
-        extracted = future.result()
+            # A malformed or out-of-order semantic queue should not crash the
+            # whole release audit.  Parse the requested body synchronously;
+            # the resulting extraction error remains visible to the caller.
+            extracted = _extract_pdf_text(load_body(result_by_url[url]) or b"")
+        else:
+            extracted = future.result()
         pdf_text_cache[url] = extracted
         pdf_remaining[url] -= 1
         if pdf_remaining[url] <= 0:
             pdf_text_cache.pop(url, None)
-        schedule_pdf(url)
         return extracted
 
     for position, claim in enumerate(semantic_claims):
+        prefetch_pdf_claims(position)
         if previous_url is not None and last_semantic_position.get(previous_url) == previous_position:
-            result_by_url[previous_url].pop("_body", None)
+            release_body(result_by_url[previous_url])
         result = result_by_url[claim["url"]]
         # Mark this claim before any branch below can ``continue``.  The next
         # iteration will release this URL's body once it was its last claim.
@@ -1331,7 +1397,7 @@ def audit(
             previous_position = position
             continue
         content_type = str(result.get("content_type") or "")
-        body = result.get("_body")
+        body = load_body(result)
         content_type_folded = content_type.casefold()
         is_pdf = "pdf" in content_type_folded or (isinstance(body, bytes) and body.lstrip().startswith(b"%PDF-"))
         is_html = "html" in content_type_folded and not is_pdf
@@ -1471,13 +1537,13 @@ def audit(
         previous_position = position
 
     if previous_url is not None and last_semantic_position.get(previous_url) == previous_position:
-        result_by_url[previous_url].pop("_body", None)
+        release_body(result_by_url[previous_url])
     if pdf_executor is not None:
         pdf_executor.shutdown(wait=True)
 
     for result in results:
         result["canonical_url"] = result["url"]
-        result.pop("_body", None)
+        release_body(result)
         result["references"] = [
             {"security_code": code, "type_key": type_key} for code, type_key in sorted(references[result["url"]])
         ]
@@ -1610,6 +1676,7 @@ def audit(
         "company_coverage_by_code": {item["security_code"]: item for item in company_coverage},
         "results": results,
     }
+    shutil.rmtree(body_dir, ignore_errors=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report

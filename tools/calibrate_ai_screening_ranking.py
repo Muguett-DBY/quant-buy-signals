@@ -48,6 +48,51 @@ _RELEASE_RULE_REASON_RE = re.compile(
 def _action_safe_summary(summary: str, action: str) -> str:
     """Prevent a downgraded card from retaining a current buy sentence."""
     summary = normalise_decision_text(summary)
+    # Calibration may demote a model review after its prose was generated.
+    # Rewrite an explicit conclusion as one atomic unit so the visible text
+    # follows the final calibrated action, including the English labels that
+    # some local shards use.
+    target_conclusion = {
+        "priority_buy": "建议买",
+        "watchlist": "观察（暂不建议买）",
+        "avoid": "不建议买",
+        "insufficient_evidence": "观察（暂不建议买）",
+    }.get(action, "观察")
+    explicit_conclusion = re.compile(
+        r"((?:独立(?:复核|结论)|(?:AI|本轮|最终|综合)?(?:复核|结论|判断))\s*(?:为|是|：|:)\s*)"
+        r"(?P<label>recommend_buy|priority_buy|do_not_recommend_buy|observe|watchlist|manual_review|"
+        r"建议买入?|推荐买入?|可以买|可买|观察|观望|不建议买入?|不推荐买入?)",
+        re.IGNORECASE,
+    )
+
+    def replace_explicit_conclusion(match: re.Match[str]) -> str:
+        label = match.group("label").casefold()
+        already_observe = label in {"observe", "watchlist", "manual_review", "观察", "观望"}
+        replacement = "观察" if action in {"watchlist", "insufficient_evidence"} and already_observe else target_conclusion
+        return f"{match.group(1)}{replacement}"
+
+    summary = explicit_conclusion.sub(replace_explicit_conclusion, summary)
+    if action == "priority_buy":
+        summary = re.sub(
+            r"(?<![A-Za-z_])(?:do_not_recommend_buy|avoid|observe|watchlist|manual_review)(?![A-Za-z_])",
+            "建议买",
+            summary,
+            flags=re.IGNORECASE,
+        )
+    elif action == "watchlist":
+        summary = re.sub(
+            r"(?<![A-Za-z_])(?:recommend_buy|priority_buy|do_not_recommend_buy|avoid|observe|watchlist|manual_review)(?![A-Za-z_])",
+            "观察",
+            summary,
+            flags=re.IGNORECASE,
+        )
+    else:
+        summary = re.sub(
+            r"(?<![A-Za-z_])(?:recommend_buy|priority_buy|do_not_recommend_buy|avoid|observe|watchlist|manual_review)(?![A-Za-z_])",
+            "不建议买",
+            summary,
+            flags=re.IGNORECASE,
+        )
     if action == "priority_buy":
         # A model may append a cautious phrase such as “优先观察标的” to an
         # otherwise affirmative conclusion.  Keep the risk caveat, but make
@@ -105,6 +150,22 @@ def _action_safe_summary(summary: str, action: str) -> str:
             )
         )
     return summary
+
+
+def _action_safe_reason(value: str, action: str) -> str:
+    """Keep a strength/risk bullet from contradicting the calibrated action.
+
+    Model bullets occasionally contain an unqualified English action label
+    (for example ``recommend_buy``) even when the ranking pass demotes the
+    company.  The public reader validates these bullets as well as the
+    summary, so apply the same narrow conclusion rewrite only when a real
+    conflict is present; ordinary attributed research language remains intact.
+    """
+
+    text = str(value or "")
+    if decision_text_conflicts(action, text):
+        text = _action_safe_summary(text, action)
+    return text
 
 
 def _identity_safe_summary(summary: str, packet: Mapping[str, Any]) -> str:
@@ -226,7 +287,14 @@ _YEAR_RE = re.compile(r"(?<!\d)(20(?:1[5-9]|2[0-9]))(?!\d)")
 # small, deterministic second pass before an opinion reaches the public score.
 _QUALITY_GATE_VERSION = "financial-quality-gate-v1"
 _QUALITY_NUMBER = r"[-+]?\d+(?:\.\d+)?"
-_QUALITY_REPORT_PREFIX = r"2026\s*年(?:中报|半年报|一季报|三季报)"
+# Reviews use several equivalent labels for the latest interim checkpoint.
+# Keep the prefix narrow to 2026 reporting periods so an announcement date or
+# a market snapshot cannot satisfy the current-report gate by accident.
+_QUALITY_REPORT_PREFIX = (
+    r"2026\s*(?:年\s*(?:中报|半年报|半年度|上半年|一季报|一季度|第一季度|三季报|三季度|第三季度|"
+    r"1\s*[-–—/]\s*3\s*月|1\s*[-–—/]\s*6\s*月|前三季度|9\s*个月)|"
+    r"H1|Q[1-3]|[-/]\s*06\s*[-/]\s*30|[-/]\s*03\s*[-/]\s*31|[-/]\s*09\s*[-/]\s*30)"
+)
 
 
 def _quality_text(packet: Mapping[str, Any], source: Mapping[str, Any]) -> str:
@@ -249,6 +317,19 @@ def _quality_text(packet: Mapping[str, Any], source: Mapping[str, Any]) -> str:
     return "；".join(value for value in values if value.strip())
 
 
+def _financial_institution(packet: Mapping[str, Any]) -> bool:
+    """Return whether the snapshot identifies a business with bank-style KPIs.
+
+    Operating cash flow is not a comparable buy gate for banks, insurers, or
+    securities firms.  Their current checkpoint is net interest/insurance or
+    fee income plus asset-quality and capital metrics instead.
+    """
+
+    context = packet.get("company_context") if isinstance(packet.get("company_context"), Mapping) else {}
+    industry = str(context.get("industry") or "")
+    return bool(re.search(r"银行|保险|证券|信托|金融", industry))
+
+
 def _quality_float(pattern: str, text: str, *, flags: int = 0) -> float | None:
     match = re.search(pattern, text, flags)
     if not match:
@@ -266,9 +347,19 @@ def _quality_growth(
     """Read a signed YoY percentage, treating ``下降`` as negative."""
 
     prefix = period_prefix or _QUALITY_REPORT_PREFIX
+    label_pattern = {
+        "经营活动现金流净额": r"(?:经营活动现金流净额|经营活动产生的现金流量净额|经营现金流)",
+        "营业收入": r"(?:营业收入|营业总收入|营收)",
+        "归母净利润": r"(?:归母净利润|归属于上市公司股东的净利润)",
+    }.get(label, re.escape(label))
+    # Search outputs use both Chinese YoY wording and the compact English
+    # ``change pct`` form emitted by the factual-binding converter.
+    trend_pattern = r"(?:(?:同比|change\s*(?:pct|percentage)?|yoy)\s*)?"
+    direction_pattern = r"(?P<direction>增长|上升|下降|减少|increase|rise|up|decrease|decline|down)?\s*"
+    value_pattern = r"(?P<value>[-+]?\d+(?:\.\d+)?)%"
     pattern = (
-        rf"{prefix}[^。\n]{{0,220}}?{label}[^。\n]{{0,80}}?"
-        rf"(?:同比\s*)?(?:(增长|上升|下降|减少)\s*)?({_QUALITY_NUMBER})%"
+        rf"{prefix}[^。\n]{{0,220}}?{label_pattern}[^。\n]{{0,80}}?"
+        rf"{trend_pattern}{direction_pattern}{value_pattern}"
     )
     match = re.search(pattern, text)
     if not match and allow_fallback:
@@ -276,15 +367,15 @@ def _quality_growth(
         # percentage to the named metric.  Keep the fallback narrow so that
         # an unrelated percentage cannot become a current-report signal.
         match = re.search(
-            rf"{label}[^。\n]{{0,80}}?(?:同比\s*)?(?:(增长|上升|下降|减少)\s*)?({_QUALITY_NUMBER})%",
+            rf"{label_pattern}[^。\n]{{0,80}}?{trend_pattern}{direction_pattern}{value_pattern}",
             text,
         )
     if not match:
         return None
-    value = _number(match.group(2).replace("−", "-"))
+    value = _number(match.group("value").replace("−", "-"))
     if value is None:
         return None
-    if match.group(1) in {"下降", "减少"} and value > 0:
+    if match.group("direction") in {"下降", "减少", "decrease", "decline", "down"} and value > 0:
         return -value
     return value
 
@@ -403,6 +494,7 @@ def _quality_gate(packet: Mapping[str, Any], source: Mapping[str, Any]) -> dict[
     interim_cashflow_growths = [
         value for value in (metrics["interim_ocf_growth"], metrics["interim_fcf_growth"]) if value is not None
     ]
+    financial_institution = _financial_institution(packet)
 
     if pe is not None:
         if pe > 35:
@@ -438,11 +530,16 @@ def _quality_gate(packet: Mapping[str, Any], source: Mapping[str, Any]) -> dict[
         if interim_profit_growth < 0:
             penalize(12.0, f"最新中期归母净利润同比下降 {interim_profit_growth:.1f}%。", hard=True)
         elif interim_profit_growth < 10:
-            penalize(
-                7.0,
-                f"最新中期归母净利润同比仅增长 {interim_profit_growth:.1f}%，尚未形成强增长确认。",
-                hard=True,
-            )
+            # For financial institutions, stable asset quality and capital
+            # metrics make high-single-digit interim profit growth a valid
+            # current checkpoint; do not apply a manufacturing-style 10%
+            # threshold to bank earnings.
+            if not financial_institution or interim_profit_growth < 8:
+                penalize(
+                    7.0,
+                    f"最新中期归母净利润同比仅增长 {interim_profit_growth:.1f}%，尚未形成强增长确认。",
+                    hard=True,
+                )
         elif interim_profit_growth > 100 and pe is not None and pe > 20:
             penalize(6.0, "最新中期利润增速超过100%且 PE 仍高，存在低基数或一次性增长风险。", hard=True)
     if interim_revenue_growth is not None and interim_revenue_growth < 0:
@@ -473,7 +570,7 @@ def _quality_gate(packet: Mapping[str, Any], source: Mapping[str, Any]) -> dict[
     if source_action == "priority_buy":
         if interim_profit_growth is None:
             penalize(7.0, "缺少最新中期归母净利润同比数据，无法形成当前买入确认。", hard=True)
-        if not interim_cashflow_growths:
+        if not interim_cashflow_growths and not financial_institution:
             penalize(5.0, "缺少最新中期现金流同比数据，无法确认利润的现金兑现。", hard=True)
         if pe is None and pb is None:
             penalize(8.0, "缺少可用 PE/PB，无法确认买入安全边际。", hard=True)
@@ -986,11 +1083,18 @@ def _review(
         summary = f"评分复核：{reason_text}。{summary}"
         risk_flags = list(dict.fromkeys([*quality_reasons, *risk_flags]))[:8]
     elif action == "priority_buy":
-        summary = f"评分复核：估值、最新盈利和现金流未触发独立否决门槛。{summary}"
+        gate_scope = (
+            "估值、最新盈利、资产质量与资本约束"
+            if _financial_institution(review_packet)
+            else "估值、最新盈利和现金流"
+        )
+        summary = f"评分复核：{gate_scope}未触发独立否决门槛。{summary}"
     if source_quality not in {"verified_https", "source_found"} and source_note not in risk_flags:
         risk_flags.insert(0, source_note)
     if not native_company_research:
         summary = _identity_safe_summary(summary, packet)
+    strengths = [_action_safe_reason(value, action) for value in strengths]
+    risk_flags = [_action_safe_reason(value, action) for value in risk_flags]
     public_verdict = verdict if verdict in {"confirmed", "caution", "misclassified", "missed_candidate"} else "caution"
     recommendation = "recommend_buy" if action == "priority_buy" else "do_not_recommend_buy"
     recommendation_label = (
@@ -1020,6 +1124,16 @@ def _review(
         "risk_adjusted_expected_return": round(float(score), 1),
         "evidence_confidence": round(float(evidence_confidence), 1),
     }
+    # Keep the lossless financial evidence graph through calibration.  The
+    # ranking pass may adjust the opinion and score, but it must not discard
+    # the dated/unit/source bindings that the release audit and public
+    # projection use to verify every numeric statement.
+    financial_fact_bindings = [
+        dict(item) for item in source.get("financial_fact_bindings", []) if isinstance(item, Mapping)
+    ]
+    numeric_fact_repairs = [
+        dict(item) for item in source.get("numeric_fact_repairs", []) if isinstance(item, Mapping)
+    ]
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
@@ -1043,6 +1157,16 @@ def _review(
         "quality_gate": quality_gate,
         "key_strengths": strengths,
         **({"quantitative_facts": quantitative_facts} if quantitative_facts else {}),
+        **(
+            {"financial_fact_bindings": financial_fact_bindings}
+            if "financial_fact_bindings" in source
+            else {}
+        ),
+        **(
+            {"numeric_fact_repairs": numeric_fact_repairs}
+            if "numeric_fact_repairs" in source
+            else {}
+        ),
         "risk_flags": risk_flags,
         "claims": (claims if native_company_research else claims[:12]),
         "model": str(source.get("model") or "unknown-external-review"),

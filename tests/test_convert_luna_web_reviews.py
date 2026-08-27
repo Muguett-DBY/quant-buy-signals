@@ -10,6 +10,7 @@ from tools.convert_luna_web_reviews import (
     _financial_fact_items,
     _inferred_fact_unit,
     _load_rows,
+    _preferred_source_url,
     _repair_fact_unit_mentions,
     _review,
     _sanitize_reason_text,
@@ -71,6 +72,23 @@ def _row(score: int = 72, decision: str = "recommend_buy") -> dict:
         "research_as_of": "2026-08-26",
         "evidence_quality": "high",
     }
+
+
+def test_sanitize_reason_text_removes_search_result_metadata() -> None:
+    result = _sanitize_reason_text(
+        "公司数据 [wordlim: 200] Published: yesterday; Crawled: today; 2026H1收入 37.27亿元。"
+    )
+
+    assert "[wordlim:" not in result
+    assert "Published:" not in result
+    assert "Crawled:" not in result
+    assert "2026H1收入 37.27亿元" in result
+
+
+def test_preferred_source_url_uses_sina_vip_bulletin_mirror() -> None:
+    assert _preferred_source_url(
+        "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=1&stockid=600000"
+    ).startswith("https://vip.stock.finance.sina.com.cn/corp/view/")
 
 
 def test_convert_sets_generation_bound_luna_web_mode(tmp_path) -> None:

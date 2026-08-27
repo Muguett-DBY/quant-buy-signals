@@ -31,6 +31,7 @@ EFFORT = "max"
 REVIEW_MODE = "codex_luna_web_review"
 _DECISIONS = {"recommend_buy", "observe", "do_not_recommend"}
 _URL_RE = re.compile(r"^https://[^\s]+$")
+_SINA_MONEY_HOST_RE = re.compile(r"https://money\.finance\.sina\.com\.cn(?=/)", re.IGNORECASE)
 _TYPE_TOKEN_RE = re.compile(
     r"(?<![0-9A-Za-z_])type\s*[1-7](?:(?:\s*[-_/]\s*)(?:type\s*)?[1-7])*(?![0-9A-Za-z_])"
     r"|(?<![0-9A-Za-z_])类型\s*[1-7](?![0-9A-Za-z_])",
@@ -47,6 +48,18 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
     """
 
     text = _text(value, limit)
+    text = _preferred_source_url(text)
+    # Search adapters may append result metadata to snippets. It is not
+    # company evidence and must not leak into public explanations or the
+    # source-semantics audit.
+    text = re.sub(r"\s*\[wordlim:\s*[^\]]*\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\s*Published:\s*[^;；\n]*;?\s*Crawled:\s*[^;；\n]*;?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\s*(?:Published|Crawled):\s*[^;；\n]*;?", "", text, flags=re.IGNORECASE)
     text = _TYPE_TOKEN_RE.sub("", text)
     text = re.sub(r"按补丁7[^，。；;\n]*", "估值和质量尚待核验", text)
     text = text.replace("强周期底部", "周期低位")
@@ -85,6 +98,18 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
 
 def _text(value: Any, limit: int = 800) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _preferred_source_url(value: Any) -> str:
+    """Use Sina's public VIP mirror for bulletin pages.
+
+    The legacy ``money`` host is routinely rate-limited while the same
+    generation-bound bulletin endpoint is served by ``vip.stock``.  Keeping
+    this canonicalisation at the adapter boundary makes every downstream
+    claim, fact binding, and audit use one reachable source identity.
+    """
+
+    return _SINA_MONEY_HOST_RE.sub("https://vip.stock.finance.sina.com.cn", _text(value, 1200))
 
 
 def _value_text(value: Any, limit: int = 240) -> str:
@@ -709,7 +734,7 @@ def _financial_fact_source_urls(item: Mapping[str, Any], row: Mapping[str, Any] 
                 values.append(source_item.get("url"))
     urls: list[str] = []
     for value in values:
-        candidate = _text(value, 1200)
+        candidate = _preferred_source_url(value)
         if candidate.lower().startswith("http://"):
             raise ValueError(f"financial fact source must use HTTPS: {candidate!r}")
         if _URL_RE.fullmatch(candidate) and candidate not in urls:
@@ -1252,9 +1277,9 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         for fact in facts
         if isinstance(fact, Mapping)
         for url in (
-            [_text(fact.get("source_url"), 1200)]
+            [_preferred_source_url(fact.get("source_url"))]
             + (
-                [_text(value, 1200) for value in fact.get("source_urls", []) if _text(value, 1200)]
+                [_preferred_source_url(value) for value in fact.get("source_urls", []) if _preferred_source_url(value)]
                 if isinstance(fact.get("source_urls"), list)
                 else []
             )
@@ -1267,7 +1292,7 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     for source in raw_sources[:8]:
         if not isinstance(source, Mapping):
             raise ValueError(f"invalid source row: {row.get('code')}")
-        url = _text(source.get("url"), 1200)
+        url = _preferred_source_url(source.get("url"))
         if not _URL_RE.fullmatch(url):
             raise ValueError(f"source is not HTTPS: {row.get('code')}: {url!r}")
         if any(code != target_code for code in _source_codes(url)):
@@ -1333,7 +1358,7 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 f"{_period_label(fact.get('period'))}：{_clean_fact_text(fact.get('fact'), 520)}",
                 600,
             )
-            source_url = _text(fact.get("source_url"), 1200) or None
+            source_url = _preferred_source_url(fact.get("source_url")) or None
         else:
             statement = _sanitize_reason_text(_clean_fact_text(fact), 600)
             source_url = None

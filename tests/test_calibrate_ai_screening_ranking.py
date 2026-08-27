@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.calibrate_ai_screening_ranking import _review
+from tools.calibrate_ai_screening_ranking import _action_safe_reason, _action_safe_summary, _review
 
 
 def _legacy_packet(
@@ -191,6 +191,34 @@ def test_financial_quality_gate_demotes_high_pb_buy() -> None:
     assert "当前结论：建议买" not in review["summary"]
 
 
+@pytest.mark.parametrize(
+    ("action", "source", "expected"),
+    [
+        ("watchlist", "公司独立复核为 recommend_buy。", "观察"),
+        ("avoid", "公司独立结论为 observe。", "不建议买"),
+        ("avoid", "最终判断为 watchlist。", "不建议买"),
+        ("priority_buy", "独立结论为 do_not_recommend_buy。", "建议买"),
+    ],
+)
+def test_action_safe_summary_rewrites_calibrated_english_conclusion(
+    action: str, source: str, expected: str
+) -> None:
+    result = _action_safe_summary(source, action)
+
+    assert expected in result
+    assert not any(
+        token in result.casefold()
+        for token in ("recommend_buy", "do_not_recommend_buy", "priority_buy", "watchlist", "observe")
+    )
+
+
+def test_action_safe_reason_rewrites_conflicting_english_label() -> None:
+    result = _action_safe_reason("资产质量判断为 recommend_buy。", "avoid")
+
+    assert "recommend_buy" not in result
+    assert "不建议买" in result
+
+
 def test_financial_quality_gate_keeps_strong_current_cash_generator() -> None:
     packet = _legacy_packet(
         code="603444",
@@ -211,6 +239,44 @@ def test_financial_quality_gate_keeps_strong_current_cash_generator() -> None:
     assert review["buy_attractiveness_score"] >= 70
     assert review["quality_gate"]["hard_block"] is False
     assert review["score_components"]["evidence_confidence"] < review["buy_attractiveness_score"]
+
+
+def test_financial_quality_gate_recognises_h1_and_preserves_fact_bindings() -> None:
+    packet = _legacy_packet(
+        code="603444",
+        score=95,
+        pe=15.60,
+        pb=4.62,
+        facts=[
+            "603444 2025年度：ROIC 33.76%；自由现金流率 45.0%",
+            "603444 2026H1营业收入 37.27 亿元，同比 +48.01%；归母净利润 10.92 亿元，同比 +69.31%",
+            "603444 2026H1经营活动现金流净额 12.73 亿元，同比 +18.22%；简化自由现金流 12.68 亿元，同比 +17.91%",
+        ],
+    )
+    packet["ai_review"]["financial_fact_bindings"] = [
+        {
+            "metric": "revenue_cny",
+            "value": 37.27,
+            "unit": "亿元",
+            "period": "2026H1",
+            "source_url": "https://example.test/603444-report",
+        }
+    ]
+    packet["ai_review"]["numeric_fact_repairs"] = [
+        {
+            "field": "revenue_cny",
+            "old": "372.68亿元",
+            "new": "37.27亿元",
+            "source_url": "https://example.test/603444-report",
+        }
+    ]
+
+    review = _review(packet, "2026-08-27")
+
+    assert review["quality_gate"]["metrics"]["interim_profit_growth"] == 69.31
+    assert review["quality_gate"]["metrics"]["interim_ocf_growth"] == 18.22
+    assert review["financial_fact_bindings"] == packet["ai_review"]["financial_fact_bindings"]
+    assert review["numeric_fact_repairs"] == packet["ai_review"]["numeric_fact_repairs"]
 
 
 def test_financial_quality_gate_demotes_cash_flow_reversal() -> None:
