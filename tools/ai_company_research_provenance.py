@@ -89,6 +89,28 @@ def _load_object(path: Path, *, label: str) -> tuple[dict[str, Any], bytes]:
     return value, raw
 
 
+def _load_bound_text(path: Path, *, label: str) -> bytes:
+    """Read a non-empty UTF-8 prompt input before hashing it.
+
+    The hash is only meaningful when the same document can actually be
+    injected into the model prompt.  Rejecting an empty/binary knowledge or
+    protocol file keeps the provenance contract honest without claiming that a
+    model used content the runner did not load.
+    """
+
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ValueError(f"{label} is unavailable: {path}") from error
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{label} is not UTF-8: {path}") from error
+    if not text.strip():
+        raise ValueError(f"{label} is empty: {path}")
+    return raw
+
+
 def _required_text(value: Any, *, label: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -235,8 +257,8 @@ def load_research_provenance_context(
         "candidate_universe_identity_sha256": universe_identity,
         "type_pair_candidate_identity_sha256": type_pair_identity,
         "research_sha256": _sha256_bytes(research_raw),
-        "knowledge_sha256": _sha256_bytes(knowledge_path.read_bytes()),
-        "protocol_sha256": _sha256_bytes(protocol_path.read_bytes()),
+        "knowledge_sha256": _sha256_bytes(_load_bound_text(knowledge_path, label="knowledge document")),
+        "protocol_sha256": _sha256_bytes(_load_bound_text(protocol_path, label="research protocol")),
     }
     return ResearchProvenanceContext(expected=expected, packets=packet_map)
 

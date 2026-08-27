@@ -17,7 +17,12 @@ from tools.ai_screening_contract import (
 from tools.build_ai_screening import _relevant_rules, _rule_chunks, build_input, merge_reviews
 from tools.calibrate_ai_screening_ranking import _action_safe_summary, _claim_url, _review
 from tools.enrich_ai_screening_input import enrich
-from tools.publish_ai_screening import _public_artifact_bytes, _public_review, build_artifact
+from tools.publish_ai_screening import (
+    _public_artifact_bytes,
+    _public_review,
+    _source_verification_metadata,
+    build_artifact,
+)
 from tools.prepare_ai_screening_overlay import prepare
 from tools.run_ai_screening_batch import (
     _cohere_local_review,
@@ -623,6 +628,38 @@ def test_public_review_retains_clickable_business_model_source_identity() -> Non
     ]
     with pytest.raises(ValueError, match="invalid business-model source IDs"):
         _public_review(review, claims_are_search_results=False)
+
+
+def test_source_verification_metadata_surfaces_failed_and_missing_company_rows() -> None:
+    metadata = {
+        "company_coverage": [
+            {
+                "security_code": "600000",
+                "status": "pass",
+                "semantic_failed_count": 0,
+                "semantic_unverified_count": 0,
+            },
+            {
+                "security_code": "600001",
+                "status": "failed",
+                "semantic_failed_count": 2,
+                "semantic_unverified_count": 1,
+            },
+            {
+                "security_code": "600002",
+                "status": "unverified",
+                "semantic_failed_count": 0,
+                "semantic_unverified_count": 0,
+            },
+        ]
+    }
+
+    coverage, affected = _source_verification_metadata(metadata, {"600000", "600001", "600002", "600003"})
+
+    assert coverage["600000"] == {"status": "pass", "issue_count": 0}
+    assert coverage["600001"] == {"status": "failed", "issue_count": 3}
+    assert coverage["600002"] == {"status": "unverified", "issue_count": 1}
+    assert affected == 3
 
 
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:

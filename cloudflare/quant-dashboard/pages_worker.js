@@ -1191,6 +1191,11 @@ function aiScreeningPageResponse(request){
     .badge.historical{background:#fef3c7;color:#92400e}
     .badge.undated{background:#e2e8f0;color:#475569}
     .badge.independent{background:#dcfce7;color:#166534}
+    .source-verification{margin-top:10px;padding:9px 10px;border:1px solid #dbeafe;border-radius:9px;background:#f8fbff;font-size:12px}
+    .source-verification b{margin-right:5px}
+    .source-verification.pass{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
+    .source-verification.failed{border-color:#fecaca;background:#fff1f2;color:#991b1b}
+    .source-verification.unverified{border-color:#fde68a;background:#fffbeb;color:#92400e}
     .section{margin-top:12px}
     .section h3{margin:0 0 5px;font-size:13px}
     .section ul{margin:5px 0;padding-left:20px}
@@ -1371,6 +1376,16 @@ function aiScreeningPageResponse(request){
       const summary=aiSummary(review),binding=review?.evidence_bindings?.summary;
       return '<p>'+esc(summary)+evidenceLinks(review,binding)+"</p>";
     }
+    function sourceVerification(review){
+      const rawStatus=String(review?.source_verification_status||"").trim();
+      if(!rawStatus)return "";
+      const status=["pass","failed","unverified"].includes(rawStatus)?rawStatus:"unverified";
+      const labels={pass:"通过",failed:"存在问题",unverified:"未完成"};
+      const issueCount=Math.max(0,Number(review?.source_verification_issue_count||0));
+      const detail=status==="pass"?"公司级来源语义复核未发现问题。":status==="failed"?"来源内容与公司事实绑定存在告警，请优先复核原始资料。":"来源尚未形成可确认的公司级验证，不能把该分数当作高置信证据。";
+      const count=status==="pass"?"": " · "+issueCount+" 项告警";
+      return '<div class="source-verification '+status+'"><b>来源复核：'+labels[status]+count+'</b>'+esc(detail)+"</div>";
+    }
     function scoreComponents(review){
       const components=review?.score_components,adjustments=review?.calibration_adjustments;
       if(!components||typeof components!=="object")return "";
@@ -1493,7 +1508,7 @@ function aiScreeningPageResponse(request){
         '<div class="top"><div><strong>'+esc(packet.name||"—")+'</strong><small>代码：'+esc(packet.security_code||"—")+'</small></div><span class="category '+group+'">'+labels[group]+'</span></div>'+
         '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="confidence">AI买入吸引力分 · 置信度：'+esc(review.confidence||"—")+'</span></div>'+
         '<div class="badges"><span class="badge '+esc(freshness)+'">'+esc(freshnessLabel(review))+"</span>"+independent+"</div>"+
-        '<details class="ai-review-details"><summary>查看完整 AI 解释</summary><div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
+        '<details class="ai-review-details"><summary>查看完整 AI 解释</summary>'+sourceVerification(review)+'<div class="review-meta">公司研究截至：'+esc(review.research_as_of||payload.research_as_of||"—")+" · 复核模型："+esc(modelLabel(review.model))+" · 推理档位："+esc(review.effort||"—")+" · 搜索查询："+esc(queryCount)+" · "+esc(searchLabel(review))+" · 可点击来源："+esc(urlCount)+" · 已移除无效来源："+esc(droppedCount)+"</div>"+
         '<section class="ai-research">'+semanticReview(review)+'<div class="section"><h3>AI为什么这样判断</h3>'+boundSummary(review)+boundReasonList(review,"key_strengths","AI补充判断","暂无 AI 独立补充判断")+"</div>"+
         scoreComponents(review)+economicProfile(review)+valuationResearch(review)+
         list(companyFacts,"公司量化事实","暂无可安全展示的公司量化事实")+
@@ -1523,6 +1538,9 @@ function aiScreeningPageResponse(request){
       const auditLabel=String(audit.release_status||"")==="passed_with_source_access_warnings"
         ? "来源复取告警 "+auditFetchWarnings+" / "+Number(audit.checked||0)+" URL；内容语义告警 "+auditSemanticWarnings+" 条（不等于未执行逐家公司搜索）"
         : "来源复取审计通过";
+      const affectedCompanyLabel=Object.prototype.hasOwnProperty.call(audit,"affected_company_count")
+        ? "<span>来源复核受影响公司 "+esc(audit.affected_company_count)+" / "+esc(value.candidate_total||0)+"</span>"
+        : "";
       document.querySelector("#meta").innerHTML=
         "<span>数据代际 "+esc(value.snapshot_generation||"—")+"</span>"+
         "<span>收盘数据日 "+esc(value.market_as_of||"—")+"</span>"+
@@ -1534,6 +1552,7 @@ function aiScreeningPageResponse(request){
         "<span>"+searchEventLabel+" "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>"+esc(auditLabel)+"</span>"+
+        affectedCompanyLabel+
         "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";
     }
     async function load(){

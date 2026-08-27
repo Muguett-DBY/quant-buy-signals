@@ -85,3 +85,48 @@ def test_full_audit_emits_one_clean_row_per_company(tmp_path: Path) -> None:
     assert result["review_count"] == 1
     assert result["issue_count"] == 0
     assert len(result["rows"]) == 1
+
+
+def test_full_audit_rejects_incompatible_financial_fact_unit(tmp_path: Path) -> None:
+    artifact = {
+        "snapshot_generation": "0123456789abcdef",
+        "market_as_of": "2026-08-24",
+        "packets": [
+            {
+                "security_code": "002532",
+                "name": "天山铝业",
+                "type_key": "type1",
+                "generation": "0123456789abcdef",
+                "market_as_of": "2026-08-24",
+                "company_context": {"code": "002532", "name": "天山铝业"},
+                "ai_review": {
+                    "ai_action": "avoid",
+                    "final_category": "do_not_recommend",
+                    "buy_attractiveness_score": 40.0,
+                    "verdict": "caution",
+                    "summary": "公司估值与现金流风险需要回避。",
+                    "key_strengths": [],
+                    "risk_flags": ["现金流风险"],
+                    "calibration_adjustments": {"final_score": 40.0},
+                    "quality_gate": {"hard_block": True},
+                    "freshness_status": "current_or_recent",
+                    "claims": [],
+                    "financial_fact_bindings": [
+                        {
+                            "metric": "operating_cash_flow_cny",
+                            "value": 12.0,
+                            "unit": "倍",
+                            "period": "2026H1",
+                            "source_url": "https://example.test/fact",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    path = tmp_path / "artifact.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    result = audit_artifact(path, expected_generation="0123456789abcdef", expected_market_as_of="2026-08-24")
+    assert result["issue_count"] == 1
+    assert result["financial_fact_unit_mismatch_count"] == 1
+    assert "financial_fact_unit_mismatch" in result["rows"][0]["errors"]

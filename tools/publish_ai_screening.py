@@ -373,6 +373,53 @@ def _text(value: Any, limit: int = 800) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _source_verification_metadata(
+    source_audit: Mapping[str, Any], published_codes: set[str]
+) -> tuple[dict[str, dict[str, Any]], int] | None:
+    """Return per-company source status and the number of affected companies.
+
+    ``company_coverage`` is the source audit's company-level projection.  Keep
+    the audit status as the public status, while promoting an inconsistent
+    ``pass`` row when its semantic counters contain an actual failure.  A
+    missing/unknown status is deliberately surfaced as ``unverified`` rather
+    than silently treated as a clean source.
+    """
+
+    coverage = source_audit.get("company_coverage")
+    if not isinstance(coverage, list):
+        return None
+    by_code: dict[str, dict[str, Any]] = {}
+    for row in coverage:
+        if not isinstance(row, Mapping):
+            continue
+        code = _text(row.get("security_code"), 32)
+        if not code:
+            continue
+        semantic_failed = row.get("semantic_failed_count")
+        semantic_unverified = row.get("semantic_unverified_count")
+        semantic_failed = semantic_failed if isinstance(semantic_failed, int) and semantic_failed >= 0 else 0
+        semantic_unverified = (
+            semantic_unverified if isinstance(semantic_unverified, int) and semantic_unverified >= 0 else 0
+        )
+        status = _text(row.get("status"), 16).lower()
+        if status not in {"pass", "failed", "unverified"}:
+            status = "unverified"
+        if status == "pass" and semantic_failed:
+            status = "failed"
+        elif status == "pass" and semantic_unverified:
+            status = "unverified"
+        issue_count = semantic_failed + semantic_unverified
+        if status != "pass" and issue_count == 0:
+            issue_count = 1
+        by_code[code] = {"status": status, "issue_count": issue_count}
+
+    affected_company_count = 0
+    for code in published_codes:
+        if by_code.get(code, {"status": "unverified"})["status"] != "pass":
+            affected_company_count += 1
+    return by_code, affected_company_count
+
+
 def _source_text(value: Any, limit: int = 800) -> str:
     """Preserve complete URLs; only prose-only metadata gets a text cap."""
 
@@ -635,6 +682,18 @@ def _public_review(
     if action == "watchlist":
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
     quantitative_facts = [_text(item, 240) for item in review.get("quantitative_facts", [])[:8]]
+    fact_bindings: list[dict[str, Any]] = []
+    # Financial bindings are the lossless audit trail.  Unlike prose lists,
+    # they must not be truncated: a public row must expose every dated fact
+    # that was checked by the release audit.
+    for binding in review.get("financial_fact_bindings", []):
+        if isinstance(binding, Mapping):
+            fact_bindings.append(dict(binding))
+    numeric_fact_repairs = [
+        dict(item)
+        for item in review.get("numeric_fact_repairs", [])[:32]
+        if isinstance(item, Mapping)
+    ]
     public_findings: list[dict[str, Any]] = []
     if require_company_research_fields:
         for finding in review.get("search_findings", []):
@@ -666,6 +725,8 @@ def _public_review(
         "confidence": _text(review.get("confidence"), 16),
         "summary": summary,
         "quantitative_facts": quantitative_facts,
+        "financial_fact_bindings": fact_bindings,
+        "numeric_fact_repairs": numeric_fact_repairs,
         "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
         "risk_flags": [_text(item, 240) for item in review.get("risk_flags", [])[:12]],
         "claims": claims,
@@ -1186,6 +1247,30 @@ def build_artifact(
         else:
             source_audit["network_warnings_allowed"] = False
             source_audit["release_status"] = "passed"
+    source_verification = _source_verification_metadata(
+        source_audit,
+        {str(packet["security_code"]) for packet in public_packets},
+    )
+    if source_verification is not None:
+        coverage_by_code, affected_company_count = source_verification
+        status_counts = Counter(
+            coverage_by_code.get(str(packet["security_code"]), {"status": "unverified"})["status"]
+            for packet in public_packets
+        )
+        for packet in public_packets:
+            review = packet["ai_review"]
+            verification = coverage_by_code.get(
+                str(packet["security_code"]),
+                {"status": "unverified", "issue_count": 1},
+            )
+            review["source_verification_status"] = verification["status"]
+            review["source_verification_issue_count"] = verification["issue_count"]
+            if verification["status"] != "pass" and review.get("confidence") == "high":
+                review["confidence"] = "medium"
+        source_audit["affected_company_count"] = affected_company_count
+        source_audit["company_pass_count"] = status_counts["pass"]
+        source_audit["company_failed_count"] = status_counts["failed"]
+        source_audit["company_unverified_count"] = status_counts["unverified"]
     source_audit["web_search_completed"] = web_search_completed_count
     source_audit["web_search_attempted"] = web_search_attempted_count
     source_audit["web_search_event_verified"] = web_search_event_verified_count
