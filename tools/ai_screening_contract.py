@@ -784,11 +784,13 @@ def stale_current_period_fields(review: Mapping[str, Any]) -> list[str]:
     for field, value in fields:
         for match in _CURRENT_PERIOD_YEAR_RE.finditer(str(value or "")):
             claimed_year = int(match.group(1) or match.group(2))
-            # A one-year lag is normal for an annual report (for example,
-            # 2025 annual figures remain the latest complete year during
-            # 2026).  Only flag prose that presents evidence older than that
-            # normal reporting lag as current/latest.
-            if claimed_year < latest_year - 1:
+            # A one-year lag is normal only when the prose explicitly says
+            # it is the latest *complete annual* period (for example, 2025
+            # annual figures remain the latest complete year during 2026).
+            # Keep flagging a one-year-old generic "latest report period"
+            # claim, because an interim filing may already be available.
+            annual_lag_is_valid = "完整年度" in match.group(0) and claimed_year >= latest_year - 1
+            if claimed_year < latest_year and not annual_lag_is_valid:
                 stale.append(field)
                 break
     return stale
