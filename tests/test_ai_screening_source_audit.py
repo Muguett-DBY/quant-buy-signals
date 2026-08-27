@@ -690,6 +690,29 @@ def test_source_audit_rejects_parseable_pdf_with_wrong_company_identity(tmp_path
     assert any("company code" in issue["reason"] for issue in report["semantic_issues"])
 
 
+def test_pdf_identity_accepts_short_name_used_in_legal_issuer_name() -> None:
+    text = "成都超纯应用材料股份有限公司 证券简称：超纯应材 2025 年度报告"
+    assert source_audit._pdf_company_identity_matches(text, "301717", "超纯应材")
+
+
+def test_industry_pdf_claim_does_not_require_issuer_identity() -> None:
+    text = "中国汽车流通行业协会 2026-04-10 2026年1-3月新能源乘用车渗透率41.6%"
+    claim = {
+        "source_context": "中国汽车流通行业协会信息中心",
+        "source_kind": "codex_luna_web_search",
+        "statement": "2026-04-10协会报告显示新能源乘用车渗透率41.6%",
+    }
+    finding = {"finding": "2026年1-3月新能源乘用车渗透率41.6%"}
+    assert source_audit._pdf_text_semantic_issues(
+        text,
+        security_code="605228",
+        name="神通科技",
+        claim=claim,
+        finding=finding,
+        require_identity=False,
+    ) == []
+
+
 def test_source_audit_marks_unclaimed_finding_non_html_unverified(tmp_path, monkeypatch) -> None:
     url = "https://reports.example/unclaimed.pdf"
     payload = {

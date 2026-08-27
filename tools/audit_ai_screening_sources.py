@@ -347,11 +347,62 @@ def _normalised_company_name(value: Any) -> str:
     text = re.sub(r"\s+", "", str(value or "")).casefold()
     # These suffixes are legal-company boilerplate and are poor identity
     # anchors on disclosure pages.  Keep the original name as a fallback.
-    for suffix in ("股份有限公司", "有限责任公司", "有限公司", "集团股份", "集团", "控股"):
+    for suffix in ("股份有限公司", "有限责任公司", "有限公司", "集团股份", "集团", "控股", "公司"):
         if text.endswith(suffix) and len(text) > len(suffix):
             text = text[: -len(suffix)]
             break
     return text
+
+
+def _pdf_company_identity_matches(text: str, security_code: str, name: str) -> bool:
+    """Match issuer identity while allowing common abbreviated Chinese names.
+
+    Disclosure PDFs often use the legal name (for example ``成都超纯应用材料``)
+    while the quote feed uses the short name (``超纯应材``).  A bounded ordered
+    character match after a two-character prefix keeps this useful alias case
+    explicit without accepting an unrelated issuer that merely shares one
+    character.
+    """
+
+    visible = re.sub(r"\s+", "", text).casefold()
+    code = re.sub(r"\s+", "", str(security_code or "")).casefold()
+    normal_name = _normalised_company_name(name)
+    if (code and code in visible) or (normal_name and normal_name in visible):
+        return True
+    if len(normal_name) < 3 or not all("\u4e00" <= char <= "\u9fff" for char in normal_name):
+        return False
+    prefix = normal_name[:2]
+    start = visible.find(prefix)
+    if start < 0:
+        return False
+    cursor = start + len(prefix)
+    # Keep the alias search local to the issuer heading; a random sequence far
+    # apart in an annual report is not an identity proof.
+    for char in normal_name[2:]:
+        position = visible.find(char, cursor, cursor + 9)
+        if position < 0:
+            return False
+        cursor = position + 1
+    return True
+
+
+def _is_industry_source_claim(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> bool:
+    """Return whether a cited document is an industry/market source.
+
+    Industry reports are intentionally not required to contain the issuer's
+    code or name.  They still must match the cited period or numeric fact.
+    """
+
+    context = " ".join(
+        str(value or "")
+        for value in (
+            claim.get("source_context"),
+            claim.get("source_kind"),
+            claim.get("statement"),
+            finding.get("finding"),
+        )
+    )
+    return any(marker in context for marker in ("行业协会", "工业协会", "协会信息中心", "行业报告", "市场报告"))
 
 
 def _report_period_tokens(value: Any) -> set[str]:
@@ -665,15 +716,14 @@ def _pdf_text_semantic_issues(
     name: str,
     claim: Mapping[str, Any],
     finding: Mapping[str, Any],
+    require_identity: bool = True,
 ) -> list[str]:
     """Run the identity, period and fact gate against extracted PDF text."""
 
     visible = re.sub(r"\s+", "", text).casefold()
     if not visible:
         return ["PDF body has no visible text"]
-    code = re.sub(r"\s+", "", str(security_code or "")).casefold()
-    normal_name = _normalised_company_name(name)
-    if not ((code and code in visible) or (normal_name and normal_name in visible)):
+    if require_identity and not _pdf_company_identity_matches(text, security_code, name):
         return ["PDF text does not match company code or normalized company name"]
     period_match = _period_matches(text, _structured_period_tokens(claim, finding))
     number_match = _structured_number_match(
@@ -1442,6 +1492,7 @@ def audit(
                 name=claim["name"],
                 claim=claim["claim"],
                 finding=claim["finding"],
+                require_identity=not _is_industry_source_claim(claim["claim"], claim["finding"]),
             )
             if pdf_issues:
                 semantic_failed_keys.add(int(claim["key"]))

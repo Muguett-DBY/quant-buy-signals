@@ -20,6 +20,7 @@ from tools.enrich_ai_screening_input import enrich
 from tools.publish_ai_screening import (
     _public_artifact_bytes,
     _public_review,
+    _normalise_negative_pe_text,
     _source_issue_kind,
     _source_verification_summary,
     _source_verification_metadata,
@@ -732,6 +733,19 @@ def test_source_issue_kind_treats_prior_direct_origin_failure_as_access() -> Non
         _source_issue_kind("source semantic verification failed in the prior direct-origin pass")
         == "access"
     )
+
+
+def test_source_issue_kind_treats_pdf_fact_parse_gap_as_unverified() -> None:
+    assert _source_issue_kind("PDF text does not match report period or fact number") == "unverified"
+    assert (
+        _source_issue_kind("structured source body does not match report period or fact number/field")
+        == "unverified"
+    )
+
+
+def test_negative_pe_is_rendered_as_lossmaking_not_applicable() -> None:
+    assert _normalise_negative_pe_text("PE -328.73倍") == "PE 不适用（原始 PE -328.73 倍）"
+    assert _normalise_negative_pe_text("PE 不适用（原始值 -328.727）") == "PE 不适用（原始值 -328.727）"
 
 
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:

@@ -62,6 +62,7 @@ _DETERMINISTIC_FIELDS = (
 _ACTION_PRIORITY = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
 _PUBLIC_ACTIONS = ("priority_buy", "watchlist", "avoid", "insufficient_evidence")
 _PUBLIC_CATEGORIES = ("recommend_buy", "observe", "do_not_recommend")
+_NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
 
 
 def _final_category(action: str) -> str:
@@ -70,6 +71,13 @@ def _final_category(action: str) -> str:
     if action in {"watchlist", "insufficient_evidence"}:
         return "observe"
     return "do_not_recommend"
+
+
+def _normalise_negative_pe_text(value: Any) -> str:
+    """Make loss-making PE readable while retaining the raw numeric value."""
+
+    text = _text(value, 1200)
+    return _NEGATIVE_PE_RE.sub(r"PE 不适用（原始 PE \1 倍）", text)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -452,6 +460,8 @@ def _source_issue_kind(reason: Any) -> str:
         "html正文未匹配" in lowered_reason
         or "html body does not match" in lowered_reason
         or "html正文未找到" in lowered_reason
+        or "pdf text does not match report period or fact number" in lowered_reason
+        or "structured source body does not match report period or fact number/field" in lowered_reason
     ):
         return "unverified"
     if any(
@@ -762,7 +772,7 @@ def _public_review(
         context_value = raw_context if raw_context else raw_source
         context_value = context_value if canonical_urls(context_value) else _text(context_value, 240)
         public_claim: dict[str, Any] = {
-            "statement": _text(claim.get("statement"), 600),
+            "statement": _normalise_negative_pe_text(_text(claim.get("statement"), 600)),
             "source_ref": source_refs[0] if source_refs else "",
             "source_context": context_value,
             "support": _text(claim.get("support"), 16),
@@ -815,7 +825,10 @@ def _public_review(
     summary = normalise_decision_text(_text(review.get("summary"), 1200))
     if action == "watchlist":
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
-    quantitative_facts = [_text(item, 240) for item in review.get("quantitative_facts", [])[:8]]
+    summary = _normalise_negative_pe_text(summary)
+    quantitative_facts = [
+        _normalise_negative_pe_text(_text(item, 240)) for item in review.get("quantitative_facts", [])[:8]
+    ]
     fact_bindings: list[dict[str, Any]] = []
     # Financial bindings are the lossless audit trail.  Unlike prose lists,
     # they must not be truncated: a public row must expose every dated fact
@@ -859,8 +872,12 @@ def _public_review(
         "quantitative_facts": quantitative_facts,
         "financial_fact_bindings": fact_bindings,
         "numeric_fact_repairs": numeric_fact_repairs,
-        "key_strengths": [_text(item, 240) for item in review.get("key_strengths", [])[:8]],
-        "risk_flags": [_text(item, 240) for item in review.get("risk_flags", [])[:12]],
+        "key_strengths": [
+            _normalise_negative_pe_text(_text(item, 240)) for item in review.get("key_strengths", [])[:8]
+        ],
+        "risk_flags": [
+            _normalise_negative_pe_text(_text(item, 240)) for item in review.get("risk_flags", [])[:12]
+        ],
         "claims": claims,
         "model": _text(review.get("model"), 120),
         "effort": _text(review.get("effort"), 32),
