@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.audit_ai_screening_sources import source_semantic_projection_sha256
+from tools.audit_ai_screening_sources import public_claim_statement, source_semantic_projection_sha256
 from tools.ai_source_urls import (
     canonical_urls,
     claim_source_urls,
@@ -62,8 +62,7 @@ _DETERMINISTIC_FIELDS = (
 _ACTION_PRIORITY = {"priority_buy": 0, "watchlist": 1, "avoid": 2, "insufficient_evidence": 3}
 _PUBLIC_ACTIONS = ("priority_buy", "watchlist", "avoid", "insufficient_evidence")
 _PUBLIC_CATEGORIES = ("recommend_buy", "observe", "do_not_recommend")
-_MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
-_NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
+_DUPLICATE_PERCENT_SUFFIX_RE = re.compile(r"(百分点|期末口径)%")
 
 
 def _final_category(action: str) -> str:
@@ -74,12 +73,22 @@ def _final_category(action: str) -> str:
     return "do_not_recommend"
 
 
+def _normalise_claim_pe_text(value: Any) -> str:
+    """Normalise PE labels without changing source-bound claim semantics."""
+
+    return public_claim_statement(value)
+
+
 def _normalise_negative_pe_text(value: Any) -> str:
     """Make loss-making PE readable while retaining the raw numeric value."""
 
-    text = _text(value, 1200)
-    text = _MALFORMED_PE_RE.sub("PE", text)
-    return _NEGATIVE_PE_RE.sub(r"PE 不适用（原始 PE \1 倍）", text)
+    text = _normalise_claim_pe_text(value)
+    # Change values such as ``+0.08个百分点`` and ``期末口径`` already carry
+    # their own unit or are a comparison basis, not percentages.  The legacy
+    # adapter appended ``%`` to both and produced visibly invalid facts like
+    # ``同比 +0.08个百分点%``.  Keep this narrow so genuine ``上年末0.84%``
+    # comparisons remain untouched.
+    return _DUPLICATE_PERCENT_SUFFIX_RE.sub(r"\1", text)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -774,7 +783,7 @@ def _public_review(
         context_value = raw_context if raw_context else raw_source
         context_value = context_value if canonical_urls(context_value) else _text(context_value, 240)
         public_claim: dict[str, Any] = {
-            "statement": _normalise_negative_pe_text(_text(claim.get("statement"), 600)),
+            "statement": _normalise_claim_pe_text(_text(claim.get("statement"), 600)),
             "source_ref": source_refs[0] if source_refs else "",
             "source_context": context_value,
             "support": _text(claim.get("support"), 16),

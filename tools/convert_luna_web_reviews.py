@@ -123,6 +123,15 @@ def _value_text(value: Any, limit: int = 240) -> str:
     return _text(value, limit)
 
 
+def _change_text(value: Any) -> str:
+    """Render a change value without appending a percent to textual bases."""
+
+    text = _value_text(value, 180)
+    if not text or "%" in text or "％" in text or "百分点" in text or not _CHANGE_NUMBER_RE.fullmatch(text):
+        return text
+    return f"{text}%"
+
+
 def _clean_fact_text(value: Any, limit: int = 600) -> str:
     """Keep numeric facts parseable without changing their values."""
 
@@ -165,6 +174,7 @@ _AMOUNT_RE = re.compile(
     # only an ASCII identifier/percent suffix should terminate this match.
     r"(?P<unit>百万元|亿元|万元|千元|元|亿|万)(?![0-9A-Za-z_%])"
 )
+_CHANGE_NUMBER_RE = re.compile(r"^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)$")
 _METRIC_ALIAS_GROUPS: tuple[tuple[str, ...], ...] = (
     ("营业收入", "营业总收入", "营业收入", "营收"),
     ("归属于上市公司股东的净利润", "归属于母公司股东的净利润", "归母净利润"),
@@ -995,7 +1005,7 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
                     rendered_values = [metric_text(key, value, value_unit) for key, value, value_unit in value_fields]
                     yoy = _value_text(item.get("yoy") or item.get("change"), 180)
                     if yoy and not any(yoy.casefold() in value.casefold() for value in rendered_values):
-                        rendered_values.append(f"同比 {yoy if '%' in yoy else f'{yoy}%'}")
+                        rendered_values.append(f"同比 {_change_text(yoy)}")
                     parts = [part for part in (metric, *rendered_values) if part]
                     if not parts:
                         metric_parts = [
@@ -1062,7 +1072,7 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
                             extras.append(rendered)
                     change_text = _value_text(item.get("change") or item.get("yoy"), 180)
                     if change_text and not any(change_text.casefold() in extra.casefold() for extra in extras):
-                        extras.append(f"同比 {change_text if '%' in change_text else f'{change_text}%'}")
+                        extras.append(f"同比 {_change_text(change_text)}")
                     if extras:
                         fact = f"{fact}；{'；'.join(extras)}"
                 if fact or period:

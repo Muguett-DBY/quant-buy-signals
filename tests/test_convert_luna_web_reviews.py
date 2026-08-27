@@ -5,6 +5,7 @@ import json
 import pytest
 
 from tools.convert_luna_web_reviews import (
+    _change_text,
     _claims,
     _financial_fact_bindings,
     _financial_fact_items,
@@ -83,6 +84,13 @@ def test_sanitize_reason_text_removes_search_result_metadata() -> None:
     assert "Published:" not in result
     assert "Crawled:" not in result
     assert "2026H1收入 37.27亿元" in result
+
+
+def test_change_text_does_not_add_percent_to_point_or_period_basis() -> None:
+    assert _change_text("+9.11") == "+9.11%"
+    assert _change_text("+0.08个百分点") == "+0.08个百分点"
+    assert _change_text("期末口径") == "期末口径"
+    assert _change_text("上年末0.84%") == "上年末0.84%"
 
 
 def test_preferred_source_url_uses_sina_vip_bulletin_mirror() -> None:

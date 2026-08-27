@@ -203,6 +203,12 @@ def test_source_projection_binds_final_public_claim_and_finding_semantics() -> N
     assert company["search_findings"][0]["source_kind"] == "official_filing"
 
 
+def test_source_projection_uses_public_claim_numeric_normalisation() -> None:
+    assert source_audit.public_claim_statement("同比 +0.08个百分点%") == "同比 +0.08个百分点"
+    assert source_audit.public_claim_statement("同比 期末口径%") == "同比 期末口径"
+    assert source_audit.public_claim_statement("PE -12.5倍") == "PE 不适用（原始 PE -12.5 倍）"
+
+
 def test_source_projection_is_canonical_across_company_order() -> None:
     payload = _projection_payload("https://reports.example/600585-half-year")
     second = json.loads(json.dumps(payload["packets"][0], ensure_ascii=False))

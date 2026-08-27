@@ -746,6 +746,13 @@ def test_negative_pe_is_rendered_as_lossmaking_not_applicable() -> None:
     assert _normalise_negative_pe_text("type 5 不是市盈率") == "type 5 不是市盈率"
 
 
+def test_numeric_fact_units_do_not_duplicate_change_basis_percent() -> None:
+    assert _normalise_negative_pe_text("同比 +0.08个百分点") == "同比 +0.08个百分点"
+    assert _normalise_negative_pe_text("同比 +0.08个百分点%") == "同比 +0.08个百分点"
+    assert _normalise_negative_pe_text("同比 期末口径%") == "同比 期末口径"
+    assert _normalise_negative_pe_text("同比 上年末0.84%") == "同比 上年末0.84%"
+
+
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:
     monkeypatch.setattr("tools.publish_ai_screening.MAX_PUBLIC_ARTIFACT_BYTES", 32)
 

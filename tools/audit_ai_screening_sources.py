@@ -57,12 +57,24 @@ _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_PDF_TEXT_CHARS = 800_000
 _MAX_PDF_BYTES = 12 * 1024 * 1024
 AUDIT_CONTRACT_VERSION = 3
+_MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
+_NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
+_DUPLICATE_PERCENT_SUFFIX_RE = re.compile(r"(百分点|期末口径)%")
 
 
 def _public_text(value: Any, limit: int) -> str:
     """Apply the same scalar text projection used by publication."""
 
     return str(value or "").strip()[:limit]
+
+
+def public_claim_statement(value: Any) -> str:
+    """Project the exact readable claim text exposed by publication."""
+
+    text = _public_text(value, 600)
+    text = _MALFORMED_PE_RE.sub("PE", text)
+    text = _NEGATIVE_PE_RE.sub(r"PE 不适用（原始 PE \1 倍）", text)
+    return _DUPLICATE_PERCENT_SUFFIX_RE.sub(r"\1", text)
 
 
 def _public_claim_source_fields(claim: Mapping[str, Any]) -> tuple[str, str, list[str]]:
@@ -151,7 +163,7 @@ def public_source_semantic_projection(payload: Mapping[str, Any]) -> dict[str, A
             claim_rows.append(
                 {
                     "claim_index": claim_index,
-                    "statement": _public_text(claim.get("statement"), 600),
+                    "statement": public_claim_statement(claim.get("statement")),
                     "source_ref": source_ref,
                     "source_context": source_context,
                     "source_refs": source_refs,
