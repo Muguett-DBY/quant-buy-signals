@@ -69,7 +69,9 @@ def _action_safe_summary(summary: str, action: str) -> str:
     def replace_explicit_conclusion(match: re.Match[str]) -> str:
         label = match.group("label").casefold()
         already_observe = label in {"observe", "watchlist", "manual_review", "观察", "观望"}
-        replacement = "观察" if action in {"watchlist", "insufficient_evidence"} and already_observe else target_conclusion
+        replacement = (
+            "观察" if action in {"watchlist", "insufficient_evidence"} and already_observe else target_conclusion
+        )
         return f"{match.group(1)}{replacement}"
 
     summary = explicit_conclusion.sub(replace_explicit_conclusion, summary)
@@ -1085,9 +1087,7 @@ def _review(
         risk_flags = list(dict.fromkeys([*quality_reasons, *risk_flags]))[:8]
     elif action == "priority_buy":
         gate_scope = (
-            "估值、最新盈利、资产质量与资本约束"
-            if _financial_institution(review_packet)
-            else "估值、最新盈利和现金流"
+            "估值、最新盈利、资产质量与资本约束" if _financial_institution(review_packet) else "估值、最新盈利和现金流"
         )
         # This is an AI quality-gate statement, not a deterministic type
         # status.  Avoid the bare “触发” wording because the Pages release
@@ -1135,9 +1135,7 @@ def _review(
     financial_fact_bindings = [
         dict(item) for item in source.get("financial_fact_bindings", []) if isinstance(item, Mapping)
     ]
-    numeric_fact_repairs = [
-        dict(item) for item in source.get("numeric_fact_repairs", []) if isinstance(item, Mapping)
-    ]
+    numeric_fact_repairs = [dict(item) for item in source.get("numeric_fact_repairs", []) if isinstance(item, Mapping)]
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": str(packet.get("security_code") or ""),
@@ -1161,16 +1159,8 @@ def _review(
         "quality_gate": quality_gate,
         "key_strengths": strengths,
         **({"quantitative_facts": quantitative_facts} if quantitative_facts else {}),
-        **(
-            {"financial_fact_bindings": financial_fact_bindings}
-            if "financial_fact_bindings" in source
-            else {}
-        ),
-        **(
-            {"numeric_fact_repairs": numeric_fact_repairs}
-            if "numeric_fact_repairs" in source
-            else {}
-        ),
+        **({"financial_fact_bindings": financial_fact_bindings} if "financial_fact_bindings" in source else {}),
+        **({"numeric_fact_repairs": numeric_fact_repairs} if "numeric_fact_repairs" in source else {}),
         "risk_flags": risk_flags,
         "claims": (claims if native_company_research else claims[:12]),
         "model": str(source.get("model") or "unknown-external-review"),

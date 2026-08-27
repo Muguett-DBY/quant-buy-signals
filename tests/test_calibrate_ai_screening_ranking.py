@@ -205,9 +205,7 @@ def test_financial_quality_gate_demotes_high_pb_buy() -> None:
         ("priority_buy", "独立结论为 do_not_recommend_buy。", "建议买"),
     ],
 )
-def test_action_safe_summary_rewrites_calibrated_english_conclusion(
-    action: str, source: str, expected: str
-) -> None:
+def test_action_safe_summary_rewrites_calibrated_english_conclusion(action: str, source: str, expected: str) -> None:
     result = _action_safe_summary(source, action)
 
     assert expected in result
