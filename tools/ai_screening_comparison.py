@@ -53,10 +53,71 @@ def _score(review: Mapping[str, Any]) -> float | None:
     return value if value == value else None
 
 
-def _reason(packet: Mapping[str, Any], review: Mapping[str, Any]) -> str:
+def _human_points(human: Mapping[str, Any], field: str, fallback: str) -> str:
+    values = human.get(field)
+    if not isinstance(values, list):
+        return fallback
+    cleaned: list[str] = []
+    for value in values:
+        text = _text(value, 180).strip(" 。；：:;")
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return "、".join(cleaned[:2]) or fallback
+
+
+def _comparison_reason(
+    review: Mapping[str, Any],
+    *,
+    change_type: str,
+    previous_category: str | None,
+    current_category: str | None,
+    direction: str,
+) -> str:
+    """Turn the current human explanation into a short change-specific sentence.
+
+    The comparison card already shows the yesterday/today path.  This sentence
+    therefore explains the evidence shift instead of repeating a generic
+    transition or dumping the valuation snapshot a second time.
+    """
+
+    human = review.get("human_explanation")
+    if not isinstance(human, Mapping):
+        return _text(review.get("summary"), 560) or "今天按公司事实重新形成独立结论。"
+    support = _human_points(human, "supporting_points", "经营亮点尚未形成完整闭环")
+    risk = _human_points(human, "watch_items", "关键风险仍需跟踪")
+    current_label = _CATEGORY_LABELS.get(current_category or "", "今日结论")
+    previous_label = _CATEGORY_LABELS.get(previous_category or "", "昨日结论")
+
+    if change_type == "new_candidate":
+        return f"这次重点看到{support}；但{risk}，先把这些证据跟上再决定仓位。"
+    if change_type == "score_changed":
+        return f"支持面是{support}；同时{risk}仍需验证，所以分数随证据强弱调整，结论类别暂不改变。"
+    if change_type == "category_changed":
+        if direction == "upgraded":
+            return f"经营面出现{support}；不过{risk}，本次从{previous_label}上调为{current_label}仍是有条件的。"
+        if direction == "downgraded":
+            return f"主要约束变成{risk}；即使还有{support}，也不足以维持原来的{previous_label}结论。"
+        return f"目前看到{support}，但{risk}尚未解除，所以先保留为{current_label}。"
+    return _text(review.get("summary"), 560) or "今天按公司事实重新形成独立结论。"
+
+
+def _reason(
+    review: Mapping[str, Any],
+    *,
+    change_type: str,
+    previous_category: str | None,
+    current_category: str | None,
+    direction: str,
+) -> str:
     human = review.get("human_explanation")
     if isinstance(human, Mapping):
-        value = _text(human.get("why_this_action") or human.get("thesis"), 560)
+        value = _comparison_reason(
+            review,
+            change_type=change_type,
+            previous_category=previous_category,
+            current_category=current_category,
+            direction=direction,
+        )
         if value:
             return value
     return _text(review.get("summary"), 560) or "本日已按公司事实重新形成独立结论。"
@@ -89,25 +150,22 @@ def _entry(
     if current_score is not None and previous_score is not None:
         score_delta = round(current_score - previous_score, 2)
     if change_type == "removed_candidate":
-        reason = "今日已不在规则达标/接近达标候选池，因此没有新的 AI 买入结论。"
+        reason = "今天已不在 AI 研究范围，因此没有新的三类结论。"
         direction = "left_candidate_pool"
     else:
-        reason = _reason(current_packet or {}, current_review)
-        if change_type == "category_changed":
-            reason = (
-                f"今日由{_CATEGORY_LABELS.get(previous_category or '', previous_category or '昨日结论')}"
-                f"调整为{_CATEGORY_LABELS.get(current_category or '', current_category or '今日结论')}：{reason}"
-            )
-        elif change_type == "new_candidate":
-            reason = f"今日进入研究范围：{reason}"
-        elif change_type == "score_changed":
-            reason = f"结论类别未变，但分数发生明显变化：{reason}"
         direction = (
             _change_direction(previous_category or "observe", current_category or "observe")
             if change_type == "category_changed"
             else "score_up"
             if (score_delta or 0) > 0
             else "score_down"
+        )
+        reason = _reason(
+            current_review,
+            change_type=change_type,
+            previous_category=previous_category,
+            current_category=current_category,
+            direction=direction,
         )
     return {
         "security_code": code,

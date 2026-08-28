@@ -2030,10 +2030,9 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "aiScreeningPageResponseV2" not in source
     assert "legacyAiScreeningPageResponse" not in source
     assert "MutationObserver" not in source
-    assert "收盘数据日" in source
-    assert "公司研究日" in source
-    assert "原生搜索事件证明" in source
-    assert "公司财务来源核验" in source
+    assert 'class="meta" id="meta"' not in page_function
+    assert '<div class="notice">' not in page_function
+    assert "原生搜索事件证明" not in page_function
     assert "访问/正文不可用" in source
     assert "公司、期间或数字不匹配" in source
     assert "查看来源核验明细" in source
@@ -2073,8 +2072,6 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "function evidenceLinks" in source
     assert "Ox Alpha Free" in source
     assert "DeepSeek V4 Flash（OpenCode Go）" in source
-    assert "复核模型 " in source
-    assert "推理档位 " in source
     assert "Array.isArray(packet.type_keys)" in source
     assert 'types.filter(Boolean).join(" / ")' in source
     assert "MAX_AI_SCREENING_BYTES=32*1024*1024" in source

@@ -10,7 +10,11 @@ def _packet(code: str, name: str, category: str, score: float, reason: str = "")
         "ai_review": {
             "final_category": category,
             "buy_attractiveness_score": score,
-            "human_explanation": {"why_this_action": reason or "今日按公司事实重新形成结论。"},
+            "human_explanation": {
+                "why_this_action": reason or "今日按公司事实重新形成结论。",
+                "supporting_points": ["收入和现金流改善"],
+                "watch_items": ["回款仍需验证"],
+            },
         },
     }
 
@@ -45,5 +49,6 @@ def test_day_over_day_reports_upgrades_downgrades_new_and_removed() -> None:
     assert comparison["new_candidate_count"] == 1
     assert comparison["removed_candidate_count"] == 1
     assert by_code["000001"]["direction"] == "upgraded"
-    assert by_code["000001"]["reason"].endswith("经营改善已能和价格条件相互印证。")
+    assert by_code["000001"]["reason"] == "经营面出现收入和现金流改善；不过回款仍需验证，本次从观察上调为建议买仍是有条件的。"
+    assert "经营信号能够和当前价格条件相互印证" not in by_code["000001"]["reason"]
     assert by_code["000003"]["direction"] == "left_candidate_pool"

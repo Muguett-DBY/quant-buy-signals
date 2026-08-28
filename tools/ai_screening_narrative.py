@@ -128,7 +128,7 @@ def _theme(text: str, *, risk: bool) -> str:
         return "当前价格没有明显透支经营预期"
     if _POSITIVE_RE.search(text) and not _NEGATIVE_RE.search(text):
         return "公司经营层面有可核验的改善信号"
-    return "公开资料仍显示出可研究的经营支点"
+    return ""
 
 
 def _themes(values: Any, *, risk: bool, limit: int = 3) -> list[str]:
@@ -152,7 +152,7 @@ def _themes(values: Any, *, risk: bool, limit: int = 3) -> list[str]:
             if _is_low_signal(clause):
                 continue
             theme = _theme(clause, risk=risk)
-            if theme not in result:
+            if theme and theme not in result:
                 result.append(theme)
             if len(result) >= limit:
                 return result
@@ -179,24 +179,15 @@ def build_human_explanation(review: Mapping[str, Any], company_name: str = "该�
 
     if action == "priority_buy":
         thesis = f"{name}值得考虑的核心在于{support_text}。"
-        why = (
-            f"之所以给出建议买，依据是公司的经营信号能够和当前价格条件相互印证，"
-            f"但{risk_text}，所以这仍是有前提的买入判断。"
-        )
+        why = f"支持买入的是{support_text}；需要盯住{risk_text}，因此只能按有前提的买入理解。"
         heading = "为什么建议买"
     elif action == "watchlist":
         thesis = f"{name}并非没有亮点，{support_text}，但现在还没有足够安全边际。"
-        why = (
-            f"目前先观察，是因为{risk_text}。先看这些问题能否改善、经营信号能否延续，"
-            "再决定是否提高仓位。"
-        )
+        why = f"先观察一段时间，看看{risk_text}能否改善，再判断{support_text}能不能变成可持续回报。"
         heading = "为什么先观察"
     else:
         thesis = f"{name}当前不适合买入，关键障碍是{risk_text}。"
-        why = (
-            f"即使公司仍有{support_text}，也不足以抵消上述风险；在现金回报、竞争优势或价格安全边际得到验证前，"
-            "先回避更合适。"
-        )
+        why = f"目前最需要解决的是{risk_text}；即使有{support_text}，也不值得为尚未兑现的预期承担这个价格。"
         heading = "为什么不建议买"
 
     return {

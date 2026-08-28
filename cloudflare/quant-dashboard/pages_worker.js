@@ -1151,7 +1151,7 @@ function aiScreeningPageResponse(request){
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
     .wrap{max-width:1240px;margin:auto;padding:20px 20px 54px}
-    .hero,.card,.stat,.notice{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}
+    .hero,.card,.stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}
     .hero{display:flex;justify-content:space-between;gap:24px;align-items:end}
     .hero h1{margin:0 0 6px;font-size:clamp(28px,4vw,44px)}
      .hero p{margin:0;color:var(--muted);max-width:820px}
@@ -1159,9 +1159,8 @@ function aiScreeningPageResponse(request){
      .page-nav{display:flex;flex-wrap:wrap;gap:8px;margin:-2px 0 14px}
      .page-nav a{display:inline-block;padding:6px 11px;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1e3a8a;text-decoration:none;font-weight:700;font-size:13px}
      .page-nav a:hover{background:#dbeafe}
-    .meta,.stats,.toolbar,.scoreline,.badges{display:flex;flex-wrap:wrap;gap:8px}
-    .meta{justify-content:flex-end;color:var(--muted);font-size:12px}
-    .meta span,.stat{padding:8px 11px;border-radius:10px;background:#eef4f7}
+    .stats,.toolbar,.scoreline,.badges{display:flex;flex-wrap:wrap;gap:8px}
+    .stat{padding:8px 11px;border-radius:10px;background:#eef4f7}
     .stats{margin:18px 0}
     .stat{min-width:150px}
     .stat b{display:block;font-size:24px}
@@ -1212,7 +1211,6 @@ function aiScreeningPageResponse(request){
     .human-logic{margin-top:10px}
     .claim{margin-top:7px;padding:7px 9px;border-left:3px solid #bfdbfe;background:#f8fbff;font-size:12px}
     .claim a{color:var(--blue);overflow-wrap:anywhere}
-    .notice{margin:16px 0;color:var(--muted);font-size:12px}
     .empty{padding:32px;text-align:center;color:var(--muted)}
     .pager{display:flex;justify-content:space-between;margin-top:14px;color:var(--muted)}
     .pager button{border:0;border-radius:8px;padding:8px 11px}
@@ -1255,7 +1253,7 @@ function aiScreeningPageResponse(request){
      .change-path{justify-content:flex-start;margin:10px 0 7px;color:var(--muted);font-size:13px}
      .change-path b{color:var(--ink)}
      .change-card p{margin:0;font-size:13px;line-height:1.7}
-     @media(max-width:700px){.hero{display:block}.meta{justify-content:flex-start;margin-top:12px}.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 36px}}
+     @media(max-width:700px){.hero{display:block}.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 36px}}
   </style>
 </head>
 <body>
@@ -1268,10 +1266,8 @@ function aiScreeningPageResponse(request){
         <h1>AI筛查</h1>
         <p>规则候选池只决定研究范围。AI逐家公司分析商业模式、现金流、估值、行业与治理，并独立给出“建议买、观察、不建议”；规则是否触发不构成 AI 买入理由，也不阻止 AI 对候选升降级。</p>
       </div>
-      <div class="meta" id="meta"><span>正在读取…</span></div>
     </section>
     <section class="stats" id="stats"></section>
-    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。候选范围只由规则达标/接近达标决定，AI再独立研究并给出三类结论；规则状态不是 AI 买入理由。页面另行展示逐家公司联网或原生搜索事件证明、公司财务来源核验与逐家公司搜索记录；来源告警会区分内容不一致和访问/解析未完成，不把后者误写成未搜索。</div>
     <section class="toolbar">
       <label>最终结论
         <select id="category">
@@ -1600,36 +1596,6 @@ function aiScreeningPageResponse(request){
       document.querySelector("#prev").disabled=page<=1;
       document.querySelector("#next").disabled=page>=pages;
     }
-    function renderMeta(value){
-      const models=Array.isArray(value.review_models)?value.review_models.map(modelLabel).join(" / "):"—";
-      const efforts=Array.isArray(value.review_efforts)?value.review_efforts.join(" / "):"—";
-      const searchEventLabel=value.review_mode==="codex_luna_web_review"?"逐家公司联网事件":"原生搜索事件";
-      const audit=value.source_audit&&typeof value.source_audit==="object"?value.source_audit:{};
-      const auditFetchWarnings=Number(audit.failed||0)+Number(audit.blocked||0);
-      const auditSemanticWarnings=Number(audit.semantic_failed_count||0)+Number(audit.semantic_unverified_count||0);
-      const auditLabel=String(audit.release_status||"")==="passed_with_source_access_warnings"
-        ? "来源复取告警 "+auditFetchWarnings+" / "+Number(audit.checked||0)+" URL；内容语义告警 "+auditSemanticWarnings+" 条（访问告警与内容不一致分开统计）"
-        : "来源复取审计通过";
-      const knowledge=value.knowledge_base_provenance&&typeof value.knowledge_base_provenance==="object"?value.knowledge_base_provenance:{};
-      const knowledgeRoot=String(knowledge.root||"").trim();
-      const affectedCompanyLabel=Object.prototype.hasOwnProperty.call(audit,"affected_company_count")
-        ? "<span>来源复核受影响公司 "+esc(audit.affected_company_count)+" / "+esc(value.candidate_total||0)+"</span>"
-        : "";
-      document.querySelector("#meta").innerHTML=
-        "<span>数据代际 "+esc(value.snapshot_generation||"—")+"</span>"+
-        "<span>收盘数据日 "+esc(value.market_as_of||"—")+"</span>"+
-        "<span>公司研究日 "+esc(value.research_as_of||"—")+"</span>"+
-        "<span>"+esc(reviewModeLabel(value))+"</span>"+
-        "<span>复核模型 "+esc(models)+"</span>"+
-        "<span>推理档位 "+esc(efforts)+"</span>"+
-        "<span>Codex搜索尝试 "+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
-        "<span>"+searchEventLabel+" "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
-        "<span>财报来源链接 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
-        (knowledgeRoot?"<span>研究框架 "+esc(knowledgeRoot)+"（"+esc(knowledge.file_count||0)+" 个文件）</span>":"")+
-        "<span>"+esc(auditLabel)+"</span>"+
-        affectedCompanyLabel+
-        "<span>类型复核对 "+esc(value.type_pair_reviewed_count||0)+" / "+esc(value.type_pair_candidate_total||0)+"</span>";
-    }
     async function load(){
       try{
         const response=await fetch("/api/ai-screening");
@@ -1637,7 +1603,6 @@ function aiScreeningPageResponse(request){
         if(!response.ok)throw new Error(value.error||"暂无结果");
         payload=value;
         const counts=value.final_category_counts||{};
-        renderMeta(value);
         document.querySelector("#stats").innerHTML=
           '<div class="stat"><b>'+esc(counts.recommend_buy??value.priority_buy_count??0)+"</b><small>建议买</small></div>"+
           '<div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+"</b><small>观察</small></div>"+
@@ -1648,7 +1613,6 @@ function aiScreeningPageResponse(request){
           '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
         render();
       }catch(error){
-        document.querySelector("#meta").innerHTML="<span>AI筛查结果暂未发布</span>";
         document.querySelector("#grid").innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+"。确定性网站结果不受影响。</p>";
       }
     }
@@ -1677,23 +1641,22 @@ function aiScreeningChangesPageResponse(request){
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
     .wrap{max-width:1080px;margin:auto;padding:20px 20px 54px}
-    .hero,.stat,.notice,.change-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}
+    .hero,.stat,.change-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 24px #19324b0b}
     .hero{display:flex;justify-content:space-between;gap:24px;align-items:end}.hero h1{margin:0 0 6px;font-size:clamp(28px,4vw,44px)}.hero p{margin:0;color:var(--muted);max-width:760px}
     .back{display:inline-block;margin-bottom:12px;color:var(--blue);font-weight:700;text-decoration:none}
     .page-nav{display:flex;flex-wrap:wrap;gap:8px;margin:-2px 0 14px}.page-nav a{display:inline-block;padding:6px 11px;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1e3a8a;text-decoration:none;font-weight:700;font-size:13px}.page-nav a:hover{background:#dbeafe}
-    .meta,.stats,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.meta{justify-content:flex-end;color:var(--muted);font-size:12px}.meta span,.stat{padding:8px 11px;border-radius:10px;background:#eef4f7}.stats{margin:18px 0}.stat{min-width:145px}.stat b{display:block;font-size:23px}.stat small{color:var(--muted)}
-    .notice{margin:16px 0;color:var(--muted);font-size:13px}.toolbar{margin:18px 0;align-items:center}.toolbar label{display:flex;gap:8px;align-items:center;color:var(--muted)}.toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:inherit}
+    .stats,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.stat{padding:8px 11px;border-radius:10px;background:#eef4f7;min-width:145px}.stat b{display:block;font-size:23px}.stat small{color:var(--muted)}
+    .toolbar{margin:18px 0;align-items:center}.toolbar label{display:flex;gap:8px;align-items:center;color:var(--muted)}.toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:inherit}
     .changes-grid{display:grid;gap:10px}.change-card{padding:14px}.change-head,.change-path{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.change-head strong{font-size:16px}.change-head small{display:block;color:var(--muted);font-size:12px;font-weight:400}.change-badge{padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;background:#e2e8f0;color:#475569}.change-badge.upgraded,.change-badge.score_up{background:#dcfce7;color:#166534}.change-badge.downgraded,.change-badge.left_candidate_pool{background:#ffe0e0;color:#991b1b}.change-badge.new_candidate{background:#dbeafe;color:#1e3a8a}.change-path{justify-content:flex-start;margin:10px 0 7px;color:var(--muted);font-size:13px}.change-path b{color:var(--ink)}.change-card p{margin:0;font-size:13px;line-height:1.7}.empty{padding:32px;text-align:center;color:var(--muted)}
-    @media(max-width:700px){.hero{display:block}.meta{justify-content:flex-start;margin-top:12px}.wrap{padding:16px 12px 36px}}
+    @media(max-width:700px){.hero{display:block}.wrap{padding:16px 12px 36px}}
   </style>
 </head>
 <body>
   <main class="wrap">
     <a class="back" href="/">← 返回主看板</a>
     <nav class="page-nav" aria-label="AI页面导航"><a href="/ai-screening">当前筛查</a><a href="/ai-screening-changes">与昨日比较</a></nav>
-    <section class="hero"><div><p>AI SECOND-PASS RESEARCH</p><h1>与昨日比较</h1><p>只列公司级 AI 结论发生变化，或买入吸引力分变化至少 5 分的公司。这里解释“为什么从观察变成建议买”，不把规则类型变化冒充成 AI 理由。</p></div><div class="meta" id="meta"><span>正在读取…</span></div></section>
+    <section class="hero"><div><p>AI SECOND-PASS RESEARCH</p><h1>与昨日比较</h1><p>只显示结论或买入吸引力分发生明显变化的公司。卡片会说明经营证据和主要风险如何改变。</p></div></section>
     <section class="stats" id="stats"></section>
-    <div class="notice">昨日与今日的结论均是对应收盘数据后的独立研究结果；“建议买”仍是研究意见，不是自动下单信号。当前页面的变化理由来自今日人话解释，具体数字和来源请打开“当前筛查”查看。</div>
     <section class="toolbar"><label>变化类型<select id="filter"><option value="all">全部变化</option><option value="upgraded">结论上调</option><option value="downgraded">结论下调</option><option value="new_candidate">新进入候选</option><option value="score_changed">分数变化≥5</option><option value="removed_candidate">退出候选</option></select></label></section>
     <section class="changes-grid" id="changes"><p class="empty">正在读取昨日比较…</p></section>
   </main>
@@ -1721,11 +1684,9 @@ function aiScreeningChangesPageResponse(request){
         if(!response.ok)throw new Error(value.error||"暂无结果");
         comparison=value.day_over_day;
         if(!comparison||comparison.available!==true)throw new Error(comparison?.unavailable_reason||"当前发布包没有上一交易日比较");
-        document.querySelector("#meta").innerHTML='<span>今日：'+esc(comparison.current_market_as_of||value.market_as_of||"—")+'</span><span>昨日：'+esc(comparison.previous_market_as_of||"—")+'</span><span>共同候选 '+esc(comparison.matched_count||0)+'</span>';
         document.querySelector("#stats").innerHTML='<div class="stat"><b>'+esc(comparison.upgraded_to_recommend_buy_count||0)+'</b><small>上调为建议买</small></div><div class="stat"><b>'+esc(comparison.downgraded_from_recommend_buy_count||0)+'</b><small>从建议买下调</small></div><div class="stat"><b>'+esc(comparison.category_changed_count||0)+'</b><small>结论发生变化</small></div><div class="stat"><b>'+esc(comparison.score_changed_count||0)+'</b><small>分数变化≥5</small></div><div class="stat"><b>'+esc(comparison.new_candidate_count||0)+'</b><small>新进入候选</small></div><div class="stat"><b>'+esc(comparison.removed_candidate_count||0)+'</b><small>退出候选</small></div>';
         render();
       }catch(error){
-        document.querySelector("#meta").innerHTML="<span>昨日比较暂不可用</span>";
         document.querySelector("#changes").innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+'。请先查看当前 AI 筛查页面。</p>';
       }
     }
