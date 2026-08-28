@@ -83,21 +83,48 @@ def _comparison_reason(
     human = review.get("human_explanation")
     if not isinstance(human, Mapping):
         return _text(review.get("summary"), 560) or "今天按公司事实重新形成独立结论。"
-    support = _human_points(human, "supporting_points", "经营亮点尚未形成完整闭环")
-    risk = _human_points(human, "watch_items", "关键风险仍需跟踪")
-    current_label = _CATEGORY_LABELS.get(current_category or "", "今日结论")
+    support = _human_points(human, "supporting_points", "")
+    risk = _human_points(human, "watch_items", "")
     previous_label = _CATEGORY_LABELS.get(previous_category or "", "昨日结论")
 
     if change_type == "new_candidate":
-        return f"这次重点看到{support}；但{risk}，先把这些证据跟上再决定仓位。"
+        if support and risk:
+            return f"首次纳入研究，主要依据是{support}；同时要继续盯住{risk}。"
+        if support:
+            return f"首次纳入研究，主要依据是{support}；后续要确认这项改善能否持续。"
+        return "首次纳入研究，当前还没有足够明确的经营亮点，先观察后续证据。"
     if change_type == "score_changed":
-        return f"支持面是{support}；同时{risk}仍需验证，所以分数随证据强弱调整，结论类别暂不改变。"
+        if direction == "score_up":
+            if support and risk:
+                return f"支撑分数上升的是{support}；{risk}仍是当前最需要验证的地方。"
+            if support:
+                return f"支撑分数上升的是{support}；还要确认改善能否持续。"
+            return "分数较昨日上升，但暂时没有足够新的经营证据，先维持原结论。"
+        if risk and support:
+            return f"分数下调主要因为{risk}；虽然{support}，但暂不足以改变结论。"
+        if risk:
+            return f"分数下调主要因为{risk}，这也是当前最需要解决的问题。"
+        return "分数较昨日下调，暂未出现足以改变结论的新增支撑。"
     if change_type == "category_changed":
         if direction == "upgraded":
-            return f"经营面出现{support}；不过{risk}，本次从{previous_label}上调为{current_label}仍是有条件的。"
+            if support and risk:
+                return f"{support}是这次上调的主要依据；但{risk}，暂不把它当成无条件买入。"
+            if support:
+                return f"{support}是这次上调的主要依据；后续还要确认改善能否持续。"
+            if risk:
+                return f"结论较昨日上调，但{risk}仍未解决，先观察后续兑现。"
+            return "结论较昨日上调，但新增支撑还不够明确，先观察后续兑现。"
         if direction == "downgraded":
-            return f"主要约束变成{risk}；即使还有{support}，也不足以维持原来的{previous_label}结论。"
-        return f"目前看到{support}，但{risk}尚未解除，所以先保留为{current_label}。"
+            if risk and support:
+                return f"{risk}成为当前主要障碍；即使还有{support}，也先不维持原来的{previous_label}判断。"
+            if risk:
+                return f"{risk}成为当前主要障碍，因此先下调原来的{previous_label}判断。"
+            return f"新增证据削弱了原来的{previous_label}判断，先降低结论强度。"
+        if support and risk:
+            return f"{support}仍在，但{risk}，暂时维持原结论。"
+        if risk:
+            return f"{risk}尚未解除，暂时维持原结论。"
+        return "经营证据变化有限，暂时维持原结论。"
     return _text(review.get("summary"), 560) or "今天按公司事实重新形成独立结论。"
 
 

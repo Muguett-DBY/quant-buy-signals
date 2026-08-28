@@ -179,7 +179,7 @@ def build_human_explanation(review: Mapping[str, Any], company_name: str = "该�
 
     if action == "priority_buy":
         thesis = f"{name}值得考虑的核心在于{support_text}。"
-        why = f"支持买入的是{support_text}；需要盯住{risk_text}，因此只能按有前提的买入理解。"
+        why = f"{support_text}是支持买入的主要依据；需要关注{risk_text}，因此只能按有前提的买入理解。"
         heading = "为什么建议买"
     elif action == "watchlist":
         thesis = f"{name}并非没有亮点，{support_text}，但现在还没有足够安全边际。"

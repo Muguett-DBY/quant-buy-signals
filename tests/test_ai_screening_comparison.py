@@ -49,6 +49,6 @@ def test_day_over_day_reports_upgrades_downgrades_new_and_removed() -> None:
     assert comparison["new_candidate_count"] == 1
     assert comparison["removed_candidate_count"] == 1
     assert by_code["000001"]["direction"] == "upgraded"
-    assert by_code["000001"]["reason"] == "经营面出现收入和现金流改善；不过回款仍需验证，本次从观察上调为建议买仍是有条件的。"
+    assert by_code["000001"]["reason"] == "收入和现金流改善是这次上调的主要依据；但回款仍需验证，暂不把它当成无条件买入。"
     assert "经营信号能够和当前价格条件相互印证" not in by_code["000001"]["reason"]
     assert by_code["000003"]["direction"] == "left_candidate_pool"
