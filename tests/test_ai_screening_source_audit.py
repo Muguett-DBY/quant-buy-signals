@@ -217,21 +217,27 @@ def test_source_urls_use_stable_sina_bulletin_mirror() -> None:
 
 
 def test_deterministic_valuation_claim_does_not_bind_article_url() -> None:
-    assert claim_source_urls(
-        {
-            "statement": "candidate valuation snapshot：股价 10 元；PE 12 倍",
-            "source_ref": "https://quote.example/600000.html",
-        }
-    ) == []
+    assert (
+        claim_source_urls(
+            {
+                "statement": "candidate valuation snapshot：股价 10 元；PE 12 倍",
+                "source_ref": "https://quote.example/600000.html",
+            }
+        )
+        == []
+    )
 
 
 def test_search_result_transcript_is_not_published_as_fact_source() -> None:
-    assert claim_source_urls(
-        {
-            "statement": "web search evidence：检索摘要：公司公告索引",
-            "source_ref": "https://example.test/company-index",
-        }
-    ) == []
+    assert (
+        claim_source_urls(
+            {
+                "statement": "web search evidence：检索摘要：公司公告索引",
+                "source_ref": "https://example.test/company-index",
+            }
+        )
+        == []
+    )
 
 
 def test_source_projection_is_canonical_across_company_order() -> None:

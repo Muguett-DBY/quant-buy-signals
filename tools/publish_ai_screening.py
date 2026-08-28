@@ -798,7 +798,9 @@ def _public_review(
             for source_ref in canonical_urls(candidate):
                 if source_ref not in source_refs:
                     source_refs.append(source_ref)
-        context_value = "估值快照来自本代市场数据" if valuation_snapshot_claim else (raw_context if raw_context else raw_source)
+        context_value = (
+            "估值快照来自本代市场数据" if valuation_snapshot_claim else (raw_context if raw_context else raw_source)
+        )
         context_value = context_value if canonical_urls(context_value) else _text(context_value, 240)
         public_claim: dict[str, Any] = {
             "statement": _normalise_claim_pe_text(_text(claim.get("statement"), 600)),

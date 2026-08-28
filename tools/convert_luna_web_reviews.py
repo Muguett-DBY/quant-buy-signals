@@ -1430,16 +1430,17 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         # Period/title matching is still safe for those rows; only valuation
         # snapshots are excluded because their 2026 date is not a filing
         # period and must never be attached to an annual/interim report.
-        is_valuation_statement = bool(
-            re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE)
-        )
+        is_valuation_statement = bool(re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE))
         if source_url is None and not is_valuation_statement:
             ranked = sorted(
-                ((
-                    _source_period_score(statement, source),
-                    _source_priority(source, set(explicit_urls)),
-                    source,
-                ) for source in sources),
+                (
+                    (
+                        _source_period_score(statement, source),
+                        _source_priority(source, set(explicit_urls)),
+                        source,
+                    )
+                    for source in sources
+                ),
                 key=lambda item: (-item[0], item[1]),
             )
             if ranked and ranked[0][0] >= 7:

@@ -1164,9 +1164,7 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                 "error": str(error)[:240],
             }
         except (OSError, urllib.error.URLError, ValueError) as error:
-            retryable_timeout = isinstance(
-                getattr(error, "reason", None), (TimeoutError, socket.timeout)
-            )
+            retryable_timeout = isinstance(getattr(error, "reason", None), (TimeoutError, socket.timeout))
             if retryable_timeout and attempt < 1:
                 time.sleep(_retry_delay(attempt))
                 attempt += 1
@@ -1702,9 +1700,7 @@ def audit(
                 name=claim["name"],
                 claim=claim["claim"],
                 finding=claim["finding"],
-                require_identity=not _is_industry_source_claim(
-                    claim["claim"], claim["finding"], str(claim["url"])
-                ),
+                require_identity=not _is_industry_source_claim(claim["claim"], claim["finding"], str(claim["url"])),
             )
             if pdf_issues:
                 semantic_failed_keys.add(int(claim["key"]))
