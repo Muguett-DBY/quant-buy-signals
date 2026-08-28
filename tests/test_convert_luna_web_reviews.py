@@ -265,6 +265,20 @@ def test_sanitize_reason_text_removes_deterministic_disclaimer_and_label() -> No
     assert "收入同比增长12%" in result
 
 
+def test_sanitize_reason_text_removes_search_transcript_envelope() -> None:
+    result = _sanitize_reason_text(
+        "2026-08-28：联网检索事实摘要；value 2025年度营业收入 120 亿元；同上，以来源原文及报告口径为准"
+    )
+
+    assert result == "2025年度营业收入 120 亿元。"
+    assert "联网检索事实摘要" not in result
+    assert "以来源原文及报告口径为准" not in result
+
+
+def test_sanitize_reason_text_drops_raw_search_reason_transcript() -> None:
+    assert _sanitize_reason_text("web search evidence：检索摘要：公司公告（https://example.com）") == ""
+
+
 def test_date_years_ignores_numeric_values_that_are_not_report_periods() -> None:
     from tools.convert_luna_web_reviews import _date_years
 
@@ -459,3 +473,65 @@ def test_nested_fact_mapping_uses_key_units_over_compound_parent_unit() -> None:
     assert by_metric["revenue_cny"]["value"] == 100
     assert by_metric["revenue_cny"]["unit"] == "元"
     assert all(binding.get("unit") != "元/%" for binding in bindings)
+
+
+def test_fact_binding_keeps_prose_quote_as_text_and_replaces_stale_valuation() -> None:
+    row = _row()
+    row["market_as_of"] = "2026-08-28"
+    row["valuation_snapshot"] = {
+        "as_of": "2026-08-28",
+        "price_cny": 7.74,
+        "pe_ttm": 12.366,
+        "pb": 0.674,
+        "market_cap_cny_yi": 57.512679912,
+    }
+    row["financial_facts"] = [
+        {
+            "date": "2026-08-28",
+            "metric": "联网检索事实摘要",
+            "value": "2025年度营业收入 120 亿元；归母净利润 9 亿元。",
+            "source": "https://example.com/report",
+        },
+        {
+            "date": "2026-08-27",
+            "metric": "估值快照",
+            "value": "2026-08-27：股价 6.23 元；PE 4.91 倍；PB 0.68 倍。",
+            "source": "https://example.com/quote",
+        },
+    ]
+
+    bindings = _financial_fact_bindings(row)
+
+    assert bindings[0]["metric"] == "公开资料事实"
+    assert "2025年度营业收入 120 亿元" in bindings[0]["value_text"]
+    assert not any("2026-08-27" in str(binding) for binding in bindings)
+    assert bindings[-1]["metric"] == "估值快照"
+    assert bindings[-1]["date"] == "2026-08-28"
+    assert "7.74" in bindings[-1]["value_text"]
+
+
+def test_non_evidence_fact_rows_are_not_published_as_company_facts() -> None:
+    row = _row()
+    row["financial_facts"] = [
+        {
+            "period": "2026-08-28",
+            "metric": "联网检索状态",
+            "value": "已定位公开披露入口；本行不以搜索摘要臆造财务数字。",
+            "source": "https://example.com/report",
+        },
+        {
+            "period": "2025年度",
+            "metric": "筛选量化事实",
+            "value": "本司外584家总营收加权增速8.6%；量价冷度。",
+            "source": "https://example.com/report",
+        },
+        {"period": "2025年度", "fact": "营业收入 120 亿元。", "source": "https://example.com/report"},
+    ]
+
+    facts = _financial_fact_items(row)
+    bindings = _financial_fact_bindings(row)
+
+    assert len(facts) == 1
+    assert all("量化事实" not in str(item) for item in facts)
+    assert len(bindings) == 1
+    assert bindings[0].get("metric") != "联网检索状态"

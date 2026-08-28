@@ -745,6 +745,7 @@ def test_source_issue_kind_treats_pdf_fact_parse_gap_as_unverified() -> None:
 
 def test_negative_pe_is_rendered_as_lossmaking_not_applicable() -> None:
     assert _normalise_negative_pe_text("PE -328.73倍") == "PE 不适用（原始 PE -328.73 倍）"
+    assert _normalise_negative_pe_text("PE 不适用（原始 PE -328.73 倍）") == "PE 不适用（原始 PE -328.73 倍）"
     assert _normalise_negative_pe_text("PE 不适用（原始值 -328.727）") == "PE 不适用（原始值 -328.727）"
     assert _normalise_negative_pe_text("tyPE 14.45倍") == "PE 14.45倍"
     assert _normalise_negative_pe_text("type 5 不是市盈率") == "type 5 不是市盈率"

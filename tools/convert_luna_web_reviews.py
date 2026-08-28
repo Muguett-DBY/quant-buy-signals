@@ -37,6 +37,14 @@ _TYPE_TOKEN_RE = re.compile(
     r"|(?<![0-9A-Za-z_])类型\s*[1-7](?![0-9A-Za-z_])",
     re.IGNORECASE,
 )
+_SEARCH_TRANSCRIPT_PREFIX_RE = re.compile(
+    r"(?im)^\s*(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年[^：:；;\n]{0,12})?\s*"
+    r"[：:]?\s*(?:联网检索事实摘要|联网检索状态|联网资料摘要|检索摘要|搜索摘要)\s*[：:；;]?\s*(?:value\s*)?"
+)
+_SEARCH_REASON_PREFIX_RE = re.compile(
+    r"(?im)^\s*(?:web\s+search\s+evidence|search\s+evidence|检索摘要|搜索摘要)\s*[：:]?\s*"
+)
+_SEARCH_TRANSCRIPT_SUFFIX_RE = re.compile(r"[。；;]\s*同上[，,]?\s*以来源原文及报告口径为准[。；;]?\s*$")
 
 
 def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
@@ -60,6 +68,23 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"\s*(?:Published|Crawled):\s*[^;；\n]*;?", "", text, flags=re.IGNORECASE)
+    # Search adapters sometimes wrap every extracted fact in a transcript
+    # envelope (``日期：联网检索事实摘要；value ...；同上...``).  The envelope
+    # is retrieval bookkeeping, not company evidence.  Remove it while
+    # retaining the dated fact itself so the public explanation stays readable
+    # and the source binding remains unchanged.
+    text = _SEARCH_TRANSCRIPT_PREFIX_RE.sub("", text)
+    text = _SEARCH_TRANSCRIPT_SUFFIX_RE.sub("。", text)
+    text = re.sub(
+        r"\s*(?:[；;，,]\s*)?(?:同上\s*)?以来源原文及报告口径为准[。；;]?\s*$",
+        "",
+        text,
+    )
+    # A raw result transcript is never an AI reason.  Its URL and snippet are
+    # already represented by claims/source metadata; dropping it avoids
+    # exposing search-engine boilerplate as a strength or risk.
+    if _SEARCH_REASON_PREFIX_RE.match(text):
+        return ""
     # This adapter uses Codex's web__run event, not a provider-native search
     # event.  Keep public wording aligned with the actual retrieval path.
     text = text.replace("原生搜索", "逐家公司联网检索")
@@ -363,14 +388,19 @@ def _scalar_value_with_unit(value: Any) -> tuple[float | int, str] | None:
         return value, ""
     if isinstance(value, (Mapping, list, tuple)):
         return None
-    match = _SCALAR_WITH_UNIT_RE.search(_text(value, 600))
-    if not match:
-        return None
-    decimal = _decimal(match.group("number"))
-    if decimal is None:
-        return None
-    unit = match.group("unit").replace("％", "%").replace("／", "/")
-    return (float(decimal) if decimal % 1 else int(decimal)), unit
+    text = _text(value, 600)
+    for match in _SCALAR_WITH_UNIT_RE.finditer(text):
+        decimal = _decimal(match.group("number"))
+        if decimal is None:
+            continue
+        unit = match.group("unit").replace("％", "%").replace("／", "/")
+        # A leading year in a prose fact (``2025年度营业收入 ...``) is a
+        # period label, not the fact's numeric value.  Continue to the first
+        # amount/ratio after it instead of producing ``2025年`` as a binding.
+        if unit == "年" and Decimal("1900") <= decimal <= Decimal("2100"):
+            continue
+        return (float(decimal) if decimal % 1 else int(decimal)), unit
+    return None
 
 
 def _is_compound_fact_unit(value: Any) -> bool:
@@ -929,6 +959,113 @@ def _period_label(value: Any) -> str:
     return period
 
 
+def _is_valuation_fact(metric: Any, value: Any = "", change: Any = "") -> bool:
+    """Return whether a raw fact is the generated close-price snapshot.
+
+    The snapshot is deterministic input data, not a searched company fact.
+    Keeping it in the financial-fact binding list makes a quote-page URL look
+    like evidence and is the source of the stale 8/27 valuation rows seen in
+    the 8/28 release.
+    """
+
+    text = " ".join(_text(item, 700) for item in (metric, value, change)).casefold()
+    return bool(re.search(r"估值快照|交易日|收盘价|现价|\bpe\b|\bpb\b|市值|market[_ ]?cap", text, flags=re.IGNORECASE))
+
+
+def _valuation_snapshot_text(row: Mapping[str, Any]) -> str:
+    """Render one generation-bound valuation fact from the queue snapshot."""
+
+    snapshot = row.get("valuation_snapshot")
+    if not isinstance(snapshot, Mapping):
+        return ""
+    as_of = _text(snapshot.get("as_of") or row.get("market_as_of"), 10)
+    price = _decimal(snapshot.get("price_cny"))
+    if not as_of or price is None:
+        return ""
+    pe = _decimal(snapshot.get("pe_ttm"))
+    pb = _decimal(snapshot.get("pb"))
+    market_cap_yi = _decimal(snapshot.get("market_cap_cny_yi"))
+    if market_cap_yi is None:
+        market_cap = _decimal(snapshot.get("market_cap_cny"))
+        market_cap_yi = market_cap / Decimal("100000000") if market_cap is not None else None
+    pe_text = "PE 未提供"
+    if pe is not None:
+        pe_text = f"PE {pe:.2f}倍" if pe > 0 else f"PE 不适用（原始 PE {pe:.2f}倍）"
+    pb_text = f"PB {pb:.2f}倍" if pb is not None else "PB 未提供"
+    market_text = f"市值 {market_cap_yi:.2f}亿元" if market_cap_yi is not None else "市值未提供"
+    return f"估值快照：股价 {price:.2f}元；{pe_text}；{pb_text}；{market_text}（交易日 {as_of}）"
+
+
+def _valuation_snapshot_binding(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    text = _valuation_snapshot_text(row)
+    if not text:
+        return None
+    snapshot = row.get("valuation_snapshot")
+    assert isinstance(snapshot, Mapping)
+    price = _decimal(snapshot.get("price_cny"))
+    as_of = _text(snapshot.get("as_of") or row.get("market_as_of"), 10)
+    if price is None or not as_of:
+        return None
+    return {
+        "date": as_of,
+        "period": as_of,
+        "metric": "估值快照",
+        "unit": "元",
+        "value": float(price),
+        "value_text": text,
+    }
+
+
+def _is_compound_fact_value(value: Any) -> bool:
+    """Avoid parsing a leading year as a scalar in a prose quotation."""
+
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(
+        len(text) > 80
+        or re.search(r"[：:；;。！？!?]", text)
+        or re.search(
+            r"(?:年度|年末|上半年|半年度|一季度|二季度|三季度|同比|联网检索事实摘要|web\s+search\s+evidence)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_non_evidence_fact(metric: Any, value: Any = None, change: Any = None) -> bool:
+    """Identify retrieval bookkeeping and deterministic scoring rows.
+
+    These rows are useful while debugging a shard, but they are not company
+    facts: publishing them as a financial binding makes a search transcript or
+    the first-pass rule calculation look like independently sourced evidence.
+    Keep the actual query/event attestation in its dedicated metadata fields.
+    """
+
+    metric_text = _text(metric, 180).strip().casefold()
+    if metric_text == "联网检索事实摘要":
+        cleaned = _sanitize_reason_text(value, 600)
+        return not bool(
+            re.search(
+                r"营业收入|营业总收入|归母净利润|净利润|现金流|研发|ROE|毛利率|资产负债率|产量|销量|收入|利润|成本|负债|现金|应收|存货|分红|派息|市场份额|需求|价格|订单|客户|产能|业务",
+                cleaned,
+            )
+        )
+    if metric_text in {
+        "联网检索状态",
+        "联网资料摘要",
+        "检索摘要",
+        "搜索摘要",
+        "web search evidence",
+        "search evidence",
+        "量化事实",
+        "筛选量化事实",
+    }:
+        return True
+    combined = " ".join(_text(item, 600) for item in (metric, value, change)).casefold()
+    return "本行不以搜索摘要臆造财务数字" in combined
+
+
 def _evidence_grade(row: Mapping[str, Any]) -> str:
     value = row.get("evidence_quality")
     if isinstance(value, Mapping):
@@ -1044,6 +1181,10 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
 
         for item in raw:
             if isinstance(item, Mapping):
+                if _is_valuation_fact(item.get("metric"), item.get("fact") or item.get("value"), item.get("change")):
+                    continue
+                if _is_non_evidence_fact(item.get("metric"), item.get("fact") or item.get("value"), item.get("change")):
+                    continue
                 period, report_date, source_date = fact_period(item)
                 source_urls = _financial_fact_source_urls(item, row)
                 source_url = source_urls[0] if source_urls else ""
@@ -1152,6 +1293,9 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
                     items.append(record)
             elif _text(item):
                 items.append(_text(item, 600))
+        valuation_fact = _valuation_snapshot_text(row)
+        if valuation_fact:
+            items.append({"period": _text(row.get("market_as_of"), 10), "fact": valuation_fact, "status": ""})
         return items
     if not isinstance(raw, Mapping):
         return []
@@ -1245,9 +1389,11 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     ) -> None:
         binding = dict(base)
         metric_text = _text(metric, 180)
+        if metric_text.casefold() in {"联网检索事实摘要", "筛选量化事实", "web search evidence", "search evidence"}:
+            metric_text = "公开资料事实"
         if metric_text:
             binding["metric"] = metric_text
-        scalar = _scalar_value_with_unit(value)
+        scalar = None if _is_compound_fact_value(value) else _scalar_value_with_unit(value)
         if scalar is not None:
             scalar_value, parsed_unit = scalar
             binding["value"] = scalar_value
@@ -1255,15 +1401,21 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
             if unit:
                 binding["unit"] = unit
             if value_text not in (None, ""):
-                binding["value_text"] = _value_text(value_text, 600)
+                binding["value_text"] = _sanitize_reason_text(_value_text(value_text, 600), 600)
         elif value not in (None, ""):
-            binding["value_text"] = _value_text(value, 600)
+            cleaned = _sanitize_reason_text(_value_text(value, 600), 600)
+            if cleaned:
+                binding["value_text"] = cleaned
         if binding:
             bindings.append(binding)
 
     if isinstance(raw, list):
         for item in raw:
             if not isinstance(item, Mapping):
+                continue
+            if _is_valuation_fact(item.get("metric"), item.get("fact") or item.get("value"), item.get("change")):
+                continue
+            if _is_non_evidence_fact(item.get("metric"), item.get("fact") or item.get("value"), item.get("change")):
                 continue
             base = common_fields(item)
             metric = item.get("metric")
@@ -1307,6 +1459,9 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
             }
             if derived and bindings:
                 bindings[-1].setdefault("derived_values", {}).update(derived)
+        valuation_binding = _valuation_snapshot_binding(row)
+        if valuation_binding is not None:
+            bindings.append(valuation_binding)
         return bindings
     if isinstance(raw, Mapping):
         # The mapping shape has no per-row source URL, but its fiscal key still
@@ -1323,6 +1478,9 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
                 value=value,
                 explicit_unit="rmb",
             )
+        valuation_binding = _valuation_snapshot_binding(row)
+        if valuation_binding is not None:
+            bindings.append(valuation_binding)
     return bindings
 
 
@@ -1424,6 +1582,12 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         else:
             statement = _sanitize_reason_text(_clean_fact_text(fact), 600)
             explicit_urls = []
+        is_valuation_statement = bool(re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE))
+        if is_valuation_statement:
+            # Valuation is generated from the generation-bound market
+            # snapshot.  Never bind a quote-page URL to it as if it were a
+            # searched financial fact.
+            explicit_urls = []
         source_url = next((url for url in explicit_urls if url in sources_by_url), None)
         if source_url is None and explicit_urls:
             # An explicit fact URL may not have been repeated in the top-level
@@ -1436,7 +1600,6 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         # Period/title matching is still safe for those rows; only valuation
         # snapshots are excluded because their 2026 date is not a filing
         # period and must never be attached to an annual/interim report.
-        is_valuation_statement = bool(re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE))
         if source_url is None and not is_valuation_statement:
             ranked = sorted(
                 (
@@ -1561,12 +1724,20 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     positive_values = row.get("buy_reasons")
     if not isinstance(positive_values, list) or not any(_text(value) for value in positive_values):
         positive_values = row.get("strengths", [])
-    strengths = [
-        _sanitize_reason_text(repaired(value, "key_strengths"), 240) for value in positive_values if _text(value)
-    ]
-    risks = [
-        _sanitize_reason_text(repaired(value, "risk_flags"), 240) for value in row.get("risks", []) if _text(value)
-    ]
+    strengths: list[str] = []
+    for value in positive_values:
+        if not _text(value):
+            continue
+        cleaned = _sanitize_reason_text(repaired(value, "key_strengths"), 240)
+        if cleaned:
+            strengths.append(cleaned)
+    risks: list[str] = []
+    for value in row.get("risks", []):
+        if not _text(value):
+            continue
+        cleaned = _sanitize_reason_text(repaired(value, "risk_flags"), 240)
+        if cleaned:
+            risks.append(cleaned)
     facts = []
     for value in _financial_fact_items(row):
         if isinstance(value, Mapping):
@@ -1574,13 +1745,13 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
             # writers place after a short metric label.  Truncating at 200
             # characters could remove the only unit and make an otherwise
             # valid dated fact fail the research contract.
-            facts.append(
-                _public_fact_text(
-                    f"{_period_label(value.get('period'))}：{_sanitize_reason_text(value.get('fact') or '', 520)}"
-                )
-            )
+            fact_text = _sanitize_reason_text(value.get("fact") or "", 520)
+            if fact_text:
+                facts.append(_public_fact_text(f"{_period_label(value.get('period'))}：{fact_text}"))
         elif _text(value):
-            facts.append(_sanitize_reason_text(_clean_fact_text(value, 240), 240))
+            cleaned = _sanitize_reason_text(_clean_fact_text(value, 240), 240)
+            if cleaned:
+                facts.append(cleaned)
     if not risks:
         raise ValueError(f"Luna review has no risk flags: {code}")
     if not facts:

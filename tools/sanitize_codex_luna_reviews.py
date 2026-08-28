@@ -43,6 +43,11 @@ _SEARCH_METADATA_TOKEN_RE = re.compile(
 _SEARCH_RESULT_DECISION_RE = re.compile(
     r"本次公司特定来源\s*\d+\s*条[。；;]?|结论\s*[:：]\s*(?:建议买|观察|不建议)[。；;]?"
 )
+_SEARCH_TRANSCRIPT_PREFIX_RE = re.compile(
+    r"(?im)^\s*(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年[^：:；;\n]{0,12})?\s*"
+    r"[：:]?\s*(?:联网检索事实摘要|联网检索状态|联网资料摘要|检索摘要|搜索摘要)\s*[：:；;]?\s*(?:value\s*)?"
+)
+_SEARCH_TRANSCRIPT_SUFFIX_RE = re.compile(r"[。；;]\s*同上[，,]?\s*以来源原文及报告口径为准[。；;]?\s*$")
 _FUTURE_DATE_RE = re.compile(r"(?<!\d)(20\d\d)[-/年](\d{1,2})(?:[-/月](\d{1,2})日?)?")
 _SOURCE_MARKERS = (
     "联网事实（Codex web_search",
@@ -86,6 +91,13 @@ def _without_search_metadata(value: Any) -> str:
     text = _SEARCH_METADATA_RE.sub(" ", text)
     text = _SEARCH_METADATA_TOKEN_RE.sub(" ", text)
     text = _SEARCH_RESULT_DECISION_RE.sub(" ", text)
+    text = _SEARCH_TRANSCRIPT_PREFIX_RE.sub("", text)
+    text = _SEARCH_TRANSCRIPT_SUFFIX_RE.sub("。", text)
+    text = re.sub(
+        r"\s*(?:[；;，,]\s*)?(?:同上\s*)?以来源原文及报告口径为准[。；;]?\s*$",
+        "",
+        text,
+    )
     text = re.sub(r"(?:联网|公司)资料摘要\s*[:：]\s*", "公开资料：", text)
     text = re.sub(r"\s+([。；;，,])", r"\1", text)
     text = re.sub(r"([。；;])\s*([。；;])", r"\1", text)

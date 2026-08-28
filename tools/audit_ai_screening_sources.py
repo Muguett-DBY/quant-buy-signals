@@ -82,7 +82,7 @@ _MAX_PDF_BYTES = 12 * 1024 * 1024
 _MAX_PDF_PAGES = 120
 AUDIT_CONTRACT_VERSION = 3
 _MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
-_NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
+_NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])(?<!原始)(?<!原始 )PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
 _DUPLICATE_PERCENT_SUFFIX_RE = re.compile(r"(百分点|期末口径)%")
 
 
