@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.audit_ai_screening_sources import public_claim_statement, source_semantic_projection_sha256
+from tools.ai_screening_comparison import build_day_over_day
 from tools.ai_source_urls import (
     canonical_urls,
     claim_source_urls,
@@ -45,6 +46,7 @@ from tools.ai_screening_contract import (
     validate_review,
     valuation_snapshot_errors,
 )
+from tools.ai_screening_narrative import build_human_explanation
 
 ARTIFACT_SCHEMA_VERSION = 2
 ARTIFACT_KIND = "ai_screening_overlay"
@@ -761,6 +763,7 @@ def _public_review(
     require_readable_reason: bool = False,
     claims_are_search_results: bool = True,
     require_company_research_fields: bool = False,
+    company_name: str = "",
 ) -> dict[str, Any]:
     errors = validate_review(
         review,
@@ -899,6 +902,13 @@ def _public_review(
         "ai_independent": bool(review.get("ai_independent", False)),
         "confidence": _text(review.get("confidence"), 16),
         "summary": summary,
+        # Keep the exact model summary for the audit trail, but expose a
+        # separate deterministic, human-first explanation for the website.
+        # It is derived only from the already reviewed strengths/risks.
+        "human_explanation": build_human_explanation(
+            review,
+            _text(company_name, 160) or _text(review.get("company_name") or review.get("name"), 160) or "该公司",
+        ),
         "quantitative_facts": quantitative_facts,
         "financial_fact_bindings": fact_bindings,
         "numeric_fact_repairs": numeric_fact_repairs,
@@ -1117,6 +1127,7 @@ def build_artifact(
     expected_generation: str,
     expected_market_as_of: str,
     source_audit_path: Path | None = None,
+    previous_ai_path: Path | None = None,
 ) -> dict[str, Any]:
     merged_bytes = merged_path.read_bytes()
     merged_sha256 = hashlib.sha256(merged_bytes).hexdigest()
@@ -1214,6 +1225,7 @@ def build_artifact(
             require_readable_reason=full_coverage,
             claims_are_search_results=review_mode != NATIVE_COMPANY_RESEARCH_REVIEW_MODE,
             require_company_research_fields=review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE,
+            company_name=_text(packet.get("name") or packet.get("security_name"), 160),
         )
         if review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE:
             if (
@@ -1592,6 +1604,8 @@ def build_artifact(
         artifact["rule_source_sha256"] = dict(
             sorted((str(key), str(value)) for key, value in rule_source_sha256.items())
         )
+    if previous_ai_path is not None:
+        artifact["day_over_day"] = build_day_over_day(artifact, _load(previous_ai_path))
     output_bytes = _public_artifact_bytes(artifact)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(output_bytes)
@@ -1605,6 +1619,7 @@ def main() -> int:
     parser.add_argument("--expected-generation", required=True)
     parser.add_argument("--expected-market-as-of", required=True)
     parser.add_argument("--source-audit", type=Path)
+    parser.add_argument("--previous-ai", type=Path)
     args = parser.parse_args()
     artifact = build_artifact(
         args.merged,
@@ -1612,6 +1627,7 @@ def main() -> int:
         expected_generation=args.expected_generation,
         expected_market_as_of=args.expected_market_as_of,
         source_audit_path=args.source_audit,
+        previous_ai_path=args.previous_ai,
     )
     print(json.dumps({"artifact_kind": artifact["artifact_kind"], "reviewed_count": artifact["reviewed_count"]}))
     return 0

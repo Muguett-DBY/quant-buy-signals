@@ -2048,6 +2048,10 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "const finalHtml=" not in source
     assert ".replace(" not in page_function
     assert "AI为什么这样判断" in source
+    assert "humanExplanation" in source
+    assert "知识库是检查清单，不替代公司事实" in source
+    assert "aiScreeningChangesPageResponse" in source
+    assert 'if(path==="/ai-screening-changes")return aiScreeningChangesPageResponse(request);' in source
     assert "ai-review-details" in source
     assert "查看完整 AI 解释" in source
     assert "代码：" in source
@@ -2645,35 +2649,41 @@ assert.equal(response.status, 200);
     response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening"), env);
     assert.equal(response.status, 404);
     response = await worker.fetch(new Request("https://dashboard.test/api/ai-screening?bad=1"), env);
-assert.equal(response.status, 400);
-response = await worker.fetch(new Request("https://dashboard.test/ai-screening"), env);
-assert.equal(response.status, 200);
-const html = await response.text();
-const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
-assert.ok(nonce);
-assert.ok(html.includes("AI筛查"));
-assert.ok(html.includes("建议买"));
-assert.ok(html.includes("观察"));
-assert.ok(html.includes("不建议"));
-assert.ok(html.includes("原生搜索事件"));
-assert.ok(html.includes("财报来源链接"));
-assert.ok(!html.includes("保留引用已绑定搜索结果"));
-assert.ok(html.includes("已移除无效来源"));
-assert.ok(html.includes("资料时效"));
-assert.ok(!html.includes("待核验（未形成买入结论）"));
-assert.ok((response.headers.get("content-security-policy") || "").includes("script-src 'nonce-" + nonce + "'"));
- const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
- assert.ok(inlineScript);
-assert.ok(inlineScript.includes("freshness_counts"));
-assert.ok(inlineScript.includes("function isRuleText"));
-assert.ok(inlineScript.includes("function aiSummary"));
-assert.ok(inlineScript.includes("candidate-rules"));
-assert.ok(html.includes("AI为什么这样判断"));
-assert.ok(html.includes("公司量化事实"));
-assert.ok(html.includes("公司商业画像"));
-assert.ok(html.includes("估值与安全边际"));
-assert.ok(html.includes("主要反证与风险"));
-assert.ok(html.includes("公司资料与来源"));
+    assert.equal(response.status, 400);
+    response = await worker.fetch(new Request("https://dashboard.test/ai-screening"), env);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
+    assert.ok(nonce);
+    const aiCsp = response.headers.get("content-security-policy") || "";
+    assert.ok(html.includes("AI筛查"));
+    response = await worker.fetch(new Request("https://dashboard.test/ai-screening-changes"), env);
+    assert.equal(response.status, 200);
+    const changesHtml = await response.text();
+    assert.ok(changesHtml.includes("与昨日比较"));
+    assert.ok(changesHtml.includes("变化类型"));
+    assert.ok(html.includes("建议买"));
+    assert.ok(html.includes("观察"));
+    assert.ok(html.includes("不建议"));
+    assert.ok(html.includes("原生搜索事件"));
+    assert.ok(html.includes("财报来源链接"));
+    assert.ok(!html.includes("保留引用已绑定搜索结果"));
+    assert.ok(html.includes("已移除无效来源"));
+    assert.ok(html.includes("资料时效"));
+    assert.ok(!html.includes("待核验（未形成买入结论）"));
+    assert.ok(aiCsp.includes("script-src 'nonce-" + nonce + "'"));
+    const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(inlineScript);
+    assert.ok(inlineScript.includes("freshness_counts"));
+    assert.ok(inlineScript.includes("function isRuleText"));
+    assert.ok(inlineScript.includes("function aiSummary"));
+    assert.ok(inlineScript.includes("candidate-rules"));
+    assert.ok(html.includes("AI为什么这样判断"));
+    assert.ok(html.includes("公司量化事实"));
+    assert.ok(html.includes("公司商业画像"));
+    assert.ok(html.includes("估值与安全边际"));
+    assert.ok(html.includes("主要反证与风险"));
+    assert.ok(html.includes("公司资料与来源"));
 assert.ok(html.includes("为何进入规则候选池"));
 assert.ok(!inlineScript.includes("reasonValues=group==='recommend_buy'"));
 assert.ok(!inlineScript.includes("确定性规则：'+esc(det.status"));
