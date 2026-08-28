@@ -60,6 +60,9 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"\s*(?:Published|Crawled):\s*[^;；\n]*;?", "", text, flags=re.IGNORECASE)
+    # This adapter uses Codex's web__run event, not a provider-native search
+    # event.  Keep public wording aligned with the actual retrieval path.
+    text = text.replace("原生搜索", "逐家公司联网检索")
     text = _TYPE_TOKEN_RE.sub("", text)
     text = re.sub(r"按补丁7[^，。；;\n]*", "估值和质量尚待核验", text)
     text = text.replace("强周期底部", "周期低位")

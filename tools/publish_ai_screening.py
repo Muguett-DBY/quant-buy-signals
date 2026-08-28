@@ -91,6 +91,16 @@ def _normalise_negative_pe_text(value: Any) -> str:
     return _DUPLICATE_PERCENT_SUFFIX_RE.sub(r"\1", text)
 
 
+def _normalise_review_text(value: Any, model: str, limit: int = 1200) -> str:
+    """Normalise public prose while naming the retrieval backend accurately."""
+
+    text = _normalise_negative_pe_text(_text(value, limit))
+    if model == "codex-luna-max":
+        text = text.replace("已完成原生搜索", "已完成逐家公司联网检索")
+        text = text.replace("原生搜索", "联网搜索")
+    return text
+
+
 def _load(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -833,13 +843,12 @@ def _public_review(
     label = _text(review.get("recommendation_label"), 64)
     if not label:
         label = "建议买" if recommendation == "recommend_buy" else "观察" if action == "watchlist" else "不建议"
+    model = _text(review.get("model"), 120)
     summary = normalise_decision_text(_text(review.get("summary"), 1200))
     if action == "watchlist":
         summary = summary.replace("当前结论：不建议买", "当前结论：观察（暂不建议买）")
-    summary = _normalise_negative_pe_text(summary)
-    quantitative_facts = [
-        _normalise_negative_pe_text(_text(item, 240)) for item in review.get("quantitative_facts", [])[:8]
-    ]
+    summary = _normalise_review_text(summary, model, 1200)
+    quantitative_facts = [_normalise_review_text(item, model, 240) for item in review.get("quantitative_facts", [])[:8]]
     fact_bindings: list[dict[str, Any]] = []
     # Financial bindings are the lossless audit trail.  Unlike prose lists,
     # they must not be truncated: a public row must expose every dated fact
@@ -883,12 +892,10 @@ def _public_review(
         "quantitative_facts": quantitative_facts,
         "financial_fact_bindings": fact_bindings,
         "numeric_fact_repairs": numeric_fact_repairs,
-        "key_strengths": [
-            _normalise_negative_pe_text(_text(item, 240)) for item in review.get("key_strengths", [])[:8]
-        ],
-        "risk_flags": [_normalise_negative_pe_text(_text(item, 240)) for item in review.get("risk_flags", [])[:12]],
+        "key_strengths": [_normalise_review_text(item, model, 240) for item in review.get("key_strengths", [])[:8]],
+        "risk_flags": [_normalise_review_text(item, model, 240) for item in review.get("risk_flags", [])[:12]],
         "claims": claims,
-        "model": _text(review.get("model"), 120),
+        "model": model,
         "effort": _text(review.get("effort"), 32),
         "retrieval_backend": _text(review.get("retrieval_backend"), 96),
         "retrieval_model": _text(review.get("retrieval_model"), 120),

@@ -2656,7 +2656,7 @@ assert.ok(html.includes("建议买"));
 assert.ok(html.includes("观察"));
 assert.ok(html.includes("不建议"));
 assert.ok(html.includes("原生搜索事件"));
-assert.ok(html.includes("财报来源核验"));
+assert.ok(html.includes("财报来源链接"));
 assert.ok(!html.includes("保留引用已绑定搜索结果"));
 assert.ok(html.includes("已移除无效来源"));
 assert.ok(html.includes("资料时效"));

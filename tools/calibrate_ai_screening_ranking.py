@@ -1062,9 +1062,15 @@ def _review(
     local_codex_review = (
         str(source.get("model") or "") in LOCAL_REVIEW_MODELS and source.get("web_search_performed") is not True
     )
+    codex_web_review = (
+        str(source.get("review_mode") or "") == "codex_luna_web_review"
+        or str(source.get("model") or "") == "codex-luna-max"
+    )
     source_note = (
         "本地全量复核（未逐家公司联网；事实来源绑定到当代研究包）"
         if local_codex_review
+        else "已完成逐家公司联网检索，财务事实来源已绑定"
+        if codex_web_review
         else "已完成原生搜索，公司财务事实来源已绑定并通过来源核验"
         if source.get("research_source_urls_verified") is True
         else {

@@ -1245,7 +1245,7 @@ function aiScreeningPageResponse(request){
       <div class="meta" id="meta"><span>正在读取…</span></div>
     </section>
     <section class="stats" id="stats"></section>
-    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。候选范围只由规则达标/接近达标决定，AI再独立研究并给出三类结论；规则状态不是 AI 买入理由。页面另行展示原生搜索事件证明、公司财务来源核验与逐家公司搜索记录；来源告警会区分内容不一致和访问/解析未完成，不把后者误写成未搜索。</div>
+    <div class="notice">“收盘数据日”是价格与财务快照口径，“公司研究日”是周末联网研究截至日期，两者不能混用。候选范围只由规则达标/接近达标决定，AI再独立研究并给出三类结论；规则状态不是 AI 买入理由。页面另行展示逐家公司联网或原生搜索事件证明、公司财务来源核验与逐家公司搜索记录；来源告警会区分内容不一致和访问/解析未完成，不把后者误写成未搜索。</div>
     <section class="toolbar">
       <label>最终结论
         <select id="category">
@@ -1578,7 +1578,7 @@ function aiScreeningPageResponse(request){
         "<span>推理档位 "+esc(efforts)+"</span>"+
         "<span>Codex搜索尝试 "+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         "<span>"+searchEventLabel+" "+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
-        "<span>财报来源核验 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
+        "<span>财报来源链接 "+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</span>"+
         (knowledgeRoot?"<span>研究框架 "+esc(knowledgeRoot)+"（"+esc(knowledge.file_count||0)+" 个文件）</span>":"")+
         "<span>"+esc(auditLabel)+"</span>"+
         affectedCompanyLabel+
@@ -1598,7 +1598,7 @@ function aiScreeningPageResponse(request){
           '<div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+"</b><small>不建议</small></div>"+
           '<div class="stat"><b>'+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>Codex搜索尝试</small></div>"+
           '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+'</b><small>'+(value.review_mode==="codex_luna_web_review"?"逐家公司联网事件":"原生搜索事件")+'</small></div>'+
-          '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源核验</small></div>"+
+          '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源链接</small></div>"+
           '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
         render();
       }catch(error){

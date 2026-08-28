@@ -21,6 +21,7 @@ from tools.publish_ai_screening import (
     _public_artifact_bytes,
     _public_review,
     _normalise_negative_pe_text,
+    _normalise_review_text,
     _source_issue_kind,
     _source_verification_summary,
     _source_verification_metadata,
@@ -751,6 +752,8 @@ def test_numeric_fact_units_do_not_duplicate_change_basis_percent() -> None:
     assert _normalise_negative_pe_text("同比 +0.08个百分点%") == "同比 +0.08个百分点"
     assert _normalise_negative_pe_text("同比 期末口径%") == "同比 期末口径"
     assert _normalise_negative_pe_text("同比 上年末0.84%") == "同比 上年末0.84%"
+    assert _normalise_review_text("已完成原生搜索。", "codex-luna-max") == "已完成逐家公司联网检索。"
+    assert _normalise_review_text("已完成原生搜索。", "opencode-go/deepseek-v4-flash") == "已完成原生搜索。"
 
 
 def test_public_artifact_serialisation_has_a_hard_size_limit(monkeypatch) -> None:
