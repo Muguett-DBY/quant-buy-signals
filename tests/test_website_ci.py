@@ -128,8 +128,11 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     assert "git diff --no-renames --name-only" in classifier["run"]
     assert '"${EVENT_NAME}" == "push" && "${REF_NAME}" == "refs/heads/main"' in classifier["run"]
     main_push = classifier["run"].index('"${EVENT_NAME}" == "push"')
-    assert 'echo "web=true"' in classifier["run"][main_push:]
-    assert 'echo "data=true"' in classifier["run"][main_push:]
+    assert "previous_tests_ok" in classifier["run"][main_push:]
+    assert "gh api" in classifier["run"][main_push:]
+    assert "using path-aware website CI classification" in classifier["run"][main_push:]
+    assert "--all --github-output" in classifier["run"][main_push:]
+    assert parsed["permissions"]["actions"] == "read"
 
     hygiene = next(
         step for step in jobs["hygiene"]["steps"] if step.get("name") == "Validate tracked files and line endings"

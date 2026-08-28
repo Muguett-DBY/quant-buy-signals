@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -35,6 +36,7 @@ jobs:
           REF_NAME: ${{ github.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -43,13 +45,31 @@ jobs:
             exit 0
           fi
           if [[ "${EVENT_NAME}" == "push" && "${REF_NAME}" == "refs/heads/main" ]]; then
-            # main has no server-side required checks.  Always test its whole
-            # accumulated state so a later narrow commit cannot hide an
-            # earlier failed data or Cloudflare change.
-            {
-              echo "web=true"
-              echo "data=true"
-            } >> "${GITHUB_OUTPUT}"
+            # Main has no server-side required checks.  A narrow push may use
+            # the same path-aware gates as a PR only after the immediately
+            # preceding revision has a successful tests run.  If that proof is
+            # unavailable, fail closed into both gates so a small follow-up
+            # cannot hide an older data-integrity failure.
+            if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Invalid head revision: ${HEAD_SHA}" >&2
+              exit 1
+            fi
+            if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || [[ "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] || ! git cat-file -e "${BASE_SHA}^{commit}"; then
+              echo "No bounded main base revision is available; running both website gates."
+              python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            previous_tests_ok="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${BASE_SHA}&event=push&per_page=100" --jq '[.workflow_runs[] | select(.name == "tests" and .conclusion == "success")] | length > 0')"
+            if [[ "${previous_tests_ok}" != "true" ]]; then
+              echo "Previous main revision has no successful tests run; running both website gates."
+              python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            changed_file="${RUNNER_TEMP}/website-changed-files.txt"
+            git diff --no-renames --name-only "${BASE_SHA}" "${HEAD_SHA}" -- > "${changed_file}"
+            python .github/scripts/classify_website_ci.py --github-output "${GITHUB_OUTPUT}" < "${changed_file}"
+            echo "Main push has a verified base; using path-aware website CI classification:"
+            cat "${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
