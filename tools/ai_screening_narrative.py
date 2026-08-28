@@ -122,9 +122,7 @@ def _theme(text: str, *, risk: bool) -> str:
         return "研发和产品能力提供了竞争优势线索"
     if _has(text, ("分红", "回购", "股东回报")):
         return "股东回报安排较明确"
-    if _has(text, ("PE", "PB", "估值", "价格", "安全边际")) and _has(
-        text, ("合理", "低估", "折价", "安全")
-    ):
+    if _has(text, ("PE", "PB", "估值", "价格", "安全边际")) and _has(text, ("合理", "低估", "折价", "安全")):
         return "当前价格没有明显透支经营预期"
     if _POSITIVE_RE.search(text) and not _NEGATIVE_RE.search(text):
         return "公司经营层面有可核验的改善信号"

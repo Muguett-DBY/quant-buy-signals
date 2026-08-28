@@ -40,9 +40,7 @@ def _category(review: Mapping[str, Any]) -> str:
     if value in _CATEGORY_ORDER:
         return value
     action = _text(review.get("ai_action"), 32)
-    return {"priority_buy": "recommend_buy", "watchlist": "observe", "avoid": "do_not_recommend"}.get(
-        action, "observe"
-    )
+    return {"priority_buy": "recommend_buy", "watchlist": "observe", "avoid": "do_not_recommend"}.get(action, "observe")
 
 
 def _score(review: Mapping[str, Any]) -> float | None:
@@ -236,7 +234,9 @@ def build_day_over_day(current: Mapping[str, Any], previous: Mapping[str, Any] |
     for code, current_packet in current_packets.items():
         previous_packet = previous_packets.get(code)
         if previous_packet is None:
-            changes.append(_entry(code=code, current_packet=current_packet, previous_packet=None, change_type="new_candidate"))
+            changes.append(
+                _entry(code=code, current_packet=current_packet, previous_packet=None, change_type="new_candidate")
+            )
             continue
         current_review = _review(current_packet)
         previous_review = _review(previous_packet)
@@ -285,14 +285,12 @@ def build_day_over_day(current: Mapping[str, Any], previous: Mapping[str, Any] |
     new_candidate = sum(item["change_type"] == "new_candidate" for item in changes)
     removed_candidate = sum(item["change_type"] == "removed_candidate" for item in changes)
     upgraded_to_buy = sum(
-        item.get("current_category") == "recommend_buy"
-        and item.get("previous_category") != "recommend_buy"
+        item.get("current_category") == "recommend_buy" and item.get("previous_category") != "recommend_buy"
         for item in changes
         if item["change_type"] in {"category_changed", "new_candidate"}
     )
     downgraded_from_buy = sum(
-        item.get("previous_category") == "recommend_buy"
-        and item.get("current_category") != "recommend_buy"
+        item.get("previous_category") == "recommend_buy" and item.get("current_category") != "recommend_buy"
         for item in changes
         if item["change_type"] == "category_changed"
     )
