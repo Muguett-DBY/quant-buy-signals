@@ -19,6 +19,8 @@ RUN_BOTH_FILES = frozenset(
 # keep those website-only changes out of the full market-data test matrix.
 AI_SCREENING_FILES = frozenset(
     {
+        ".github/workflows/publish-ai-screening.yml",
+        "cloudflare/quant-dashboard/ai_screening_seed.json",
         "tools/ai_screening_contract.py",
         "tools/validate_ai_screening_public.py",
         "tools/calibrate_ai_screening_ranking.py",

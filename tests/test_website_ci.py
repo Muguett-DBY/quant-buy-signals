@@ -81,6 +81,8 @@ def _bash_executable() -> str | None:
         (["tests/test_cloudflare_dashboard.py"], True, False),
         (["tools/ai_screening_narrative.py"], True, False),
         (["tests/test_ai_screening_comparison.py"], True, False),
+        (["cloudflare/quant-dashboard/ai_screening_seed.json"], True, False),
+        ([".github/workflows/publish-ai-screening.yml"], True, False),
         ([".github/workflows/tests.yml"], True, True),
         ([".github/scripts/classify_website_ci.py"], True, True),
         (["data/fetcher.py"], False, True),
