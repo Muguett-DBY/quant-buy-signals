@@ -14,14 +14,18 @@ expose, so changing cited prose while retaining a URL cannot reuse an audit.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import ipaddress
+import io
 import json
 import math
 import re
 import shutil
 import socket
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -35,6 +39,8 @@ from tools.ai_source_urls import (
     canonical_urls,
     claim_source_urls,
     finding_source_url,
+    is_deterministic_valuation_claim,
+    is_search_provenance_claim,
 )
 
 
@@ -45,7 +51,19 @@ _OFFICIAL_DOMAIN_SUFFIXES = (
     "bse.cn",
     "hkexnews.hk",
 )
-_BLOCKED_HTTP_STATUSES = frozenset({401, 403, 407, 429})
+_BLOCKED_HTTP_STATUSES = frozenset({401, 403, 407, 429, 456})
+# A few Chinese disclosure mirrors return the non-standard 456 status while
+# throttling a burst of otherwise valid requests.  Treat those responses as a
+# transport retry, not as evidence that the cited filing is wrong.  The same
+# bounded retry also covers transient gateway errors and timeouts.
+_TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 456, 500, 502, 503, 504})
+_MAX_FETCH_ATTEMPTS = 3
+_HOST_THROTTLE_SECONDS = 0.04
+_host_throttle_lock = threading.Lock()
+_host_next_request: dict[str, float] = {}
+_dns_cache_lock = threading.Lock()
+_dns_cache: dict[tuple[str, int], tuple[str, ...]] = {}
+_dns_error_cache: dict[tuple[str, int], str] = {}
 _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
 # Keep PDF parsing bounded even when a reachable source is unexpectedly large
 # or contains a very large number of pages.  The HTTP layer already limits the
@@ -56,6 +74,12 @@ _REDIRECT_HTTP_STATUSES = frozenset({301, 302, 303, 307, 308})
 # or unusually large PDF from monopolising the full-source audit.
 _MAX_PDF_TEXT_CHARS = 800_000
 _MAX_PDF_BYTES = 12 * 1024 * 1024
+# Annual reports can contain thousands of scanned annex pages.  The identity,
+# period and headline financial facts used by this audit are in the opening
+# statement/notes; cap extraction before a pathological annex monopolises the
+# release job.  A bounded prefix is reported as unverified when it cannot
+# prove the claim, never as a semantic pass.
+_MAX_PDF_PAGES = 120
 AUDIT_CONTRACT_VERSION = 3
 _MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
 _NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
@@ -80,6 +104,10 @@ def public_claim_statement(value: Any) -> str:
 def _public_claim_source_fields(claim: Mapping[str, Any]) -> tuple[str, str, list[str]]:
     """Return the source fields that survive ``publish_ai_screening``."""
 
+    if is_deterministic_valuation_claim(claim):
+        return "", "估值快照来自本代市场数据，不绑定新闻来源", []
+    if is_search_provenance_claim(claim):
+        return "", "搜索事件记录已单独保留，不将检索摘要当作财务事实", []
     raw_sources: list[str] = []
     singular_source = str(claim.get("source_ref") or "").strip()
     if singular_source:
@@ -154,15 +182,25 @@ def public_source_semantic_projection(payload: Mapping[str, Any]) -> dict[str, A
         raw_claims = review.get("claims")
         claims = raw_claims if isinstance(raw_claims, list) else []
         claim_rows: list[dict[str, Any]] = []
-        for claim_index, claim in enumerate(claims):
+        for claim in claims:
             if not isinstance(claim, Mapping):
+                continue
+            # Search transcripts are retained as query metadata by the
+            # review converter, but publication deliberately removes them
+            # from the public claim graph. Keep the audit projection/counts
+            # aligned with that public contract instead of treating a
+            # non-fact transcript as an unbound financial claim.
+            if is_search_provenance_claim(claim):
                 continue
             source_ref, source_context, source_refs = _public_claim_source_fields(claim)
             finding_id = _public_text(claim.get("search_finding_id"), 120)
             linked_finding = findings_by_id.get(finding_id, {})
             claim_rows.append(
                 {
-                    "claim_index": claim_index,
+                    # Publication removes search-provenance transcripts, so
+                    # public claim indices are dense and independent of the
+                    # raw converter row positions.
+                    "claim_index": len(claim_rows),
                     "statement": public_claim_statement(claim.get("statement")),
                     "source_ref": source_ref,
                     "source_context": source_context,
@@ -233,11 +271,19 @@ class _VisibleTextParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
+        self.metadata_parts: list[str] = []
         self._title_depth = 0
         self._skip_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         folded = tag.casefold()
+        if folded == "meta":
+            values = {key.casefold(): str(value or "") for key, value in attrs}
+            key = (values.get("property") or values.get("name") or values.get("itemprop") or "").casefold()
+            if key in {"description", "keywords", "og:title", "og:description", "article:section"}:
+                content = values.get("content", "").strip()
+                if content:
+                    self.metadata_parts.append(content)
         if folded == "title":
             self._title_depth += 1
         if folded in {"script", "style", "noscript", "template"}:
@@ -336,7 +382,7 @@ def _article_published_date(body: bytes, content_type: str) -> date | None:
     return None
 
 
-def _html_visible_text(body: bytes, content_type: str) -> tuple[str, str]:
+def _html_visible_text(body: bytes, content_type: str) -> tuple[str, str, str]:
     """Return normalized visible text and title for HTML-only checks."""
 
     charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
@@ -349,10 +395,11 @@ def _html_visible_text(body: bytes, content_type: str) -> tuple[str, str]:
     try:
         parser.feed(text)
     except Exception:  # pragma: no cover - malformed pages should fail closed below
-        return "", ""
+        return "", "", ""
     visible = re.sub(r"\s+", "", "".join(parser.text_parts)).casefold()
     title = re.sub(r"\s+", "", "".join(parser.title_parts)).casefold()
-    return visible, title
+    metadata = re.sub(r"\s+", "", "".join(parser.metadata_parts)).casefold()
+    return visible, title, metadata
 
 
 def _normalised_company_name(value: Any) -> str:
@@ -398,7 +445,7 @@ def _pdf_company_identity_matches(text: str, security_code: str, name: str) -> b
     return True
 
 
-def _is_industry_source_claim(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> bool:
+def _is_industry_source_claim(claim: Mapping[str, Any], finding: Mapping[str, Any], url: str = "") -> bool:
     """Return whether a cited document is an industry/market source.
 
     Industry reports are intentionally not required to contain the issuer's
@@ -414,7 +461,29 @@ def _is_industry_source_claim(claim: Mapping[str, Any], finding: Mapping[str, An
             finding.get("finding"),
         )
     )
-    return any(marker in context for marker in ("行业协会", "工业协会", "协会信息中心", "行业报告", "市场报告"))
+    if any(marker in context for marker in ("行业协会", "工业协会", "协会信息中心", "行业报告", "市场报告")):
+        return True
+    # Macro/statistical sources are valid evidence for industry prices,
+    # production, sales and policy claims but will naturally not mention the
+    # issuer's stock code.  Keep the exemption narrow: it applies only when
+    # the prose itself is an industry observation and the host is an
+    # identifiable public data publisher.
+    host = str(urlparse(str(url or claim.get("source_ref") or "")).hostname or "").casefold()
+    macro_hosts = (
+        "stats.gov.cn",
+        "gov.cn",
+        "moa.gov.cn",
+        "miit.gov.cn",
+        "nea.gov.cn",
+        "cif.mofcom.gov.cn",
+        "cbmf.org",
+        "cnfa.com.cn",
+        "semi.org.cn",
+    )
+    industry_terms = ("行业", "市场", "价格", "销量", "产量", "出口", "进口", "政策", "协会", "宏观")
+    return any(host == suffix or host.endswith("." + suffix) for suffix in macro_hosts) and any(
+        term in context for term in industry_terms
+    )
 
 
 def _report_period_tokens(value: Any) -> set[str]:
@@ -698,7 +767,9 @@ def _extract_pdf_text(body: bytes) -> tuple[str, str | None]:
             return "", "PDF has no pages"
         text_parts: list[str] = []
         text_length = 0
-        for page in document:
+        for page_index, page in enumerate(document):
+            if page_index >= _MAX_PDF_PAGES:
+                break
             page_text = page.get_text("text")
             if not isinstance(page_text, str):
                 page_text = str(page_text or "")
@@ -724,6 +795,7 @@ def _extract_pdf_text(body: bytes) -> tuple[str, str | None]:
 def _pdf_text_semantic_issues(
     text: str,
     *,
+    source_url: str = "",
     security_code: str,
     name: str,
     claim: Mapping[str, Any],
@@ -736,7 +808,15 @@ def _pdf_text_semantic_issues(
     if not visible:
         return ["PDF body has no visible text"]
     if require_identity and not _pdf_company_identity_matches(text, security_code, name):
-        return ["PDF text does not match company code or normalized company name"]
+        # Exchange disclosure paths carry the issuer code even when the PDF
+        # text layer drops the heading (a common outcome for generated
+        # attachments).  Keep this fallback limited to official market hosts;
+        # an arbitrary third-party URL must still prove identity in its body.
+        url_digits = re.sub(r"\D", "", str(source_url or ""))
+        code = re.sub(r"\s+", "", str(security_code or ""))
+        official_url_identity = _official_domain(source_url) and bool(code and code in url_digits)
+        if not official_url_identity:
+            return ["PDF text does not match company code or normalized company name"]
     period_match = _period_matches(text, _structured_period_tokens(claim, finding))
     number_match = _structured_number_match(
         visible,
@@ -754,6 +834,7 @@ def _pdf_semantic_issues(
     *,
     security_code: str,
     name: str,
+    source_url: str = "",
     claim: Mapping[str, Any],
     finding: Mapping[str, Any],
 ) -> list[str]:
@@ -764,6 +845,7 @@ def _pdf_semantic_issues(
         return [f"PDF text extraction is unverified ({extraction_reason})"]
     return _pdf_text_semantic_issues(
         text,
+        source_url=source_url,
         security_code=security_code,
         name=name,
         claim=claim,
@@ -775,15 +857,17 @@ def _html_semantic_issues(
     body: bytes,
     content_type: str,
     *,
+    url: str = "",
     security_code: str,
     name: str,
     report_period: Any,
     claim: Mapping[str, Any],
     finding: Mapping[str, Any],
+    require_identity: bool = True,
 ) -> list[str]:
     """Run the deliberately small HTML identity/content gate."""
 
-    visible, title = _html_visible_text(body, content_type)
+    visible, title, metadata = _html_visible_text(body, content_type)
     if not visible:
         return ["HTML body has no visible text"]
     charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
@@ -793,15 +877,19 @@ def _html_semantic_issues(
     except LookupError:
         raw_text = body.decode("utf-8", errors="replace").casefold()
     first_text = f"{title}{visible[:600]}"
+    title_text = title
+    challenge_markup = re.search(r"<(?:form|input)\b[^>]*(?:captcha|验证码|安全验证)", raw_text)
     if re.search(
-        r"(?:<title[^>]*>\s*(?:404|page\s*not\s*found|not\s*found)|(?:404|page\s*not\s*found|not\s*found|页面不存在|内容不存在|找不到页面|链接失效))",
-        first_text,
+        r"(?:404|page\s*not\s*found|not\s*found|页面不存在|内容不存在|找不到页面|链接失效)",
+        title_text,
     ) or re.search(r"(?:id|class)\s*=\s*[\"'][^\"']*(?:404|not[-_ ]?found)[^\"']*[\"']", raw_text):
         return ["HTML appears to be a soft-404 page"]
     if re.search(
         r"(?:captcha|verify\s+you\s+are\s+human|人机验证|验证码|安全验证|<input[^>]+(?:captcha|验证码))",
-        f"{first_text}{raw_text}",
+        first_text,
     ):
+        return ["HTML appears to be a login or CAPTCHA challenge"]
+    if challenge_markup:
         return ["HTML appears to be a login or CAPTCHA challenge"]
     if re.search(r"(?:登录|登陆|sign\s*in|log\s*in|login|authentication required)", title) or re.search(
         r"<form[^>]+(?:login|sign[-_ ]?in)", raw_text
@@ -810,10 +898,19 @@ def _html_semantic_issues(
 
     code = re.sub(r"\s+", "", str(security_code or "")).casefold()
     normal_name = _normalised_company_name(name)
-    if not ((code and code in visible) or (normal_name and normal_name in visible)):
-        return ["HTML正文未匹配公司代码或规范化公司名"]
+    identity_text = f"{title}{metadata}{visible}"
+    if require_identity and not ((code and code in identity_text) or (normal_name and normal_name in identity_text)):
+        url_digits = re.sub(r"\D", "", str(url or ""))
+        official_url_identity = _official_domain(url) and bool(code and code in url_digits)
+        if not official_url_identity:
+            return ["HTML正文未匹配公司代码或规范化公司名"]
 
-    period_match = _period_matches("".join((title, visible)), _report_period_tokens(report_period))
+    period_tokens = _report_period_tokens(report_period)
+    # Legacy Codex reviews did not carry a separate report_period field.  The
+    # statement itself still declares the period, so use those tokens rather
+    # than treating every HTML claim as undated.
+    period_tokens.update(_structured_period_tokens(claim, finding))
+    period_match = _period_matches("".join((title, metadata, visible)), period_tokens)
     numbers = _claim_numbers(claim, finding)
     number_match = _structured_number_match(
         visible,
@@ -867,28 +964,80 @@ def _resolve_public_addresses(url: str) -> list[str]:
     parsed = urlparse(public_url)
     host = str(parsed.hostname)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    addresses = {
-        str(sockaddr[0]).split("%", 1)[0]
-        for family, _socket_type, _protocol, _canonical_name, sockaddr in socket.getaddrinfo(
-            host,
-            port,
-            family=socket.AF_UNSPEC,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
-        )
-        if family in {socket.AF_INET, socket.AF_INET6} and sockaddr
-    }
+    cache_key = (host.casefold(), port)
+    with _dns_cache_lock:
+        cached = _dns_cache.get(cache_key)
+        cached_error = _dns_error_cache.get(cache_key)
+    if cached is not None:
+        return list(cached)
+    if cached_error:
+        raise OSError(cached_error)
+    try:
+        addresses = {
+            str(sockaddr[0]).split("%", 1)[0]
+            for family, _socket_type, _protocol, _canonical_name, sockaddr in socket.getaddrinfo(
+                host,
+                port,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+                proto=socket.IPPROTO_TCP,
+            )
+            if family in {socket.AF_INET, socket.AF_INET6} and sockaddr
+        }
+    except OSError as error:
+        with _dns_cache_lock:
+            _dns_error_cache[cache_key] = str(error)[:240]
+        raise
     if not addresses:
-        raise OSError(f"DNS returned no A/AAAA addresses for {host}")
+        reason = f"DNS returned no A/AAAA addresses for {host}"
+        with _dns_cache_lock:
+            _dns_error_cache[cache_key] = reason
+        raise OSError(reason)
     non_public = sorted(address for address in addresses if not ipaddress.ip_address(address).is_global)
     if non_public:
-        raise UnsafeUrlError(f"DNS resolved to non-public address(es): {','.join(non_public)}")
-    return sorted(addresses)
+        reason = f"DNS resolved to non-public address(es): {','.join(non_public)}"
+        with _dns_cache_lock:
+            _dns_error_cache[cache_key] = reason
+        raise UnsafeUrlError(reason)
+    resolved = tuple(sorted(addresses))
+    with _dns_cache_lock:
+        _dns_cache[cache_key] = resolved
+    return list(resolved)
 
 
 def _official_domain(url: str) -> bool:
     host = (urlparse(url).hostname or "").casefold()
     return any(host == suffix or host.endswith("." + suffix) for suffix in _OFFICIAL_DOMAIN_SUFFIXES)
+
+
+def _throttle_host(url: str) -> None:
+    """Keep a burst of source-audit requests from tripping mirror limits."""
+
+    host = (urlparse(url).netloc or "").casefold()
+    if not host:
+        return
+    with _host_throttle_lock:
+        now = time.monotonic()
+        next_request = _host_next_request.get(host, now)
+        delay = max(0.0, next_request - now)
+        _host_next_request[host] = max(now, next_request) + _HOST_THROTTLE_SECONDS
+    if delay:
+        time.sleep(delay)
+
+
+def _retry_delay(attempt: int, response: Any = None) -> float:
+    """Return a short bounded backoff for a transient origin response."""
+
+    retry_after = ""
+    if response is not None:
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            retry_after = str(headers.get("retry-after") or "").strip()
+    try:
+        delay = float(retry_after) if retry_after else 0.0
+    except ValueError:
+        delay = 0.0
+    return min(2.0, max(delay, 0.12 * (2**attempt)))
 
 
 def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int = 5) -> dict[str, Any]:
@@ -899,8 +1048,10 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
     opener = urllib.request.build_opener(_NoRedirectHandler(), urllib.request.ProxyHandler({}))
     current_url = url
     redirect_count = 0
+    attempt = 0
     while True:
         try:
+            _throttle_host(current_url)
             resolved_addresses = _resolve_public_addresses(current_url)
             request = urllib.request.Request(
                 current_url,
@@ -923,6 +1074,26 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                 body_truncated = is_pdf_response and len(body) > read_limit
                 if body_truncated:
                     body = body[:read_limit]
+                # urllib deliberately does not decode Content-Encoding.  A
+                # number of exchange/CDN disclosure endpoints label a gzip
+                # compressed PDF as ``text/html``; parsing the compressed
+                # bytes creates false identity/period warnings.  Decode with
+                # the same bounded cap used for the origin body and keep the
+                # truncation flag fail-closed for PDFs.
+                content_encoding = str(response.headers.get("content-encoding") or "").casefold()
+                if "gzip" in content_encoding or body[:2] == b"\x1f\x8b":
+                    try:
+                        with gzip.GzipFile(fileobj=io.BytesIO(body)) as compressed:
+                            decoded = compressed.read(read_limit + 1)
+                        if len(decoded) > read_limit:
+                            body_truncated = is_pdf_response
+                            body = decoded[:read_limit]
+                        else:
+                            body = decoded
+                    except (OSError, EOFError):
+                        # Keep the original response; semantic verification
+                        # will report an explicit unverified/non-text body.
+                        pass
                 return {
                     **base,
                     "result": "ok" if 200 <= status < 400 else "failed",
@@ -963,6 +1134,13 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                     }
                 current_url = urljoin(current_url, location)
                 redirect_count += 1
+                attempt = 0
+                continue
+            if status in _TRANSIENT_HTTP_STATUSES and attempt < _MAX_FETCH_ATTEMPTS - 1:
+                delay = _retry_delay(attempt, error)
+                error.close()
+                time.sleep(delay)
+                attempt += 1
                 continue
             result = "blocked" if status in _BLOCKED_HTTP_STATUSES else "failed"
             reason = str(error.reason or error)[:240]
@@ -986,6 +1164,13 @@ def _check_url(url: str, *, timeout: float, max_bytes: int, max_redirects: int =
                 "error": str(error)[:240],
             }
         except (OSError, urllib.error.URLError, ValueError) as error:
+            retryable_timeout = isinstance(
+                getattr(error, "reason", None), (TimeoutError, socket.timeout)
+            )
+            if retryable_timeout and attempt < 1:
+                time.sleep(_retry_delay(attempt))
+                attempt += 1
+                continue
             return {
                 **base,
                 "result": "failed",
@@ -1004,6 +1189,12 @@ def audit(
     timeout: float = 15.0,
     max_bytes: int = 262_144,
 ) -> dict[str, Any]:
+    # DNS answers are safe to reuse within one bounded audit run and avoid
+    # resolving the same disclosure host once per URL.  Clear any values left
+    # by unit tests or a previous in-process audit invocation.
+    with _dns_cache_lock:
+        _dns_cache.clear()
+        _dns_error_cache.clear()
     merged_bytes = merged_path.read_bytes()
     payload = json.loads(merged_bytes.decode("utf-8"))
     packets = payload.get("packets")
@@ -1081,6 +1272,10 @@ def audit(
         claims = review.get("claims") if isinstance(review.get("claims"), list) else []
         for claim_index, claim in enumerate(claims):
             if not isinstance(claim, Mapping):
+                continue
+            if is_search_provenance_claim(claim):
+                # This row is a query attestation, not a published fact. It
+                # is intentionally omitted from the public semantic graph.
                 continue
             claim_count += 1
             finding_id = str(claim.get("search_finding_id") or "").strip()
@@ -1502,11 +1697,14 @@ def audit(
                 continue
             pdf_issues = _pdf_text_semantic_issues(
                 pdf_text,
+                source_url=str(claim["url"]),
                 security_code=claim["security_code"],
                 name=claim["name"],
                 claim=claim["claim"],
                 finding=claim["finding"],
-                require_identity=not _is_industry_source_claim(claim["claim"], claim["finding"]),
+                require_identity=not _is_industry_source_claim(
+                    claim["claim"], claim["finding"], str(claim["url"])
+                ),
             )
             if pdf_issues:
                 semantic_failed_keys.add(int(claim["key"]))
@@ -1555,11 +1753,13 @@ def audit(
         html_issues = _html_semantic_issues(
             body,
             content_type,
+            url=str(claim["url"]),
             security_code=claim["security_code"],
             name=claim["name"],
             report_period=claim.get("report_period"),
             claim=claim["claim"],
             finding=finding,
+            require_identity=not _is_industry_source_claim(claim["claim"], finding, str(claim["url"])),
         )
         if html_issues:
             semantic_failed_keys.add(int(claim["key"]))

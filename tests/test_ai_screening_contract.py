@@ -1304,6 +1304,29 @@ def test_public_review_strips_reasonix_annotation_from_source_url() -> None:
     assert public["web_search_verified"] is True
 
 
+def test_public_review_drops_search_result_transcript_claim() -> None:
+    review = {
+        "schema_version": 2,
+        "security_code": "600339",
+        "type_key": "type1",
+        "verdict": "caution",
+        "recommended_action": "manual_review",
+        "buy_attractiveness_score": 60,
+        "ai_action": "watchlist",
+        "confidence": "medium",
+        "key_strengths": [],
+        "risk_flags": [],
+        "claims": [
+            {"statement": "web search evidence：公司公告索引", "source_ref": "https://example.test/index"},
+            {"statement": "2026H1营业收入 100 亿元", "source_ref": "https://example.test/report"},
+        ],
+        "web_search_performed": True,
+    }
+    public = _public_review(review)
+    assert [claim["statement"] for claim in public["claims"]] == ["2026H1营业收入 100 亿元"]
+    assert public["web_search_verified"] is True
+
+
 def test_public_review_preserves_complete_long_source_url() -> None:
     long_url = "https://example.test/" + ("long-segment-" * 100) + ".pdf?download=1"
     review = {

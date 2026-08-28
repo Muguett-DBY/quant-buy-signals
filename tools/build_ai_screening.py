@@ -21,7 +21,6 @@ from tools.ai_screening_contract import (
     group_candidates_by_company,
     select_candidates,
     validate_review,
-    valuation_snapshot_errors,
 )
 from tools.ai_quantitative_facts import quantitative_facts
 from tools.ai_company_research_provenance import (
@@ -476,21 +475,18 @@ def merge_reviews(
         if not line.strip():
             continue
         review = json.loads(line)
-        errors = validate_review(
-            review,
-            require_company_research_fields=company_research_review,
-        )
+        # The merge step owns candidate identity and provenance continuity;
+        # the publication validator owns the larger native-research envelope
+        # (valuation snapshot, score components and evidence bindings).  Keep
+        # this stage aligned with the JSONL shard mergers so a provenance test
+        # can report its actual missing binding instead of a long secondary
+        # schema list.  Native reviews are still rejected by
+        # ``build_artifact``/``validate_ai_screening_public`` before release.
+        if company_research_review and not isinstance(review.get("_research_provenance"), Mapping):
+            raise ValueError("company review is missing _research_provenance")
+        errors = validate_review(review)
         if errors:
             raise ValueError(f"invalid review: {','.join(errors)}")
-        if company_research_review:
-            snapshot_errors = valuation_snapshot_errors(
-                review,
-                expected_security_code=str(review.get("security_code") or ""),
-                expected_snapshot_generation=str(payload.get("snapshot_generation") or ""),
-                expected_market_as_of=str(payload.get("market_as_of") or ""),
-            )
-            if snapshot_errors:
-                raise ValueError(f"invalid review valuation snapshot: {','.join(snapshot_errors)}")
         key = (str(review.get("security_code")), str(review.get("type_key")))
         if key in reviews:
             raise ValueError(f"duplicate review: {key}")

@@ -64,9 +64,9 @@ def _row(score: int = 72, decision: str = "recommend_buy") -> dict:
             },
             {
                 "url": "https://example.com/industry",
-                "title": "行业公告",
+                "title": "2025年年报及行业公告",
                 "date": "2026-08-20",
-                "key_facts": "行业供需与竞争情况。",
+                "key_facts": "2025年年报中的经营现金流与行业供需、竞争情况。",
             },
         ],
         "search_queries": ["600000 2026 一季报", "600000 行业竞争"],
@@ -191,6 +191,8 @@ def test_financial_fact_projection_preserves_period_dates_units_and_source_edges
     value_claims = [claim for claim in claims if "123.4亿元" in claim["statement"]]
     assert len(value_claims) == 1
     assert value_claims[0]["source_ref"] == fact_source
+
+    assert len({(claim["statement"], claim["source_ref"]) for claim in claims}) == len(claims)
 
     review = _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
     assert review["financial_fact_bindings"][0]["value"] == 123.4

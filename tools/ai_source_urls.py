@@ -58,6 +58,12 @@ def _canonical_token(value: str) -> str:
     # which is case-insensitive is normalized, and default ports disappear so
     # the audit and publisher agree on one identity for the same resource.
     host = parsed.hostname.casefold()
+    # Sina serves the same public bulletin mirror on ``money`` and ``vip``.
+    # The latter intermittently returns a non-standard 456 throttle response
+    # to parallel CI requests; the stable mirror keeps provenance identical
+    # while making source verification reproducible.
+    if host == "vip.stock.finance.sina.com.cn" and parsed.path.casefold().startswith("/corp/"):
+        host = "money.finance.sina.com.cn"
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     netloc = host
@@ -96,9 +102,43 @@ def canonical_urls(value: Any) -> list[str]:
     return urls
 
 
+def is_deterministic_valuation_claim(claim: Mapping[str, Any]) -> bool:
+    """Return whether a claim is the generated close-price snapshot.
+
+    The current price, PE, PB and market-cap sentence comes from the
+    generation-bound market snapshot, not from a news page.  Treating an
+    arbitrary article URL attached by a model as proof for that sentence is
+    precisely what creates the noisy source warnings on quote pages.
+    """
+
+    text = " ".join(str(claim.get(key) or "") for key in ("statement", "source_context")).casefold()
+    return (
+        "candidate valuation snapshot" in text
+        or "candidate snapshot" in text
+        or "估值快照" in text
+        or "候选估值" in text
+    )
+
+
+def is_search_provenance_claim(claim: Mapping[str, Any]) -> bool:
+    """Return whether a claim is only a search-result transcript.
+
+    A snippet such as ``web search evidence: ...`` records that a query was
+    run, but it is not a financial fact and its landing page is often a
+    JavaScript index rather than the cited filing.  Search-event metadata
+    remains published separately; treating the transcript as a claim would
+    create false semantic warnings and clutter the company card.
+    """
+
+    statement = str(claim.get("statement") or "").strip().casefold()
+    return statement.startswith(("web search evidence", "search evidence", "检索摘要", "搜索摘要"))
+
+
 def claim_source_urls(claim: Mapping[str, Any]) -> list[str]:
     """Collect URL values from every source field of one claim."""
 
+    if is_deterministic_valuation_claim(claim) or is_search_provenance_claim(claim):
+        return []
     values: list[Any] = [claim.get("source_ref"), claim.get("source_context")]
     source_refs = claim.get("source_refs")
     if isinstance(source_refs, list):

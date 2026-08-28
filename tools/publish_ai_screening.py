@@ -20,6 +20,8 @@ from tools.ai_source_urls import (
     canonical_urls,
     claim_source_urls,
     finding_source_url,
+    is_deterministic_valuation_claim,
+    is_search_provenance_claim,
     iter_review_url_bindings,
     review_canonical_urls,
 )
@@ -771,14 +773,20 @@ def _public_review(
     for claim in review.get("claims", []):
         if not isinstance(claim, Mapping):
             raise ValueError("AI claim must be an object")
+        if is_search_provenance_claim(claim):
+            # The query/event attestation is retained in the review metadata;
+            # a raw search-result transcript is not a company fact and should
+            # not become a clickable evidence card or semantic-audit edge.
+            continue
+        valuation_snapshot_claim = is_deterministic_valuation_claim(claim)
         raw_sources: list[str] = []
-        singular_source = str(claim.get("source_ref") or "").strip()
+        singular_source = "" if valuation_snapshot_claim else str(claim.get("source_ref") or "").strip()
         if singular_source:
             raw_sources.append(singular_source)
-        if isinstance(claim.get("source_refs"), list):
+        if not valuation_snapshot_claim and isinstance(claim.get("source_refs"), list):
             raw_sources.extend(str(value).strip() for value in claim["source_refs"] if str(value).strip())
         raw_source = raw_sources[0] if raw_sources else ""
-        raw_context = str(claim.get("source_context") or "").strip()
+        raw_context = "" if valuation_snapshot_claim else str(claim.get("source_context") or "").strip()
         if not raw_source:
             # Some OpenCode tool responses put the returned URL in a separate
             # source_context field.  Reuse it only when it is an actual URL;
@@ -790,7 +798,7 @@ def _public_review(
             for source_ref in canonical_urls(candidate):
                 if source_ref not in source_refs:
                     source_refs.append(source_ref)
-        context_value = raw_context if raw_context else raw_source
+        context_value = "估值快照来自本代市场数据" if valuation_snapshot_claim else (raw_context if raw_context else raw_source)
         context_value = context_value if canonical_urls(context_value) else _text(context_value, 240)
         public_claim: dict[str, Any] = {
             "statement": _normalise_claim_pe_text(_text(claim.get("statement"), 600)),

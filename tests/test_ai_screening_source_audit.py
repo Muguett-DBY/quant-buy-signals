@@ -11,7 +11,7 @@ from email.message import Message
 import pytest
 
 from tools import audit_ai_screening_sources as source_audit
-from tools.ai_source_urls import canonical_urls
+from tools.ai_source_urls import canonical_urls, claim_source_urls
 from tools.publish_ai_screening import _validated_source_audit, build_artifact
 
 
@@ -207,6 +207,31 @@ def test_source_projection_uses_public_claim_numeric_normalisation() -> None:
     assert source_audit.public_claim_statement("同比 +0.08个百分点%") == "同比 +0.08个百分点"
     assert source_audit.public_claim_statement("同比 期末口径%") == "同比 期末口径"
     assert source_audit.public_claim_statement("PE -12.5倍") == "PE 不适用（原始 PE -12.5 倍）"
+
+
+def test_source_urls_use_stable_sina_bulletin_mirror() -> None:
+    vip = "https://vip.stock.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12149032&stockid=600742"
+    money = "https://money.finance.sina.com.cn/corp/view/vCB_AllBulletinDetail.php?id=12149032&stockid=600742"
+    assert canonical_urls(vip) == [money]
+    assert claim_source_urls({"source_ref": vip}) == [money]
+
+
+def test_deterministic_valuation_claim_does_not_bind_article_url() -> None:
+    assert claim_source_urls(
+        {
+            "statement": "candidate valuation snapshot：股价 10 元；PE 12 倍",
+            "source_ref": "https://quote.example/600000.html",
+        }
+    ) == []
+
+
+def test_search_result_transcript_is_not_published_as_fact_source() -> None:
+    assert claim_source_urls(
+        {
+            "statement": "web search evidence：检索摘要：公司公告索引",
+            "source_ref": "https://example.test/company-index",
+        }
+    ) == []
 
 
 def test_source_projection_is_canonical_across_company_order() -> None:
@@ -953,6 +978,25 @@ def test_html_semantic_gate_rejects_placeholder_pages(body: bytes, expected: str
 
     assert issues
     assert expected.casefold() in issues[0].casefold()
+
+
+def test_html_semantic_gate_allows_public_industry_source_without_issuer_identity() -> None:
+    body = """
+    <html><head><title>2026年水泥行业运行情况</title></head>
+    <body><p>2026年上半年水泥价格同比下降 4.2%，行业产量 10.5亿吨。</p></body></html>
+    """.encode()
+    issues = source_audit._html_semantic_issues(
+        body,
+        "text/html; charset=utf-8",
+        url="https://www.cbmf.org/c/2026/08/03/23917.shtml",
+        security_code="600000",
+        name="浦发银行",
+        report_period="2026H1",
+        claim={"statement": "2026年上半年水泥行业价格同比下降4.2%"},
+        finding={"finding": "行业价格同比下降4.2%"},
+        require_identity=False,
+    )
+    assert issues == []
 
 
 def test_source_audit_does_not_semantically_pass_blocked_unique_source(tmp_path, monkeypatch) -> None:

@@ -755,7 +755,11 @@ def _financial_fact_source_urls(item: Mapping[str, Any], row: Mapping[str, Any] 
     return urls
 
 
-def _load_rows(paths: list[Path]) -> dict[str, dict[str, Any]]:
+def _load_rows(
+    paths: list[Path],
+    *,
+    expected_codes_by_index: Mapping[int, str] | None = None,
+) -> dict[str, dict[str, Any]]:
     records_by_index: dict[int, list[dict[str, Any]]] = {}
     for path in paths:
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -774,19 +778,66 @@ def _load_rows(paths: list[Path]) -> dict[str, dict[str, Any]]:
                 raise ValueError(f"unexpected Luna review mode for {code}: {row.get('review_mode')!r}")
             records_by_index.setdefault(index, []).append(dict(row))
 
-    # Resolve only explicit append-only corrections.  This also lets a
-    # correction replace a stale row whose code was accidentally written at
-    # the right index; all remaining duplicate identities still fail closed.
+    # Resolve only explicit append-only corrections.  When the queue identity
+    # map is available it is authoritative even if a correction shard was
+    # written after an earlier row shifted its numeric ``index``.  This is the
+    # shape produced by the 2026-08-27 correction chain: the expected code can
+    # be present at the neighbouring index while the stale row is marked as a
+    # correction.  Normal duplicate rows at one index still fail closed.
     selected: list[dict[str, Any]] = []
-    for index, records in records_by_index.items():
-        if len(records) == 1:
-            selected.append(records[0])
-            continue
-        corrections = [record for record in records if record.get("correction") is True]
-        if len(corrections) != 1 or records[-1] is not corrections[0]:
-            codes = "/".join(_text(record.get("code"), 16) for record in records)
-            raise ValueError(f"duplicate Luna review index {index}: {codes}")
-        selected.append(corrections[0])
+    if expected_codes_by_index is not None:
+        records_by_code: dict[str, list[dict[str, Any]]] = {}
+        for records in records_by_index.values():
+            for record in records:
+                records_by_code.setdefault(_text(record.get("code"), 16), []).append(record)
+        for index, expected_code in expected_codes_by_index.items():
+            expected_code = _text(expected_code, 16)
+            candidates = records_by_code.get(expected_code, [])
+            if not candidates:
+                continue
+            exact = [record for record in candidates if record.get("index") == index]
+            pool = exact or candidates
+            if len(pool) > 1:
+                corrections = [record for record in pool if record.get("correction") is True]
+                if len(corrections) == 1:
+                    chosen = corrections[0]
+                elif len(corrections) > 1:
+                    chosen = corrections[-1]
+                elif all(_text(record.get("code"), 16) == expected_code for record in pool):
+                    # The first correction shard predates the explicit
+                    # ``correction`` marker.  A same-code append is still an
+                    # unambiguous replacement; retain the newest file-order
+                    # row rather than rebinding a stale review.
+                    chosen = pool[-1]
+                else:
+                    raise ValueError(f"duplicate Luna review code {expected_code} at index {index}")
+            else:
+                chosen = pool[0]
+            chosen = dict(chosen)
+            # The queue index is the stable identity used by the downstream
+            # artifact.  Normalize a shifted correction row only after its
+            # code has matched the expected queue slot.
+            chosen["index"] = index
+            selected.append(chosen)
+        for index, records in records_by_index.items():
+            expected_code = _text(expected_codes_by_index.get(index), 16)
+            if not expected_code:
+                continue
+            matching = [record for record in records if _text(record.get("code"), 16) == expected_code]
+            stale = [record for record in records if record not in matching]
+            if matching and any(record.get("correction") is not True for record in stale):
+                codes = "/".join(_text(record.get("code"), 16) for record in records)
+                raise ValueError(f"duplicate Luna review index {index}: {codes}")
+    else:
+        for index, records in records_by_index.items():
+            if len(records) == 1:
+                selected.append(records[0])
+                continue
+            corrections = [record for record in records if record.get("correction") is True]
+            if len(corrections) != 1 or records[-1] is not corrections[0]:
+                codes = "/".join(_text(record.get("code"), 16) for record in records)
+                raise ValueError(f"duplicate Luna review index {index}: {codes}")
+            selected.append(corrections[0])
 
     rows: dict[str, dict[str, Any]] = {}
     for row in selected:
@@ -1280,165 +1331,197 @@ def _research_date(row: Mapping[str, Any], market_as_of: str) -> str:
     return value
 
 
+def _source_period_score(statement: str, source: Mapping[str, str]) -> int:
+    """Score whether a disclosure title is a plausible home for one fact.
+
+    Older Luna rows did not include ``source_url`` on every fact.  The old
+    adapter then used the first remaining URL, which is how annual numbers were
+    attached to a quarterly filing.  This deliberately conservative matcher
+    uses the reporting year and the filing-period wording; a fact is left
+    unbound when neither is present instead of inventing provenance.
+    """
+
+    fact_text = _text(statement, 900).casefold()
+    source_text = f"{_text(source.get('title'), 320)} {_text(source.get('url'), 1200)}".casefold()
+    score = 0
+    years = set(re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", fact_text))
+    if years and any(year in source_text for year in years):
+        score += 5
+    period_markers = (
+        (r"上半年|半年度|半年报|h1", "上半年|半年度|半年报|h1", 9),
+        (r"下半年|h2", "下半年|h2", 9),
+        (r"一季度|第一季度|一季报|q1", "一季度|第一季度|一季报|q1", 9),
+        (r"二季度|第二季度|二季报|q2", "二季度|第二季度|二季报|q2", 9),
+        (r"三季度|第三季度|三季报|三季度报告|q3", "三季度|第三季度|三季报|q3", 9),
+        (r"四季度|第四季度|四季报|q4", "四季度|第四季度|四季报|q4", 9),
+        (r"年报|年度|fy|全年", "年报|年度|fy|全年", 7),
+    )
+    for fact_pattern, source_pattern, weight in period_markers:
+        if re.search(fact_pattern, fact_text) and re.search(source_pattern, source_text):
+            score += weight
+            break
+    if re.search(r"行业|产量|销量|价格|需求|竞争|市场", fact_text) and re.search(
+        r"行业|经营数据|产量|销量|市场", source_text
+    ):
+        score += 2
+    if _is_pdf_source(_text(source.get("url"), 1200)):
+        score += 1
+    return score
+
+
 def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     raw_sources = row.get("sources")
     if not isinstance(raw_sources, list) or len(raw_sources) < 2:
         raise ValueError(f"Luna review needs at least two sources: {row.get('code')}")
     facts = _financial_fact_items(row)
-    fact_source_urls = {
-        url
-        for fact in facts
-        if isinstance(fact, Mapping)
-        for url in (
-            [_preferred_source_url(fact.get("source_url"))]
-            + (
-                [_preferred_source_url(value) for value in fact.get("source_urls", []) if _preferred_source_url(value)]
-                if isinstance(fact.get("source_urls"), list)
-                else []
-            )
-        )
-        if url
-    }
-    sources: list[dict[str, str]] = []
-    seen_urls: set[str] = set()
     target_code = _text(row.get("code"), 16)
-    for source in raw_sources[:8]:
-        if not isinstance(source, Mapping):
-            raise ValueError(f"invalid source row: {row.get('code')}")
-        url = _preferred_source_url(source.get("url"))
+    sources: list[dict[str, str]] = []
+    sources_by_url: dict[str, dict[str, str]] = {}
+
+    def add_source(url: str, *, title: Any = "", date_value: Any = "", key_facts: Any = "") -> None:
+        url = _preferred_source_url(url)
         if not _URL_RE.fullmatch(url):
             raise ValueError(f"source is not HTTPS: {row.get('code')}: {url!r}")
         if any(code != target_code for code in _source_codes(url)):
-            continue
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        sources.append(
-            {
-                "url": url,
-                "title": _clean_source_title(source.get("title"), target_code),
-                "date": _text(source.get("date") or source.get("source_date"), 32),
-                "key_facts": _text(source.get("key_facts") or source.get("key_points"), 600),
-            }
+            raise ValueError(f"source belongs to another company: {row.get('code')}: {url!r}")
+        if url in sources_by_url:
+            return
+        source = {
+            "url": url,
+            "title": _clean_source_title(title, target_code),
+            "date": _text(date_value, 32),
+            "key_facts": _text(key_facts, 600),
+        }
+        sources.append(source)
+        sources_by_url[url] = source
+
+    # Keep the model's complete source list available for period matching, but
+    # only publish URLs that are actually used by a claim below.
+    for source in raw_sources[:16]:
+        if not isinstance(source, Mapping):
+            raise ValueError(f"invalid source row: {row.get('code')}")
+        add_source(
+            source.get("url"),
+            title=source.get("title"),
+            date_value=source.get("date") or source.get("source_date"),
+            key_facts=source.get("key_facts") or source.get("key_points"),
         )
-    # A fact may carry a valid search URL that the model forgot to repeat in
-    # its top-level source list.  Keep that exact URL in the auditable source
-    # graph rather than silently rebinding the fact to the first unrelated
-    # source.  The URL remains subject to the same HTTPS/company-code checks.
-    for url in sorted(fact_source_urls):
-        if not _URL_RE.fullmatch(url):
-            raise ValueError(f"financial fact source is not HTTPS: {row.get('code')}: {url!r}")
-        if any(code != target_code for code in _source_codes(url)):
-            raise ValueError(f"financial fact source belongs to another company: {row.get('code')}: {url!r}")
-        if url not in seen_urls:
-            seen_urls.add(url)
-            sources.append(
-                {
-                    "url": url,
-                    "title": "财务事实来源",
-                    "date": "",
-                    "key_facts": "",
-                }
-            )
-    if len(sources) < 2:
-        raise ValueError(f"Luna review needs two distinct sources: {row.get('code')}")
-    # Two independently selected sources are sufficient for the public
-    # evidence contract.  Prefer URLs explicitly attached to facts, then fill
-    # with the model's remaining search results.  Keeping the public graph
-    # bounded avoids turning the full release audit into thousands of duplicate
-    # fetches while retaining a dated primary disclosure plus a corroborating
-    # source for every company.
-    if len(sources) > 2:
-        fact_sources = [source for source in sources if source["url"] in fact_source_urls]
-        other_sources = [source for source in sources if source["url"] not in fact_source_urls]
-        ordered = sorted(
-            fact_sources + other_sources,
-            key=lambda source: _source_priority(source, fact_source_urls),
-        )
-        if len(fact_sources) > 2:
-            # Every fact-linked URL must remain available for its edge.  Keep
-            # all of them; the bounded two-source projection only applies when
-            # it cannot discard a fact binding.
-            sources = sorted(fact_sources, key=lambda source: _is_pdf_source(source["url"]))
-        else:
-            sources = ordered[:2]
-        seen_urls = {source["url"] for source in sources}
-    claims: list[dict[str, Any]] = []
-    fact_statements: list[tuple[str, set[str], str | None]] = []
+
+    fact_entries: list[dict[str, Any]] = []
     for fact in facts:
         if isinstance(fact, Mapping):
             statement = _sanitize_reason_text(
                 f"{_period_label(fact.get('period'))}：{_clean_fact_text(fact.get('fact'), 520)}",
                 600,
             )
-            source_url = _preferred_source_url(fact.get("source_url")) or None
+            explicit_urls = _financial_fact_source_urls(fact, row)
         else:
             statement = _sanitize_reason_text(_clean_fact_text(fact), 600)
-            source_url = None
-        fact_statements.append((statement, _research_dimensions(statement), source_url))
-    remaining = list(range(len(fact_statements)))
-    used_dimensions: set[str] = set()
-    for index, source in enumerate(sources, 1):
-        statement = _sanitize_reason_text(
-            source["key_facts"] or source["title"] or "公司公开披露来源已检索。",
-            600,
+            explicit_urls = []
+        source_url = next((url for url in explicit_urls if url in sources_by_url), None)
+        if source_url is None and explicit_urls:
+            # An explicit fact URL may not have been repeated in the top-level
+            # list.  It was validated by _financial_fact_source_urls, so add
+            # it with a neutral context rather than rebinding to another URL.
+            for url in explicit_urls:
+                add_source(url, title="财务事实来源")
+            source_url = explicit_urls[0]
+        # Some correction shards keep the readable fact as a plain string.
+        # Period/title matching is still safe for those rows; only valuation
+        # snapshots are excluded because their 2026 date is not a filing
+        # period and must never be attached to an annual/interim report.
+        is_valuation_statement = bool(
+            re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE)
         )
-        if remaining:
-            # Prefer a fact that explicitly names this source.  This avoids
-            # attaching a cash-flow number to an unrelated industry article
-            # when the model supplied per-fact source_url metadata.
-            chosen_position = next(
-                (position for position in remaining if fact_statements[position][2] == source["url"]),
-                next(
-                    (position for position in remaining if fact_statements[position][1] - used_dimensions),
-                    remaining[0],
-                ),
+        if source_url is None and not is_valuation_statement:
+            ranked = sorted(
+                ((
+                    _source_period_score(statement, source),
+                    _source_priority(source, set(explicit_urls)),
+                    source,
+                ) for source in sources),
+                key=lambda item: (-item[0], item[1]),
             )
-            remaining.remove(chosen_position)
-            statement, dimensions, _fact_source_url = fact_statements[chosen_position]
-            if statement.strip("："):
-                used_dimensions.update(dimensions)
-        claims.append(
+            if ranked and ranked[0][0] >= 7:
+                source_url = ranked[0][2]["url"]
+        fact_entries.append(
             {
-                "fact_id": f"luna-source-{index:03d}",
                 "statement": statement,
-                "source_ref": source["url"],
-                "source_refs": [source["url"]],
-                "source_context": source["title"],
-                # Priority-buy reviews need at least two independently linked
-                # dated facts; all source-backed rows therefore remain
-                # auditable support claims rather than unlabeled prose.
-                # Every selected fact is a source-backed research claim.  The
-                # contract, rather than an arbitrary first-three cutoff,
-                # decides whether the set spans enough dimensions for a
-                # priority recommendation.
-                "support": "supports",
-                "source_kind": "codex_luna_web_search",
+                "dimensions": _research_dimensions(statement),
+                "source_url": source_url,
             }
         )
-    # A single disclosure URL often supports several dimensions (for example
-    # earnings and operating cash flow).  Keep the additional fact-to-source
-    # edges instead of silently dropping them after one claim per URL; the
-    # public priority-buy contract requires two independently linked research
-    # dimensions, not merely two URL labels.
-    for position in remaining:
-        statement, dimensions, fact_source_url = fact_statements[position]
-        source_ref = fact_source_url if fact_source_url in seen_urls else sources[0]["url"]
+
+    claims: list[dict[str, Any]] = []
+    used_urls: set[str] = set()
+    appended_fact_keys: set[tuple[str, str]] = set()
+
+    def append_fact(entry: Mapping[str, Any]) -> None:
+        source_url = _text(entry.get("source_url"), 1200)
+        if not source_url or source_url not in sources_by_url:
+            return
+        fact_key = (_text(entry.get("statement"), 600), source_url)
+        if fact_key in appended_fact_keys:
+            return
         claims.append(
             {
                 "fact_id": f"luna-fact-{len(claims) + 1:03d}",
-                "statement": statement,
-                "source_ref": source_ref,
-                "source_refs": [source_ref],
-                "source_context": next(
-                    (source["title"] for source in sources if source["url"] == source_ref),
-                    sources[0]["title"],
-                ),
+                "statement": entry["statement"],
+                "source_ref": source_url,
+                "source_refs": [source_url],
+                "source_context": sources_by_url[source_url]["title"],
                 "support": "supports",
                 "source_kind": "codex_luna_web_search",
             }
         )
-    return claims, [source["url"] for source in sources]
+        appended_fact_keys.add(fact_key)
+        used_urls.add(source_url)
+
+    # Establish two independent source edges before adding duplicate facts
+    # from the same filing.  This keeps the priority-buy evidence contract
+    # meaningful without assigning any fact to an unrelated first URL.
+    for entry in fact_entries:
+        if entry.get("source_url") and entry["source_url"] not in used_urls:
+            append_fact(entry)
+            if len(used_urls) >= 2:
+                break
+    for entry in fact_entries:
+        if len(claims) >= 12:
+            break
+        if entry.get("source_url"):
+            append_fact(entry)
+
+    # A row with no per-fact provenance still needs two auditable search edges.
+    # Use dated filing titles as corroboration, never a fabricated financial
+    # statement.  The source audit can verify the period in the title/body;
+    # unsupported numbers remain quantitative facts, not falsely bound claims.
+    if len(used_urls) < 2:
+        candidates = sorted(sources, key=lambda source: _source_priority(source, used_urls))
+        for source in candidates:
+            if source["url"] in used_urls:
+                continue
+            title = source["title"] or "公司公开披露来源"
+            statement = _sanitize_reason_text(
+                f"{title}（披露日期 {_text(source['date'], 20)}）",
+                600,
+            )
+            claims.append(
+                {
+                    "fact_id": f"luna-source-{len(claims) + 1:03d}",
+                    "statement": statement,
+                    "source_ref": source["url"],
+                    "source_refs": [source["url"]],
+                    "source_context": source["title"],
+                    "support": "corroborates",
+                    "source_kind": "codex_luna_web_search",
+                }
+            )
+            used_urls.add(source["url"])
+            if len(used_urls) >= 2:
+                break
+    if len(used_urls) < 2:
+        raise ValueError(f"Luna review needs two distinct claim sources: {row.get('code')}")
+    return claims[:12], list(dict.fromkeys(used_urls))[:16]
 
 
 def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: str) -> dict[str, Any]:
@@ -1601,7 +1684,12 @@ def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dic
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping) or not isinstance(payload.get("packets"), list):
         raise ValueError("input queue packets are missing")
-    rows = _load_rows(shard_paths)
+    expected_codes_by_index = {
+        index: _text(packet.get("security_code"), 16)
+        for index, packet in enumerate(payload["packets"])
+        if isinstance(packet, Mapping)
+    }
+    rows = _load_rows(shard_paths, expected_codes_by_index=expected_codes_by_index)
     packets: list[dict[str, Any]] = []
     for expected_index, raw_packet in enumerate(payload["packets"]):
         if not isinstance(raw_packet, Mapping):
