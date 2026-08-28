@@ -254,6 +254,17 @@ def test_sanitize_reason_text_removes_trigger_and_threshold_labels() -> None:
     assert "已进入研究范围" in result
 
 
+def test_sanitize_reason_text_removes_deterministic_disclaimer_and_label() -> None:
+    value = "规则候选标签仅决定研究范围，不作为买入理由；筛选量化事实；收入同比增长12%。"
+
+    result = _sanitize_reason_text(value)
+
+    assert "规则候选标签" not in result
+    assert "筛选量化事实" not in result
+    assert "量化事实" in result
+    assert "收入同比增长12%" in result
+
+
 def test_date_years_ignores_numeric_values_that_are_not_report_periods() -> None:
     from tools.convert_luna_web_reviews import _date_years
 

@@ -327,6 +327,9 @@ def test_review_requires_sources_and_keeps_verdict_bounded() -> None:
         "TYPE1 已触发，规则分数较高",
         "确定性筛选已经达标",
         "第七种买入情况接近达标",
+        "规则候选标签仅决定研究范围，不作为买入理由",
+        "筛选量化事实：同行增速 12%",
+        "本司外584家总营收加权增速 8.6%",
     ],
 )
 def test_ai_reason_fields_reject_rule_language(reason: str) -> None:

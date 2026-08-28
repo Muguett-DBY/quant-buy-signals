@@ -45815,7 +45815,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 8.87 元；PE 14.34 倍；PB 0.85 倍；市值 93.46 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 买入区内折价14%；五项满分4项；自由现金流收益率11.9%;最新11.17亿；最新报告期经营现金流为负"
+          "2025年度：量化事实；value 买入区内折价14%；五项满分4项；自由现金流收益率11.9%;最新11.17亿；最新报告期经营现金流为负"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -45836,7 +45836,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 8.87 元；PE 14.34 倍；PB 0.85 倍；市值 93.46 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 8.87 元；PE 14.34 倍；PB 0.85 倍；市值 93.46 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -46998,7 +46998,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 9.15 元；PE 21.79 倍；PB 1.99 倍；市值 31.29 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率34%/1.99;冷5;利6；资产负债表稳健3项；历史利润振幅9.7倍；10年均利市盈率28.9倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率34%/1.99;冷5;利6；资产负债表稳健3项；历史利润振幅9.7倍；10年均利市盈率28.9倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47019,7 +47019,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 9.15 元；PE 21.79 倍；PB 1.99 倍；市值 31.29 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 9.15 元；PE 21.79 倍；PB 1.99 倍；市值 31.29 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47308,7 +47308,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 14.63 元；PE 20.65 倍；PB 2.15 倍；市值 57.51 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率10%/2.14;冷7;利2；资产负债表稳健4项；历史利润振幅6.1倍；10年均利市盈率30.4倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率10%/2.14;冷7;利2；资产负债表稳健4项；历史利润振幅6.1倍；10年均利市盈率30.4倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47329,7 +47329,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 14.63 元；PE 20.65 倍；PB 2.15 倍；市值 57.51 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 14.63 元；PE 20.65 倍；PB 2.15 倍；市值 57.51 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47443,7 +47443,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 9.85 元；PE 21.89 倍；PB 1.22 倍；市值 43.86 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率19%/1.22;冷8;毛10；资产负债表稳健4项；历史利润振幅4.1倍；10年均利市盈率17.3倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率19%/1.22;冷8;毛10；资产负债表稳健4项；历史利润振幅4.1倍；10年均利市盈率17.3倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47464,7 +47464,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 9.85 元；PE 21.89 倍；PB 1.22 倍；市值 43.86 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 9.85 元；PE 21.89 倍；PB 1.22 倍；市值 43.86 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47578,7 +47578,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 17.11 元；PE 21.12 倍；PB 1.47 倍；市值 69.97 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率60%/1.47;冷1;利8；资产负债表稳健3项；历史利润振幅4.0倍；10年均利市盈率19.6倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率60%/1.47;冷1;利8；资产负债表稳健3项；历史利润振幅4.0倍；10年均利市盈率19.6倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47599,7 +47599,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 17.11 元；PE 21.12 倍；PB 1.47 倍；市值 69.97 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 17.11 元；PE 21.12 倍；PB 1.47 倍；市值 69.97 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47713,7 +47713,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 7.51 元；PE 18.28 倍；PB 1.77 倍；市值 44.87 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-4.6%;年初至今-23.1%;换手2.10%;量比1.00;上限8.0；自身五年市净率/市盈率分位19%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-4.6%;年初至今-23.1%;换手2.10%;量比1.00;上限8.0；自身五年市净率/市盈率分位19%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47734,7 +47734,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 7.51 元；PE 18.28 倍；PB 1.77 倍；市值 44.87 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 7.51 元；PE 18.28 倍；PB 1.77 倍；市值 44.87 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47848,7 +47848,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 17.63 元；PE 8.95 倍；PB 2.08 倍；市值 76.57 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外151家总营收加权增速7.3%，竞争格局分散(HHI=0.11)扣1分；最新同口径利润下滑,拐点封顶；量价冷度;60日-11.4%;年初至今-45.9%;换手1.74%;量比2.04;上限8.0；自身五年市净率/市盈率分位1%"
+          "2025年度：量化事实；value 同行样本151家总营收加权增速7.3%，竞争格局分散(HHI=0.11)扣1分；最新同口径利润下滑,拐点封顶；量价冷度;60日-11.4%;年初至今-45.9%;换手1.74%;量比2.04;上限8.0；自身五年市净率/市盈率分位1%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -47869,7 +47869,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 17.63 元；PE 8.95 倍；PB 2.08 倍；市值 76.57 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 17.63 元；PE 8.95 倍；PB 2.08 倍；市值 76.57 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -47983,7 +47983,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 18.30 元；PE 22.05 倍；PB 2.03 倍；市值 21.52 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-11.9%;年初至今-24.4%;换手2.27%;量比0.62;上限8.0；自身五年市净率/市盈率分位40%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-11.9%;年初至今-24.4%;换手2.27%;量比0.62;上限8.0；自身五年市净率/市盈率分位40%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48004,7 +48004,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 18.30 元；PE 22.05 倍；PB 2.03 倍；市值 21.52 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 18.30 元；PE 22.05 倍；PB 2.03 倍；市值 21.52 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48118,7 +48118,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.59 元；PE 23.34 倍；PB 1.50 倍；市值 45.76 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率84%/1.50;冷3;利8；资产负债表稳健3项；历史利润振幅168.3倍；10年均利市盈率12.4倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率84%/1.50;冷3;利8；资产负债表稳健3项；历史利润振幅168.3倍；10年均利市盈率12.4倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48139,7 +48139,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.59 元；PE 23.34 倍；PB 1.50 倍；市值 45.76 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 6.59 元；PE 23.34 倍；PB 1.50 倍；市值 45.76 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48253,7 +48253,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 3.75 元；PE 22.06 倍；PB 0.94 倍；市值 60.18 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率18%/0.94;冷1;毛4；资产负债表稳健3项；历史利润振幅9.2倍；10年均利市盈率28.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率18%/0.94;冷1;毛4；资产负债表稳健3项；历史利润振幅9.2倍；10年均利市盈率28.2倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48274,7 +48274,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 3.75 元；PE 22.06 倍；PB 0.94 倍；市值 60.18 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 3.75 元；PE 22.06 倍；PB 0.94 倍；市值 60.18 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48388,7 +48388,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 3.36 元；PE 10.93 倍；PB 0.74 倍；市值 66.87 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率34%/0.74;冷7;利2；资产负债表稳健3项；历史利润振幅11.3倍；10年均利市盈率15.0倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率34%/0.74;冷7;利2；资产负债表稳健3项；历史利润振幅11.3倍；10年均利市盈率15.0倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48409,7 +48409,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 3.36 元；PE 10.93 倍；PB 0.74 倍；市值 66.87 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 3.36 元；PE 10.93 倍；PB 0.74 倍；市值 66.87 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48523,7 +48523,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 7.50 元；PE 12.41 倍；PB 0.85 倍；市值 50.85 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 刚进买入区6%；五项满分4项；自由现金流收益率13.6%;最新10.09亿；最新报告期经营现金流为负"
+          "2025年度：量化事实；value 刚进买入区6%；五项满分4项；自由现金流收益率13.6%;最新10.09亿；最新报告期经营现金流为负"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48544,7 +48544,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 7.50 元；PE 12.41 倍；PB 0.85 倍；市值 50.85 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 7.50 元；PE 12.41 倍；PB 0.85 倍；市值 50.85 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48658,7 +48658,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 10.66 元；PE 14.29 倍；PB 1.31 倍；市值 123.27 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率30%/1.31;冷1;毛6；资产负债表稳健3项；历史利润弹性偏弱；10年均利市盈率14.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率30%/1.31;冷1;毛6；资产负债表稳健3项；历史利润弹性偏弱；10年均利市盈率14.2倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48679,7 +48679,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 10.66 元；PE 14.29 倍；PB 1.31 倍；市值 123.27 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 10.66 元；PE 14.29 倍；PB 1.31 倍；市值 123.27 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -48793,7 +48793,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 5.94 元；PE 13.52 倍；PB 1.01 倍；市值 32.90 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率15%/1.01;冷1;利2；资产负债表稳健4项；历史利润振幅24.9倍；10年均利市盈率17.3倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率15%/1.01;冷1;利2；资产负债表稳健4项；历史利润振幅24.9倍；10年均利市盈率17.3倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -48814,7 +48814,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 5.94 元；PE 13.52 倍；PB 1.01 倍；市值 32.90 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 5.94 元；PE 13.52 倍；PB 1.01 倍；市值 32.90 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -49068,7 +49068,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 14.05 元；PE 21.72 倍；PB 1.49 倍；市值 454.16 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 券商业绩/风控周期；金融回归5项；量价冷度;60日10.5%;年初至今1.9%;换手0.85%;量比1.29;上限4.9；自身五年市净率/市盈率分位63%"
+          "2025年度：量化事实；value 券商业绩/风控周期；金融回归5项；量价冷度;60日10.5%;年初至今1.9%;换手0.85%;量比1.29;上限4.9；自身五年市净率/市盈率分位63%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -49089,7 +49089,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 14.05 元；PE 21.72 倍；PB 1.49 倍；市值 454.16 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 14.05 元；PE 21.72 倍；PB 1.49 倍；市值 454.16 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -49203,7 +49203,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 15.05 元；PE 6.15 倍；PB 1.07 倍；市值 268.70 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外97家总营收加权增速6.2%，竞争格局分散(HHI=0.16)扣1分；最新同口径利润下滑,拐点封顶；量价冷度;60日-12.4%;年初至今-35.4%;换手0.97%;量比0.82;上限8.0；自身五年市净率/市盈率分位12%"
+          "2025年度：量化事实；value 同行样本97家总营收加权增速6.2%，竞争格局分散(HHI=0.16)扣1分；最新同口径利润下滑,拐点封顶；量价冷度;60日-12.4%;年初至今-35.4%;换手0.97%;量比0.82;上限8.0；自身五年市净率/市盈率分位12%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -49224,7 +49224,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 15.05 元；PE 6.15 倍；PB 1.07 倍；市值 268.70 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 15.05 元；PE 6.15 倍；PB 1.07 倍；市值 268.70 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -49866,7 +49866,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 46.88 元；PE 27.91 倍；PB 2.74 倍；市值 73.59 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+利润连升；量价冷度;60日-17.8%;年初至今-13.6%;换手1.59%;量比0.97;上限8.0；自身五年市净率/市盈率分位48%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+利润连升；量价冷度;60日-17.8%;年初至今-13.6%;换手1.59%;量比0.97;上限8.0；自身五年市净率/市盈率分位48%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -49887,7 +49887,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 46.88 元；PE 27.91 倍；PB 2.74 倍；市值 73.59 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 46.88 元；PE 27.91 倍；PB 2.74 倍；市值 73.59 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -50176,7 +50176,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 10.55 元；PE 21.98 倍；PB 2.21 倍；市值 228.83 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外123家总营收加权增速3.9%，竞争格局分散(HHI=0.06)扣2分；拐点4项:净利率连升+利润连升；量价冷度;60日-1.9%;年初至今-28.2%;换手0.38%;量比1.08;上限8.0；自身五年市净率/市盈率分位9%"
+          "2025年度：量化事实；value 同行样本123家总营收加权增速3.9%，竞争格局分散(HHI=0.06)扣2分；拐点4项:净利率连升+利润连升；量价冷度;60日-1.9%;年初至今-28.2%;换手0.38%;量比1.08;上限8.0；自身五年市净率/市盈率分位9%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -50197,7 +50197,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 10.55 元；PE 21.98 倍；PB 2.21 倍；市值 228.83 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 10.55 元；PE 21.98 倍；PB 2.21 倍；市值 228.83 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -51010,7 +51010,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 24.86 元；PE 21.25 倍；PB 2.40 倍；市值 42.36 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:营收加速+利润连升；量价冷度;60日-10.9%;年初至今7.7%;换手3.06%;量比2.20;上限8.0；自身五年市净率/市盈率分位35%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:营收加速+利润连升；量价冷度;60日-10.9%;年初至今7.7%;换手3.06%;量比2.20;上限8.0；自身五年市净率/市盈率分位35%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -51031,7 +51031,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 24.86 元；PE 21.25 倍；PB 2.40 倍；市值 42.36 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 24.86 元；PE 21.25 倍；PB 2.40 倍；市值 42.36 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -66753,7 +66753,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 7.42 元；PE 35.08 倍；PB 1.13 倍；市值 421.24 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率28%/1.13;冷1;利10；资产负债表稳健1项；历史利润振幅24.8倍；10年均利市盈率12.1倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率28%/1.13;冷1;利10；资产负债表稳健1项；历史利润振幅24.8倍；10年均利市盈率12.1倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -66774,7 +66774,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 7.42 元；PE 35.08 倍；PB 1.13 倍；市值 421.24 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 7.42 元；PE 35.08 倍；PB 1.13 倍；市值 421.24 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -66888,7 +66888,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 36.17 元；PE 35.12 倍；PB 4.68 倍；市值 1522.04 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外76家总营收加权增速4.4%，竞争格局分散(HHI=0.15)扣1分；拐点2项:利润连升+现金流支撑；量价冷度;60日-22.6%;年初至今-34.1%;换手1.09%;量比1.08;上限8.0；自身五年市净率/市盈率分位28%"
+          "2025年度：量化事实；value 同行样本76家总营收加权增速4.4%，竞争格局分散(HHI=0.15)扣1分；拐点2项:利润连升+现金流支撑；量价冷度;60日-22.6%;年初至今-34.1%;换手1.09%;量比1.08;上限8.0；自身五年市净率/市盈率分位28%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -66909,7 +66909,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 36.17 元；PE 35.12 倍；PB 4.68 倍；市值 1522.04 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 36.17 元；PE 35.12 倍；PB 4.68 倍；市值 1522.04 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -67023,7 +67023,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 19.30 元；PE 34.89 倍；PB 1.83 倍；市值 222.44 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率49%/1.83;冷5;利8；资产负债表稳健3项；历史利润振幅112.9倍；10年均利市盈率30.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率49%/1.83;冷5;利8；资产负债表稳健3项；历史利润振幅112.9倍；10年均利市盈率30.2倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -67044,7 +67044,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 19.30 元；PE 34.89 倍；PB 1.83 倍；市值 222.44 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 19.30 元；PE 34.89 倍；PB 1.83 倍；市值 222.44 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -67288,7 +67288,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.54 元；PE 32.70 倍；PB 1.59 倍；市值 274.84 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 券商业绩/风控周期；金融回归4项；量价冷度;60日0.1%;年初至今-3.8%;换手1.17%;量比1.11;上限6.9；自身五年市净率/市盈率分位22%"
+          "2025年度：量化事实；value 券商业绩/风控周期；金融回归4项；量价冷度;60日0.1%;年初至今-3.8%;换手1.17%;量比1.11;上限6.9；自身五年市净率/市盈率分位22%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -67309,7 +67309,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.54 元；PE 32.70 倍；PB 1.59 倍；市值 274.84 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 6.54 元；PE 32.70 倍；PB 1.59 倍；市值 274.84 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -67423,7 +67423,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 12.28 元；PE 53.39 倍；PB 3.42 倍；市值 22.26 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率47%/3.42;冷3;利10；资产负债表稳健4项；历史利润弹性偏弱；10年均利市盈率31.8倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率47%/3.42;冷3;利10；资产负债表稳健4项；历史利润弹性偏弱；10年均利市盈率31.8倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -67444,7 +67444,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 12.28 元；PE 53.39 倍；PB 3.42 倍；市值 22.26 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 12.28 元；PE 53.39 倍；PB 3.42 倍；市值 22.26 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -67558,7 +67558,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 7.94 元；PE 39.70 倍；PB 1.58 倍；市值 22.95 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率34%/1.59;冷1;毛10；资产负债表稳健4项；历史利润弹性偏弱；10年均利市盈率34.4倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率34%/1.59;冷1;毛10；资产负债表稳健4项；历史利润弹性偏弱；10年均利市盈率34.4倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -67579,7 +67579,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 7.94 元；PE 39.70 倍；PB 1.58 倍；市值 22.95 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 7.94 元；PE 39.70 倍；PB 1.58 倍；市值 22.95 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -67903,7 +67903,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 14.31 元；PE 31.80 倍；PB 1.72 倍；市值 41.76 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率18%/1.72;冷1;毛10；资产负债表稳健4项；历史利润振幅6.5倍；10年均利市盈率23.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率18%/1.72;冷1;毛10；资产负债表稳健4项；历史利润振幅6.5倍；10年均利市盈率23.2倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -67924,7 +67924,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 14.31 元；PE 31.80 倍；PB 1.72 倍；市值 41.76 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 14.31 元；PE 31.80 倍；PB 1.72 倍；市值 41.76 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -68038,7 +68038,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 56.52 元；PE 57.72 倍；PB 2.47 倍；市值 260.96 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外388家总营收加权增速16.3%，竞争格局分散(HHI=0.06)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-7.7%;年初至今-16.0%;换手3.01%;量比1.44;上限8.0；自身五年市净率/市盈率分位20%"
+          "2025年度：量化事实；value 同行样本388家总营收加权增速16.3%，竞争格局分散(HHI=0.06)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-7.7%;年初至今-16.0%;换手3.01%;量比1.44;上限8.0；自身五年市净率/市盈率分位20%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -68059,7 +68059,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 56.52 元；PE 57.72 倍；PB 2.47 倍；市值 260.96 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 56.52 元；PE 57.72 倍；PB 2.47 倍；市值 260.96 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -68173,7 +68173,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 30.42 元；PE 35.37 倍；PB 5.79 倍；市值 203.06 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.5%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-23.2%;年初至今0.6%;换手2.62%;量比0.87;上限8.0；自身五年市净率/市盈率分位62%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.5%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-23.2%;年初至今0.6%;换手2.62%;量比0.87;上限8.0；自身五年市净率/市盈率分位62%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -68194,7 +68194,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 30.42 元；PE 35.37 倍；PB 5.79 倍；市值 203.06 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 30.42 元；PE 35.37 倍；PB 5.79 倍；市值 203.06 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -68308,7 +68308,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 11.70 元；PE 38.06 倍；PB 2.00 倍；市值 128.59 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外138家总营收加权增速10.3%，竞争格局分散(HHI=0.04)扣2分；拐点6项:营收加速+净利率连升；量价冷度;60日-5.5%;年初至今-14.5%;换手2.57%;量比0.92;上限8.0；自身五年市净率/市盈率分位55%"
+          "2025年度：量化事实；value 同行样本138家总营收加权增速10.3%，竞争格局分散(HHI=0.04)扣2分；拐点6项:营收加速+净利率连升；量价冷度;60日-5.5%;年初至今-14.5%;换手2.57%;量比0.92;上限8.0；自身五年市净率/市盈率分位55%"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -68329,7 +68329,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 11.70 元；PE 38.06 倍；PB 2.00 倍；市值 128.59 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 11.70 元；PE 38.06 倍；PB 2.00 倍；市值 128.59 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -68443,7 +68443,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 12.75 元；PE 33.55 倍；PB 0.83 倍；市值 60.97 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率22%/0.83;冷1;毛8；资产负债表稳健4项；历史利润振幅16.7倍；10年均利市盈率13.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率22%/0.83;冷1;毛8；资产负债表稳健4项；历史利润振幅16.7倍；10年均利市盈率13.2倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -68464,7 +68464,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 12.75 元；PE 33.55 倍；PB 0.83 倍；市值 60.97 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 12.75 元；PE 33.55 倍；PB 0.83 倍；市值 60.97 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -68980,7 +68980,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 5.70 元；PE 40.71 倍；PB 1.44 倍；市值 55.68 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率55%/1.44;冷7;利2；资产负债表稳健4项；历史利润振幅14.9倍；10年均利市盈率55.6倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率55%/1.44;冷7;利2；资产负债表稳健4项；历史利润振幅14.9倍；10年均利市盈率55.6倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -69001,7 +69001,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 5.70 元；PE 40.71 倍；PB 1.44 倍；市值 55.68 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 5.70 元；PE 40.71 倍；PB 1.44 倍；市值 55.68 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -69852,7 +69852,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 43.16 元；PE 52.63 倍；PB 1.75 倍；市值 311.31 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率2%/1.75;冷3;毛6；资产负债表稳健3项；历史利润振幅4.1倍；10年均利市盈率70.0倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率2%/1.75;冷3;毛6；资产负债表稳健3项；历史利润振幅4.1倍；10年均利市盈率70.0倍"
         ],
         "recommendation_label": "观察",
         "recommended_action": "manual_review",
@@ -69873,7 +69873,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 43.16 元；PE 52.63 倍；PB 1.75 倍；市值 311.31 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。规则候选标签仅决定研究范围，不作为买入理由；独立结论为observe。",
+        "summary": "估值快照：股价 43.16 元；PE 52.63 倍；PB 1.75 倍；市值 311.31 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。当前估值与盈利质量尚不足以支持立即买入，先观察正式报告兑现。独立结论为observe。",
         "verdict": "caution",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -88296,7 +88296,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.62 元；PE 331.00 倍；PB 2.24 倍；市值 28.70 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率70%/2.24;冷1;利8；资产负债表稳健3项；历史利润振幅51.2倍；10年均利市盈率50.3倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率70%/2.24;冷1;利8；资产负债表稳健3项；历史利润振幅51.2倍；10年均利市盈率50.3倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -88317,7 +88317,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.62 元；PE 331.00 倍；PB 2.24 倍；市值 28.70 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 6.62 元；PE 331.00 倍；PB 2.24 倍；市值 28.70 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -88431,7 +88431,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 4.36 元；PE 218.00 倍；PB 1.07 倍；市值 68.36 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率34%/1.07;冷1;毛6；资产负债表稳健3项；历史利润振幅21.1倍；10年周期平均利润非正"
+          "2025年度：量化事实；value 已登记的外部证据；市净率34%/1.07;冷1;毛6；资产负债表稳健3项；历史利润振幅21.1倍；10年周期平均利润非正"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -88452,7 +88452,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 4.36 元；PE 218.00 倍；PB 1.07 倍；市值 68.36 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 4.36 元；PE 218.00 倍；PB 1.07 倍；市值 68.36 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -88797,7 +88797,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 27.00 元；PE 142.10 倍；PB 2.55 倍；市值 23.49 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率15%/2.55;冷5;毛10；资产负债表稳健3项；历史利润振幅6.6倍；8年均利市盈率53.8倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率15%/2.55;冷5;毛10；资产负债表稳健3项；历史利润振幅6.6倍；8年均利市盈率53.8倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -88818,7 +88818,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 27.00 元；PE 142.10 倍；PB 2.55 倍；市值 23.49 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 27.00 元；PE 142.10 倍；PB 2.55 倍；市值 23.49 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -88932,7 +88932,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 7.70 元；PE 103.22 倍；PB 2.91 倍；市值 44.47 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外388家总营收加权增速16.3%，竞争格局分散(HHI=0.06)扣2分；拐点3项:营收加速+现金流支撑；量价冷度;60日-26.9%;年初至今-9.7%;换手4.59%;量比1.32;上限8.0；自身五年市净率/市盈率分位42%"
+          "2025年度：量化事实；value 同行样本388家总营收加权增速16.3%，竞争格局分散(HHI=0.06)扣2分；拐点3项:营收加速+现金流支撑；量价冷度;60日-26.9%;年初至今-9.7%;换手4.59%;量比1.32;上限8.0；自身五年市净率/市盈率分位42%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -88953,7 +88953,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 7.70 元；PE 103.22 倍；PB 2.91 倍；市值 44.47 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 7.70 元；PE 103.22 倍；PB 2.91 倍；市值 44.47 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -89247,7 +89247,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 4.26 元；PE 71.00 倍；PB 0.94 倍；市值 33.57 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率15%/0.94;冷5;利10；资产负债表稳健4项；历史利润振幅6.0倍；10年均利市盈率25.1倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率15%/0.94;冷5;利10；资产负债表稳健4项；历史利润振幅6.0倍；10年均利市盈率25.1倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -89268,7 +89268,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 4.26 元；PE 71.00 倍；PB 0.94 倍；市值 33.57 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 4.26 元；PE 71.00 倍；PB 0.94 倍；市值 33.57 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -89382,7 +89382,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.70 元；PE 64.67 倍；PB 1.08 倍；市值 28.72 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率26%/1.08;冷1;毛10；资产负债表稳健3项；历史利润振幅8.1倍；10年均利市盈率19.8倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率26%/1.08;冷1;毛10；资产负债表稳健3项；历史利润振幅8.1倍；10年均利市盈率19.8倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -89403,7 +89403,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.70 元；PE 64.67 倍；PB 1.08 倍；市值 28.72 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 6.70 元；PE 64.67 倍；PB 1.08 倍；市值 28.72 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -89517,7 +89517,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.17 元；PE 154.25 倍；PB 1.26 倍；市值 25.78 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率5%/1.26;冷1;利10；资产负债表稳健4项；历史利润振幅11.9倍；10年均利市盈率16.5倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率5%/1.26;冷1;利10；资产负债表稳健4项；历史利润振幅11.9倍；10年均利市盈率16.5倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -89538,7 +89538,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.17 元；PE 154.25 倍；PB 1.26 倍；市值 25.78 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 6.17 元；PE 154.25 倍；PB 1.26 倍；市值 25.78 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -89652,7 +89652,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 15.26 元；PE 不适用（原始 PE -52.62 倍）；PB 1.01 倍；市值 54.00 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率4%/1.01;冷1;利10；资产负债表稳健3项；历史利润振幅13.6倍；10年均利市盈率17.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率4%/1.01;冷1;利10；资产负债表稳健3项；历史利润振幅13.6倍；10年均利市盈率17.2倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -89673,7 +89673,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 15.26 元；PE 不适用（原始 PE -52.62 倍）；PB 1.01 倍；市值 54.00 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 15.26 元；PE 不适用（原始 PE -52.62 倍）；PB 1.01 倍；市值 54.00 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -89787,7 +89787,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 5.74 元；PE 71.75 倍；PB 1.25 倍；市值 34.39 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率8%/1.25;冷7;利10；资产负债表稳健1项；历史利润振幅13.1倍；10年均利市盈率25.1倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率8%/1.25;冷7;利10；资产负债表稳健1项；历史利润振幅13.1倍；10年均利市盈率25.1倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -89808,7 +89808,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 5.74 元；PE 71.75 倍；PB 1.25 倍；市值 34.39 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 5.74 元；PE 71.75 倍；PB 1.25 倍；市值 34.39 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -90589,7 +90589,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 11.02 元；PE 不适用（原始 PE -58.00 倍）；PB 4.05 倍；市值 57.04 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外129家总营收加权增速3.7%；拐点6项:营收加速+净利率连升；量价冷度;60日-14.6%;年初至今-25.6%;换手3.22%;量比0.87;上限8.0；自身五年市净率分位67%"
+          "2025年度：量化事实；value 同行样本129家总营收加权增速3.7%；拐点6项:营收加速+净利率连升；量价冷度;60日-14.6%;年初至今-25.6%;换手3.22%;量比0.87;上限8.0；自身五年市净率分位67%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -90610,7 +90610,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 11.02 元；PE 不适用（原始 PE -58.00 倍）；PB 4.05 倍；市值 57.04 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 11.02 元；PE 不适用（原始 PE -58.00 倍）；PB 4.05 倍；市值 57.04 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -90724,7 +90724,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 11.57 元；PE 不适用（原始 PE -74.41 倍）；PB 2.05 倍；市值 28.37 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率43%/2.05;冷3;毛10；资产负债表稳健3项；历史利润振幅6.5倍；10年均利市盈率1318.0倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率43%/2.05;冷3;毛10；资产负债表稳健3项；历史利润振幅6.5倍；10年均利市盈率1318.0倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -90745,7 +90745,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 11.57 元；PE 不适用（原始 PE -74.41 倍）；PB 2.05 倍；市值 28.37 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 11.57 元；PE 不适用（原始 PE -74.41 倍）；PB 2.05 倍；市值 28.37 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -90859,7 +90859,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 13.93 元；PE 220.06 倍；PB 5.77 倍；市值 44.92 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率89%/5.77;冷1;毛10；资产负债表稳健3项；历史利润振幅5.2倍；10年均利市盈率84.0倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率89%/5.77;冷1;毛10；资产负债表稳健3项；历史利润振幅5.2倍；10年均利市盈率84.0倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -90880,7 +90880,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 13.93 元；PE 220.06 倍；PB 5.77 倍；市值 44.92 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 13.93 元；PE 220.06 倍；PB 5.77 倍；市值 44.92 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -90994,7 +90994,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 20.20 元；PE 295.75 倍；PB 4.60 倍；市值 41.86 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率52%/4.60;冷5;毛6；资产负债表稳健3项；历史利润振幅10.5倍；10年周期平均利润非正"
+          "2025年度：量化事实；value 已登记的外部证据；市净率52%/4.60;冷5;毛6；资产负债表稳健3项；历史利润振幅10.5倍；10年周期平均利润非正"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -91015,7 +91015,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 20.20 元；PE 295.75 倍；PB 4.60 倍；市值 41.86 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 20.20 元；PE 295.75 倍；PB 4.60 倍；市值 41.86 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -91339,7 +91339,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 23.26 元；PE 66.90 倍；PB 1.91 倍；市值 50.81 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率46%/1.91;冷5;毛10；资产负债表稳健3项；历史利润振幅5.9倍；10年均利市盈率29.3倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率46%/1.91;冷5;毛10；资产负债表稳健3项；历史利润振幅5.9倍；10年均利市盈率29.3倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -91360,7 +91360,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 23.26 元；PE 66.90 倍；PB 1.91 倍；市值 50.81 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 23.26 元；PE 66.90 倍；PB 1.91 倍；市值 50.81 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -92098,7 +92098,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 25.42 元；PE 195.54 倍；PB 2.02 倍；市值 27.45 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率33%/2.02;冷5;毛10；资产负债表稳健3项；历史利润振幅14.7倍；10年均利市盈率44.9倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率33%/2.02;冷5;毛10；资产负债表稳健3项；历史利润振幅14.7倍；10年均利市盈率44.9倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -92119,7 +92119,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 25.42 元；PE 195.54 倍；PB 2.02 倍；市值 27.45 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 25.42 元；PE 195.54 倍；PB 2.02 倍；市值 27.45 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -92425,7 +92425,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 27.77 元；PE 173.56 倍；PB 7.74 倍；市值 112.31 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点3项:营收加速+最新同口径营收增；量价冷度;60日-17.7%;年初至今-25.8%;换手2.61%;量比1.42;上限8.0；上市不足5年，用全部3.04年历史，自身市净率/市盈率分位10%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点3项:营收加速+最新同口径营收增；量价冷度;60日-17.7%;年初至今-25.8%;换手2.61%;量比1.42;上限8.0；上市不足5年，用全部3.04年历史，自身市净率/市盈率分位10%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -92446,7 +92446,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 27.77 元；PE 173.56 倍；PB 7.74 倍；市值 112.31 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 27.77 元；PE 173.56 倍；PB 7.74 倍；市值 112.31 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -92915,7 +92915,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 4.33 元；PE 不适用（原始 PE -10.41 倍）；PB 1.26 倍；市值 61.37 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率14%/1.27;冷5;毛10；资产负债表稳健3项；历史利润振幅34.6倍；10年均利市盈率26.8倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率14%/1.27;冷5;毛10；资产负债表稳健3项；历史利润振幅34.6倍；10年均利市盈率26.8倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -92936,7 +92936,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 4.33 元；PE 不适用（原始 PE -10.41 倍）；PB 1.26 倍；市值 61.37 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 4.33 元；PE 不适用（原始 PE -10.41 倍）；PB 1.26 倍；市值 61.37 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -93050,7 +93050,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 9.80 元；PE 不适用（原始 PE -490.00 倍）；PB 3.08 倍；市值 22.11 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率61%/3.08;冷3;利10；资产负债表稳健3项；历史利润振幅72.4倍；10年均利市盈率143.0倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率61%/3.08;冷3;利10；资产负债表稳健3项；历史利润振幅72.4倍；10年均利市盈率143.0倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -93071,7 +93071,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 9.80 元；PE 不适用（原始 PE -490.00 倍）；PB 3.08 倍；市值 22.11 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 9.80 元；PE 不适用（原始 PE -490.00 倍）；PB 3.08 倍；市值 22.11 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -93185,7 +93185,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 3.41 元；PE 不适用（原始 PE -106.90 倍）；PB 16.39 倍；市值 42.03 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率87%/16.40;冷7;利10；资产负债表稳健3项；历史利润振幅300.0倍；10年均利市盈率27.4倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率87%/16.40;冷7;利10；资产负债表稳健3项；历史利润振幅300.0倍；10年均利市盈率27.4倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -93206,7 +93206,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 3.41 元；PE 不适用（原始 PE -106.90 倍）；PB 16.39 倍；市值 42.03 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 3.41 元；PE 不适用（原始 PE -106.90 倍）；PB 16.39 倍；市值 42.03 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -93320,7 +93320,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.66 元；PE 不适用（原始 PE -30.27 倍）；PB 1.01 倍；市值 72.63 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率24%/1.01;冷1;毛10；资产负债表稳健1项；历史利润振幅77.6倍；10年均利市盈率16.8倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率24%/1.01;冷1;毛10；资产负债表稳健1项；历史利润振幅77.6倍；10年均利市盈率16.8倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -93341,7 +93341,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.66 元；PE 不适用（原始 PE -30.27 倍）；PB 1.01 倍；市值 72.63 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 6.66 元；PE 不适用（原始 PE -30.27 倍）；PB 1.01 倍；市值 72.63 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -93455,7 +93455,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 6.65 元；PE 85.26 倍；PB 1.88 倍；市值 1033.42 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外194家总营收加权增速6.7%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-16.4%;年初至今-22.7%;换手0.36%;量比1.09;上限8.0；自身五年市净率/市盈率分位37%"
+          "2025年度：量化事实；value 同行样本194家总营收加权增速6.7%，竞争格局分散(HHI=0.03)扣2分；拐点4项:营收加速+现金流支撑；量价冷度;60日-16.4%;年初至今-22.7%;换手0.36%;量比1.09;上限8.0；自身五年市净率/市盈率分位37%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -93476,7 +93476,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 6.65 元；PE 85.26 倍；PB 1.88 倍；市值 1033.42 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 6.65 元；PE 85.26 倍；PB 1.88 倍；市值 1033.42 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -93590,7 +93590,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 46.09 元；PE 131.69 倍；PB 7.84 倍；市值 159.65 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外151家总营收加权增速7.4%，竞争格局分散(HHI=0.11)扣1分；拐点6项:营收加速+净利率连升；量价冷度;60日-8.6%;年初至今-4.0%;换手1.53%;量比0.76;上限8.0；自身五年市净率/市盈率分位68%"
+          "2025年度：量化事实；value 同行样本151家总营收加权增速7.4%，竞争格局分散(HHI=0.11)扣1分；拐点6项:营收加速+净利率连升；量价冷度;60日-8.6%;年初至今-4.0%;换手1.53%;量比0.76;上限8.0；自身五年市净率/市盈率分位68%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -93611,7 +93611,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 46.09 元；PE 131.69 倍；PB 7.84 倍；市值 159.65 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 46.09 元；PE 131.69 倍；PB 7.84 倍；市值 159.65 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -94386,7 +94386,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 17.57 元；PE 109.81 倍；PB 2.42 倍；市值 32.14 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-10.4%;年初至今-23.5%;换手1.08%;量比1.52;上限8.0；自身五年市净率/市盈率分位56%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:净利率连升+利润连升；量价冷度;60日-10.4%;年初至今-23.5%;换手1.08%;量比1.52;上限8.0；自身五年市净率/市盈率分位56%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -94407,7 +94407,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 17.57 元；PE 109.81 倍；PB 2.42 倍；市值 32.14 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 17.57 元；PE 109.81 倍；PB 2.42 倍；市值 32.14 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -94534,7 +94534,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 13.71 元；PE 68.55 倍；PB 2.83 倍；市值 35.16 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率83%/2.89;冷6;毛8；资产负债表稳健4项；历史利润振幅3.0倍；10年均利市盈率44.1倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率83%/2.89;冷6;毛8；资产负债表稳健4项；历史利润振幅3.0倍；10年均利市盈率44.1倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -94555,7 +94555,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 13.71 元；PE 68.55 倍；PB 2.83 倍；市值 35.16 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 13.71 元；PE 68.55 倍；PB 2.83 倍；市值 35.16 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -95020,7 +95020,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 34.73 元；PE 289.42 倍；PB 5.18 倍；市值 30.71 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:净利率连升+利润连升；量价冷度;60日-12.5%;年初至今-37.3%;换手1.78%;量比1.15;上限8.0；自身五年市净率分位38%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点4项:净利率连升+利润连升；量价冷度;60日-12.5%;年初至今-37.3%;换手1.78%;量比1.15;上限8.0；自身五年市净率分位38%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -95041,7 +95041,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 34.73 元；PE 289.42 倍；PB 5.18 倍；市值 30.71 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 34.73 元；PE 289.42 倍；PB 5.18 倍；市值 30.71 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -95168,7 +95168,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 44.99 元；PE 78.93 倍；PB 8.14 倍；市值 40.65 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 本司外584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:营收加速+净利率连升；量价冷度;60日-4.0%;年初至今-10.0%;换手1.12%;量比0.95;上限8.0；自身五年市净率/市盈率分位43%"
+          "2025年度：量化事实；value 同行样本584家总营收加权增速8.6%，竞争格局分散(HHI=0.03)扣2分；拐点5项:营收加速+净利率连升；量价冷度;60日-4.0%;年初至今-10.0%;换手1.12%;量比0.95;上限8.0；自身五年市净率/市盈率分位43%"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -95189,7 +95189,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 44.99 元；PE 78.93 倍；PB 8.14 倍；市值 40.65 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 44.99 元；PE 78.93 倍；PB 8.14 倍；市值 40.65 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -95441,7 +95441,7 @@
         "official_fetch_completed": false,
         "quantitative_facts": [
           "2026-08-28：估值快照；value 估值快照：股价 28.64 元；PE 286.40 倍；PB 2.96 倍；市值 34.85 亿元（交易日 2026-08-28）；同比 候选快照；非公司财报，未替代收盘独立核验",
-          "2025年度：筛选量化事实；value 已登记的外部证据；市净率32%/3.04;冷5;利8；资产负债表稳健3项；历史利润振幅16.6倍；10年均利市盈率128.2倍"
+          "2025年度：量化事实；value 已登记的外部证据；市净率32%/3.04;冷5;利8；资产负债表稳健3项；历史利润振幅16.6倍；10年均利市盈率128.2倍"
         ],
         "recommendation_label": "不建议",
         "recommended_action": "demote",
@@ -95462,7 +95462,7 @@
         "source_verification_issue_kinds": {},
         "source_verification_issues": [],
         "source_verification_status": "pass",
-        "summary": "估值快照：股价 28.64 元；PE 286.40 倍；PB 2.96 倍；市值 34.85 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。规则候选标签仅决定研究范围，不作为买入理由；独立结论为do_not_recommend。",
+        "summary": "估值快照：股价 28.64 元；PE 286.40 倍；PB 2.96 倍；市值 34.85 亿元（交易日 2026-08-28）；本轮已检索公司公告索引，并从商业模式、盈利/现金流质量、估值与行业周期进行独立复核。PE较高或盈利口径不可用，暂不支持买入。独立结论为do_not_recommend。",
         "verdict": "confirmed",
         "web_search_claim_urls_verified": true,
         "web_search_dropped_claim_url_count": 0,
@@ -179521,7 +179521,7 @@
     "affected_company_count": 0,
     "audit_contract_version": 3,
     "audit_passed": true,
-    "audit_sha256": "e661fcba0ddb32a5761438fc2d1f996754a90f0bb41349dcf171600e02f14cce",
+    "audit_sha256": "24a05ea6f5aa22dd3265b2c18ae99b8a6c872014260e7ddbe4b04683f874b2ae",
     "available": true,
     "blocked": 0,
     "blocked_semantic_claim_count": 0,
@@ -200015,7 +200015,7 @@
     "company_unverified_count": 0,
     "failed": 0,
     "invalid_claim_url_count": 0,
-    "merged_sha256": "45363e43cd65a79303b1173c7f7a58e151ea9dbdabc01fcc3bdcbfcd5882d9fc",
+    "merged_sha256": "1589d1cec569b1f3db37a75e212bbfa678a387dacdd71bfcfa64341368192417",
     "network_warnings_allowed": false,
     "ok": 2162,
     "projection_claim_count": 4035,

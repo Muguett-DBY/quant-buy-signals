@@ -392,6 +392,7 @@ _RULE_REASON_LEAK_RE = re.compile(
     r"(?:筛选|买入|七类|模型)规则(?:分数|评分|状态|触发|达标|结果|候选)|"
     r"(?:候选|规则|筛选|类型|type).{0,8}(?:触发|达标)|"
     r"(?:触发|达标).{0,8}(?:候选|规则|筛选|类型|type)|候选池|入池|"
+    r"规则候选标签|筛选量化事实|本司外\d|"
     r"\b(?:triggered|conditional|insufficient_evidence)\b",
     re.IGNORECASE,
 )

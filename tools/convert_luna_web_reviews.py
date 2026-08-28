@@ -91,6 +91,12 @@ def _sanitize_reason_text(value: Any, limit: int = 1200) -> str:
     )
     text = re.sub(r"(?:仅是|只是)?(?:筛选索引|研究索引)", "", text)
     text = re.sub(r"分片中的(?:type|类型)状态(?:未作为买入理由)?", "", text, flags=re.IGNORECASE)
+    # A few review writers append a deterministic-pool disclaimer after the
+    # company conclusion.  The candidate pool is already rendered in its own
+    # UI section; keeping this sentence would make the AI prose fail the
+    # public rule-language contract.
+    text = re.sub(r"规则候选标签仅决定研究范围，不作为买入理由[；;。]?", "", text)
+    text = text.replace("筛选量化事实", "量化事实")
     text = text.replace("筛选规则", "研究条件")
     text = text.replace("买入规则", "投资条件")
     text = re.sub(r"\s{2,}", " ", text)
