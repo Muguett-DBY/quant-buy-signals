@@ -79,6 +79,8 @@ def _bash_executable() -> str | None:
         (["cloudflare-cron/worker.js"], True, False),
         (["cloudflare/quant-dashboard/market_signing_public_key.txt"], True, True),
         (["tests/test_cloudflare_dashboard.py"], True, False),
+        (["tools/ai_screening_narrative.py"], True, False),
+        (["tests/test_ai_screening_comparison.py"], True, False),
         ([".github/workflows/tests.yml"], True, True),
         ([".github/scripts/classify_website_ci.py"], True, True),
         (["data/fetcher.py"], False, True),
@@ -178,6 +180,13 @@ def test_web_gate_is_small_and_matches_the_predeployment_contract_gate():
 
     expected_tests = "tests/test_cloudflare_dashboard.py tests/test_website_ci.py"
     assert expected_tests in web_run
+    for ai_test in (
+        "tests/test_ai_screening_narrative.py",
+        "tests/test_ai_screening_comparison.py",
+        "tests/test_ai_screening_source_audit.py",
+        "tests/test_merge_ai_screening_reviews.py",
+    ):
+        assert ai_test in web_run
     assert expected_tests in predeploy_run
     assert "requirements-dev-lock.txt" not in web_run
     assert "node --check cloudflare-cron/worker.js" in web_run

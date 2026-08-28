@@ -15,12 +15,48 @@ RUN_BOTH_FILES = frozenset(
         "cloudflare/quant-dashboard/market_signing_public_key.txt",
     }
 )
-WEB_FILES = frozenset(
+# The AI overlay has its own compact contract suite and R2 publication lane;
+# keep those website-only changes out of the full market-data test matrix.
+AI_SCREENING_FILES = frozenset(
     {
-        ".github/workflows/deploy-cloudflare.yml",
-        "tests/test_cloudflare_dashboard.py",
-        "tests/test_website_ci.py",
+        "tools/ai_screening_contract.py",
+        "tools/validate_ai_screening_public.py",
+        "tools/calibrate_ai_screening_ranking.py",
+        "tools/ai_screening_identity.py",
+        "tools/audit_ai_screening_full.py",
+        "tools/sanitize_ai_screening_identity.py",
+        "tools/build_codex_luna_review.py",
+        "tools/ai_company_research_knowledge.md",
+        "tools/ai_screening_dual_channel_contract.py",
+        "tools/publish_ai_screening.py",
+        "tools/ai_screening_narrative.py",
+        "tools/ai_screening_comparison.py",
+        "tools/audit_ai_screening_sources.py",
+        "tools/convert_luna_web_reviews.py",
+        "tools/sanitize_codex_luna_reviews.py",
+        "tests/test_ai_screening_contract.py",
+        "tests/test_validate_ai_screening_public.py",
+        "tests/test_convert_luna_web_reviews.py",
+        "tests/test_ai_screening_release_contract.py",
+        "tests/test_ai_screening_narrative.py",
+        "tests/test_ai_screening_comparison.py",
+        "tests/test_ai_screening_identity_audit.py",
+        "tests/test_build_codex_luna_review.py",
+        "tests/test_ai_screening_dual_channel_contract.py",
+        "tests/test_sanitize_codex_luna_reviews.py",
+        "tests/test_assemble_ai_screening_reviews.py",
+        "tests/test_merge_ai_screening_reviews.py",
     }
+)
+WEB_FILES = (
+    frozenset(
+        {
+            ".github/workflows/deploy-cloudflare.yml",
+            "tests/test_cloudflare_dashboard.py",
+            "tests/test_website_ci.py",
+        }
+    )
+    | AI_SCREENING_FILES
 )
 
 # These products remain in the repository, but they are intentionally outside

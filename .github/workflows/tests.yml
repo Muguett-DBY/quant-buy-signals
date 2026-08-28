@@ -167,7 +167,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install web contract dependencies
-        run: python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+        run: python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3 pymupdf==1.28.0
 
       - name: Worker syntax and website contracts
         shell: bash
@@ -176,7 +176,20 @@ jobs:
           node --check cloudflare-cron/worker.js
           node --check cloudflare/quant-dashboard/pages_worker.js
           node --check cloudflare/quant-dashboard/refresh_worker.js
-          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py -q
+          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py \
+            tests/test_ai_screening_narrative.py \
+            tests/test_ai_screening_comparison.py \
+            tests/test_validate_ai_screening_public.py \
+            tests/test_convert_luna_web_reviews.py \
+            tests/test_ai_screening_release_contract.py \
+            tests/test_ai_screening_source_audit.py \
+            tests/test_ai_screening_identity_audit.py \
+            tests/test_calibrate_ai_screening_ranking.py \
+            tests/test_build_codex_luna_review.py \
+            tests/test_ai_screening_dual_channel_contract.py \
+            tests/test_sanitize_codex_luna_reviews.py \
+            tests/test_assemble_ai_screening_reviews.py \
+            tests/test_merge_ai_screening_reviews.py -q
 
   data:
     name: Website data-integrity gate
