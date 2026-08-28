@@ -144,6 +144,7 @@ jobs:
           fi
           echo "seed_changed=${seed_changed}" >> "${GITHUB_OUTPUT}"
           echo "upload=false" >> "${GITHUB_OUTPUT}"
+          echo "stale_seed=false" >> "${GITHUB_OUTPUT}"
           if [[ ! -f "${seed}" ]]; then
             echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
             exit 0
@@ -163,8 +164,9 @@ jobs:
           stale_seed=false
           if [[ "${live_generation}" != "${generation}" ]]; then
             if [[ "${seed_changed}" == "true" ]]; then
-              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}." >&2
-              exit 1
+              echo "stale_seed=true" >> "${GITHUB_OUTPUT}"
+              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}; refusing to publish a stale overlay and continuing the website deployment."
+              exit 0
             fi
             stale_seed=true
             market_as_of="$(jq -er '.market_as_of' "${seed}")"
@@ -298,7 +300,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ steps.ai_preflight.outputs.seed_changed }}" == "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
+          if [[ "${{ steps.ai_preflight.outputs.seed_changed }}" == "true" && "${{ steps.ai_preflight.outputs.stale_seed }}" != "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
             echo "The changed AI screening seed was not uploaded." >&2
             exit 1
           fi

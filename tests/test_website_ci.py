@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy-cloudflare.yml"
+PUBLISH_AI_WORKFLOW = ROOT / ".github" / "workflows" / "publish-ai-screening.yml"
 CLASSIFIER_PATH = ROOT / ".github" / "scripts" / "classify_website_ci.py"
 MARKET_SIGNING_PUBLIC_KEY = ROOT / "cloudflare" / "quant-dashboard" / "market_signing_public_key.txt"
 REFRESH_WORKER = ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
@@ -296,6 +297,38 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     assert ".research_source_urls_verified_count == .candidate_total" in verify["run"]
     assert ".type_pair_research_source_urls_verified_count == .type_pair_candidate_total" in verify["run"]
     assert ".type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total" in verify["run"]
+
+
+def test_ai_overlay_release_skips_stale_generation_without_publishing_it():
+    publish = _workflow(PUBLISH_AI_WORKFLOW)
+    publish_text = PUBLISH_AI_WORKFLOW.read_text(encoding="utf-8")
+    publish_steps = publish["jobs"]["publish"]["steps"]
+    preflight = next(step for step in publish_steps if step.get("id") == "preflight")
+    upload = next(step for step in publish_steps if "Upload the AI overlay" in step["name"])
+    pages = next(step for step in publish_steps if "Deploy only the Pages AI reader" in step["name"])
+    verify = next(step for step in publish_steps if step.get("name") == "Verify the published AI API")
+
+    assert 'echo "stale=false"' in preflight["run"]
+    assert 'echo "stale=true"' in preflight["run"]
+    assert "leaving the generation-bound overlay unchanged" in preflight["run"]
+    for step in (upload, pages, verify):
+        assert step["if"] == "steps.preflight.outputs.stale != 'true'"
+    assert "does not match the live market generation" not in publish_text
+    assert "generation-bound" in publish_text
+
+
+def test_cloudflare_deploy_does_not_fail_on_a_changed_but_stale_ai_seed():
+    deploy = _workflow(DEPLOY_WORKFLOW)
+    deploy_text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+    steps = deploy["jobs"]["deploy"]["steps"]
+    preflight = next(step for step in steps if step.get("id") == "ai_preflight")
+    verify = next(step for step in steps if step.get("name") == "Verify the deployed site")
+
+    assert 'echo "stale_seed=false"' in preflight["run"]
+    assert 'echo "stale_seed=true"' in preflight["run"]
+    assert "continuing the website deployment" in preflight["run"]
+    assert "steps.ai_preflight.outputs.stale_seed" in verify["run"]
+    assert "refusing to publish a stale overlay" in deploy_text
 
 
 def test_cloudflare_deploy_bash_blocks_parse_with_bash():
