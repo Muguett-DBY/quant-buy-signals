@@ -1713,7 +1713,7 @@ function aiScreeningChangesPageResponse(request){
         const current=item.current_category?labels[item.current_category]+"（"+score(item.current_score)+"）":"今日不在候选";
         const delta=item.score_delta===null||item.score_delta===undefined?"":(Number(item.score_delta)>=0?" · 分数 "+(item.score_delta>0?"+":"")+Number(item.score_delta).toFixed(1):" · 分数 "+Number(item.score_delta).toFixed(1));
         return '<article class="change-card"><div class="change-head"><strong>'+esc(item.name||"—")+'<small>代码：'+esc(item.security_code||"—")+'</small></strong><span class="change-badge '+esc(direction)+'">'+esc(badge)+'</span></div><div class="change-path">昨日：<b>'+esc(previous)+'</b> → 今日：<b>'+esc(current)+'</b>'+esc(delta)+'</div><p>'+esc(item.reason||"今日已按公司事实重新形成独立结论。")+'</p></article>';
-      }).join(""):"<p class=\"empty\">当前筛选没有结论变化。</p>";
+      }).join(""):'<p class="empty">当前筛选没有结论变化。</p>';
     }
     async function load(){
       try{
