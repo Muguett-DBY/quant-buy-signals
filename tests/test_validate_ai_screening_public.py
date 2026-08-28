@@ -238,13 +238,13 @@ def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     result = validate_artifact_file(
         path,
-        expected_generation="7d342251f53fbedb",
-        expected_market_as_of="2026-08-27",
+        expected_generation="7ee4958f2e33242d",
+        expected_market_as_of="2026-08-28",
     )
 
-    assert result["candidate_total"] == 1030
-    assert result["searched"] == 1030
-    assert result["actions"] == {"avoid": 787, "priority_buy": 2, "watchlist": 241}
+    assert result["candidate_total"] == 964
+    assert result["searched"] == 964
+    assert result["actions"] == {"avoid": 570, "priority_buy": 5, "watchlist": 389}
     assert payload["review_mode"] == "codex_luna_web_review"
     assert payload["reviewed_without_web_search"] == 0
     assert payload["full_coverage_final_recommendation"] is True
@@ -262,7 +262,7 @@ def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
 def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -> None:
     payload = json.loads(Path("cloudflare/quant-dashboard/ai_screening_seed.json").read_text(encoding="utf-8"))
     packets = payload["packets"]
-    assert len(packets) == 1030
+    assert len(packets) == 964
     assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
     assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
     # Source repair may remove an unprovable auxiliary claim, but every
@@ -271,6 +271,9 @@ def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -
     assert {
         packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"
     } == {
+        "603444",
+        "300515",
+        "000680",
         "600926",
         "600919",
     }
