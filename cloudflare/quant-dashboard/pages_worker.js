@@ -1218,6 +1218,7 @@ function aiScreeningPageResponse(request){
     .candidate-rules{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
     .candidate-rules summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:700}
     .candidate-rule{margin-top:8px}
+    .candidate-rule-note{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
     .ai-research>p{margin:6px 0}
     .research-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:7px}
     .research-item{padding:9px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e7edf5;font-size:13px}
@@ -1295,6 +1296,7 @@ function aiScreeningPageResponse(request){
     const AI_RULE_REASON_RE=/${AI_RULE_REASON_RE.source}/i;
     const esc=value=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
     const labels={recommend_buy:"建议买",observe:"观察",do_not_recommend:"不建议"};
+    const deterministicStatusLabels={triggered:"已触发",conditional:"待确认",observe:"观察",insufficient_evidence:"确定性前筛资料不足",evidence_gap:"存在未核验维度",decision_relevant:"结论相关资料待补",source_gap:"直接/结构化资料待补",proxy_verification:"量化代理待核验",bounded:"结论已锁定",vetoed:"硬条件否决",not_triggered:"未触发",not_applicable:"不适用",blocked:"交易状态阻断"};
     const pageSize=30;
     let page=1;
     let payload={packets:[]};
@@ -1570,6 +1572,8 @@ function aiScreeningPageResponse(request){
       const sourceMarkup=claims(review)||'<div class="claim">暂无已核验公司资料来源</div>';
       const categoryLabels={deep_value:"深度价值",turnaround:"困境反转",compounder:"复利成长",cyclical:"周期",growth:"成长",venture:"早期/风险投资",quality_equity:"优质股权",other:"其他"};
       const economicCategory=categoryLabels[String(review.economic_category||"")]||String(review.economic_category||"");
+      const deterministicStatus=String(deterministic.status||"");
+      const deterministicStatusLabel=deterministicStatusLabels[deterministicStatus]||"未分类状态";
       return '<article class="card ai-card">'+
         '<div class="top"><div><strong>'+esc(packet.name||"—")+'</strong><small>代码：'+esc(packet.security_code||"—")+'</small></div><span class="category '+group+'">'+labels[group]+'</span></div>'+
         '<div class="scoreline"><span class="score">'+esc(Number(review.buy_attractiveness_score||0).toFixed(1))+'</span><span class="confidence">AI买入吸引力分 · 置信度：'+esc(review.confidence||"—")+'</span></div>'+
@@ -1581,7 +1585,7 @@ function aiScreeningPageResponse(request){
          scoreComponents(review)+economicProfile(review)+valuationResearch(review)+
          '<details class="evidence-details"><summary>展开量化事实（报告期与数字）</summary>'+list(companyFacts,"公司量化事实","暂无可安全展示的公司量化事实")+"</details>"+
          searchFindings(review)+
-        '<details class="candidate-rules"><summary>为何进入规则候选池</summary><div class="rule candidate-rule">规则候选类型：'+esc(types.filter(Boolean).join(" / ")||"—")+" · 确定性状态："+esc(deterministic.status||"—")+" · 规则分数："+esc(deterministic.score??deterministic.score_upper_bound??"—")+"</div>"+
+        '<details class="candidate-rules"><summary>为何进入研究池（仅说明候选范围）</summary><div class="rule candidate-rule">确定性前筛状态：'+esc(deterministicStatusLabel)+" · 规则候选类型："+esc(types.filter(Boolean).join(" / ")||"—")+" · 规则分数："+esc(deterministic.score??deterministic.score_upper_bound??"—")+'<p class="candidate-rule-note">这里仅说明公司为何进入 AI 研究范围，不是 AI 的最终结论。AI 已独立联网检索并结合公司事实给出上方“建议买、观察、不建议”。</p></div>'+
         list(ruleFacts,"规则候选依据","暂无可展示的规则候选依据")+
         '</details><div class="source-section"><h3>公司资料与来源</h3>'+sourceMarkup+"</div></section></details></article>";
     }

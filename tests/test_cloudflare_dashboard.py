@@ -2059,7 +2059,9 @@ def test_ai_screening_route_is_read_only_generation_bound_and_csp_protected(tmp_
     assert "估值与安全边际" in source
     assert "主要反证与风险" in source
     assert "公司资料与来源" in source
-    assert "为何进入规则候选池" in source
+    assert "为何进入研究池（仅说明候选范围）" in source
+    assert "这里仅说明公司为何进入 AI 研究范围，不是 AI 的最终结论" in source
+    assert "确定性前筛状态：" in source
     assert "candidate-rules" in source
     assert "quantitative_facts" in source
     assert "economic_category" in source
@@ -2684,7 +2686,7 @@ assert.equal(response.status, 200);
     assert.ok(html.includes("估值与安全边际"));
     assert.ok(html.includes("主要反证与风险"));
     assert.ok(html.includes("公司资料与来源"));
-assert.ok(html.includes("为何进入规则候选池"));
+assert.ok(html.includes("为何进入研究池（仅说明候选范围）"));
 assert.ok(!inlineScript.includes("reasonValues=group==='recommend_buy'"));
 assert.ok(!inlineScript.includes("确定性规则：'+esc(det.status"));
 assert.doesNotThrow(() => new Function(inlineScript));
@@ -2809,7 +2811,9 @@ assert.ok(!defaultCard.includes("模型已达标"));
 assert.ok(!defaultCard.includes("type1"));
 assert.ok(!defaultCard.includes("conditional"));
 assert.ok(candidateDetails.includes("规则候选类型：type1 / type2"));
-assert.ok(candidateDetails.includes("确定性状态：conditional"));
+assert.ok(candidateDetails.includes("确定性前筛状态：待确认"));
+assert.ok(candidateDetails.includes("这里仅说明公司为何进入 AI 研究范围，不是 AI 的最终结论"));
+assert.ok(!candidateDetails.includes("确定性状态：conditional"));
 assert.ok(candidateDetails.includes("规则评分88分"));
 assert.ok(!candidateDetails.includes("原生搜索事件已核验"));
 """
