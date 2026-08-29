@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from data import quality_history as qh
+from data.as_of import shanghai_today
 from data.cache import SafeFileCache
 from data.market_history import TencentWeeklyHistoryAdapter, WeeklyClose
 from data.quality_history import (
@@ -628,7 +629,7 @@ def test_quality_history_rejects_future_cutoffs_before_network_work():
     with pytest.raises(ValueError, match="future"):
         fetch_quality_history(
             "600519",
-            date.today() + timedelta(days=1),
+            shanghai_today() + timedelta(days=1),
             weekly_adapter=adapter,
             use_cache=False,
         )

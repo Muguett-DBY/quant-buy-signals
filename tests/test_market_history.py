@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import requests
 
+from data.as_of import shanghai_today
 from data.cache import SafeFileCache
 from data.market_history import (
     BLUME_RAW_WEIGHT,
@@ -444,7 +445,7 @@ def test_public_orchestrator_rejects_future_cutoff_before_io(tmp_path):
     with pytest.raises(ValueError, match="future"):
         estimate_market_beta(
             "600519",
-            date.today() + timedelta(days=1),
+            shanghai_today() + timedelta(days=1),
             adapter=adapter,
             cache_dir=tmp_path,
         )
