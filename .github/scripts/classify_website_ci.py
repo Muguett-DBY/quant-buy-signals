@@ -31,6 +31,8 @@ AI_SCREENING_FILES = frozenset(
         "tools/ai_company_research_knowledge.md",
         "tools/ai_screening_dual_channel_contract.py",
         "tools/publish_ai_screening.py",
+        "tools/build_ai_screening.py",
+        "tools/atomic_io.py",
         "tools/ai_screening_narrative.py",
         "tools/ai_screening_comparison.py",
         "tools/audit_ai_screening_sources.py",
@@ -42,23 +44,23 @@ AI_SCREENING_FILES = frozenset(
         "tests/test_ai_screening_release_contract.py",
         "tests/test_ai_screening_narrative.py",
         "tests/test_ai_screening_comparison.py",
+        "tests/test_ai_screening_source_audit.py",
+        "tests/test_calibrate_ai_screening_ranking.py",
         "tests/test_ai_screening_identity_audit.py",
         "tests/test_build_codex_luna_review.py",
         "tests/test_ai_screening_dual_channel_contract.py",
         "tests/test_sanitize_codex_luna_reviews.py",
         "tests/test_assemble_ai_screening_reviews.py",
         "tests/test_merge_ai_screening_reviews.py",
+        "tests/test_atomic_io.py",
     }
 )
-WEB_FILES = (
-    frozenset(
-        {
-            ".github/workflows/deploy-cloudflare.yml",
-            "tests/test_cloudflare_dashboard.py",
-            "tests/test_website_ci.py",
-        }
-    )
-    | AI_SCREENING_FILES
+WEB_FILES = frozenset(
+    {
+        ".github/workflows/deploy-cloudflare.yml",
+        "tests/test_cloudflare_dashboard.py",
+        "tests/test_website_ci.py",
+    }
 )
 
 # These products remain in the repository, but they are intentionally outside
@@ -92,6 +94,11 @@ def classify_paths(paths: Iterable[str]) -> WebsiteGates:
     web = False
     data = False
     for path in normalized:
+        if path in AI_SCREENING_FILES:
+            # The dedicated AI publication workflow owns this compact gate.
+            # A seed-only change must not repeat the general Worker or the
+            # 45-minute data-integrity suites.
+            continue
         if path in RUN_BOTH_FILES:
             web = True
             data = True

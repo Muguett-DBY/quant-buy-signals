@@ -16,25 +16,36 @@ with a reason; values are never guessed.
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urljoin, urlparse
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
+from data.as_of import shanghai_today
 from data.cache import SafeFileCache
+from data.provider_http import (
+    is_transient_request_error,
+    read_bounded_response_bytes,
+    retry_delay_seconds,
+    thread_local_session,
+)
 
-MODEL_ID = "cninfo-annual-acquisition-v1"
-CACHE_SCHEMA_VERSION = 1
+MODEL_ID = "cninfo-annual-acquisition-v2"
+CACHE_SCHEMA_VERSION = 2
 MAX_PDF_BYTES = 60 * 1024 * 1024
+MAX_JSON_BYTES = 5 * 1024 * 1024
 MAX_TEXT_WORDS = 2_000_000
+REQUEST_ATTEMPTS = 3
 
-CNINFO_TOP_SEARCH_URL = "http://www.cninfo.com.cn/new/information/topSearch/query"
-CNINFO_ANNOUNCE_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
-CNINFO_PDF_PREFIX = "http://static.cninfo.com.cn/"
+CNINFO_TOP_SEARCH_URL = "https://www.cninfo.com.cn/new/information/topSearch/query"
+CNINFO_ANNOUNCE_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
+CNINFO_PDF_PREFIX = "https://static.cninfo.com.cn/"
 CNINFO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Referer": "http://www.cninfo.com.cn/",
+    "Referer": "https://www.cninfo.com.cn/",
     "X-Requested-With": "XMLHttpRequest",
 }
 CNINFO_CACHE_DIR = CACHE_DIRECTORY / "cninfo_annual"
@@ -42,6 +53,7 @@ CNINFO_CACHE_DIR = CACHE_DIRECTORY / "cninfo_annual"
 _A_SHARE_CODE = re.compile(r"^[036][0-9]{5}$")
 _NUMERIC_TOKEN = re.compile(r"^\(?-?[0-9][0-9,]*(\.[0-9]+)?\)?$")
 _ACQUISITION_LABEL = re.compile(r"(?:取得|购买|收购)子公司|acquisition.{0,40}subsidiari|acquisition.{0,40}business")
+_EXPLICIT_ZERO_TOKENS = frozenset({"-", "–", "—", "―", "−", "－", "﹣"})
 _UNIT_PATTERNS = [
     re.compile(r"单位[：:]?\s*[^。；;]{0,14}?(?:人民币)?(?P<unit>百万元|千元|万元|亿元)"),
     re.compile(r"金额单位均为(?:人民币)?(?P<unit>百万元|千元|万元|亿元)"),
@@ -60,6 +72,7 @@ class AnnualAcquisitionEvidence:
     acquisition_cashflow: float | None
     unit: str
     source_url: str
+    source_sha256: str
     reason: str
 
 
@@ -85,15 +98,58 @@ def _parse_pdf_number(word: str) -> float:
     return -parsed if negative else parsed
 
 
-def _request_json(url: str, data: Mapping[str, Any] | None, *, timeout: tuple[int, int] = (15, 30)):
-    import requests
+def _validate_source_url(url: str, *, expected_host: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != expected_host or parsed.username or parsed.password:
+        raise CninfoAnnualError("CNINFO response redirected outside the trusted HTTPS origin")
+    return url
 
+
+def _read_bounded_response(response: Any, *, maximum_bytes: int) -> bytes:
     try:
-        response = requests.post(url, data=data, headers=CNINFO_HEADERS, timeout=timeout)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:  # noqa: BLE001
-        raise CninfoAnnualError(f"CNINFO request failed: {type(exc).__name__}") from exc
+        content = read_bounded_response_bytes(response, maximum_bytes)
+    except ValueError as exc:
+        raise CninfoAnnualError("CNINFO response exceeds the size contract") from exc
+    if not content:
+        raise CninfoAnnualError("CNINFO response returned empty content")
+    return content
+
+
+def _request_json(
+    url: str,
+    data: Mapping[str, Any] | None,
+    *,
+    session: Any = None,
+    timeout: tuple[int, int] = (15, 30),
+):
+    client = session or thread_local_session()
+    last_error: BaseException | None = None
+    for attempt in range(REQUEST_ATTEMPTS):
+        response = None
+        try:
+            response = client.post(url, data=data, headers=CNINFO_HEADERS, timeout=timeout, stream=True)
+            response.raise_for_status()
+            final_url = str(getattr(response, "url", None) or url)
+            _validate_source_url(final_url, expected_host="www.cninfo.com.cn")
+            payload = json.loads(_read_bounded_response(response, maximum_bytes=MAX_JSON_BYTES))
+            break
+        except (CninfoAnnualError, json.JSONDecodeError, OSError, ValueError) as exc:
+            last_error = exc
+            should_retry = isinstance(exc, OSError) or is_transient_request_error(exc, response)
+        except Exception as exc:  # requests exceptions remain optional at import time
+            last_error = exc
+            should_retry = is_transient_request_error(exc, response)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        if not should_retry or attempt + 1 >= REQUEST_ATTEMPTS:
+            raise CninfoAnnualError(f"CNINFO request failed: {type(last_error).__name__}") from last_error
+        import time
+
+        time.sleep(retry_delay_seconds(response, attempt=attempt, base_seconds=2.0))
+    else:  # pragma: no cover - the loop either breaks or raises
+        raise CninfoAnnualError("CNINFO request failed")
     if isinstance(payload, list):
         return payload
     if isinstance(payload, Mapping) and payload.get("announcements") is not None:
@@ -101,8 +157,8 @@ def _request_json(url: str, data: Mapping[str, Any] | None, *, timeout: tuple[in
     raise CninfoAnnualError("CNINFO response is not a JSON list or announcement payload")
 
 
-def _resolve_org_id(code: str) -> str:
-    results = _request_json(CNINFO_TOP_SEARCH_URL, {"keyWord": code, "maxNum": 10})
+def _resolve_org_id(code: str, *, session: Any = None) -> str:
+    results = _request_json(CNINFO_TOP_SEARCH_URL, {"keyWord": code, "maxNum": 10}, session=session)
     for entry in results:
         if not isinstance(entry, Mapping):
             continue
@@ -113,7 +169,7 @@ def _resolve_org_id(code: str) -> str:
     raise CninfoAnnualError(f"CNINFO org id not found for {code}")
 
 
-def _find_annual_report_pdf(code: str, org_id: str, year: int) -> str:
+def _find_annual_report_pdf(code: str, org_id: str, year: int, *, session: Any = None) -> str:
     """Return the adjunct URL of the annual report whose cover year is ``year``."""
 
     start = f"{year}-01-01"
@@ -136,6 +192,7 @@ def _find_annual_report_pdf(code: str, org_id: str, year: int) -> str:
             "sortType": "",
             "isHLtitle": "true",
         },
+        session=session,
     )
     announcements = results.get("announcements") or []
     for announcement in announcements:
@@ -143,26 +200,38 @@ def _find_annual_report_pdf(code: str, org_id: str, year: int) -> str:
             continue
         title = str(announcement.get("announcementTitle") or "")
         adjunct = str(announcement.get("adjunctUrl") or "")
-        if f"{year}年" in title and "摘要" not in title and adjunct.endswith(".PDF"):
+        if f"{year}年" in title and "摘要" not in title and adjunct.upper().endswith(".PDF"):
             return adjunct
     raise CninfoAnnualError(f"CNINFO annual report {year} not found for {code}")
 
 
-def _download_pdf(adjunct_url: str) -> bytes:
-    import requests
+def _download_pdf(adjunct_url: str, *, session: Any = None) -> tuple[bytes, str]:
+    url = urljoin(CNINFO_PDF_PREFIX, adjunct_url.lstrip("/"))
+    _validate_source_url(url, expected_host="static.cninfo.com.cn")
+    client = session or thread_local_session()
+    last_error: BaseException | None = None
+    for attempt in range(REQUEST_ATTEMPTS):
+        response = None
+        try:
+            response = client.get(url, headers=CNINFO_HEADERS, timeout=(30, 120), stream=True)
+            response.raise_for_status()
+            final_url = _validate_source_url(
+                str(getattr(response, "url", None) or url), expected_host="static.cninfo.com.cn"
+            )
+            return _read_bounded_response(response, maximum_bytes=MAX_PDF_BYTES), final_url
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            should_retry = is_transient_request_error(exc, response)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        if not should_retry or attempt + 1 >= REQUEST_ATTEMPTS:
+            break
+        import time
 
-    url = CNINFO_PDF_PREFIX + adjunct_url
-    try:
-        response = requests.get(url, headers=CNINFO_HEADERS, timeout=(30, 120))
-        response.raise_for_status()
-        content = response.content
-    except Exception as exc:  # noqa: BLE001
-        raise CninfoAnnualError(f"CNINFO PDF download failed: {type(exc).__name__}") from exc
-    if not content:
-        raise CninfoAnnualError("CNINFO PDF download returned empty content")
-    if len(content) > MAX_PDF_BYTES:
-        raise CninfoAnnualError("CNINFO PDF exceeds the size limit")
-    return content
+        time.sleep(retry_delay_seconds(response, attempt=attempt, base_seconds=3.0))
+    raise CninfoAnnualError(f"CNINFO PDF download failed: {type(last_error).__name__}") from last_error
 
 
 def _detect_unit(page_text: str) -> str:
@@ -249,13 +318,20 @@ def _parse_acquisition_cashflow(pdf_bytes: bytes, code: str, year: int) -> tuple
                 if label_end <= 0:
                     label_end = 0.0
                 candidates: list[float] = []
+                explicit_zero = False
                 for x0, _wy0, _x1, _wy1, word, *_rest in words:
-                    if _wy0 < y1 and _wy1 > y0 and x0 >= label_end - 2 and _NUMERIC_TOKEN.match(word):
-                        candidates.append(_parse_pdf_number(word))
-                if not candidates:
-                    # Dash or blank means "no occurrence this year".
+                    if not (_wy0 < y1 and _wy1 > y0 and x0 >= label_end - 2):
+                        continue
+                    token = word.strip()
+                    if _NUMERIC_TOKEN.match(token):
+                        candidates.append(_parse_pdf_number(token))
+                    elif token in _EXPLICIT_ZERO_TOKENS:
+                        explicit_zero = True
+                if candidates:
+                    return candidates[0], _unit_for_page(page_units, page_index), None
+                if explicit_zero:
                     return 0.0, _unit_for_page(page_units, page_index), None
-                return candidates[0], _unit_for_page(page_units, page_index), None
+                return None, "", "acquisition_value_not_found"
         return None, "", "acquisition_line_not_found"
     finally:
         document.close()
@@ -287,7 +363,7 @@ def fetch_annual_acquisition(
 
     if isinstance(code, bool) or not isinstance(code, str) or not _A_SHARE_CODE.fullmatch(code):
         raise ValueError(f"invalid security code: {code!r}")
-    if isinstance(year, bool) or not isinstance(year, int) or not 2000 <= year <= date.today().year:
+    if isinstance(year, bool) or not isinstance(year, int) or not 2000 <= year <= shanghai_today().year:
         raise ValueError(f"invalid report year: {year!r}")
     path = Path(cache_dir)
     if use_cache:
@@ -309,9 +385,9 @@ def fetch_annual_acquisition(
             except (CninfoAnnualError, TypeError, ValueError):
                 pass
     try:
-        org_id = _resolve_org_id(code)
-        adjunct = _find_annual_report_pdf(code, org_id, year)
-        pdf_bytes = _download_pdf(adjunct)
+        org_id = _resolve_org_id(code, session=session)
+        adjunct = _find_annual_report_pdf(code, org_id, year, session=session)
+        pdf_bytes, source_url = _download_pdf(adjunct, session=session)
         value, unit, reason = _parse_acquisition_cashflow(pdf_bytes, code, year)
     except CninfoAnnualError as exc:
         evidence = AnnualAcquisitionEvidence(
@@ -321,6 +397,7 @@ def fetch_annual_acquisition(
             acquisition_cashflow=None,
             unit="",
             source_url="",
+            source_sha256="",
             reason=str(exc),
         )
     else:
@@ -330,7 +407,8 @@ def fetch_annual_acquisition(
             available=reason is None,
             acquisition_cashflow=value,
             unit=unit,
-            source_url=CNINFO_PDF_PREFIX + adjunct,
+            source_url=source_url,
+            source_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
             reason=reason or "",
         )
     if use_cache:
@@ -351,6 +429,7 @@ def fetch_annual_acquisition(
                         "acquisition_cashflow": evidence.acquisition_cashflow,
                         "unit": evidence.unit,
                         "source_url": evidence.source_url,
+                        "source_sha256": evidence.source_sha256,
                         "reason": evidence.reason,
                     },
                 }

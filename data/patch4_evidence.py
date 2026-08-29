@@ -29,8 +29,9 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
+from data.as_of import shanghai_today
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
-from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds, thread_local_session
 from engine.quality_equity import (
     PATCH4_MAX_EVIDENCE_AGE_DAYS,
     PATCH4_MODEL_ID,
@@ -330,7 +331,7 @@ def _parse_as_of(value: date | str) -> date:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
             raise ValueError("as_of must be a valid calendar date") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise ValueError("as_of cannot be in the future")
     return parsed
 
@@ -1721,6 +1722,8 @@ def fetch_patch4_evidence(
 ) -> Patch4Evidence:
     """Fetch and validate five atomic Patch 4 facts for one A-share security."""
 
+    if session is requests:
+        session = thread_local_session()
     normalized_code = _normalise_code(code)
     cutoff = _parse_as_of(as_of)
     if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:

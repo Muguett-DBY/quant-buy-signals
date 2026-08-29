@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, REQUEST_TIMEOUT
+from data.as_of import shanghai_today
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
 from data.market_history import (
     TENCENT_HISTORY_ENDPOINT,
@@ -33,7 +34,7 @@ from data.market_history import (
     TencentWeeklyHistoryAdapter,
     WeeklyClose,
 )
-from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds, thread_local_session
 
 
 MODEL_ID = "type7-market-history-v1"
@@ -134,7 +135,7 @@ def _parse_as_of(value: date | str) -> date:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
             raise ValueError("as_of must be a valid calendar date") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise ValueError("as_of cannot be in the future")
     return parsed
 
@@ -235,6 +236,8 @@ def _fetch_valuation_rows(
     timeout: int = REQUEST_TIMEOUT,
     rate_limiter: Any = _VALUATION_RATE_LIMITER,
 ) -> list[dict[str, Any]]:
+    if session is requests:
+        session = thread_local_session()
     start = _years_before(as_of, 5)
     params = {
         "reportName": "RPT_VALUEANALYSIS_DET",

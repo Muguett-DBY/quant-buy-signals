@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 
 import config as _production_config
+from data.as_of import shanghai_today
 from data.financial_source_evidence import FinancialSourceEvidenceError, zero_capex_evidence
 from data.patch4_evidence import (
     MODEL_ID as PATCH4_PUBLIC_EVIDENCE_MODEL_ID,
@@ -1689,7 +1690,7 @@ def _audit_type5_bottom_contract_replay(
         or contract.get("code") != code
         or contract.get("as_of") != as_of
         or reference is None
-        or reference > date.today()
+        or reference > shanghai_today()
         or not quote_binding_valid
     ):
         return None
@@ -2147,7 +2148,7 @@ def _audit_patch4_ledger_valid(
         or assessment.get("formula_version") != _AUDIT_PATCH4_FORMULA_VERSION
         or assessment.get("code") != code
         or assessment.get("as_of") != as_of
-        or reference > date.today()
+        or reference > shanghai_today()
         or not isinstance(assessment.get("complete"), bool)
     ):
         return False
@@ -2800,7 +2801,7 @@ def _audit_type7_ledger_impl(
             except ValueError:
                 quote_as_of = None
             expected_valuation_passed = bool(
-                expected_valuation_complete and quote_as_of is not None and quote_as_of <= date.today()
+                expected_valuation_complete and quote_as_of is not None and quote_as_of <= shanghai_today()
             )
             if (
                 set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete", "validation_basis"}
@@ -3479,7 +3480,7 @@ def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list
         code != expected_code
         or not re.fullmatch(r"[036][0-9]{5}", code)
         or parsed_as_of is None
-        or parsed_as_of > date.today()
+        or parsed_as_of > shanghai_today()
     ):
         errors.append("independent company/date binding mismatch")
 
@@ -3987,12 +3988,16 @@ def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list
                 g = _finite(gdN_inputs.get("g"))
                 d = _finite(gdN_inputs.get("d"))
                 rd = _finite(gdN_inputs.get("rd_intensity"))
+                dividend_status = str(gdN_inputs.get("dividend_evidence_status") or "known_zero")
                 cycle_confirmed = gdN_inputs.get("cycle_confirmed") is True
                 if g is None:
                     expected_complete_gdn = False
                     expected_passed_gdn = False
                 else:
-                    expected_complete_gdn = True
+                    independent_route = bool(
+                        (g > 0 and rd is not None and rd >= 0.03) or (gdn_class_code == "C" and cycle_confirmed)
+                    )
+                    expected_complete_gdn = dividend_status != "unavailable" or independent_route
                     if g > 0 and d is not None and d > 0:
                         expected_passed_gdn = True
                     elif g > 0 and rd is not None and rd >= 0.03:
@@ -4006,7 +4011,7 @@ def _independent_type7_ledger_errors(ledger: Any, *, expected_code: str) -> list
                 if (
                     gdN.get("complete") is not expected_complete_gdn
                     or gdN.get("passed") is not expected_passed_gdn
-                    or gdN.get("missing_inputs") != ([] if expected_complete_gdn else ["g"])
+                    or gdN.get("missing_inputs") != ([] if expected_complete_gdn else (["g"] if g is None else ["d"]))
                 ):
                     errors.append("independent gdN filter gate replay mismatch")
                 if expected_complete_gdn is not True:

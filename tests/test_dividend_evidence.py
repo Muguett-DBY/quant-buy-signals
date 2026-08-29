@@ -36,7 +36,8 @@ class _FakeSession:
     def __init__(self, rows_by_code: dict[str, list[dict]]) -> None:
         self._rows = rows_by_code
 
-    def get(self, url, *, params, headers, timeout):
+    def get(self, url, *, params, headers, timeout, stream):
+        assert stream is True
         code = str(params.get("filter") or "").split('"')[1]
         return _FakeResponse(self._rows.get(code, []))
 
@@ -47,8 +48,9 @@ class _QueuedSession:
         self.served: list[_FakeResponse] = []
         self.calls = 0
 
-    def get(self, url, *, params, headers, timeout):
+    def get(self, url, *, params, headers, timeout, stream):
         del url, params, headers, timeout
+        assert stream is True
         self.calls += 1
         response = self.responses.pop(0)
         self.served.append(response)
@@ -86,15 +88,17 @@ def test_load_dividend_evidence_computes_trailing_cash_and_binds_evidence(tmp_pa
         session=session,
     )
 
-    assert "000001" not in evidence  # 无分红记录
+    assert evidence["000001"]["status"] == "unavailable"
+    assert evidence["000001"]["reason"] == "source_returned_no_rows"
     record = evidence["600519"]
+    assert record["status"] == "available"
     assert record["trailing_cash_per_share"] == 27.6 + 23.9
     assert set(record["evidence"]) == {"source", "evidence_id", "as_of", "summary"}
     assert record["evidence"]["as_of"] == "2026-07-31"
     assert "600519" in record["evidence"]["evidence_id"]
 
 
-def test_load_dividend_evidence_falls_back_to_latest_cash_when_no_ex_date(tmp_path):
+def test_load_dividend_evidence_does_not_treat_announced_but_unpaid_cash_as_paid(tmp_path):
     rows = {
         "600519": [
             {
@@ -107,8 +111,82 @@ def test_load_dividend_evidence_falls_back_to_latest_cash_when_no_ex_date(tmp_pa
     }
     session = _FakeSession(rows)
     evidence = load_dividend_evidence(["600519"], as_of="2026-07-31", cache_dir=tmp_path, session=session)
-    assert evidence["600519"]["trailing_cash_per_share"] == 24.0
-    assert evidence["600519"]["payout_ratio"] is None
+    assert evidence["600519"]["status"] == "unavailable"
+    assert evidence["600519"]["reason"] == "no_paid_cash_dividend_in_trailing_year"
+
+
+def test_load_dividend_evidence_rejects_future_ex_date_as_trailing_cash(tmp_path):
+    session = _FakeSession(
+        {
+            "600519": [
+                {
+                    "REPORT_DATE": "2026-06-30",
+                    "NOTICE_DATE": "2026-07-20",
+                    "EX_DIVIDEND_DATE": "2026-08-10",
+                    "PRETAX_BONUS_RMB": 100.0,
+                    "DIVIDENT_RATIO": 0.2,
+                }
+            ]
+        }
+    )
+
+    evidence = load_dividend_evidence(["600519"], as_of="2026-07-31", cache_dir=tmp_path, session=session)
+
+    assert evidence["600519"]["status"] == "unavailable"
+    assert evidence["600519"]["reason"] == "no_paid_cash_dividend_in_trailing_year"
+
+
+def test_load_dividend_evidence_preserves_explicit_paid_zero(tmp_path):
+    session = _FakeSession(
+        {
+            "600519": [
+                {
+                    "REPORT_DATE": "2025-12-31",
+                    "NOTICE_DATE": "2026-04-01",
+                    "EX_DIVIDEND_DATE": "2026-06-01",
+                    "PRETAX_BONUS_RMB": 0.0,
+                    "DIVIDENT_RATIO": 0.0,
+                }
+            ]
+        }
+    )
+
+    evidence = load_dividend_evidence(["600519"], as_of="2026-07-31", cache_dir=tmp_path, session=session)
+
+    assert evidence["600519"]["status"] == "known_zero"
+    assert evidence["600519"]["trailing_cash_per_share"] == 0.0
+
+
+def test_invalid_cached_row_is_refetched_instead_of_becoming_evidence(tmp_path):
+    cache = dividend.SafeFileCache(
+        tmp_path / "600519.json.gz",
+        schema_version=dividend.DIVIDEND_CACHE_SCHEMA_VERSION,
+        ttl=dividend.DIVIDEND_CACHE_TTL_SECONDS,
+    )
+    cache.save(
+        {
+            "model_id": dividend.DIVIDEND_CACHE_MODEL_ID,
+            "code": "600519",
+            "rows": [{"report_date": "invalid", "cash_per_ten_share": 99.0}],
+        }
+    )
+    session = _FakeSession(
+        {
+            "600519": [
+                {
+                    "REPORT_DATE": "2025-12-31",
+                    "EX_DIVIDEND_DATE": "2026-06-01",
+                    "PRETAX_BONUS_RMB": 10.0,
+                    "DIVIDENT_RATIO": 0.1,
+                }
+            ]
+        }
+    )
+
+    evidence = load_dividend_evidence(["600519"], as_of="2026-07-31", cache_dir=tmp_path, session=session)
+
+    assert evidence["600519"]["status"] == "available"
+    assert evidence["600519"]["trailing_cash_per_share"] == 1.0
 
 
 def test_dividend_retry_honours_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:

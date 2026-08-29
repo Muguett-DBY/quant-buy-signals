@@ -7,6 +7,7 @@ from datetime import date
 
 import pytest
 
+from data.as_of import shanghai_today
 import engine.quantitative_evidence as quantitative_evidence
 from engine import buy_screener
 from engine.quantitative_evidence import (
@@ -252,7 +253,7 @@ def test_sector_aggregate_requires_minimum_sample_and_exact_coverage_threshold()
 
 
 def test_company_context_rejects_peer_growth_from_an_old_reporting_window() -> None:
-    trade_date = date.today()
+    trade_date = shanghai_today()
     expected_latest_year = trade_date.year - 1
     stale_peers = [
         _metric(
@@ -789,7 +790,7 @@ def test_all_derived_scores_emit_metadata_accepted_by_the_scoring_boundary() -> 
         assert evidence["evidence_id"].startswith(f"{MODEL_ID}:{key}:META:")
         assert not any(ord(character) < 32 for character in evidence["source"] + evidence["evidence_id"])
         assert date.fromisoformat(evidence["as_of"]).isoformat() == evidence["as_of"]
-        assert date.fromisoformat(evidence["as_of"]) <= date.today()
+        assert date.fromisoformat(evidence["as_of"]) <= shanghai_today()
         assert 0 < len(evidence["summary"]) <= 1_000
         assert f"evidence_level={payload['evidence_level']}" in evidence["summary"]
         assert not any(ord(character) < 32 for character in evidence["summary"])
@@ -910,14 +911,14 @@ def test_old_consecutive_fcf_history_cannot_become_complete_under_a_new_trade_da
     metric = _metric(
         "STALE-FCF",
         financial_indicator_as_of=None,
-        source_trade_date=date.today().isoformat(),
+        source_trade_date=shanghai_today().isoformat(),
         fcf_years=[2008, 2009, 2010],
         fcf_history=[7.0, 8.0, 9.0],
     )
 
     accounting = derive_company_evidence(metric, _context())["accounting_integrity_score"]
 
-    assert accounting["evidence"]["as_of"] == date.today().isoformat()
+    assert accounting["evidence"]["as_of"] == shanghai_today().isoformat()
     assert accounting["evidence_level"] == "partial"
     assert "free_cash_flow_history" in accounting["details"]["evidence_quality"]["missing_inputs"]
 
@@ -926,7 +927,7 @@ def test_stale_financial_as_of_is_not_masked_by_a_newer_trade_date() -> None:
     metric = _metric(
         "STALE-FINANCIAL-AS-OF",
         financial_indicator_as_of="2010-12-31",
-        source_trade_date=date.today().isoformat(),
+        source_trade_date=shanghai_today().isoformat(),
         fcf_years=[2008, 2009, 2010],
         fcf_history=[7.0, 8.0, 9.0],
     )

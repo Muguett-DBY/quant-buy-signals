@@ -1,6 +1,7 @@
 const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-04-v5";
 const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）";
 const CATALOGUE_INDEX_CONTRACT_VERSION=4;
+const CODE_COMMIT="__QUANT_CODE_COMMIT__";
 const RULE_SOURCES=Object.freeze([
   Object.freeze({id:"template1",filename:"第1模板.md",sha256:"98D8A101A08CDB122AFD23C793FAA3EDF5E4E426EAE09E7FC20901476EA95B1D"}),
   Object.freeze({id:"template5",filename:"第5模板.md",sha256:"37A9CD43633BCD0BC1F2811738D48A7D1CFF659E5EF11B6FD9152F2ED0686946"}),
@@ -186,11 +187,13 @@ function score(row,type=""){const result=type?row.types?.[type]:null;const exact
 function actualBuyTypes(row){const declared=Array.isArray(row?.buy_types)?new Set(row.buy_types):null;return TYPE_PRIORITY.filter(typeKey=>row?.types?.[typeKey]?.status==="triggered"&&(declared===null||declared.has(typeKey)))}
 function primaryTriggeredType(row){const triggered=actualBuyTypes(row),declared=String(row?.primary_type||"");return triggered.includes(declared)?declared:(triggered[0]||"")}
 function primaryTriggeredScore(row){const typeKey=primaryTriggeredType(row);return typeKey?finiteNumber(row?.types?.[typeKey]?.score):null}
+function selectedTypeStatusRank(row,typeKey){if(actualBuyTypes(row).includes(typeKey))return 5;const status=String(row?.types?.[typeKey]?.status||"");return status==="conditional"?4:status==="observe"?3:status==="insufficient_evidence"?2:status==="not_applicable"||!status?0:1}
 function compareRowsByScore(left,right,typeKey=""){
+  if(typeKey){const leftRank=selectedTypeStatusRank(left,typeKey),rightRank=selectedTypeStatusRank(right,typeKey);if(leftRank!==rightRank)return rightRank-leftRank;const leftScore=score(left,typeKey),rightScore=score(right,typeKey);if(leftScore!==rightScore)return rightScore-leftScore;return String(left.code||"").localeCompare(String(right.code||""))}
   const leftTriggered=actualBuyTypes(left).length>0,rightTriggered=actualBuyTypes(right).length>0;
   if(leftTriggered!==rightTriggered)return rightTriggered?1:-1;
   if(leftTriggered&&rightTriggered){const leftPrimary=primaryTriggeredScore(left)??-1,rightPrimary=primaryTriggeredScore(right)??-1;if(leftPrimary!==rightPrimary)return rightPrimary-leftPrimary}
-  const leftScore=typeKey?score(left,typeKey):score(left),rightScore=typeKey?score(right,typeKey):score(right);
+  const leftScore=score(left),rightScore=score(right);
   if(leftScore!==rightScore)return rightScore-leftScore;
   return String(left.code||"").localeCompare(String(right.code||""));
 }
@@ -513,7 +516,7 @@ async function detailByCode(code){
     renderDetail(company);
   }catch(error){
     if(error?.name==="AbortError"||requestId!==activeDetailRequest)return;
-    $("drawer").removeAttribute("aria-busy");$("detailMeta").textContent="明细读取失败";$("detailRows").textContent=String(error?.message||error);
+    $("drawer").removeAttribute("aria-busy");$("detailMeta").textContent="明细读取失败";const message=document.createElement("p");message.textContent=String(error?.message||error);message.setAttribute("role","alert");const retry=document.createElement("button");retry.type="button";retry.textContent="重新读取";retry.addEventListener("click",()=>detailByCode(code));$("detailRows").replaceChildren(message,retry);
   }
 }
 async function load(){
@@ -551,7 +554,7 @@ async function load(){
     const notice=$("notice");notice.hidden=notices.length===0;notice.textContent=notices.join(" ");notice.setAttribute("role",criticalNotice?"alert":"status");notice.setAttribute("aria-live",criticalNotice?"assertive":"polite");
     render();scheduleIdleDetailPrefetch();
   }catch(error){
-    $("meta").textContent="数据读取失败："+String(error?.message||error);$("notice").hidden=false;$("notice").setAttribute("role","alert");$("notice").setAttribute("aria-live","assertive");$("notice").textContent="请稍后重试；如果持续失败，请检查数据发布状态。";
+    $("meta").textContent="数据读取失败："+String(error?.message||error);const notice=$("notice"),message=document.createElement("span"),retry=document.createElement("button");message.textContent="请稍后重试；如果持续失败，请检查数据发布状态。 ";retry.type="button";retry.textContent="重新读取";retry.addEventListener("click",()=>{retry.disabled=true;$("meta").textContent="正在重新读取数据…";load()});notice.hidden=false;notice.setAttribute("role","alert");notice.setAttribute("aria-live","assertive");notice.replaceChildren(message,retry);
   }
 }
 $("q").addEventListener("compositionstart",()=>{composing=true});
@@ -898,6 +901,25 @@ async function validAiNativeCompanySourceAudit(audit,packets){
   }
   return seenCodes.size===packetCodes.size&&semanticTotal===semanticCounts.semantic_claim_count;
 }
+async function validAiCodexLunaSourceAudit(audit,packets){
+  if(!audit||audit.audit_contract_version!==AI_SOURCE_AUDIT_CONTRACT_VERSION||audit.audit_passed!==true||audit.network_warnings_allowed!==false||audit.release_status!=="passed")return false;
+  if(![audit.audit_sha256,audit.merged_sha256,audit.projection_sha256].every(value=>/^[0-9a-f]{64}$/.test(String(value||""))))return false;
+  for(const field of ["failed","blocked","invalid_claim_url_count","semantic_failed_count","semantic_unverified_count","company_failed_count","company_unverified_count","affected_company_count"]){if(!Number.isInteger(audit[field])||audit[field]!==0)return false}
+  const projection=await sourceSemanticProjectionDigest({review_mode:"codex_luna_web_review",packets});
+  if(Object.entries(projection).some(([field,value])=>audit[field]!==value))return false;
+  if(!Number.isInteger(audit.semantic_claim_count)||!Number.isInteger(audit.semantic_passed_count)||audit.semantic_claim_count!==projection.projection_claim_count||audit.semantic_passed_count!==audit.semantic_claim_count)return false;
+  const coverage=audit.company_coverage;
+  if(!Array.isArray(coverage)||coverage.length!==packets.length)return false;
+  const packetCodes=new Set(packets.map(packet=>String(packet?.security_code||""))),seenCodes=new Set();let semanticTotal=0;
+  for(const item of coverage){
+    const code=String(item?.security_code||"");
+    if(!packetCodes.has(code)||seenCodes.has(code)||item?.status!=="pass")return false;
+    const counts=[item.semantic_claim_count,item.semantic_passed_count,item.semantic_failed_count,item.semantic_unverified_count];
+    if(!counts.every(value=>Number.isInteger(value)&&value>=0)||item.semantic_failed_count!==0||item.semantic_unverified_count!==0||item.semantic_passed_count!==item.semantic_claim_count)return false;
+    seenCodes.add(code);semanticTotal+=item.semantic_claim_count;
+  }
+  return seenCodes.size===packetCodes.size&&semanticTotal===audit.semantic_claim_count;
+}
 async function canonicalAiCandidateIdentity(packets){
   const pairs=[],seenPairs=new Set();
   for(const packet of packets){
@@ -939,6 +961,7 @@ async function validAiScreeningArtifact(value,generation){
   const validCount=(count,maximum)=>Number.isInteger(count)&&count>=0&&count<=maximum;
   if((externalFull||mixedReview)&&(!value.source_audit||value.source_audit.available!==true||value.source_audit.invalid_claim_url_count!==0||Number(value.source_audit.failed||0)!==0))return false;
   if(nativeCompanyResearch){const audit=value.source_audit,checked=audit.checked,ok=audit.ok,failed=audit.failed,blocked=audit.blocked,invalid=audit.invalid??0;if(audit.audit_passed!==true||!await validAiNativeCompanySourceAudit(audit,packets)||!Number.isInteger(audit.claim_count)||audit.claim_count<packets.length||!/^[0-9a-f]{64}$/.test(String(audit.merged_sha256||""))||!/^[0-9a-f]{64}$/.test(String(audit.audit_sha256||""))||![checked,ok,failed,blocked,invalid].every(item=>Number.isInteger(item)&&item>=0)||checked!==ok+failed+blocked+invalid)return false}
+  if(codexLunaReview&&!await validAiCodexLunaSourceAudit(value.source_audit,packets))return false;
   if(!Number.isInteger(pairTotal)||pairTotal<packets.length||value.type_pair_unique_company_count!==packets.length||!validCount(pairReviewed,pairTotal)||!validCount(pairUnreviewed,pairTotal)||pairReviewed+pairUnreviewed!==pairTotal||!validCount(attempted,packets.length)||!validCount(unreviewed,packets.length)||attempted+unreviewed!==packets.length||!validCount(needsReview,attempted)||value.completed_review_count!==attempted||value.pending_review_count!==unreviewed||!validCount(value.type_pair_needs_review_count,pairReviewed))return false;
   const pairSearchAttempted=value.type_pair_web_search_attempted_count,pairSearchCompleted=value.type_pair_web_search_completed_count,pairSearchEvents=value.type_pair_web_search_event_verified_count,pairClaimUrls=value.type_pair_web_search_claim_urls_verified_count,pairResearchSources=value.type_pair_research_source_urls_verified_count??0,pairDroppedClaimUrls=value.type_pair_web_search_dropped_claim_url_count,companySearchAttempted=value.web_search_attempted_count,companySearchCompleted=value.web_search_completed_count,companySearchEvents=value.web_search_event_verified_count,companyClaimUrls=value.web_search_claim_urls_verified_count,companyResearchSources=value.research_source_urls_verified_count??0,companyDroppedClaimUrls=value.web_search_dropped_claim_url_count;
   if(!validCount(pairSearchAttempted,pairReviewed)||!validCount(pairSearchCompleted,pairSearchAttempted)||!validCount(pairSearchEvents,pairSearchAttempted)||!validCount(pairClaimUrls,pairSearchEvents)||!validCount(pairResearchSources,pairReviewed)||!validCount(pairDroppedClaimUrls,pairTotal*16)||!validCount(companySearchAttempted,attempted)||!validCount(companySearchCompleted,companySearchAttempted)||!validCount(companySearchEvents,companySearchAttempted)||!validCount(companyClaimUrls,companySearchEvents)||!validCount(companyResearchSources,attempted)||!validCount(companyDroppedClaimUrls,packets.length*16))return false;
@@ -949,9 +972,7 @@ async function validAiScreeningArtifact(value,generation){
       pairSearchAttempted!==pairTotal||pairSearchCompleted!==pairTotal||pairSearchEvents!==pairTotal||pairClaimUrls!==pairTotal||
       companySearchAttempted!==packets.length||companySearchCompleted!==packets.length||companySearchEvents!==packets.length||companyClaimUrls!==packets.length||
       value.reviewed_without_web_search!==0||value.full_coverage_web_search!==true||
-      !value.source_audit||value.source_audit.available!==true||value.source_audit.invalid_claim_url_count!==0||
-      !((value.source_audit.audit_passed===true&&Number(value.source_audit.failed||0)===0&&Number(value.source_audit.semantic_failed_count||0)===0&&Number(value.source_audit.semantic_unverified_count||0)===0)||
-        (value.source_audit.network_warnings_allowed===true&&value.source_audit.release_status==="passed_with_source_access_warnings"))
+      !value.source_audit||value.source_audit.available!==true
     ))return false;
     if(nativeCompanyResearch&&(pairResearchSources!==pairTotal||companyResearchSources!==packets.length))return false;
     if(codexLunaReview&&(!Array.isArray(value.review_models)||value.review_models.length!==1||value.review_models[0]!=="codex-luna-max"||!Array.isArray(value.review_efforts)||value.review_efforts.length!==1||value.review_efforts[0]!=="max"))return false;
@@ -969,6 +990,7 @@ async function validAiScreeningArtifact(value,generation){
     if(!/^[036]\d{5}$/.test(code)||!/^type[1-7]$/.test(type)||seenCodes.has(code)||!Array.isArray(typeKeys)||typeKeys.length<1||typeKeys.length>7||typeKeys.some(item=>typeof item!=="string"||!/^type[1-7]$/.test(item))||new Set(typeKeys).size!==typeKeys.length||!typeKeys.includes(type)||!Number.isInteger(pairCount)||pairCount!==typeKeys.length||rank!==packetIndex+1||seenRanks.has(rank)||!review||typeof review!=="object")return false;
     const model=String(review.model||""),effort=String(review.effort||""),verdict=String(review.verdict||""),recommendedAction=String(review.recommended_action||""),action=String(review.ai_action||""),score=Number(review.buy_attractiveness_score),category=String(review.final_category||""),recommendation=String(review.final_recommendation||""),label=review.recommendation_label,summary=review.summary;
     if(!["confirmed","caution","misclassified","missed_candidate","needs_review"].includes(verdict)||!["keep","demote","manual_review"].includes(recommendedAction)||!["priority_buy","watchlist","avoid","insufficient_evidence"].includes(action)||!Number.isFinite(score)||score<0||score>100||!["recommend_buy","observe","do_not_recommend"].includes(category)||!["recommend_buy","do_not_recommend_buy"].includes(recommendation)||typeof label!=="string"||!label.trim()||typeof summary!=="string"||!["high","medium","low"].includes(String(review.confidence))||typeof review.ai_independent!=="boolean"||!Array.isArray(review.key_strengths)||review.key_strengths.length>8||review.key_strengths.some(item=>typeof item!=="string")||!validAiReviewDescriptorList(review.quantitative_facts,8,240)||!Array.isArray(review.risk_flags)||review.risk_flags.length>12||review.risk_flags.some(item=>typeof item!=="string")||!Array.isArray(review.claims)||review.claims.length>(nativeCompanyResearch?32:12))return false;
+    if(codexLunaReview&&(review.source_verification_status!=="pass"||review.source_verification_issue_count!==0||!Array.isArray(review.source_verification_issues)||review.source_verification_issues.length!==0||!review.source_verification_issue_kinds||typeof review.source_verification_issue_kinds!=="object"||Array.isArray(review.source_verification_issue_kinds)||Object.keys(review.source_verification_issue_kinds).length!==0))return false;
     if(packetIndex>0&&compareAiPacketOrder(packets[packetIndex-1],packet)>0)return false;
     if(aiReviewHasRuleReason(review))return false;
     if(fullCoverage&&nativeReview&&review.quantitative_facts.some(item=>!/\d/.test(item)))return false;
@@ -1023,17 +1045,17 @@ async function aiScreeningArtifact(env,generation){
 async function currentGeneration(env,generationId=""){if(generationId)return await env.DB.prepare("SELECT * FROM generations WHERE generation_id=?").bind(generationId).first();return await env.DB.prepare("SELECT g.* FROM current_generation c JOIN generations g ON g.generation_id=c.generation_id WHERE c.singleton=1").first()}
 async function sha256Hex(bytes){const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("")}
 async function generationManifestRecord(env,generation){
-  if(!generation)return{manifest:null,object:null,ok:false};
+  if(!generation)return{manifest:null,object:null,bytes:null,ok:false};
   const object=await env.DATA_BUCKET.get("generations/"+generation.generation_id+"/manifest.json");
-  if(!object)return{manifest:null,object:null,ok:false};
-  if(object.size<1||object.size>MAX_MANIFEST_BYTES)return{manifest:null,object,ok:false};
+  if(!object)return{manifest:null,object:null,bytes:null,ok:false};
+  if(object.size<1||object.size>MAX_MANIFEST_BYTES)return{manifest:null,object,bytes:null,ok:false};
   const bytes=await object.arrayBuffer(),expected=String(generation.manifest_sha256||"").toLowerCase(),marker=String(object.customMetadata?.sha256||"").toLowerCase();
-  if(object.size!==bytes.byteLength||!/^[0-9a-f]{64}$/.test(expected))return{manifest:null,object,ok:false};
+  if(object.size!==bytes.byteLength||!/^[0-9a-f]{64}$/.test(expected))return{manifest:null,object,bytes:null,ok:false};
   const actual=await sha256Hex(bytes);
-  if(actual!==expected||(marker&&marker!==expected))return{manifest:null,object,ok:false};
-  let manifest;try{manifest=JSON.parse(new TextDecoder().decode(bytes))}catch{return{manifest:null,object,ok:false}}
-  if(manifest?.company_details&&marker!==expected)return{manifest:null,object,ok:false};
-  return{manifest,object,ok:true};
+  if(actual!==expected||(marker&&marker!==expected))return{manifest:null,object,bytes:null,ok:false};
+  let manifest;try{manifest=JSON.parse(new TextDecoder().decode(bytes))}catch{return{manifest:null,object,bytes:null,ok:false}}
+  if(manifest?.company_details&&marker!==expected)return{manifest:null,object,bytes:null,ok:false};
+  return{manifest,object,bytes,ok:true};
 }
 async function generationManifest(env,generation){const record=await generationManifestRecord(env,generation);if(record.object&&!record.ok)throw new Error("数据清单对象完整性校验失败");return record.manifest}
 function declaredAsset(manifest,key){const value=manifest?.[key];const filename=String(value?.filename||""),sha256=String(value?.sha256||"").toLowerCase(),size=Number(value?.size),uncompressedSize=Number(value?.uncompressed_size);return{filename,sha256:/^[0-9a-f]{64}$/.test(sha256)?sha256:"",size:Number.isSafeInteger(size)&&size>0&&size<=MAX_COMPRESSED_ASSET_BYTES?size:null,uncompressed_size:Number.isSafeInteger(uncompressedSize)&&uncompressedSize>0&&uncompressedSize<=MAX_UNCOMPRESSED_ASSET_BYTES?uncompressedSize:null}}
@@ -1077,17 +1099,24 @@ function tradingDataFreshness(marketAsOf,timestamp,nowMs=Date.now()){
 }
 function generationRecordHealthy(generation){const companyCount=Number(generation?.company_count);return Boolean(generation&&/^[0-9a-f]{16}$/.test(String(generation.generation_id||""))&&/^[0-9a-f]{64}$/.test(String(generation.manifest_sha256||"").toLowerCase())&&Number.isSafeInteger(companyCount)&&companyCount>0)}
 function uncheckedDeepHealth(){return{manifest_ok:null,manifest_bytes:null,catalogue_ok:null,catalogue_bytes:null,signals_ok:null,signals_bytes:null,signature_ok:null,signature_bytes:null,company_details_declared:null,company_details_ready:null,company_detail_shards:null,company_detail_bytes:null}}
+function manifestSignatureKeyBytes(){const raw=atob("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExQ3XrBYfIsZilmdQvnTqIcqo7mCPhRTOnntpt/hqA+mCkHaHRGhjEyd3ek5XNRyjhadmMl364s8MBOjAySPENg==");return Uint8Array.from(raw,value=>value.charCodeAt(0))}
+function manifestDerToP1363(value){const bytes=new Uint8Array(value);let offset=0;if(bytes[offset++]!==0x30)throw new Error("签名序列无效");const readLength=()=>{let length=bytes[offset++];if(length&0x80){const count=length&0x7f;if(count<1||count>2)throw new Error("签名长度无效");length=0;for(let index=0;index<count;index++)length=length*256+bytes[offset++]}return length};if(readLength()!==bytes.length-offset)throw new Error("签名序列长度不一致");const integer=()=>{if(bytes[offset++]!==0x02)throw new Error("签名整数无效");const length=readLength(),end=offset+length;if(end>bytes.length||length<1)throw new Error("签名整数长度无效");while(offset<end-1&&bytes[offset]===0)offset++;const item=bytes.slice(offset,end);offset=end;if(item.length>32)throw new Error("签名整数过长");const padded=new Uint8Array(32);padded.set(item,32-item.length);return padded};const output=new Uint8Array(64);output.set(integer());output.set(integer(),32);if(offset!==bytes.length)throw new Error("签名包含尾随数据");return output}
+async function verifyPublishedManifestSignature(manifestBytes,signatureBytes){const key=await crypto.subtle.importKey("spki",manifestSignatureKeyBytes(),{name:"ECDSA",namedCurve:"P-256"},false,["verify"]);return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"},key,manifestDerToP1363(signatureBytes),manifestBytes)}
+async function verifiedHealthObject(env,key,size,expectedHash){if(!Number.isSafeInteger(size)||size<1||!/^[0-9a-f]{64}$/.test(String(expectedHash||"")))return null;const object=await env.DATA_BUCKET.get(key);if(!object||object.size!==size)return null;const bytes=await object.arrayBuffer(),actual=bytes.byteLength===size?await sha256Hex(bytes):"",marker=String(object.customMetadata?.sha256||"").toLowerCase();return actual===expectedHash&&marker===expectedHash?{object,bytes}:null}
 async function deepGenerationHealth(env,generation){
   const failed={ok:false,manifest_ok:false,manifest_bytes:0,catalogue_ok:false,catalogue_bytes:0,signals_ok:false,signals_bytes:0,signature_ok:false,signature_bytes:0,company_details_declared:false,company_details_ready:false,company_detail_shards:0,company_detail_bytes:0};
   if(!generation)return failed;
   try{
     const manifestRecord=await generationManifestRecord(env,generation),manifest=manifestRecord.manifest;
     if(!manifest)return{...failed,manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0};
-    const catalogue=declaredAsset(manifest,"catalogue"),signals=declaredAsset(manifest,"signals"),signatureName=String(manifest?.signature?.filename||""),prefix="generations/"+generation.generation_id+"/",detailAssets=declaredCompanyDetails(manifest,generation.generation_id);
-    const [catalogueObject,signalsObject,signatureObject,...detailObjects]=await Promise.all([catalogue.filename?env.DATA_BUCKET.head(prefix+catalogue.filename):null,signals.filename?env.DATA_BUCKET.head(prefix+signals.filename):null,signatureName?env.DATA_BUCKET.head(prefix+signatureName):null,...(detailAssets||[]).map(entry=>env.DATA_BUCKET.head(prefix+entry.filename))]);
-    const detailsDeclared=Array.isArray(detailAssets),catalogueOk=Boolean(catalogueObject&&catalogue.size===catalogueObject.size&&(!detailsDeclared||String(catalogueObject.customMetadata?.sha256||"").toLowerCase()===catalogue.sha256)),signalsOk=Boolean(signalsObject&&signals.size===signalsObject.size&&(!detailsDeclared||String(signalsObject.customMetadata?.sha256||"").toLowerCase()===signals.sha256)),signatureOk=Boolean(signatureObject&&signatureObject.size>=64&&signatureObject.size<=128);
-    const detailsOk=!detailsDeclared||Boolean(detailAssets.length===16&&detailObjects.every((object,index)=>object&&object.size===detailAssets[index].size&&String(object.customMetadata?.sha256||"").toLowerCase()===String(detailAssets[index].sha256||"").toLowerCase())),detailBytes=detailObjects.reduce((total,object)=>total+Number(object?.size||0),0);
-    return{ok:Boolean(manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk&&detailsOk),manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0,catalogue_ok:catalogueOk,catalogue_bytes:catalogueObject?.size||0,signals_ok:signalsOk,signals_bytes:signalsObject?.size||0,signature_ok:signatureOk,signature_bytes:signatureObject?.size||0,company_details_declared:detailsDeclared,company_details_ready:detailsDeclared&&detailsOk,company_detail_shards:detailAssets?.length||0,company_detail_bytes:detailBytes};
+    const catalogue=declaredAsset(manifest,"catalogue"),signals=declaredAsset(manifest,"signals"),signatureName=String(manifest?.signature?.filename||""),prefix="generations/"+generation.generation_id+"/",detailAssets=declaredCompanyDetails(manifest,generation.generation_id),detailsDeclared=Array.isArray(detailAssets);
+    const [catalogueRecord,signalsRecord]=await Promise.all([catalogue.filename?verifiedHealthObject(env,prefix+catalogue.filename,catalogue.size,catalogue.sha256):null,signals.filename?verifiedHealthObject(env,prefix+signals.filename,signals.size,signals.sha256):null]);
+    let signatureRecord=null,signatureOk=false;
+    if(signatureName===`manifest-${generation.generation_id}.sig`){const object=await env.DATA_BUCKET.get(prefix+signatureName);if(object&&object.size>=64&&object.size<=128){const bytes=await object.arrayBuffer(),digest=bytes.byteLength===object.size?await sha256Hex(bytes):"",marker=String(object.customMetadata?.sha256||"").toLowerCase();if(bytes.byteLength===object.size&&digest===marker&&await verifyPublishedManifestSignature(manifestRecord.bytes,bytes)){signatureRecord={object,bytes};signatureOk=true}}}
+    const detailRecords=[];
+    if(detailsDeclared){for(let start=0;start<detailAssets.length;start+=4){detailRecords.push(...await Promise.all(detailAssets.slice(start,start+4).map(entry=>verifiedHealthObject(env,prefix+entry.filename,entry.size,String(entry.sha256||"").toLowerCase()))))}}
+    const catalogueOk=Boolean(catalogueRecord),signalsOk=Boolean(signalsRecord),detailsOk=!detailsDeclared||Boolean(detailAssets.length===16&&detailRecords.every(Boolean)),detailBytes=detailRecords.reduce((total,record)=>total+Number(record?.object?.size||0),0);
+    return{ok:Boolean(manifestRecord.ok&&catalogueOk&&signalsOk&&signatureOk&&detailsOk),manifest_ok:manifestRecord.ok,manifest_bytes:manifestRecord.object?.size||0,catalogue_ok:catalogueOk,catalogue_bytes:catalogueRecord?.object?.size||0,signals_ok:signalsOk,signals_bytes:signalsRecord?.object?.size||0,signature_ok:signatureOk,signature_bytes:signatureRecord?.object?.size||0,company_details_declared:detailsDeclared,company_details_ready:detailsDeclared&&detailsOk,company_detail_shards:detailAssets?.length||0,company_detail_bytes:detailBytes};
   }catch{return{...failed,error:"全资产完整性检查失败"}}
 }
 function limitedGzipStream(bytes,label){let total=0;const source=new Response(bytes).body;if(!source)throw new Error(label+"流不可用");return source.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TransformStream({transform(chunk,controller){const length=Number(chunk?.byteLength||0);if(!Number.isSafeInteger(length)||length<0||total+length>MAX_UNCOMPRESSED_ASSET_BYTES)throw new Error(label+"解压后超过安全上限");total+=length;controller.enqueue(chunk)}}))}
@@ -1134,9 +1163,10 @@ function headSafeResponse(request,response){return request.method==="HEAD"?new R
 function securedResponse(response){const headers=new Headers(response.headers);for(const [key,value] of Object.entries(BASE_SECURITY_HEADERS))headers.set(key,value);return new Response(response.body,{status:response.status,statusText:response.statusText,headers})}
 function canonicalGenerationRequest(url){const entries=[...url.searchParams.entries()];return entries.length===0||(entries.length===1&&entries[0][0]==="generation_id"&&/^[0-9a-f]{16}$/.test(entries[0][1]))}
 function generationCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);return new Request(cacheUrl.toString(),{method:"GET"})}
-function canonicalCatalogueIndexRequest(url){const entries=[...url.searchParams.entries()];return entries.length===2&&entries.every(([key])=>key==="generation_id"||key==="index_contract")&&url.searchParams.getAll("generation_id").length===1&&Boolean(url.searchParams.get("generation_id"))&&url.searchParams.getAll("index_contract").length===1&&url.searchParams.get("index_contract")===String(CATALOGUE_INDEX_CONTRACT_VERSION)}
+function canonicalCatalogueIndexRequest(url){const entries=[...url.searchParams.entries()];return entries.length===2&&entries.every(([key])=>key==="generation_id"||key==="index_contract")&&url.searchParams.getAll("generation_id").length===1&&/^[0-9a-f]{16}$/.test(url.searchParams.get("generation_id")||"")&&url.searchParams.getAll("index_contract").length===1&&url.searchParams.get("index_contract")===String(CATALOGUE_INDEX_CONTRACT_VERSION)}
 function catalogueIndexCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);cacheUrl.searchParams.set("index_contract",String(CATALOGUE_INDEX_CONTRACT_VERSION));return new Request(cacheUrl.toString(),{method:"GET"})}
 function generationMethodologyVersion(manifest){return String(manifest?.provenance?.methodology_version||"legacy-unversioned")}
+function deployedCodeCommit(){return /^[0-9a-f]{40}$/.test(CODE_COMMIT)?CODE_COMMIT:null}
 async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,securedResponse(hit))}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
 function aiScreeningPageResponse(request){
   const nonce=cspNonce();
@@ -1286,7 +1316,7 @@ function aiScreeningPageResponse(request){
         </select>
       </label>
     </section>
-    <section class="grid" id="grid"><p class="empty">正在读取 AI 筛查结果…</p></section>
+    <section class="grid" id="grid" aria-live="polite"><p class="empty">正在读取 AI 筛查结果…</p></section>
     <nav class="pager" id="pager" hidden>
       <span id="pageInfo"></span>
       <span><button id="prev">上一页</button> <button id="next">下一页</button></span>
@@ -1611,13 +1641,12 @@ function aiScreeningPageResponse(request){
           '<div class="stat"><b>'+esc(counts.recommend_buy??value.priority_buy_count??0)+"</b><small>建议买</small></div>"+
           '<div class="stat"><b>'+esc(counts.observe??((value.watchlist_count||0)+(value.insufficient_evidence_count||0)))+"</b><small>观察</small></div>"+
           '<div class="stat"><b>'+esc(counts.do_not_recommend??value.avoid_count??0)+"</b><small>不建议</small></div>"+
-          '<div class="stat"><b>'+esc(value.web_search_attempted_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>Codex搜索尝试</small></div>"+
-          '<div class="stat"><b>'+esc(value.web_search_event_verified_count||0)+" / "+esc(value.candidate_total||0)+'</b><small>'+(value.review_mode==="codex_luna_web_review"?"逐家公司联网事件":"原生搜索事件")+'</small></div>'+
-          '<div class="stat"><b>'+esc(value.research_source_urls_verified_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>财报来源链接</small></div>"+
-          '<div class="stat"><b>'+esc((value.freshness_counts?.historical||0)+(value.freshness_counts?.undated||0))+"</b><small>资料时效：非当前/未标注</small></div>";
+          '<div class="stat"><b>'+esc(value.market_as_of||value.snapshot_market_as_of||"—")+"</b><small>收盘数据日</small></div>"+
+          '<div class="stat"><b>'+esc(value.research_as_of||value.company_research_as_of||"—")+"</b><small>公司研究日</small></div>"+
+          '<div class="stat"><b>'+esc(value.reviewed_count||0)+" / "+esc(value.candidate_total||0)+"</b><small>完成独立复核</small></div>";
         render();
       }catch(error){
-        document.querySelector("#grid").innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+"。确定性网站结果不受影响。</p>";
+        const grid=document.querySelector("#grid");grid.setAttribute("role","alert");grid.innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+'。确定性网站结果不受影响。<br><button type="button" id="aiRetry">重新读取</button></p>';document.querySelector("#aiRetry").addEventListener("click",()=>{grid.removeAttribute("role");grid.innerHTML='<p class="empty">正在重新读取 AI 筛查结果…</p>';load()});
       }
     }
 
@@ -1662,7 +1691,7 @@ function aiScreeningChangesPageResponse(request){
     <section class="hero"><div><p>AI SECOND-PASS RESEARCH</p><h1>与昨日比较</h1><p>只显示结论或买入吸引力分发生明显变化的公司。卡片会说明经营证据和主要风险如何改变。</p></div></section>
     <section class="stats" id="stats"></section>
     <section class="toolbar"><label>变化类型<select id="filter"><option value="all">全部变化</option><option value="upgraded">结论上调</option><option value="downgraded">结论下调</option><option value="new_candidate">新进入候选</option><option value="score_changed">分数变化≥5</option><option value="removed_candidate">退出候选</option></select></label></section>
-    <section class="changes-grid" id="changes"><p class="empty">正在读取昨日比较…</p></section>
+    <section class="changes-grid" id="changes" aria-live="polite"><p class="empty">正在读取昨日比较…</p></section>
   </main>
   <script nonce="${nonce}">
     const esc=value=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
@@ -1688,10 +1717,10 @@ function aiScreeningChangesPageResponse(request){
         if(!response.ok)throw new Error(value.error||"暂无结果");
         comparison=value.day_over_day;
         if(!comparison||comparison.available!==true)throw new Error(comparison?.unavailable_reason||"当前发布包没有上一交易日比较");
-        document.querySelector("#stats").innerHTML='<div class="stat"><b>'+esc(comparison.upgraded_to_recommend_buy_count||0)+'</b><small>上调为建议买</small></div><div class="stat"><b>'+esc(comparison.downgraded_from_recommend_buy_count||0)+'</b><small>从建议买下调</small></div><div class="stat"><b>'+esc(comparison.category_changed_count||0)+'</b><small>结论发生变化</small></div><div class="stat"><b>'+esc(comparison.score_changed_count||0)+'</b><small>分数变化≥5</small></div><div class="stat"><b>'+esc(comparison.new_candidate_count||0)+'</b><small>新进入候选</small></div><div class="stat"><b>'+esc(comparison.removed_candidate_count||0)+'</b><small>退出候选</small></div>';
+        document.querySelector("#stats").innerHTML='<div class="stat"><b>'+esc(value.market_as_of||value.snapshot_market_as_of||"—")+'</b><small>今日收盘数据</small></div><div class="stat"><b>'+esc(comparison.previous_market_as_of||comparison.previous_research_as_of||"—")+'</b><small>比较基准日</small></div><div class="stat"><b>'+esc(comparison.upgraded_to_recommend_buy_count||0)+'</b><small>上调为建议买</small></div><div class="stat"><b>'+esc(comparison.downgraded_from_recommend_buy_count||0)+'</b><small>从建议买下调</small></div><div class="stat"><b>'+esc(comparison.category_changed_count||0)+'</b><small>结论发生变化</small></div><div class="stat"><b>'+esc(comparison.new_candidate_count||0)+'</b><small>新进入候选</small></div><div class="stat"><b>'+esc(comparison.removed_candidate_count||0)+'</b><small>退出候选</small></div>';
         render();
       }catch(error){
-        document.querySelector("#changes").innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+'。请先查看当前 AI 筛查页面。</p>';
+        const changes=document.querySelector("#changes");changes.setAttribute("role","alert");changes.innerHTML='<p class="empty">'+esc(error.message||"暂无结果")+'。请先查看当前 AI 筛查页面。<br><button type="button" id="changesRetry">重新读取</button></p>';document.querySelector("#changesRetry").addEventListener("click",()=>{changes.removeAttribute("role");changes.innerHTML='<p class="empty">正在重新读取昨日比较…</p>';load()});
       }
     }
     document.querySelector("#filter").addEventListener("change",render);
@@ -1710,7 +1739,7 @@ export default{
       if(path==="/"||path==="/index.html")return dashboardHtmlResponse(request);
       if(path==="/ai-screening")return aiScreeningPageResponse(request);
       if(path==="/ai-screening-changes")return aiScreeningChangesPageResponse(request);
-      if(path==="/api/methodology")return json({schema_version:2,methodology_version:METHODOLOGY_VERSION,decision_domain:"new_buy_or_add",qualify_threshold:7,patch7_total_gate:PATCH7_TOTAL_GATE,type5_appendix:TYPE5_APPENDIX,sell_domain:SELL_DOMAIN,rule_source_contract:RULE_SOURCE_CONTRACT,types:METHODOLOGY},200,{"cache-control":"public, max-age=86400"});
+      if(path==="/api/methodology")return headSafeResponse(request,json({schema_version:2,methodology_version:METHODOLOGY_VERSION,decision_domain:"new_buy_or_add",qualify_threshold:7,patch7_total_gate:PATCH7_TOTAL_GATE,type5_appendix:TYPE5_APPENDIX,sell_domain:SELL_DOMAIN,rule_source_contract:RULE_SOURCE_CONTRACT,types:METHODOLOGY},200,{"cache-control":"public, max-age=300, stale-while-revalidate=3600"}));
       const requestedGeneration=url.searchParams.get("generation_id")||"";
       if(path==="/api/ai-screening"&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"invalid generation query"},400));
       if(path==="/api/catalogue-index"&&!canonicalCatalogueIndexRequest(url))return headSafeResponse(request,json({error:"公司索引请求参数无效，请刷新页面"},400));
@@ -1728,11 +1757,11 @@ export default{
         const ok=Boolean(recordOk&&!freshness.stale&&(!deep||integrityOk));
         return headSafeResponse(request,json({ok,deep_check:deep,integrity_checked:deep,integrity_ok:deep?integrityOk:null,...freshness,freshness_basis:"北京时间18:00前最低要求覆盖上一交易日；若已发布当日15:00后的收盘数据则直接接受，18:00后要求覆盖当日交易日；已登记交易所休市日顺延，并保留14天绝对安全上限",generation_record_ok:recordOk,generation_id:generation?.generation_id||null,market_as_of:generation?.market_as_of||null,updated_at:generation?.data_timestamp_utc||null,data_generated_at:generation?.data_timestamp_utc||null,generation_published_at:generation?.created_at||null,last_mirror_check_at:generation?.last_checked_at||null,...deepFields},ok?200:503));
       }
-      if(path==="/api/meta")return json(generation||{ok:false,error:"尚未完成首次数据同步"});
-      if(!generation)return json({error:"尚未完成首次数据同步"},503);
+      if(path==="/api/meta")return headSafeResponse(request,json(generation?{...generation,data_source_commit:generation.source_commit||null,code_commit:deployedCodeCommit()}:{ok:false,error:"尚未完成首次数据同步"}));
+      if(!generation)return headSafeResponse(request,json({error:"尚未完成首次数据同步"},503));
       const prefix="generations/"+generation.generation_id+"/";
       if(path==="/api/manifest"){
-        const manifest=await generationManifest(env,generation);if(!manifest)return json({error:"数据对象缺失"},503);return json({...manifest,generation_id:generation.generation_id},200,{"cache-control":requestedGeneration?"public, max-age=31536000, immutable":"no-store"});
+        const manifest=await generationManifest(env,generation);if(!manifest)return headSafeResponse(request,json({error:"数据对象缺失"},503));return headSafeResponse(request,json({...manifest,generation_id:generation.generation_id},200,{"cache-control":requestedGeneration?"public, max-age=31536000, immutable":"no-store"}));
       }
       if(path==="/api/catalogue"){
         const manifest=await generationManifest(env,generation),metadata=declaredAsset(manifest,"catalogue"),catalogue=await readCatalogue(env,prefix,manifest);return headSafeResponse(request,json(catalogue,200,{"cache-control":requestedGeneration?"public, max-age=31536000, immutable":"no-store",etag:metadata.sha256}));
@@ -1744,9 +1773,9 @@ export default{
       if(companyMatch){
         const code=companyMatch[1],manifest=await generationManifest(env,generation);const build=async()=>{let company=await readCompanyDetail(env,prefix,manifest,generation.generation_id,code),detailContract="company_detail_v2",capabilities=manifest?.capabilities||{},methodologyVersion=generationMethodologyVersion(manifest);if(!manifest?.company_details){const catalogue=await readCatalogue(env,prefix,manifest);company=catalogue.companies.find(value=>String(value?.code||"")===code);capabilities=catalogue.capabilities||capabilities;detailContract="legacy_catalogue"}if(!company)return{error:"未找到该公司",code};return{generation_id:generation.generation_id,market_as_of:generation.market_as_of,methodology_version:methodologyVersion,methodology_current:methodologyVersion===METHODOLOGY_VERSION,detail_contract:detailContract,capabilities,company}};if(requestedGeneration)return await immutableProjection(request,build,generationCacheRequest(request,generation.generation_id));const payload=await build();return headSafeResponse(request,json(payload,payload.error?404:200));
       }
-      return new Response("Not Found",{status:404,headers:BASE_SECURITY_HEADERS});
+      return headSafeResponse(request,new Response("Not Found",{status:404,headers:BASE_SECURITY_HEADERS}));
     }catch(error){
-      return json({error:String(error?.message||error)},500);
+      const requestId=crypto.randomUUID();console.error(JSON.stringify({event:"pages_request_failed",request_id:requestId,path,method:request.method,error:String(error?.message||error)}));return headSafeResponse(request,json({error:"服务器暂时无法完成请求",request_id:requestId},500));
     }
   },
 };

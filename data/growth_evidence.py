@@ -28,6 +28,7 @@ import pandas as pd
 import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
+from data.as_of import shanghai_today
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
 from data.capex_evidence import CAPEX_FIELD, EASTMONEY_DATACENTER_URL, NON_CAPEX_OUTFLOW_FIELDS
 from data.datacenter import DataFetchError, fetch_detailed_annual_cashflow_history
@@ -35,6 +36,7 @@ from data.provider_http import (
     RequestRateLimiter as _RequestRateLimiter,
     is_transient_request_error,
     retry_delay_seconds,
+    thread_local_session,
 )
 
 
@@ -206,6 +208,7 @@ _EXTERNAL_RECORD_FIELDS = {
     "source_report",
     "source_field",
     "source_url",
+    "source_sha256",
 }
 _SEGMENT_CACHE_STATE_FIELDS = {
     "segment_growth_sources",
@@ -276,7 +279,7 @@ def _parse_as_of(value: date | str) -> date:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
             raise ValueError("as_of must be a valid calendar date") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise ValueError("as_of cannot be in the future")
     return parsed
 
@@ -415,7 +418,7 @@ def _parse_report_date(value: Any) -> date:
         parsed = date.fromisoformat(match.group("date"))
     except ValueError as exc:
         raise GrowthEvidenceError("segment report date is invalid") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise GrowthEvidenceError("segment source contains a future report date")
     return parsed
 
@@ -1529,6 +1532,8 @@ def _fetch_segment_growth_sources(
     recent_cache_state: Mapping[str, Mapping[str, Any]] | None = None,
     annual_revenue: dict[int, float] | None = None,
 ) -> tuple[dict[str, Any], bool, str]:
+    if session is requests:
+        session = thread_local_session()
     if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
         raise ValueError("cache_ttl_seconds must be non-negative")
     if (
@@ -1867,13 +1872,14 @@ def _acquisition_records_by_year(
             "source_report": str(record.get("SOURCE_REPORT_NAME") or "RPT_F10_FINANCE_GCASHFLOW"),
             "source_field": _ACQUISITION_FIELD,
             "source_url": str(record.get("SOURCE_REPORT_URL") or EASTMONEY_DATACENTER_URL),
+            "source_sha256": str(record.get("SOURCE_CONTENT_SHA256") or ""),
         }
     return prepared
 
 
 def _overlay_cninfo_acquisition(
     records: Any,
-    cninfo_acquisition_values: Mapping[int, float],
+    cninfo_acquisition_values: Mapping[int, Mapping[str, Any]],
     *,
     code: str,
 ) -> list[dict[str, Any]]:
@@ -1905,19 +1911,39 @@ def _overlay_cninfo_acquisition(
         if report_year in prepared:
             raise GrowthEvidenceError("acquisition cash-flow contains duplicate annual rows")
         prepared[report_year] = dict(record)
-    for year, value in cninfo_acquisition_values.items():
-        if not isinstance(year, int) or not isinstance(value, (int, float)) or value < 0:
+    for year, evidence in cninfo_acquisition_values.items():
+        if not isinstance(year, int) or not isinstance(evidence, Mapping):
             raise GrowthEvidenceError("CNINFO acquisition overlay values are invalid")
+        value = evidence.get("value_cny")
+        source_url = str(evidence.get("source_url") or "")
+        source_sha256 = str(evidence.get("source_sha256") or "").lower()
+        parsed_url = urlsplit(source_url)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or value < 0
+            or parsed_url.scheme != "https"
+            or parsed_url.hostname != "static.cninfo.com.cn"
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
+        ):
+            raise GrowthEvidenceError("CNINFO acquisition overlay provenance is invalid")
         if year in prepared:
             row = prepared[year]
             row["OBTAIN_SUBSIDIARY_OTHER"] = value
             row["SOURCE_REPORT_NAME"] = "CNINFO ANNUAL REPORT"
+            row["SOURCE_REPORT_URL"] = source_url
+            row["SOURCE_CONTENT_SHA256"] = source_sha256
         else:
             prepared[year] = {
                 "SECURITY_CODE": code,
                 "REPORT_DATE": f"{year}-12-31",
                 "OBTAIN_SUBSIDIARY_OTHER": value,
                 "SOURCE_REPORT_NAME": "CNINFO ANNUAL REPORT",
+                "SOURCE_REPORT_URL": source_url,
+                "SOURCE_CONTENT_SHA256": source_sha256,
             }
     return [prepared[year] for year in sorted(prepared)]
 
@@ -2000,6 +2026,7 @@ def build_external_growth_evidence(
                 "source_report": acquisition["source_report"],
                 "source_field": acquisition["source_field"],
                 "source_url": acquisition["source_url"],
+                "source_sha256": acquisition["source_sha256"],
             }
         )
     # The source response is decoded through Python floats.  Rebuild every
@@ -2447,13 +2474,26 @@ def _normalise_external_record(
         value.get("acquisition_derivation"),
         acquisition_cash=float(acquisition),
     )
-    if value.get("source_report") == "CNINFO ANNUAL REPORT":
-        if value.get("source_field") != _ACQUISITION_FIELD:
+    source_report = value.get("source_report")
+    source_url = value.get("source_url")
+    source_sha256 = value.get("source_sha256")
+    if source_report == "CNINFO ANNUAL REPORT":
+        parsed_url = urlsplit(str(source_url or ""))
+        if (
+            value.get("source_field") != _ACQUISITION_FIELD
+            or parsed_url.scheme != "https"
+            or parsed_url.hostname != "static.cninfo.com.cn"
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or not isinstance(source_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
+        ):
             raise GrowthEvidenceError("external growth record source identity is invalid")
     elif (
-        value.get("source_report") != "RPT_F10_FINANCE_GCASHFLOW"
+        source_report != "RPT_F10_FINANCE_GCASHFLOW"
         or value.get("source_field") != _ACQUISITION_FIELD
-        or value.get("source_url") != EASTMONEY_DATACENTER_URL
+        or source_url != EASTMONEY_DATACENTER_URL
+        or source_sha256 != ""
     ):
         raise GrowthEvidenceError("external growth record source identity is invalid")
     return {
@@ -2465,9 +2505,10 @@ def _normalise_external_record(
         "acquisition_cash_to_revenue": float(calculated_ratio),
         "acquisition_value_basis": basis,
         "acquisition_derivation": derivation,
-        "source_report": "RPT_F10_FINANCE_GCASHFLOW",
+        "source_report": source_report,
         "source_field": _ACQUISITION_FIELD,
-        "source_url": EASTMONEY_DATACENTER_URL,
+        "source_url": source_url,
+        "source_sha256": source_sha256,
     }
 
 
@@ -2659,7 +2700,7 @@ def fetch_growth_evidence(
     revenue_records: Sequence[Mapping[str, Any]],
     goodwill_records: Sequence[Mapping[str, Any]],
     acquisition_cashflow_records: Any = None,
-    cninfo_acquisition_values: Mapping[int, float] | None = None,
+    cninfo_acquisition_values: Mapping[int, Mapping[str, Any]] | None = None,
     session: Any = requests,
     cache_dir: str | Path = SEGMENT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
@@ -2784,7 +2825,7 @@ def fetch_growth_evidence_batch(
     progress_cb: Any = None,
     cache_dir: str | Path = SEGMENT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
-    cninfo_acquisition_by_code: Mapping[str, Mapping[int, float]] | None = None,
+    cninfo_acquisition_by_code: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None,
     time_budget_seconds: float | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for exact Type 3 preflight candidates."""

@@ -1159,6 +1159,9 @@ def _deduplicate_and_sort(records: list[dict[str, Any]]) -> list[dict[str, Any]]
         report_date = _report_date(record.get("REPORT_DATE"))
         record["REPORT_DATE"] = report_date
         if report_date:
+            previous = by_date.get(report_date)
+            if previous is not None and previous != record:
+                raise DataFetchError(f"conflicting duplicate financial rows: {report_date}")
             by_date[report_date] = record
         else:
             without_date.append(record)

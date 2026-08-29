@@ -260,6 +260,75 @@ def _validate_native_company_source_audit(source_audit: Mapping[str, Any], packe
         raise ValueError("native company research source audit company semantic totals are inconsistent")
 
 
+def _validate_codex_luna_source_audit(source_audit: Mapping[str, Any], packets: list[Any]) -> None:
+    """Require every published Codex/Luna company source check to pass.
+
+    Network or parser failures are useful while building an audit report, but
+    they are not a publishable evidence state.  The public artifact therefore
+    has one unambiguous contract: all company-level claims were semantically
+    verified and the audit projection still matches the packets being served.
+    """
+
+    if source_audit.get("audit_contract_version") != 3 or source_audit.get("audit_passed") is not True:
+        raise ValueError("Codex/Luna source audit contract did not pass")
+    for field in ("audit_sha256", "merged_sha256", "projection_sha256"):
+        if not _HASH_RE.fullmatch(str(source_audit.get(field) or "")):
+            raise ValueError(f"Codex/Luna source audit {field} is invalid")
+    if source_audit.get("network_warnings_allowed") is not False or source_audit.get("release_status") != "passed":
+        raise ValueError("Codex/Luna source audit warnings are not publishable")
+    for field in (
+        "failed",
+        "blocked",
+        "invalid_claim_url_count",
+        "semantic_failed_count",
+        "semantic_unverified_count",
+        "company_failed_count",
+        "company_unverified_count",
+        "affected_company_count",
+    ):
+        if _int(source_audit.get(field, 0), f"source_audit.{field}") != 0:
+            raise ValueError(f"Codex/Luna source audit contains a non-passing {field}")
+
+    projection_sha256, projection_counts = source_semantic_projection_sha256(
+        {"review_mode": CODEX_LUNA_WEB_REVIEW_MODE, "packets": packets}
+    )
+    if str(source_audit.get("projection_sha256") or "") != projection_sha256:
+        raise ValueError("Codex/Luna source audit semantic projection is stale")
+    for field, expected in projection_counts.items():
+        if _int(source_audit.get(field), f"source_audit.{field}") != expected:
+            raise ValueError(f"Codex/Luna source audit {field} is stale")
+
+    semantic_claims = _int(source_audit.get("semantic_claim_count"), "source_audit.semantic_claim_count")
+    semantic_passed = _int(source_audit.get("semantic_passed_count"), "source_audit.semantic_passed_count")
+    if semantic_claims != projection_counts["projection_claim_count"] or semantic_passed != semantic_claims:
+        raise ValueError("Codex/Luna source audit semantic coverage is incomplete")
+
+    coverage = source_audit.get("company_coverage")
+    if not isinstance(coverage, list) or len(coverage) != len(packets):
+        raise ValueError("Codex/Luna source audit company coverage is incomplete")
+    packet_codes = {str(packet.get("security_code") or "") for packet in packets if isinstance(packet, Mapping)}
+    seen_codes: set[str] = set()
+    coverage_claims = 0
+    for item in coverage:
+        if not isinstance(item, Mapping):
+            raise ValueError("Codex/Luna source audit company coverage is invalid")
+        code = str(item.get("security_code") or "")
+        if code not in packet_codes or code in seen_codes or item.get("status") != "pass":
+            raise ValueError(f"Codex/Luna source audit company status is not publishable: {code}")
+        claim_count = _int(item.get("semantic_claim_count"), f"source_audit.company_coverage.{code}.claims")
+        passed_count = _int(item.get("semantic_passed_count"), f"source_audit.company_coverage.{code}.passed")
+        failed_count = _int(item.get("semantic_failed_count"), f"source_audit.company_coverage.{code}.failed")
+        unverified_count = _int(
+            item.get("semantic_unverified_count"), f"source_audit.company_coverage.{code}.unverified"
+        )
+        if failed_count or unverified_count or passed_count != claim_count:
+            raise ValueError(f"Codex/Luna source audit company claims did not all pass: {code}")
+        seen_codes.add(code)
+        coverage_claims += claim_count
+    if seen_codes != packet_codes or coverage_claims != semantic_claims:
+        raise ValueError("Codex/Luna source audit company totals are inconsistent")
+
+
 def _review_for_validation(review: Mapping[str, Any], packet: Mapping[str, Any]) -> dict[str, Any]:
     value = dict(review)
     value.setdefault("schema_version", 2)
@@ -387,10 +456,7 @@ def validate_artifact(
         if _int(source_audit.get("invalid_claim_url_count"), "source_audit.invalid_claim_url_count") != 0:
             raise ValueError("external full AI screening seed has invalid claim URLs")
         failed = _int(source_audit.get("failed", 0), "source_audit.failed")
-        network_warnings_allowed = (
-            review_mode == CODEX_LUNA_WEB_REVIEW_MODE and source_audit.get("network_warnings_allowed") is True
-        )
-        if failed != 0 and not network_warnings_allowed:
+        if failed != 0:
             raise ValueError("external full AI screening seed has unreachable claim URLs")
         for field in ("checked", "ok", "blocked"):
             if field in source_audit:
@@ -417,6 +483,8 @@ def validate_artifact(
             raise ValueError("native company research source audit metadata is incomplete")
         if company_research_review:
             _validate_native_company_source_audit(source_audit, packets)
+        if review_mode == CODEX_LUNA_WEB_REVIEW_MODE:
+            _validate_codex_luna_source_audit(source_audit, packets)
     elif mixed_full:
         source_audit = payload.get("source_audit")
         if not isinstance(source_audit, Mapping) or source_audit.get("available") is not True:
@@ -459,6 +527,13 @@ def validate_artifact(
         review = packet.get("ai_review")
         if not isinstance(review, Mapping):
             raise ValueError(f"AI screening review is missing: {code}")
+        if review_mode == CODEX_LUNA_WEB_REVIEW_MODE and (
+            review.get("source_verification_status") != "pass"
+            or review.get("source_verification_issue_count") != 0
+            or review.get("source_verification_issues") != []
+            or review.get("source_verification_issue_kinds") != {}
+        ):
+            raise ValueError(f"Codex/Luna source verification did not pass for {code}")
         review_value = _review_for_validation(review, packet)
         errors = validate_review(
             review_value,

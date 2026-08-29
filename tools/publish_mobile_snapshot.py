@@ -19,10 +19,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from data.as_of import shanghai_now
 from data.cache import SafeFileCache
 from data.fetcher import DataFetcher
 from data.growth_evidence import (
@@ -191,7 +191,7 @@ def _utc_timestamp(value: object) -> str:
 
 
 def _shanghai_now() -> datetime:
-    return datetime.now(tz=ZoneInfo("Asia/Shanghai"))
+    return shanghai_now()
 
 
 def _shanghai_today() -> str:
@@ -378,16 +378,29 @@ def _prepare_dividend_evidence(
     """Bind Eastmoney dividend history to the whole universe for the gdN gate.
 
     Dividend data is an enhancement for the Type 7 gdN investability filter:
-    if the source fails, publication continues and companies simply keep a
-    zero dividend engine (gate evaluates on growth/R&D alone).
+    if the source fails, publication continues with an explicit unavailable
+    dividend state.  The gdN gate may still pass an independent R&D or verified
+    strong-cycle route, but it never turns a network failure into d=0.
     """
     from data.dividend_evidence import DividendEvidenceError, load_dividend_evidence
 
     try:
         evidence = load_dividend_evidence(eligible_codes, as_of=as_of)
     except (DividendEvidenceError, TypeError, ValueError, OSError) as exc:
-        print(f"DIVIDEND_DIAGNOSTIC unavailable; gdN filter uses d=0 fallback: {exc!r}", flush=True)
-        return {}
+        print(f"DIVIDEND_DIAGNOSTIC unavailable; gdN filter keeps d unknown: {exc!r}", flush=True)
+        return {
+            code: {
+                "status": "unavailable",
+                "reason": f"batch_failure:{type(exc).__name__}",
+                "evidence": {
+                    "source": "东方财富分红送配明细",
+                    "evidence_id": f"eastmoney-sharebonus-v2:{code}:{as_of.replace('-', '')}",
+                    "as_of": as_of,
+                    "summary": "分红资料批量抓取失败，未把未知值当作零",
+                },
+            }
+            for code in sorted(set(eligible_codes))
+        }
     return evidence
 
 
@@ -500,7 +513,7 @@ def _load_cninfo_acquisition_batch(
     as_of: date,
     max_workers: int = 16,
     time_budget_seconds: float = 900.0,
-) -> dict[str, dict[int, float]]:
+) -> dict[str, dict[int, dict[str, object]]]:
     """Load audited annual-report acquisition cash-flow values in CNY.
 
     Only companies in the network tranche are loaded; cached CNINFO results
@@ -523,30 +536,35 @@ def _load_cninfo_acquisition_batch(
     latest = _latest_completed_annual_year(as_of)
     years = list(range(latest, latest - EXTERNAL_HISTORY_YEARS, -1))
     tasks = [(code, year) for code in codes for year in years]
-    by_code: dict[str, dict[int, float]] = {}
+    by_code: dict[str, dict[int, dict[str, object]]] = {}
     deadline = time.monotonic() + max(0.0, time_budget_seconds)
-    pool = ThreadPoolExecutor(max_workers=max_workers)
-    try:
-        futures = {pool.submit(fetch_annual_acquisition, code, year): (code, year) for code, year in tasks}
-        remaining = time_budget_seconds
-        try:
-            for future in as_completed(futures, timeout=remaining):
-                code, year = futures[future]
-                try:
-                    evidence = future.result()
-                except Exception:  # noqa: BLE001
-                    continue
-                if not evidence.available or evidence.acquisition_cashflow is None:
-                    continue
-                multiplier = _CNINFO_UNIT_MULTIPLIERS.get(evidence.unit, 1.0)
-                by_code.setdefault(code, {})[year] = abs(evidence.acquisition_cashflow) * multiplier
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-        except TimeoutError:
-            pass
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    window_size = max_workers * 4
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for offset in range(0, len(tasks), window_size):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            window = tasks[offset : offset + window_size]
+            futures = {pool.submit(fetch_annual_acquisition, code, year): (code, year) for code, year in window}
+            try:
+                for future in as_completed(futures, timeout=remaining):
+                    code, year = futures[future]
+                    try:
+                        evidence = future.result()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if not evidence.available or evidence.acquisition_cashflow is None:
+                        continue
+                    multiplier = _CNINFO_UNIT_MULTIPLIERS.get(evidence.unit, 1.0)
+                    by_code.setdefault(code, {})[year] = {
+                        "value_cny": abs(evidence.acquisition_cashflow) * multiplier,
+                        "source_url": evidence.source_url,
+                        "source_sha256": evidence.source_sha256,
+                    }
+            except TimeoutError:
+                for future in futures:
+                    future.cancel()
+                break
     return by_code
 
 
@@ -643,7 +661,7 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
             from data import tdx_segment as _tdx_segment
 
             return _tdx_segment.backfill_tdx_segments(prepared)
-        cninfo_by_code: dict[str, dict[int, float]] = {}
+        cninfo_by_code: dict[str, dict[int, dict[str, object]]] = {}
         network_codes = [str(request.get("code") or "") for request in selected_network]
         if network_codes:
             as_of_value = next(

@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 from zipfile import BadZipFile, ZipFile
 from zoneinfo import ZoneInfo
 
+from data.as_of import shanghai_today
 from engine.quantitative_evidence import (
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
     validate_quantitative_evidence_record,
@@ -1651,7 +1652,7 @@ def _audit_type5_bottom_contract_replay(
         or contract.get("code") != code
         or contract.get("as_of") != as_of
         or reference is None
-        or reference > date.today()
+        or reference > shanghai_today()
         or not quote_binding_valid
     ):
         return None
@@ -2112,7 +2113,7 @@ def _audit_patch4_ledger_valid(
         or assessment.get("formula_version") != _AUDIT_PATCH4_FORMULA_VERSION
         or assessment.get("code") != code
         or assessment.get("as_of") != as_of
-        or reference > date.today()
+        or reference > shanghai_today()
         or not isinstance(assessment.get("complete"), bool)
     ):
         return False
@@ -2654,7 +2655,7 @@ def _audit_type7_ledger_valid_impl(
     except ValueError:
         quote_as_of = None
     expected_valuation_passed = bool(
-        expected_valuation_complete and quote_as_of is not None and quote_as_of <= date.today()
+        expected_valuation_complete and quote_as_of is not None and quote_as_of <= shanghai_today()
     )
     if (
         set(valuation_prerequisite) != {"passed", "as_of", "valuation_complete", "validation_basis"}
@@ -3750,7 +3751,7 @@ def _audit_company_codes(
         if not str(company.get("name") or "").strip() or str(company.get("industry") or "").strip() in {"", "DEFAULT"}:
             return None
         source_trade_date = _audit_type7_history_date(company.get("source_trade_date"))
-        if source_trade_date is None or source_trade_date > date.today():
+        if source_trade_date is None or source_trade_date > shanghai_today():
             return None
         if (_finite_number(company.get("price")) or 0) <= 0 or (_finite_number(company.get("market_cap")) or 0) <= 0:
             return None

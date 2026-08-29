@@ -17,6 +17,7 @@ from statistics import mean, median
 from typing import Any
 from urllib.parse import urlsplit
 
+from data.as_of import shanghai_today
 from data.quality_history import replay_valuation_distribution
 
 
@@ -376,7 +377,7 @@ def _verified_score(metric: Mapping[str, Any], key: str) -> tuple[float | None, 
         return None, False, "missing"
     evidence_date = _parse_evidence_date(evidence.get("as_of"))
     metric_as_of = _parse_evidence_date(metric.get("source_trade_date"))
-    if evidence_date is None or metric_as_of is None or metric_as_of > date.today() or evidence_date > metric_as_of:
+    if evidence_date is None or metric_as_of is None or metric_as_of > shanghai_today() or evidence_date > metric_as_of:
         return None, False, "missing"
     raw_level = metric.get(f"{key}_evidence_level")
     level = str(raw_level) if isinstance(raw_level, str) else "missing"
@@ -411,7 +412,7 @@ def normalise_patch4_assessment(
     if not _A_SHARE_CODE.fullmatch(str(security_code or "")):
         raise QualityEquityError("Patch 4 security code is invalid")
     reference = _parse_evidence_date(as_of)
-    if reference is None or reference > date.today():
+    if reference is None or reference > shanghai_today():
         raise QualityEquityError("Patch 4 assessment date is invalid")
     expected_fields = {"schema_version", "model_id", "code", "as_of", "criteria"}
     if not isinstance(value, Mapping) or set(value) != expected_fields:
@@ -633,7 +634,7 @@ def normalise_research_sources(
         raise QualityEquityError("type7_research_sources must be a list")
     if len(value) > MAX_RESEARCH_SOURCES:
         raise QualityEquityError("type7_research_sources exceeds the item limit")
-    reference = today or date.today()
+    reference = today or shanghai_today()
     if not isinstance(reference, date):
         raise QualityEquityError("Type 7 research reference date is invalid")
     if isinstance(max_age_days, bool) or not isinstance(max_age_days, int) or not 0 <= max_age_days <= 3_650:
@@ -816,7 +817,7 @@ def normalise_research_content_verification(
         reference = date.fromisoformat(as_of)
     except (TypeError, ValueError) as exc:
         raise QualityEquityError("Type 7 report-content verification date is invalid") from exc
-    if reference > date.today() or not _A_SHARE_CODE.fullmatch(security_code):
+    if reference > shanghai_today() or not _A_SHARE_CODE.fullmatch(security_code):
         raise QualityEquityError("Type 7 report-content verification identity is invalid")
     if not isinstance(value.get("passed"), bool) or value.get("required_bodies") != MIN_RESEARCH_BODY_SOURCES:
         raise QualityEquityError("Type 7 report-content verification decision is invalid")
@@ -1002,7 +1003,7 @@ def _latest_complete_financial_year(metric: Mapping[str, Any]) -> int | None:
 
     trade_date = _parse_evidence_date(metric.get("source_trade_date"))
     financial_date = _parse_evidence_date(metric.get("financial_indicator_as_of"))
-    today = date.today()
+    today = shanghai_today()
     if trade_date is not None and trade_date > today:
         return None
     if financial_date is not None:
@@ -1434,7 +1435,7 @@ def _history_record(value: Any, code: str, as_of: str | None) -> Mapping[str, An
         return None
     reference = _history_date(as_of)
     record_as_of = str(value.get("as_of") or "")
-    if reference is None or reference > date.today() or record_as_of != as_of:
+    if reference is None or reference > shanghai_today() or record_as_of != as_of:
         return None
     if not _valid_shareholder_return(value.get("shareholder_return"), reference):
         return None
@@ -2251,7 +2252,7 @@ def assess_quality_equity(
         valuation_evidence_complete=valuation_evidence_complete,
     )
     metric_as_of = _parse_evidence_date(metric.get("source_trade_date"))
-    quote_date_complete = metric_as_of is not None and metric_as_of <= date.today()
+    quote_date_complete = metric_as_of is not None and metric_as_of <= shanghai_today()
     technology_score = values["technology"][0]
     technology_score_complete = values["technology"][1]
     rd_intensity = _finite(metric.get("rd_intensity"))
@@ -2286,7 +2287,7 @@ def assess_quality_equity(
 
     research = normalise_research_sources(
         metric.get("type7_research_sources"),
-        today=metric_as_of if quote_date_complete else date.today(),
+        today=metric_as_of if quote_date_complete else shanghai_today(),
         security_code=code,
     )
     validated_history = _history_record(
@@ -2296,7 +2297,7 @@ def assess_quality_equity(
     )
     metadata_precheck = research_metadata_precheck(
         research,
-        reference=metric_as_of if metric_as_of is not None else date.today(),
+        reference=metric_as_of if metric_as_of is not None else shanghai_today(),
     )
     content_as_of = metric_as_of.isoformat() if metric_as_of is not None else "0001-01-01"
     raw_content_verification = metric.get("type7_research_content_verification")
@@ -3190,7 +3191,7 @@ def _validate_quality_equity_ledger_impl(ledger: Any) -> list[str]:
         valuation_complete = valuation.get("valuation_complete") if isinstance(valuation, Mapping) else None
         expected_valuation_complete = bool(template1_items.get("t1_20", {}).get("complete"))
         expected_valuation_passed = bool(
-            expected_valuation_complete and valuation_as_of is not None and valuation_as_of <= date.today()
+            expected_valuation_complete and valuation_as_of is not None and valuation_as_of <= shanghai_today()
         )
         if (
             not isinstance(valuation, Mapping)

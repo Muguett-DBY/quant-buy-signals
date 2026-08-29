@@ -10,7 +10,7 @@ from engine.audit import (
     _independent_type7_ledger_errors,
     _type7_valuation_binding_errors,
 )
-from engine.type7_patch6 import MODEL_ID, assess_patch6_type7, validate_patch6_type7_ledger
+from engine.type7_patch6 import MODEL_ID, _gdN_filter_gate, assess_patch6_type7, validate_patch6_type7_ledger
 from tests.test_quality_equity import _history, _metric, _type1
 from tools.verify_release_zip import _audit_type7_ledger_valid
 
@@ -98,6 +98,42 @@ def _cycle_route():
         "pb_percentile": 0.10,
         "current_pb": 1.0,
     }
+
+
+def test_gdn_keeps_unknown_dividend_distinct_from_confirmed_zero():
+    unknown = _gdN_filter_gate(
+        {"trend_growth": -0.05, "price": 10.0, "dividend_evidence_status": "unavailable"},
+        "A",
+    )
+    known_zero = _gdN_filter_gate(
+        {
+            "trend_growth": -0.05,
+            "price": 10.0,
+            "trailing_cash_per_share": 0.0,
+            "dividend_evidence_status": "known_zero",
+        },
+        "A",
+    )
+
+    assert unknown["complete"] is False
+    assert unknown["missing_inputs"] == ["d"]
+    assert known_zero["complete"] is True
+    assert known_zero["passed"] is False
+
+
+def test_gdn_independent_research_route_can_pass_when_dividend_is_unavailable():
+    result = _gdN_filter_gate(
+        {
+            "trend_growth": 0.08,
+            "rd_intensity": 0.05,
+            "price": 10.0,
+            "dividend_evidence_status": "unavailable",
+        },
+        "A",
+    )
+
+    assert result["complete"] is True
+    assert result["passed"] is True
 
 
 def _set_classification_component_score(ledger, group, key, score, *, inputs=None):

@@ -3,10 +3,10 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
-import tomllib
 
 import pytest
 import yaml
@@ -19,8 +19,9 @@ PUBLISH_AI_WORKFLOW = ROOT / ".github" / "workflows" / "publish-ai-screening.yml
 CLASSIFIER_PATH = ROOT / ".github" / "scripts" / "classify_website_ci.py"
 MARKET_SIGNING_PUBLIC_KEY = ROOT / "cloudflare" / "quant-dashboard" / "market_signing_public_key.txt"
 REFRESH_WORKER = ROOT / "cloudflare" / "quant-dashboard" / "refresh_worker.js"
-DISPATCHER_CONFIG = ROOT / "cloudflare-cron" / "wrangler.toml"
+DISPATCHER_CONFIG = ROOT / "cloudflare-cron" / "wrangler.jsonc"
 REFRESH_CONFIG = ROOT / "cloudflare" / "quant-dashboard" / "wrangler.jsonc"
+MIGRATIONS = ROOT / "cloudflare" / "quant-dashboard" / "migrations"
 
 
 def _workflow(path: Path) -> dict:
@@ -43,7 +44,7 @@ def _classifier_module():
 
 
 def test_cloudflare_crons_use_unambiguous_weekday_names():
-    dispatcher = tomllib.loads(DISPATCHER_CONFIG.read_text(encoding="utf-8"))
+    dispatcher = json.loads(DISPATCHER_CONFIG.read_text(encoding="utf-8"))
     refresh = json.loads(REFRESH_CONFIG.read_text(encoding="utf-8"))
 
     assert dispatcher["triggers"]["crons"] == ["15 8 * * MON-FRI"]
@@ -79,10 +80,11 @@ def _bash_executable() -> str | None:
         (["cloudflare-cron/worker.js"], True, False),
         (["cloudflare/quant-dashboard/market_signing_public_key.txt"], True, True),
         (["tests/test_cloudflare_dashboard.py"], True, False),
-        (["tools/ai_screening_narrative.py"], True, False),
-        (["tests/test_ai_screening_comparison.py"], True, False),
-        (["cloudflare/quant-dashboard/ai_screening_seed.json"], True, False),
-        ([".github/workflows/publish-ai-screening.yml"], True, False),
+        (["tools/ai_screening_narrative.py"], False, False),
+        (["tests/test_ai_screening_comparison.py"], False, False),
+        (["cloudflare/quant-dashboard/ai_screening_seed.json"], False, False),
+        ([".github/workflows/publish-ai-screening.yml"], False, False),
+        (["tools/atomic_io.py"], False, False),
         ([".github/workflows/tests.yml"], True, True),
         ([".github/scripts/classify_website_ci.py"], True, True),
         (["data/fetcher.py"], False, True),
@@ -104,6 +106,14 @@ def test_website_change_classifier_is_fast_for_web_and_fail_closed_everywhere_el
 def test_website_change_classifier_rejects_an_empty_diff():
     with pytest.raises(ValueError, match="empty"):
         _classifier_module().classify_paths([])
+
+
+def test_ai_only_classifier_and_publication_trigger_stay_in_lockstep():
+    publish = _workflow(PUBLISH_AI_WORKFLOW)
+    trigger_paths = set(_trigger(publish)["push"]["paths"])
+    classifier_paths = set(_classifier_module().AI_SCREENING_FILES)
+
+    assert trigger_paths == classifier_paths
 
 
 def test_refresh_worker_uses_the_website_owned_market_signing_key():
@@ -134,6 +144,8 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     main_push = classifier["run"].index('"${EVENT_NAME}" == "push"')
     assert "previous_tests_ok" in classifier["run"][main_push:]
     assert "gh api" in classifier["run"][main_push:]
+    assert "for attempt in 1 2 3 4" in classifier["run"][main_push:]
+    assert 'previous_tests_ok=""' in classifier["run"][main_push:]
     assert "using path-aware website CI classification" in classifier["run"][main_push:]
     assert "--all --github-output" in classifier["run"][main_push:]
     assert parsed["permissions"]["actions"] == "read"
@@ -170,30 +182,28 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     assert "gradlew" not in all_workflow_text
 
 
-def test_web_gate_is_small_and_matches_the_predeployment_contract_gate():
+def test_web_gate_is_small_and_deployment_reuses_the_exact_tests_revision():
     tests = _workflow(TEST_WORKFLOW)
     deploy = _workflow(DEPLOY_WORKFLOW)
     web_steps = tests["jobs"]["web"]["steps"]
     predeploy_steps = deploy["jobs"]["deploy"]["steps"]
     web_run = next(step for step in web_steps if step.get("name") == "Worker syntax and website contracts")["run"]
     predeploy_run = next(
-        step for step in predeploy_steps if step.get("name") == "Verify both workers and the dashboard contract tests"
+        step for step in predeploy_steps if step.get("name") == "Recheck the deployable Worker syntax"
     )["run"]
 
     expected_tests = "tests/test_cloudflare_dashboard.py tests/test_website_ci.py"
     assert expected_tests in web_run
-    for ai_test in (
-        "tests/test_ai_screening_narrative.py",
-        "tests/test_ai_screening_comparison.py",
-        "tests/test_ai_screening_source_audit.py",
-        "tests/test_merge_ai_screening_reviews.py",
-    ):
-        assert ai_test in web_run
-    assert expected_tests in predeploy_run
+    assert "tests/test_ai_screening_contract.py" not in web_run
+    assert "pytest" not in predeploy_run
     assert "requirements-dev-lock.txt" not in web_run
-    assert "node --check cloudflare-cron/worker.js" in web_run
-    assert "node --check cloudflare/quant-dashboard/pages_worker.js" in web_run
-    assert "node --check cloudflare/quant-dashboard/refresh_worker.js" in web_run
+    for worker in (
+        "cloudflare-cron/worker.js",
+        "cloudflare/quant-dashboard/pages_worker.js",
+        "cloudflare/quant-dashboard/refresh_worker.js",
+    ):
+        assert f"node --check {worker}" in web_run
+        assert f"node --check {worker}" in predeploy_run
 
 
 def test_cloudflare_deploy_waits_for_the_tests_workflow_and_has_no_direct_push_trigger():
@@ -249,68 +259,34 @@ def test_cloudflare_deploy_is_pinned_fail_closed_and_verifies_the_live_site():
     ):
         assert endpoint in verify["run"]
     assert 'grep -qF "AI"' in verify["run"]
-    upload_ai = next(
-        step for step in steps if "Upload the optional generation-bound AI screening overlay" in step["name"]
-    )
-    preflight_ai = next(
-        step for step in steps if "Preflight the optional generation-bound AI screening overlay" in step["name"]
-    )
-    assert upload_ai["env"] == {
-        "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-        "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
-    }
-    assert "r2 object put" in upload_ai["run"]
-    assert upload_ai["id"] == "ai_overlay"
-    assert "quant-market-data/ai-screening/${generation}.json" in upload_ai["run"]
-    assert preflight_ai["id"] == "ai_preflight"
-    assert steps.index(preflight_ai) < steps.index(refresh)
-    assert steps.index(preflight_ai) < steps.index(dispatcher)
-    assert steps.index(preflight_ai) < steps.index(pages)
-    assert steps.index(upload_ai) < steps.index(pages)
-    assert "python -m tools.validate_ai_screening_public" in preflight_ai["run"]
-    assert "33554432" in preflight_ai["run"]
-    assert ".source_audit.audit_passed == true" in preflight_ai["run"]
-    assert ".source_audit.audit_contract_version == 3" in preflight_ai["run"]
-    assert ".source_audit.projection_sha256" in preflight_ai["run"]
-    assert ".source_audit.projection_company_count == .candidate_total" in preflight_ai["run"]
-    assert ".source_audit.projection_claim_count" in preflight_ai["run"]
-    assert ".source_audit.projection_search_finding_count" in preflight_ai["run"]
-    assert ".source_audit.projection_source_reference_count" in preflight_ai["run"]
-    assert ".source_audit.projection_unique_url_count" in preflight_ai["run"]
-    assert ".source_audit.semantic_failed_count == 0" in preflight_ai["run"]
-    assert ".source_audit.semantic_unverified_count == 0" in preflight_ai["run"]
-    assert ".source_audit.company_coverage" in preflight_ai["run"]
-    assert ".referenced_no_source_finding_ids" in preflight_ai["run"]
-    assert ".source_audit.audit_sha256" in preflight_ai["run"]
-    assert "AI screening seed targets" in preflight_ai["run"]
-    assert "seed_changed=${seed_changed}" in preflight_ai["run"]
-    assert "Changed AI screening seed targets" in preflight_ai["run"]
-    assert "stale_seed=true" in preflight_ai["run"]
-    assert "stale AI screening seed passed the current Worker contract" in preflight_ai["run"]
-    assert preflight_ai["run"].index("python -m tools.validate_ai_screening_public") < preflight_ai["run"].index(
-        "stale AI screening seed passed the current Worker contract"
-    )
-    assert 'echo "uploaded=true"' in upload_ai["run"]
-    assert "steps.ai_preflight.outputs.seed_changed" in verify["run"]
-    assert "steps.ai_overlay.outputs.uploaded" in verify["run"]
-    assert "ai-screening-generation" in verify["run"]
     assert "/api/health?deep=1" in verify["run"]
     assert ".integrity_checked == true" in verify["run"]
-    assert ".type_pair_reviewed_count == .type_pair_candidate_total" in verify["run"]
-    assert ".type_pair_candidate_total == .type_pair_expected_total" in verify["run"]
-    assert ".candidate_offset == 0" in verify["run"]
-    assert ".type_pair_unreviewed_count == 0" in verify["run"]
-    assert '.review_mode == "codex_luna_web_review"' in verify["run"]
-    assert '.review_mode == "opencode_native_company_research_review"' in verify["run"]
-    assert ".reviewed_without_web_search == 0" in verify["run"]
-    assert ".full_coverage_web_search == true" in verify["run"]
-    assert ".web_search_attempted_count == .candidate_total" in verify["run"]
-    assert ".web_search_event_verified_count == .candidate_total" in verify["run"]
-    assert ".type_pair_web_search_attempted_count == .type_pair_candidate_total" in verify["run"]
-    assert ".type_pair_web_search_event_verified_count == .type_pair_candidate_total" in verify["run"]
-    assert ".research_source_urls_verified_count == .candidate_total" in verify["run"]
-    assert ".type_pair_research_source_urls_verified_count == .type_pair_candidate_total" in verify["run"]
-    assert ".type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total" in verify["run"]
+    assert ".code_commit == $revision" in verify["run"]
+    assert ".data_source_commit == .source_commit" in verify["run"]
+
+    runtime = next(step for step in steps if step.get("id") == "runtime")
+    migration = next(step for step in steps if step.get("name") == "Apply pending D1 migrations")
+    worker_versions = next(step for step in steps if step.get("id") == "workers_previous")
+    pages_previous = next(step for step in steps if step.get("id") == "pages_previous")
+    assert ".code_commit // empty" in runtime["run"]
+    assert "deploy=false" in runtime["run"]
+    assert "d1 migrations apply quant-market-data --remote" in migration["run"]
+    assert "/workers/scripts/${worker}/deployments" in worker_versions["run"]
+    assert ".result.deployments[0]" in worker_versions["run"]
+    assert "/pages/projects/quant/deployments?env=production&per_page=1" in pages_previous["run"]
+
+    pages_rollback = next(step for step in steps if step["name"].startswith("Roll back Pages"))
+    dispatcher_rollback = next(step for step in steps if step["name"].startswith("Roll back the dispatcher"))
+    refresh_rollback = next(step for step in steps if step["name"].startswith("Roll back the refresh"))
+    assert "/rollback" in pages_rollback["run"]
+    assert "wrangler@${WRANGLER_VERSION}" in dispatcher_rollback["run"]
+    assert "wrangler@${WRANGLER_VERSION}" in refresh_rollback["run"]
+    assert "steps.dispatcher_deploy.outputs.attempted == 'true'" in dispatcher_rollback["if"]
+    assert "steps.refresh_deploy.outputs.attempted == 'true'" in refresh_rollback["if"]
+
+    assert "ai-screening/" not in workflow
+    assert "r2 object put" not in workflow
+    assert "validate_ai_screening_public" not in workflow
 
 
 def test_ai_overlay_release_skips_stale_generation_without_publishing_it():
@@ -319,42 +295,68 @@ def test_ai_overlay_release_skips_stale_generation_without_publishing_it():
     publish_steps = publish["jobs"]["publish"]["steps"]
     preflight = next(step for step in publish_steps if step.get("id") == "preflight")
     upload = next(step for step in publish_steps if "Upload the AI overlay" in step["name"])
-    pages = next(step for step in publish_steps if "Deploy only the Pages AI reader" in step["name"])
     verify = next(step for step in publish_steps if step.get("name") == "Verify the published AI API")
+    rollback = next(step for step in publish_steps if "Restore the previous AI object" in step["name"])
+    revision = next(step for step in publish_steps if step.get("id") == "revision")
 
     assert 'echo "stale=false"' in preflight["run"]
     assert 'echo "stale=true"' in preflight["run"]
     assert "leaving the generation-bound overlay unchanged" in preflight["run"]
-    for step in (upload, pages, verify):
-        assert step["if"] == "steps.preflight.outputs.stale != 'true'"
+    for step in (upload, verify):
+        assert "steps.revision.outputs.current == 'true'" in step["if"]
+        assert "steps.preflight.outputs.stale != 'true'" in step["if"]
+    assert publish["jobs"]["publish"]["if"] == "github.ref == 'refs/heads/main'"
+    assert 'echo "current=false"' in revision["run"]
+    assert "skipping without publishing" in revision["run"]
+    assert "Deploy only the Pages AI reader" not in publish_text
+    assert "r2 object get" in upload["run"]
+    assert "expected_etag" in verify["run"]
+    assert "r2 object put" in rollback["run"]
+    assert "r2 object delete" in rollback["run"]
     assert "does not match the live market generation" not in publish_text
     assert "generation-bound" in publish_text
+    for strict_gate in (
+        ".source_audit.audit_contract_version == 3",
+        ".source_audit.audit_passed == true",
+        ".source_audit.semantic_failed_count == 0",
+        ".source_audit.semantic_unverified_count == 0",
+        ".source_audit.company_failed_count == 0",
+        ".source_audit.company_unverified_count == 0",
+        ".source_audit.network_warnings_allowed == false",
+        '.source_audit.release_status == "passed"',
+        '.ai_review.source_verification_status == "pass"',
+        ".ai_review.source_verification_issue_count == 0",
+    ):
+        assert strict_gate in preflight["run"]
+        assert strict_gate in verify["run"]
 
 
-def test_cloudflare_deploy_does_not_fail_on_a_changed_but_stale_ai_seed():
-    deploy = _workflow(DEPLOY_WORKFLOW)
-    deploy_text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-    steps = deploy["jobs"]["deploy"]["steps"]
-    preflight = next(step for step in steps if step.get("id") == "ai_preflight")
-    verify = next(step for step in steps if step.get("name") == "Verify the deployed site")
-
-    assert 'echo "stale_seed=false"' in preflight["run"]
-    assert 'echo "stale_seed=true"' in preflight["run"]
-    assert "continuing the website deployment" in preflight["run"]
-    assert "steps.ai_preflight.outputs.stale_seed" in verify["run"]
-    assert "refusing to publish a stale overlay" in deploy_text
+def test_worker_configs_enable_current_compatibility_and_observability():
+    for path in (DISPATCHER_CONFIG, REFRESH_CONFIG):
+        config = json.loads(path.read_text(encoding="utf-8"))
+        assert config["compatibility_date"] == "2026-08-29"
+        assert "nodejs_compat" in config["compatibility_flags"]
+        assert config["observability"] == {"enabled": True, "head_sampling_rate": 1}
 
 
-def test_cloudflare_deploy_bash_blocks_parse_with_bash():
+def test_d1_migrations_are_additive_and_schema_baseline_is_present():
+    migrations = sorted(MIGRATIONS.glob("*.sql"))
+    assert [path.name for path in migrations] == ["0001_initial.sql"]
+    for path in migrations:
+        sql = path.read_text(encoding="utf-8")
+        assert "CREATE TABLE IF NOT EXISTS generations" in sql
+        assert "CREATE TABLE IF NOT EXISTS current_generation" in sql
+        assert not re.search(r"\b(?:DROP|DELETE|TRUNCATE|ALTER\s+TABLE)\b", sql, re.IGNORECASE)
+
+
+@pytest.mark.parametrize("workflow_path", [DEPLOY_WORKFLOW, PUBLISH_AI_WORKFLOW])
+def test_cloudflare_deploy_bash_blocks_parse_with_bash(workflow_path: Path):
     executable = _bash_executable()
     if executable is None:
         pytest.skip("Bash is not installed on this test host")
-    parsed = _workflow(DEPLOY_WORKFLOW)
-    blocks = [
-        step["run"]
-        for step in parsed["jobs"]["deploy"]["steps"]
-        if isinstance(step.get("run"), str) and step.get("shell") == "bash"
-    ]
+    parsed = _workflow(workflow_path)
+    job = next(iter(parsed["jobs"].values()))
+    blocks = [step["run"] for step in job["steps"] if isinstance(step.get("run"), str) and step.get("shell") == "bash"]
     assert blocks
     for block in blocks:
         result = subprocess.run(

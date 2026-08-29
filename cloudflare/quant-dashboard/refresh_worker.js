@@ -18,12 +18,15 @@ const MAX_UNCOMPRESSED_ASSET_BYTES = 24_000_000;
 const MAX_DETAIL_COMPRESSED_TOTAL = 48_000_000;
 const MAX_DETAIL_UNCOMPRESSED_TOTAL = 144_000_000;
 const DETAIL_DOWNLOAD_BATCH_SIZE = 4;
-const R2_HEAD_BATCH_SIZE = 4;
+const R2_VERIFY_BATCH_SIZE = 4;
 const R2_PUT_BATCH_SIZE = 4;
 const R2_DELETE_BATCH_SIZE = 32;
 const MAX_GENERATION_OBJECTS = 64;
 const MAX_STALE_GENERATIONS_PER_REFRESH = 8;
 const DEFAULT_GENERATION_RETENTION_COUNT = 8;
+const UPSTREAM_FETCH_ATTEMPTS = 3;
+const UPSTREAM_FETCH_TIMEOUT_MS = 30_000;
+const MAX_RETRY_DELAY_MS = 5_000;
 const ASSET_NAMES = {
   catalogue: /^catalog-[0-9a-f]{16}\.json\.gz$/,
   signals: /^signals-[0-9a-f]{16}\.json\.gz$/,
@@ -36,6 +39,46 @@ function json(value, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
+}
+
+function retryableStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function retryDelayMs(response, attempt) {
+  const raw = String(response?.headers?.get("retry-after") || "").trim();
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(MAX_RETRY_DELAY_MS, seconds * 1_000);
+  const date = Date.parse(raw);
+  if (Number.isFinite(date)) return Math.max(0, Math.min(MAX_RETRY_DELAY_MS, date - Date.now()));
+  return Math.min(MAX_RETRY_DELAY_MS, 250 * (2 ** attempt) + Math.floor(Math.random() * 150));
+}
+
+async function secretsEqual(provided, expected) {
+  if (typeof provided !== "string" || typeof expected !== "string" || !provided || !expected) return false;
+  const encoder = new TextEncoder();
+  const [providedHash, expectedHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
+}
+
+async function fetchWithRetry(url, init, label) {
+  let lastError = null;
+  for (let attempt = 0; attempt < UPSTREAM_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(UPSTREAM_FETCH_TIMEOUT_MS) });
+      if (!retryableStatus(response.status) || attempt === UPSTREAM_FETCH_ATTEMPTS - 1) return response;
+      try { await response.body?.cancel(); } catch { /* best-effort release before retry */ }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(response, attempt)));
+    } catch (error) {
+      lastError = error;
+      if (attempt === UPSTREAM_FETCH_ATTEMPTS - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(null, attempt)));
+    }
+  }
+  throw new Error(`${label} request failed after retries`, { cause: lastError });
 }
 
 async function sha256(bytes) {
@@ -87,15 +130,45 @@ function validateAssetDeclaration(name, kind, metadata = {}) {
   if (kind !== "signature" && !HEX64.test(String(metadata.sha256 || ""))) throw new Error(`invalid ${kind} checksum`);
 }
 
+function validateManifestMetadata(manifest) {
+  const marketAsOf = String(manifest?.market_as_of || "");
+  const dataTimestamp = String(manifest?.data_timestamp_utc || "");
+  const generatedAt = String(manifest?.generated_at_utc || "");
+  const sourceCommit = String(manifest?.provenance?.source_commit || "");
+  const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(marketAsOf) ? Date.parse(`${marketAsOf}T00:00:00Z`) : NaN;
+  if (!Number.isFinite(dateValue) || new Date(dateValue).toISOString().slice(0, 10) !== marketAsOf) {
+    throw new Error("manifest market date is invalid");
+  }
+  if (!Number.isFinite(Date.parse(dataTimestamp)) || !Number.isFinite(Date.parse(generatedAt))) {
+    throw new Error("manifest timestamp is invalid");
+  }
+  if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("manifest source commit is invalid");
+  const summary = manifest?.summary;
+  const counts = [
+    summary?.company_count,
+    summary?.triggered_company_count,
+    summary?.conditional_company_count,
+    summary?.pending_company_count,
+  ];
+  if (!counts.every((value) => Number.isSafeInteger(value) && value >= 0) || counts[0] < 1) {
+    throw new Error("manifest summary counts are invalid");
+  }
+  if (counts.slice(1).some((value) => value > counts[0])) throw new Error("manifest summary count exceeds coverage");
+}
+
 async function downloadAsset(name, kind, metadata = {}) {
   validateAssetDeclaration(name, kind, metadata);
-  const response = await fetch(`${SOURCE_ASSET_BASE}${encodeURIComponent(name)}?mirror=${Date.now()}`, {
+  const response = await fetchWithRetry(`${SOURCE_ASSET_BASE}${encodeURIComponent(name)}?mirror=${Date.now()}`, {
     cf: { cacheTtl: 0, cacheEverything: false },
-  });
-  if (!response.ok) throw new Error(`${kind} download HTTP ${response.status}`);
+  }, kind);
+  if (!response.ok) {
+    try { await response.body?.cancel(); } catch { /* best-effort release */ }
+    throw new Error(`${kind} download HTTP ${response.status}`);
+  }
   const maxBytes = kind === "signature" ? 128 : metadata.size;
   const declaredLength = Number(response.headers.get("content-length") || 0);
   if (declaredLength > maxBytes || (kind !== "signature" && declaredLength > 0 && declaredLength !== metadata.size)) {
+    try { await response.body?.cancel(); } catch { /* best-effort release */ }
     throw new Error(`${kind} response length mismatch`);
   }
   const bytes = await readBoundedStream(response.body, maxBytes, `${kind} response`);
@@ -397,13 +470,17 @@ function expectedGenerationObjects({
 }
 
 async function inspectGenerationObjects(bucket, objects) {
-  return await mapInBatches(objects, R2_HEAD_BATCH_SIZE, async (object) => {
-    const existing = await bucket.head(object.key);
-    const complete = Boolean(
+  return await mapInBatches(objects, R2_VERIFY_BATCH_SIZE, async (object) => {
+    const existing = await bucket.get(object.key);
+    let complete = false;
+    if (
       existing
       && existing.size === object.expectedSize
       && String(existing.customMetadata?.sha256 || "").toLowerCase() === String(object.expectedHash).toLowerCase()
-    );
+    ) {
+      const bytes = await readBoundedStream(existing.body, object.expectedSize, `${object.name} R2 object`);
+      complete = bytes.byteLength === object.expectedSize && await sha256(bytes) === String(object.expectedHash).toLowerCase();
+    }
     return { ...object, complete };
   });
 }
@@ -533,16 +610,23 @@ async function pruneOldGenerations(env, currentGenerationId) {
 }
 
 async function refresh(env) {
-  const response = await fetch(`${SOURCE_MANIFEST}?mirror=${Date.now()}`, { cf: { cacheTtl: 0, cacheEverything: false } });
-  if (!response.ok) throw new Error(`manifest download HTTP ${response.status}`);
+  const response = await fetchWithRetry(`${SOURCE_MANIFEST}?mirror=${Date.now()}`, { cf: { cacheTtl: 0, cacheEverything: false } }, "manifest");
+  if (!response.ok) {
+    try { await response.body?.cancel(); } catch { /* best-effort release */ }
+    throw new Error(`manifest download HTTP ${response.status}`);
+  }
   const declaredManifestLength = Number(response.headers.get("content-length") || 0);
-  if (declaredManifestLength > MAX_MANIFEST_BYTES) throw new Error("manifest is too large");
+  if (declaredManifestLength > MAX_MANIFEST_BYTES) {
+    try { await response.body?.cancel(); } catch { /* best-effort release */ }
+    throw new Error("manifest is too large");
+  }
   const sourceManifestBytes = await readBoundedStream(response.body, MAX_MANIFEST_BYTES, "manifest response");
   const manifestText = new TextDecoder("utf-8", { fatal: true }).decode(sourceManifestBytes);
   const manifest = JSON.parse(manifestText);
   if (manifest.product !== "DS_DCF" || manifest.schema_version !== 1 || manifest.analysis_quality?.ok !== true) {
     throw new Error("manifest quality contract failed");
   }
+  validateManifestMetadata(manifest);
   const catalogueName = String(manifest.catalogue?.filename || "");
   const signalsName = String(manifest.signals?.filename || "");
   const signatureName = String(manifest.signature?.filename || "");
@@ -770,16 +854,23 @@ async function refresh(env) {
 
 export default {
   async fetch(request, env) {
-    if (request.method !== "POST" || new URL(request.url).pathname !== "/refresh" || request.headers.get("x-refresh-key") !== env.REFRESH_KEY) {
+    const authorized = request.method === "POST"
+      && new URL(request.url).pathname === "/refresh"
+      && await secretsEqual(request.headers.get("x-refresh-key"), env.REFRESH_KEY);
+    if (!authorized) {
       return json({ error: "not found" }, 404);
     }
     try {
       return json(await refresh(env));
     } catch (error) {
-      return json({ status: "error", error: String(error?.message || error) }, 502);
+      const requestId = crypto.randomUUID();
+      console.error(JSON.stringify({ event: "refresh_failed", request_id: requestId, error: String(error?.message || error) }));
+      return json({ status: "error", error: "refresh failed", request_id: requestId }, 502);
     }
   },
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(refresh(env));
+    ctx.waitUntil(refresh(env).catch((error) => {
+      console.error(JSON.stringify({ event: "scheduled_refresh_failed", error: String(error?.message || error) }));
+    }));
   },
 };

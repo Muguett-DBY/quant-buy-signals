@@ -594,7 +594,9 @@ const tampered = await worker.fetch(
   env,
 );
 assert.equal(tampered.status, 500);
-assert.match((await tampered.json()).error, /目录正文完整性校验失败/);
+const tamperedError = await tampered.json();
+assert.equal(tamperedError.error, "服务器暂时无法完成请求");
+assert.match(tamperedError.request_id, /^[0-9a-f-]{36}$/);
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],
@@ -742,6 +744,12 @@ assert.deepEqual(
     .sort((left, right) => helpers.compareRowsByScore(left, right, ""))
     .map(row => row.code),
   ["600002", "600001", "300002", "300001"],
+);
+assert.deepEqual(
+  [type1Signal, conditionalOnly, multiSignal]
+    .sort((left, right) => helpers.compareRowsByScore(left, right, "type7"))
+    .map(row => row.code),
+  ["300002", "600001", "600002"],
 );
 assert.deepEqual(
   helpers.decisionCategoryCounts(
@@ -917,6 +925,56 @@ for (const method of ["POST", "OPTIONS"]) {
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.deepEqual(await response.json(), { error: "只读接口不接受写请求" });
 }
+const generation = { generation_id: "0123456789abcdef", market_as_of: "2026-08-28", source_commit: "a".repeat(40) };
+const env = { DB: { prepare: () => ({ bind() { return this; }, first: async () => generation }) } };
+for (const path of ["/api/methodology", "/api/meta"]) {
+  const response = await worker.fetch(new Request("https://dashboard.test" + path, { method: "HEAD" }), env);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "");
+}
+const missing = await worker.fetch(new Request("https://dashboard.test/missing", { method: "HEAD" }), env);
+assert.equal(missing.status, 404);
+assert.equal(await missing.text(), "");
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_refresh_worker_validates_signed_manifest_scalar_metadata():
+    source = REFRESH_WORKER.read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None
+    validator = r"""
+import assert from "node:assert/strict";
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const url = "data:text/javascript;base64," + Buffer.from(source + "\nexport { validateManifestMetadata };\n").toString("base64");
+const { validateManifestMetadata } = await import(url);
+const valid = {
+  market_as_of: "2026-08-28",
+  data_timestamp_utc: "2026-08-28T08:20:00Z",
+  generated_at_utc: "2026-08-28T08:21:00Z",
+  provenance: { source_commit: "a".repeat(40) },
+  summary: { company_count: 5000, triggered_company_count: 100, conditional_company_count: 50, pending_company_count: 300 },
+};
+assert.doesNotThrow(() => validateManifestMetadata(valid));
+for (const mutation of [
+  value => { value.market_as_of = "2026-02-30"; },
+  value => { value.generated_at_utc = "not-a-date"; },
+  value => { value.provenance.source_commit = "short"; },
+  value => { value.summary.company_count = 0; },
+  value => { value.summary.pending_company_count = 5001; },
+]) {
+  const value = structuredClone(valid);
+  mutation(value);
+  assert.throws(() => validateManifestMetadata(value));
+}
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", validator],
@@ -941,12 +999,18 @@ for await (const chunk of process.stdin) source += chunk;
 const url = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
 const worker = (await import(url)).default;
 Date.now = () => Date.parse("2026-08-11T12:00:00Z");
-const checksum = "a".repeat(64);
-const manifest = {
-  catalogue: { filename: "catalogue.json.gz", size: 120, sha256: checksum, uncompressed_size: 240 },
-  signals: { filename: "signals.json.gz", size: 80, sha256: checksum, uncompressed_size: 160 },
-  signature: { filename: "manifest.sig" },
-};
+  const catalogueBytes = Buffer.alloc(120, 1);
+  const signalsBytes = Buffer.alloc(80, 2);
+  const signatureBytes = Buffer.concat([
+    Buffer.from([0x30, 0x44, 0x02, 0x20]), Buffer.alloc(32, 1),
+    Buffer.from([0x02, 0x20]), Buffer.alloc(32, 2),
+  ]);
+  const digest = bytes => createHash("sha256").update(bytes).digest("hex");
+  const manifest = {
+    catalogue: { filename: "catalogue.json.gz", size: 120, sha256: digest(catalogueBytes), uncompressed_size: 240 },
+    signals: { filename: "signals.json.gz", size: 80, sha256: digest(signalsBytes), uncompressed_size: 160 },
+    signature: { filename: "manifest-0123456789abcdef.sig" },
+  };
 const manifestBytes = Buffer.from(JSON.stringify(manifest));
 const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
 const objectFor = (size, bytes = null, hash = "") => ({
@@ -969,10 +1033,16 @@ const generation = {
 const prefix = "generations/0123456789abcdef/";
 const objects = new Map([
   [prefix + "manifest.json", objectFor(manifestBytes.byteLength, manifestBytes, manifestHash)],
-  [prefix + "catalogue.json.gz", objectFor(120)],
-  [prefix + "signals.json.gz", objectFor(80)],
-  [prefix + "manifest.sig", objectFor(64)],
-]);
+  [prefix + "catalogue.json.gz", objectFor(120, catalogueBytes, digest(catalogueBytes))],
+  [prefix + "signals.json.gz", objectFor(80, signalsBytes, digest(signalsBytes))],
+  [prefix + "manifest-0123456789abcdef.sig", objectFor(signatureBytes.byteLength, signatureBytes, digest(signatureBytes))],
+  ]);
+  const realCrypto = globalThis.crypto;
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: { subtle: {
+    digest: (...args) => realCrypto.subtle.digest(...args),
+    importKey: (...args) => realCrypto.subtle.importKey(...args),
+    verify: async () => true,
+  } } });
 let getCount = 0;
 let headCount = 0;
 const env = {
@@ -1004,10 +1074,10 @@ assert.equal(payload.integrity_checked, true);
 assert.equal(payload.integrity_ok, true);
 assert.equal(payload.manifest_ok, true);
 assert.equal(payload.company_details_declared, false);
-assert.equal(getCount, 1);
-assert.equal(headCount, 3);
+  assert.equal(getCount, 4);
+  assert.equal(headCount, 0);
 
-objects.delete(prefix + "signals.json.gz");
+    objects.delete(prefix + "signals.json.gz");
 response = await worker.fetch(new Request("https://dashboard.test/api/health?deep=1"), env);
 assert.equal(response.status, 503);
 payload = await response.json();
@@ -1550,13 +1620,14 @@ def test_refresh_worker_same_generation_validates_and_repairs_d1_before_returnin
     )
 
 
-def test_refresh_worker_bounds_primary_decompression_and_r2_head_put_concurrency():
+def test_refresh_worker_bounds_primary_decompression_and_r2_verify_put_concurrency():
     source = REFRESH_WORKER.read_text(encoding="utf-8")
     node = shutil.which("node")
     assert node is not None, "Node.js is required to execute the refresh resource contracts"
     validator = r"""
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 let source = "";
 process.stdin.setEncoding("utf8");
@@ -1587,28 +1658,34 @@ await assert.rejects(
   /catalogue uncompressed response exceeds its byte limit/,
 );
 
-const objects = Array.from({ length: 11 }, (_, index) => ({
-  name: `asset-${index}`,
-  key: `generations/0123456789abcdef/asset-${index}`,
-  body: new Uint8Array([index]).buffer,
-  contentType: "application/json",
-  contentEncoding: null,
-  expectedSize: 1,
-  expectedHash: "a".repeat(64),
-}));
-let activeHeads = 0;
-let maxHeads = 0;
+const objects = Array.from({ length: 11 }, (_, index) => {
+  const bytes = new Uint8Array([index]);
+  return {
+    name: `asset-${index}`,
+    key: `generations/0123456789abcdef/asset-${index}`,
+    body: bytes.buffer,
+    contentType: "application/json",
+    contentEncoding: null,
+    expectedSize: 1,
+    expectedHash: createHash("sha256").update(bytes).digest("hex"),
+  };
+});
+let activeGets = 0;
+let maxGets = 0;
 const inspected = await inspectGenerationObjects({
-  async head() {
-    activeHeads += 1;
-    maxHeads = Math.max(maxHeads, activeHeads);
+  async get(key) {
+    activeGets += 1;
+    maxGets = Math.max(maxGets, activeGets);
     await new Promise((resolve) => setTimeout(resolve, 2));
-    activeHeads -= 1;
-    return { size: 1, customMetadata: { sha256: "a".repeat(64) } };
+    activeGets -= 1;
+    const index = Number(key.split("-").at(-1));
+    const bytes = new Uint8Array([index]);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    return { size: 1, body: new Response(bytes).body, customMetadata: { sha256: hash } };
   },
 }, objects);
 assert.equal(inspected.length, objects.length);
-assert.equal(maxHeads, 4);
+assert.equal(maxGets, 4);
 assert.ok(inspected.every((object) => object.complete));
 
 let activePuts = 0;
@@ -2283,6 +2360,60 @@ assert.equal(response.status, 200);
     const missingClaimBinding = structuredClone(external);
     missingClaimBinding.packets[0].ai_review.web_search_claim_urls_verified = false;
     assert.equal(await statusForArtifact(missingClaimBinding), 404);
+    const codexLuna = structuredClone(external);
+    codexLuna.review_mode = "codex_luna_web_review";
+    codexLuna.review_models = ["codex-luna-max"];
+    codexLuna.review_efforts = ["max"];
+    codexLuna.type_pair_web_search_completed_count = 1;
+    codexLuna.type_pair_research_source_urls_verified_count = 1;
+    codexLuna.web_search_completed_count = 1;
+    codexLuna.web_source_verified_count = 1;
+    codexLuna.research_source_urls_verified_count = 1;
+    Object.assign(codexLuna.packets[0].ai_review, {
+      model: "codex-luna-max",
+      effort: "max",
+      web_search_verified: true,
+      web_search_verified_claim_url_count: 1,
+      research_source_urls_verified: true,
+      claims: [{ statement: "2026年报告披露经营现金流改善。", source_ref: "https://example.test/report" }],
+      source_verification_status: "pass",
+      source_verification_issue_count: 0,
+      source_verification_issues: [],
+      source_verification_issue_kinds: {},
+    });
+    const codexProjection = await sourceSemanticProjectionDigest(codexLuna);
+    codexLuna.source_audit = {
+      available: true,
+      audit_contract_version: 3,
+      audit_passed: true,
+      audit_sha256: "a".repeat(64),
+      merged_sha256: "b".repeat(64),
+      ...codexProjection,
+      checked: 1,
+      ok: 1,
+      failed: 0,
+      blocked: 0,
+      invalid: 0,
+      invalid_claim_url_count: 0,
+      semantic_claim_count: codexProjection.projection_claim_count,
+      semantic_passed_count: codexProjection.projection_claim_count,
+      semantic_failed_count: 0,
+      semantic_unverified_count: 0,
+      company_pass_count: 1,
+      company_failed_count: 0,
+      company_unverified_count: 0,
+      affected_company_count: 0,
+      network_warnings_allowed: false,
+      release_status: "passed",
+      company_coverage: [{ security_code: "600339", status: "pass", semantic_claim_count: codexProjection.projection_claim_count, semantic_passed_count: codexProjection.projection_claim_count, semantic_failed_count: 0, semantic_unverified_count: 0 }],
+    };
+    assert.equal(await statusForArtifact(codexLuna), 200);
+    const codexWarningRelease = structuredClone(codexLuna);
+    Object.assign(codexWarningRelease.source_audit, { audit_passed: false, failed: 1, ok: 0, network_warnings_allowed: true, release_status: "passed_with_source_access_warnings" });
+    assert.equal(await statusForArtifact(codexWarningRelease), 404);
+    const codexPacketWarning = structuredClone(codexLuna);
+    Object.assign(codexPacketWarning.packets[0].ai_review, { source_verification_status: "unverified", source_verification_issue_count: 1, source_verification_issues: [{ kind: "access" }], source_verification_issue_kinds: { access: 1 } });
+    assert.equal(await statusForArtifact(codexPacketWarning), 404);
     const companyResearch = structuredClone(external);
     companyResearch.review_mode = "opencode_native_company_research_review";
     companyResearch.review_models = ["opencode-go/muse-spark-1.2-contributor"];
@@ -2668,15 +2799,16 @@ assert.equal(response.status, 200);
     assert.ok(html.includes("观察"));
     assert.ok(html.includes("不建议"));
     assert.ok(html.includes("原生搜索事件"));
-    assert.ok(html.includes("财报来源链接"));
+    assert.ok(!html.includes("财报来源链接"));
+    assert.ok(html.includes("完成独立复核"));
     assert.ok(!html.includes("保留引用已绑定搜索结果"));
     assert.ok(html.includes("已移除无效来源"));
-    assert.ok(html.includes("资料时效"));
+    assert.ok(!html.includes("资料时效：非当前/未标注"));
     assert.ok(!html.includes("待核验（未形成买入结论）"));
     assert.ok(aiCsp.includes("script-src 'nonce-" + nonce + "'"));
     const inlineScript = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
     assert.ok(inlineScript);
-    assert.ok(inlineScript.includes("freshness_counts"));
+    assert.ok(inlineScript.includes("research_as_of"));
     assert.ok(inlineScript.includes("function isRuleText"));
     assert.ok(inlineScript.includes("function aiSummary"));
     assert.ok(inlineScript.includes("candidate-rules"));
@@ -2698,10 +2830,12 @@ const fakeDocument = {
         value: "all",
         innerHTML: "",
         textContent: "",
-        hidden: false,
-        disabled: false,
-        addEventListener() {},
-      });
+            hidden: false,
+            disabled: false,
+            addEventListener() {},
+            setAttribute() {},
+            removeAttribute() {},
+          });
     }
     return elements.get(selector);
   },

@@ -28,11 +28,13 @@ from urllib.parse import urlsplit
 import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS
+from data.as_of import shanghai_today
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
 from data.provider_http import (
     RequestRateLimiter as _RequestRateLimiter,
     is_transient_request_error,
     retry_delay_seconds,
+    thread_local_session,
 )
 from engine.quality_equity import (
     MAX_RESEARCH_SOURCES,
@@ -143,7 +145,7 @@ def _parse_as_of(value: date | str) -> date:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
             raise ValueError("as_of must be a valid calendar date") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise ValueError("as_of cannot be in the future")
     return parsed
 
@@ -896,6 +898,8 @@ def _fetch_recent_sources(
     timeout: tuple[int, int] = REQUEST_TIMEOUT,
     rate_limiter: Any = _GLOBAL_RATE_LIMITER,
 ) -> list[dict[str, str]]:
+    if session is requests:
+        session = thread_local_session()
     by_report: dict[str, dict[str, str]] = {}
     total_pages: int | None = None
     for page_number in range(1, MAX_PAGES + 1):

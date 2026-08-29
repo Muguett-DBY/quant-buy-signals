@@ -18,12 +18,20 @@ class _FakeSession:
     def __init__(self, rows_by_symbol: dict[str, list[dict]]) -> None:
         self._rows = rows_by_symbol
 
-    def get(self, url, *, params, headers, timeout):
+    def get(self, url, *, params, headers, timeout, stream):
         class _Response:
             def __init__(self, text_value: str) -> None:
-                self.text = text_value
+                self._content = text_value.encode("utf-8")
+                self.headers = {"Content-Length": str(len(self._content))}
 
             def raise_for_status(self) -> None:
+                return None
+
+            def iter_content(self, *, chunk_size: int):
+                for offset in range(0, len(self._content), chunk_size):
+                    yield self._content[offset : offset + chunk_size]
+
+            def close(self) -> None:
                 return None
 
         symbol = str(params.get("symbol") or "")
@@ -87,10 +95,19 @@ def test_load_commodity_cycle_evidence_binds_code_dated_records(tmp_path, monkey
     assert set(evidence) == {"000001", "000002"}
     for code, record in evidence.items():
         assert 0 <= record["score"] <= 10
-        assert set(record["evidence"]) == {"source", "evidence_id", "as_of", "summary"}
+        assert set(record["evidence"]) == {
+            "source",
+            "source_url",
+            "source_sha256",
+            "evidence_id",
+            "as_of",
+            "summary",
+        }
         assert record["evidence"]["as_of"] == "2026-07-31"
         assert code in record["evidence"]["evidence_id"]
         assert "新浪期货主力连续CU0" in record["evidence"]["source"]
+        assert record["evidence"]["source_url"].startswith("https://")
+        assert len(record["evidence"]["source_sha256"]) == 64
 
 
 def test_load_commodity_cycle_evidence_reuses_cache(tmp_path, monkeypatch):

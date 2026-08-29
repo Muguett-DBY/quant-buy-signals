@@ -71,7 +71,10 @@ def test_unit_for_page_falls_back_to_previous_page_then_yuan():
 
 
 def test_parse_acquisition_zero_when_dash_and_unit_detected(monkeypatch):
-    rows = _words([("取得子公司及其他营业单位支付的现金净额", 10), ("－", 300)])
+    rows = [
+        (10.0, 0.0, 250.0, 10.0, "取得子公司及其他营业单位支付的现金净额"),
+        (300.0, 0.0, 310.0, 10.0, "－"),
+    ]
 
     class _Doc:
         page_count = 1
@@ -92,15 +95,55 @@ def test_parse_acquisition_zero_when_dash_and_unit_detected(monkeypatch):
     assert unit in ("", "元")
 
 
+def test_parse_acquisition_blank_value_is_not_treated_as_zero(monkeypatch):
+    rows = [(10.0, 0.0, 250.0, 10.0, "取得子公司及其他营业单位支付的现金净额")]
+
+    class _Doc:
+        page_count = 1
+
+        def __iter__(self):
+            yield from (self,)
+
+        def get_text(self, mode):
+            assert mode == "words"
+            return rows
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cn, "_import_fitz", lambda: type("F", (), {"open": staticmethod(lambda *a, **k: _Doc())}))
+    value, unit, reason = cn._parse_acquisition_cashflow(b"pdf-bytes", "000429", 2025)
+    assert value is None
+    assert unit == ""
+    assert reason == "acquisition_value_not_found"
+
+
 def test_overlay_constructs_rows_when_eastmoney_records_empty():
     records = []
-    overlay = cn_overlay_helper(records, {2024: 5.0, 2025: 0.0}, "600519")
+    overlay = cn_overlay_helper(
+        records,
+        {
+            2024: _cninfo_value(5.0, "a" * 64),
+            2025: _cninfo_value(0.0, "b" * 64),
+        },
+        "600519",
+    )
     assert {r["REPORT_DATE"] for r in overlay} == {"2024-12-31", "2025-12-31"}
     by_year = {r["REPORT_DATE"][:4]: r for r in overlay}
     assert by_year["2024"]["OBTAIN_SUBSIDIARY_OTHER"] == 5.0
     assert by_year["2025"]["OBTAIN_SUBSIDIARY_OTHER"] == 0.0
     assert by_year["2024"]["SECURITY_CODE"] == "600519"
     assert by_year["2024"]["SOURCE_REPORT_NAME"] == "CNINFO ANNUAL REPORT"
+    assert by_year["2024"]["SOURCE_REPORT_URL"].startswith("https://static.cninfo.com.cn/")
+    assert by_year["2024"]["SOURCE_CONTENT_SHA256"] == "a" * 64
+
+
+def _cninfo_value(value: float, digest: str) -> dict[str, object]:
+    return {
+        "value_cny": value,
+        "source_url": "https://static.cninfo.com.cn/finalpage/report.PDF",
+        "source_sha256": digest,
+    }
 
 
 def cn_overlay_helper(records, values, code):
@@ -113,7 +156,24 @@ def test_overlay_rejects_negative_values():
     from data import growth_evidence as ge
 
     with pytest.raises(ge.GrowthEvidenceError):
-        ge._overlay_cninfo_acquisition([], {2024: -1.0}, code="600519")
+        ge._overlay_cninfo_acquisition([], {2024: _cninfo_value(-1.0, "a" * 64)}, code="600519")
+
+
+def test_overlay_rejects_untrusted_or_missing_cninfo_provenance():
+    from data import growth_evidence as ge
+
+    with pytest.raises(ge.GrowthEvidenceError, match="provenance"):
+        ge._overlay_cninfo_acquisition(
+            [],
+            {
+                2024: {
+                    "value_cny": 1.0,
+                    "source_url": "https://example.com/report.PDF",
+                    "source_sha256": "a" * 64,
+                }
+            },
+            code="600519",
+        )
 
 
 def test_fetch_annual_acquisition_rejects_bad_inputs(tmp_path):
@@ -138,7 +198,8 @@ def test_cache_roundtrip(tmp_path):
             "available": True,
             "acquisition_cashflow": 0.0,
             "unit": "元",
-            "source_url": "http://static.cninfo.com.cn/finalpage/x.PDF",
+            "source_url": "https://static.cninfo.com.cn/finalpage/x.PDF",
+            "source_sha256": "a" * 64,
             "reason": "",
         },
     }

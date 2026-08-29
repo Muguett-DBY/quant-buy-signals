@@ -22,6 +22,7 @@ from tools.ai_screening_contract import (
     select_candidates,
     validate_review,
 )
+from tools.atomic_io import atomic_write_text
 from tools.ai_quantitative_facts import quantitative_facts
 from tools.ai_company_research_provenance import (
     load_research_provenance_context,
@@ -424,10 +425,10 @@ def build_input(
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     input_path = out_dir / "ai-screening-input.json"
-    input_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    (out_dir / "ai-screening-candidates.jsonl").write_text(
+    atomic_write_text(input_path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    atomic_write_text(
+        out_dir / "ai-screening-candidates.jsonl",
         "".join(json.dumps(packet, ensure_ascii=False, sort_keys=True) + "\n" for packet in packets),
-        encoding="utf-8",
     )
     manifest = {
         "schema_version": REVIEW_SCHEMA_VERSION,
@@ -450,8 +451,8 @@ def build_input(
         "rule_source_sha256": payload["rule_source_sha256"],
         "input_sha256": _sha256_bytes(input_path.read_bytes()),
     }
-    (out_dir / "ai-screening-manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    atomic_write_text(
+        out_dir / "ai-screening-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
     )
     return manifest
 
@@ -522,7 +523,7 @@ def merge_reviews(
         ]
         if missing:
             raise ValueError(f"full-coverage candidates missing reviews: {missing[:3]}")
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def main() -> int:

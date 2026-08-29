@@ -111,119 +111,90 @@ jobs:
           fi
           echo "Deploying revision ${actual:0:12}."
 
-      - name: Install the deployment verification dependencies
+      - name: Determine whether Cloudflare runtime code changed
+        id: runtime
         if: steps.stale.outputs.skip != 'true'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.13"
+        shell: bash
+        run: |
+          set -euo pipefail
+          live_meta="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            --retry 3 --retry-all-errors --retry-delay 2 https://quant.custard.top/api/meta 2>/dev/null || true)"
+          live_revision="$(jq -r '.code_commit // empty' <<< "${live_meta}" 2>/dev/null || true)"
+          if [[ ! "${live_revision}" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "${live_revision}^{commit}" 2>/dev/null; then
+            echo "No trustworthy deployed code revision is available; running the deployment."
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          changed="${RUNNER_TEMP}/cloudflare-runtime-changes.txt"
+          git diff --no-renames --name-only "${live_revision}" "${{ steps.resolve.outputs.sha }}" -- > "${changed}"
+          if grep -Eq '^(cloudflare-cron/|cloudflare/quant-dashboard/(pages_worker\.js|refresh_worker\.js|wrangler\.jsonc|market_signing_public_key\.txt|schema\.sql|migrations/))' "${changed}"; then
+            echo "Cloudflare runtime changes detected since ${live_revision:0:12}."
+            cat "${changed}"
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "deploy=false" >> "${GITHUB_OUTPUT}"
+          echo "No Cloudflare runtime files changed since ${live_revision:0:12}; the independent data/AI publication lanes remain authoritative."
 
-      - name: Verify both workers and the dashboard contract tests
-        if: steps.stale.outputs.skip != 'true'
+      - name: Runtime deployment skipped
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'false'
+        run: echo "No Cloudflare runtime deployment is required for this verified revision."
+
+      - name: Recheck the deployable Worker syntax
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
           node --check cloudflare-cron/worker.js
           node --check cloudflare/quant-dashboard/pages_worker.js
           node --check cloudflare/quant-dashboard/refresh_worker.js
-          # Same fixed versions as requirements-dev-lock.txt (pytest 9.1.1,
-          # pyyaml 6.0.3) so verification never floats either.
-          python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
-          python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py tests/test_ai_screening_contract.py tests/test_validate_ai_screening_public.py -q
 
-      - name: Preflight the optional generation-bound AI screening overlay
-        id: ai_preflight
-        if: steps.stale.outputs.skip != 'true'
+      - name: Capture the active Worker versions
+        id: workers_previous
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
-          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
-          seed_changed=false
-          resolved_sha="${{ steps.resolve.outputs.sha }}"
-          if git rev-parse --verify "${resolved_sha}^" >/dev/null 2>&1 && ! git diff --quiet "${resolved_sha}^" "${resolved_sha}" -- "${seed}"; then
-            seed_changed=true
-          fi
-          echo "seed_changed=${seed_changed}" >> "${GITHUB_OUTPUT}"
-          echo "upload=false" >> "${GITHUB_OUTPUT}"
-          echo "stale_seed=false" >> "${GITHUB_OUTPUT}"
-          if [[ ! -f "${seed}" ]]; then
-            echo "No AI screening seed is checked in; leaving the optional overlay unchanged."
-            exit 0
-          fi
-          seed_bytes="$(stat -c '%s' "${seed}")"
-          if [[ "${seed_bytes}" -lt 1 || "${seed_bytes}" -gt 33554432 ]]; then
-            echo "AI screening seed size ${seed_bytes} is outside the 1..33554432 byte limit." >&2
-            exit 1
-          fi
-          generation="$(jq -er '.snapshot_generation' "${seed}")"
-          if [[ ! "${generation}" =~ ^[0-9a-f]{16}$ ]]; then
-            echo "AI screening seed has an invalid generation id." >&2
-            exit 1
-          fi
-          live_meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
-          live_generation="$(jq -er '.generation_id' <<< "${live_meta}")"
-          stale_seed=false
-          if [[ "${live_generation}" != "${generation}" ]]; then
-            if [[ "${seed_changed}" == "true" ]]; then
-              echo "stale_seed=true" >> "${GITHUB_OUTPUT}"
-              echo "Changed AI screening seed targets ${generation}, while the published site serves ${live_generation}; refusing to publish a stale overlay and continuing the website deployment."
-              exit 0
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          for worker in quant-market-refresh ds-dcf-dispatch; do
+            response="$(curl --fail --silent --show-error \
+              --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${worker}/deployments")"
+            version="$(jq -er '
+              select(.success == true)
+              | .result.deployments[0]
+              | select((.versions | length) == 1 and .versions[0].percentage == 100)
+              | .versions[0].version_id
+            ' <<< "${response}")"
+            [[ "${version}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+            if [[ "${worker}" == "quant-market-refresh" ]]; then
+              echo "refresh=${version}" >> "${GITHUB_OUTPUT}"
+            else
+              echo "dispatcher=${version}" >> "${GITHUB_OUTPUT}"
             fi
-            stale_seed=true
-            market_as_of="$(jq -er '.market_as_of' "${seed}")"
-          else
-            market_as_of="$(jq -er '.market_as_of' <<< "${live_meta}")"
-          fi
-          python -m tools.validate_ai_screening_public \
-            --artifact "${seed}" \
-            --expected-generation "${generation}" \
-            --expected-market-as-of "${market_as_of}"
-          if jq -e '.review_mode == "opencode_native_company_research_review"' "${seed}" >/dev/null; then
-            python -m tools.audit_ai_company_research_reviews --artifact "${seed}"
-            jq -e '
-              .source_audit.available == true
-              and .source_audit.audit_contract_version == 3
-              and .source_audit.audit_passed == true
-              and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
-              and (.source_audit.projection_sha256 | test("^[0-9a-f]{64}$"))
-              and .source_audit.projection_company_count == .candidate_total
-              and (.source_audit.projection_claim_count | type) == "number"
-              and (.source_audit.projection_search_finding_count | type) == "number"
-              and (.source_audit.projection_source_reference_count | type) == "number"
-              and (.source_audit.projection_unique_url_count | type) == "number"
-              and .source_audit.projection_claim_count == .source_audit.claim_count
-              and .source_audit.projection_source_reference_count >= .source_audit.projection_unique_url_count
-              and .source_audit.projection_unique_url_count == (.source_audit.canonical_urls | length)
-              and .source_audit.failed == 0
-              and .source_audit.invalid_claim_url_count == 0
-              and .source_audit.claim_count >= .candidate_total
-              and (.source_audit.semantic_claim_count | type) == "number"
-              and (.source_audit.semantic_passed_count | type) == "number"
-              and .source_audit.semantic_failed_count == 0
-              and .source_audit.semantic_unverified_count == 0
-              and (.source_audit.canonical_urls | type) == "array"
-              and (.source_audit.source_bindings | type) == "array"
-              and (.source_audit.company_coverage | type) == "array"
-              and (.source_audit.company_coverage | length) == .candidate_total
-              and all(.source_audit.company_coverage[];
-                (.referenced_no_source_finding_ids | type) == "array"
-                and (.referenced_no_source_finding_ids | length) == 0
-                and (.semantic_claim_count == .semantic_passed_count + .semantic_failed_count + .semantic_unverified_count)
-                and .semantic_failed_count == 0
-                and .semantic_unverified_count == 0
-              )
-            ' "${seed}" >/dev/null
-          fi
-          if [[ "${stale_seed}" == "true" ]]; then
-            echo "Unchanged stale AI screening seed passed the current Worker contract; leaving that historical overlay untouched."
-            exit 0
-          fi
-          echo "generation=${generation}" >> "${GITHUB_OUTPUT}"
-          echo "market_as_of=${market_as_of}" >> "${GITHUB_OUTPUT}"
-          echo "upload=true" >> "${GITHUB_OUTPUT}"
-          echo "AI screening seed passed generation, coverage, source-audit and size preflight before deployment."
+          done
+
+      - name: Apply pending D1 migrations
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
+        working-directory: cloudflare/quant-dashboard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 migrations apply quant-market-data --remote
 
       - name: Deploy the quant-market-refresh worker
-        if: steps.stale.outputs.skip != 'true'
+        id: refresh_deploy
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         working-directory: cloudflare/quant-dashboard
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -238,11 +209,14 @@ jobs:
           # --keep-vars preserves existing bindings and variables; worker
           # secrets (the key-protected refresh secret) are always preserved
           # by wrangler itself and never appear in this workflow.
+          echo "attempted=true" >> "${GITHUB_OUTPUT}"
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy --keep-vars 2>&1 | tee "$RUNNER_TEMP/refresh-deploy.log"
+          echo "deployed=true" >> "${GITHUB_OUTPUT}"
           grep -E "Current Version ID" "$RUNNER_TEMP/refresh-deploy.log"
 
       - name: Deploy the post-close website data dispatcher
-        if: steps.stale.outputs.skip != 'true'
+        id: dispatcher_deploy
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         working-directory: cloudflare-cron
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -255,27 +229,31 @@ jobs:
             exit 1
           fi
           # Preserve the GITHUB_TOKEN Worker secret configured outside git.
+          echo "attempted=true" >> "${GITHUB_OUTPUT}"
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy --keep-vars 2>&1 | tee "$RUNNER_TEMP/dispatcher-deploy.log"
+          echo "deployed=true" >> "${GITHUB_OUTPUT}"
           grep -E "Current Version ID" "$RUNNER_TEMP/dispatcher-deploy.log"
 
-      - name: Upload the optional generation-bound AI screening overlay
-        id: ai_overlay
-        if: steps.stale.outputs.skip != 'true' && steps.ai_preflight.outputs.upload == 'true'
+      - name: Capture the current production Pages deployment
+        id: pages_previous
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
-          seed="cloudflare/quant-dashboard/ai_screening_seed.json"
-          generation="${{ steps.ai_preflight.outputs.generation }}"
-          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "quant-market-data/ai-screening/${generation}.json" \
-            --file "${seed}" --remote --content-type application/json
-          printf '%s' "${generation}" > "$RUNNER_TEMP/ai-screening-generation"
-          echo "uploaded=true" >> "${GITHUB_OUTPUT}"
+          response="$(curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/quant/deployments?env=production&per_page=1")"
+          previous_id="$(jq -er 'select(.success == true) | .result[0].id' <<< "${response}")"
+          [[ "${previous_id}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+          echo "id=${previous_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Deploy the Cloudflare Pages worker
-        if: steps.stale.outputs.skip != 'true'
+        id: pages_deploy
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -284,26 +262,36 @@ jobs:
           set -euo pipefail
           pages_dir="$(mktemp -d)"
           cp cloudflare/quant-dashboard/pages_worker.js "${pages_dir}/_worker.js"
+          python - "${pages_dir}/_worker.js" "${{ steps.resolve.outputs.sha }}" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          revision = sys.argv[2]
+          source = path.read_text(encoding="utf-8")
+          placeholder = "__QUANT_CODE_COMMIT__"
+          if source.count(placeholder) != 1 or len(revision) != 40:
+              raise SystemExit("Pages code revision placeholder contract failed")
+          path.write_text(source.replace(placeholder, revision), encoding="utf-8", newline="\n")
+          PY
           if [[ "$(find "${pages_dir}" -type f | wc -l)" -ne 1 ]]; then
             echo "The Pages staging directory must contain exactly _worker.js." >&2
             exit 1
           fi
+          echo "attempted=true" >> "${GITHUB_OUTPUT}"
           npx --yes "wrangler@${WRANGLER_VERSION}" pages deploy "${pages_dir}" \
             --project-name quant \
             --branch main \
             --commit-hash "${{ steps.resolve.outputs.sha }}" \
             --commit-dirty=false 2>&1 | tee "$RUNNER_TEMP/pages-deploy.log"
           grep -E "Deployment complete" "$RUNNER_TEMP/pages-deploy.log"
+          echo "deployed=true" >> "${GITHUB_OUTPUT}"
 
       - name: Verify the deployed site
-        if: steps.stale.outputs.skip != 'true'
+        if: steps.stale.outputs.skip != 'true' && steps.runtime.outputs.deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ steps.ai_preflight.outputs.seed_changed }}" == "true" && "${{ steps.ai_preflight.outputs.stale_seed }}" != "true" && "${{ steps.ai_overlay.outputs.uploaded }}" != "true" ]]; then
-            echo "The changed AI screening seed was not uploaded." >&2
-            exit 1
-          fi
           # pages_worker.js also carries the template placeholder constants
           # (__QUANT_METHODOLOGY_VERSION__/__QUANT_METHODOLOGY_LABEL__) used by
           # the release pipeline; -m1 pins the real constants at the top of the
@@ -314,114 +302,76 @@ jobs:
             echo "Could not extract the expected methodology version/label from the worker." >&2
             exit 1
           fi
-          methodology="$(curl --fail --silent --show-error https://quant.custard.top/api/methodology)"
-          actual_version="$(jq -er '.methodology_version' <<< "${methodology}")"
-          if [[ "${actual_version}" != "${expected_version}" ]]; then
-            echo "Deployed methodology ${actual_version} != expected ${expected_version}." >&2
-            exit 1
-          fi
-          health="$(curl --fail --silent --show-error 'https://quant.custard.top/api/health?deep=1')"
-          if ! jq -e '.ok == true and .integrity_checked == true and .integrity_ok == true and (.generation_id | length) >= 16' <<< "${health}" >/dev/null; then
-            echo "Deployed /api/health did not verify the complete generation." >&2
-            exit 1
-          fi
-          meta="$(curl --fail --silent --show-error https://quant.custard.top/api/meta)"
-          if [[ "$(jq -er '.generation_id | length' <<< "${meta}")" -lt 16 ]]; then
-            echo "Deployed /api/meta has no valid generation." >&2
-            exit 1
-          fi
-          homepage="$(curl --fail --silent --show-error https://quant.custard.top/)"
-          if ! grep -qF "${expected_version}" <<< "${homepage}"; then
-            echo "Deployed homepage does not expose the current methodology version." >&2
-            exit 1
-          fi
-          ai_page="$(curl --fail --silent --show-error https://quant.custard.top/ai-screening)"
-          if ! grep -qF "AI" <<< "${ai_page}"; then
-            echo "Deployed AI screening page is unavailable." >&2
-            exit 1
-          fi
-          if [[ -f "$RUNNER_TEMP/ai-screening-generation" ]]; then
-            ai_generation="$(< "$RUNNER_TEMP/ai-screening-generation")"
-            ai_api="$(curl --fail --silent --show-error "https://quant.custard.top/api/ai-screening?generation_id=${ai_generation}")"
-            if ! jq -e --arg generation "${ai_generation}" '
-              .snapshot_generation == $generation
-              and .ai_is_advisory == true
-              and .auto_buy_promotion == false
-              and .full_coverage_final_recommendation == true
-              and .candidate_offset == 0
-              and .reviewed_count == .candidate_total
-              and .type_pair_reviewed_count == .type_pair_candidate_total
-              and .type_pair_candidate_total == .type_pair_expected_total
-              and .type_pair_unreviewed_count == 0
-              and .insufficient_evidence_count == 0
-              and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
-              and (
-                if .review_mode == "codex_luna_web_review" then
-                  (.web_search_attempted_count == .candidate_total
-                   and .web_search_event_verified_count == .candidate_total
-                   and .web_search_claim_urls_verified_count == .candidate_total
-                   and .reviewed_without_web_search == 0
-                   and .type_pair_web_search_attempted_count == .type_pair_candidate_total
-                   and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
-                   and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total
-                   and .full_coverage_web_search == true
-                   and .source_audit.available == true
-                   and .source_audit.invalid_claim_url_count == 0
-                   and ((.source_audit.network_warnings_allowed == true
-                         and .source_audit.release_status == "passed_with_source_access_warnings")
-                        or (.source_audit.failed == 0
-                            and .source_audit.semantic_failed_count == 0
-                            and .source_audit.semantic_unverified_count == 0)))
-                 elif .review_mode == "opencode_native_company_research_review" then
-                   (.web_search_attempted_count == .candidate_total
-                    and .web_search_event_verified_count == .candidate_total
-                    and .research_source_urls_verified_count == .candidate_total
-                    and .reviewed_without_web_search == 0
-                    and .type_pair_web_search_attempted_count == .type_pair_candidate_total
-                    and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
-                    and .type_pair_research_source_urls_verified_count == .type_pair_candidate_total
-                    and .full_coverage_web_search == true
-                    and .source_audit.available == true
-                    and .source_audit.audit_contract_version == 3
-                    and .source_audit.audit_passed == true
-                    and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
-                    and (.source_audit.merged_sha256 | test("^[0-9a-f]{64}$"))
-                    and (.source_audit.projection_sha256 | test("^[0-9a-f]{64}$"))
-                    and .source_audit.projection_company_count == .candidate_total
-                    and (.source_audit.projection_claim_count | type) == "number"
-                    and (.source_audit.projection_search_finding_count | type) == "number"
-                    and (.source_audit.projection_source_reference_count | type) == "number"
-                    and (.source_audit.projection_unique_url_count | type) == "number"
-                    and .source_audit.projection_claim_count == .source_audit.claim_count
-                    and .source_audit.projection_source_reference_count >= .source_audit.projection_unique_url_count
-                    and .source_audit.projection_unique_url_count == (.source_audit.canonical_urls | length)
-                    and .source_audit.invalid_claim_url_count == 0
-                    and .source_audit.failed == 0
-                    and .source_audit.semantic_failed_count == 0
-                    and .source_audit.semantic_unverified_count == 0
-                    and .source_audit.semantic_claim_count == .source_audit.semantic_passed_count
-                    and (.source_audit.canonical_urls | type) == "array"
-                    and (.source_audit.source_bindings | type) == "array"
-                    and (.source_audit.company_coverage | type) == "array"
-                    and (.source_audit.company_coverage | length) == .candidate_total
-                    and all(.source_audit.company_coverage[];
-                      (.referenced_no_source_finding_ids | type) == "array"
-                      and (.referenced_no_source_finding_ids | length) == 0
-                      and .semantic_failed_count == 0
-                      and .semantic_unverified_count == 0
-                    ))
-                else
-                  (.web_search_attempted_count == .candidate_total
-                   and .web_search_event_verified_count == .candidate_total
-                   and .reviewed_without_web_search == 0
-                   and .type_pair_web_search_attempted_count == .type_pair_candidate_total
-                   and .type_pair_web_search_event_verified_count == .type_pair_candidate_total
-                   and .type_pair_web_search_claim_urls_verified_count == .type_pair_candidate_total)
-                end
-              )
-            ' <<< "${ai_api}" >/dev/null; then
-              echo "Published AI screening overlay failed its generation-bound contract." >&2
-              exit 1
+          verified=false
+          for attempt in 1 2 3 4 5 6 7 8; do
+            methodology="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --retry 2 --retry-all-errors --retry-delay 2 https://quant.custard.top/api/methodology 2>/dev/null || true)"
+            health="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+              --retry 2 --retry-all-errors --retry-delay 2 'https://quant.custard.top/api/health?deep=1' 2>/dev/null || true)"
+            meta="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --retry 2 --retry-all-errors --retry-delay 2 https://quant.custard.top/api/meta 2>/dev/null || true)"
+            homepage="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --retry 2 --retry-all-errors --retry-delay 2 https://quant.custard.top/ 2>/dev/null || true)"
+            ai_page="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --retry 2 --retry-all-errors --retry-delay 2 https://quant.custard.top/ai-screening 2>/dev/null || true)"
+            if [[ "$(jq -r '.methodology_version // empty' <<< "${methodology}" 2>/dev/null || true)" == "${expected_version}" ]] \
+              && jq -e '.ok == true and .integrity_checked == true and .integrity_ok == true and (.generation_id | test("^[0-9a-f]{16}$"))' <<< "${health}" >/dev/null 2>&1 \
+              && jq -e --arg revision "${{ steps.resolve.outputs.sha }}" '
+                (.generation_id | test("^[0-9a-f]{16}$"))
+                and .code_commit == $revision
+                and .data_source_commit == .source_commit
+              ' <<< "${meta}" >/dev/null 2>&1 \
+              && grep -qF "${expected_version}" <<< "${homepage}" \
+              && grep -qF "AI" <<< "${ai_page}"; then
+              verified=true
+              echo "Production verification passed on attempt ${attempt}."
+              break
             fi
+            sleep $((attempt * 3))
+          done
+          if [[ "${verified}" != "true" ]]; then
+            echo "Production did not reach the expected code, data-integrity, homepage and AI-page state after eight attempts." >&2
+            exit 1
           fi
           echo "Verified /api/methodology, /api/health, /api/meta, /ai-screening and the homepage."
+
+      - name: Roll back Pages after failed production verification
+        if: failure() && steps.pages_deploy.outputs.attempted == 'true' && steps.pages_previous.outputs.id != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --request POST \
+            --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/quant/deployments/${{ steps.pages_previous.outputs.id }}/rollback")"
+          jq -e '.success == true' <<< "${response}" >/dev/null
+          echo "Rolled Pages back to deployment ${{ steps.pages_previous.outputs.id }}."
+
+      - name: Roll back the dispatcher Worker after a failed deployment
+        if: failure() && steps.dispatcher_deploy.outputs.attempted == 'true' && steps.workers_previous.outputs.dispatcher != ''
+        working-directory: cloudflare-cron
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "wrangler@${WRANGLER_VERSION}" rollback \
+            "${{ steps.workers_previous.outputs.dispatcher }}" \
+            --message "Automated rollback after failed website deployment"
+
+      - name: Roll back the refresh Worker after a failed deployment
+        if: failure() && steps.refresh_deploy.outputs.attempted == 'true' && steps.workers_previous.outputs.refresh != ''
+        working-directory: cloudflare/quant-dashboard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "wrangler@${WRANGLER_VERSION}" rollback \
+            "${{ steps.workers_previous.outputs.refresh }}" \
+            --message "Automated rollback after failed website deployment"

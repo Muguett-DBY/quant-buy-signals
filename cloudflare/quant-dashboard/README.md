@@ -7,12 +7,15 @@ generation immutably in R2, and advances a D1 pointer only after the manifest,
 catalogue, signal index, all 16 company-detail shards, and the ECDSA signature
 pass size, hash, schema, partition, and coverage validation.
 
-- `schema.sql` is applied once to the D1 database.
+- `migrations/` is the authoritative, idempotent D1 schema history and is
+  applied by the production deployment before either Worker changes.  The
+  top-level `schema.sql` remains a readable snapshot of the current schema.
 - `refresh_worker.js` is deployed as `quant-market-refresh`.  The GitHub
   publication workflow calls its key-protected `/refresh` endpoint immediately
   after the stable Pages manifest is deployed; the weekday `0 15 * * MON-FRI` UTC
-  trigger (23:00 Beijing) remains a recovery-only mirror check after the 16:17
-  GitHub refresh and leaves room for delayed GitHub runners.  It never calculates scores.
+  trigger (23:00 Beijing) remains a recovery-only mirror check after the 16:15
+  Cloudflare dispatch and 16:45 GitHub fallback, leaving room for delayed
+  GitHub runners.  It never calculates scores.
 - `pages_worker.js` is the Pages advanced-mode worker.  Its API is GET-only:
   `/api/health`, `/api/meta`, `/api/manifest`, `/api/catalogue-index`,
   `/api/company/{code}`, and the backward-compatible `/api/catalogue` used by
@@ -24,6 +27,12 @@ pass size, hash, schema, partition, and coverage validation.
   company-detail shard, the worker checks the downloaded R2 body against the
   manifest SHA-256 (and the declared decompressed size); R2 object metadata
   alone is not treated as proof of content integrity.
+- `ai_screening_seed.json` is published directly to its generation-bound R2
+  object by the dedicated AI workflow.  It does not redeploy Pages or either
+  Worker.  Publication requires every candidate and type pair, every search
+  event, every HTTPS research source, and every company-level semantic source
+  check to pass; access/parser warnings are build-time diagnostics and are not
+  a public artifact state.
 
 The public page intentionally distinguishes “已触发”, “待确认”, “观察”,
 “资料不足”, “不适用” and “不符合硬条件”; missing evidence is never shown as
@@ -37,11 +46,11 @@ model yet.
 
 The drawer traps keyboard focus while open and restores focus to the company
 row on close.  Name/code searches deliberately span every status and disable
-  the status selector while the query is active.  Type 7 first classifies the
-  company, calculates 12 class-specific items, then uses the arithmetic mean
-  of business model, moat and long-term growth for quality certification.  The
-  page separately shows the class-specific current-buy gates; technology
-  companies require all three dimensions at least 7 and a five-year P/B
-  percentile no higher than 20%.  Type 7 always applies its own class-specific
-  price gate even when another framework also triggers.  It shows
-  ranges, rather than zeroes, whenever a required item is incomplete.
+the status selector while the query is active.  Type 7 first classifies the
+company, calculates 12 class-specific items, then uses the arithmetic mean
+of business model, moat and long-term growth for quality certification.  The
+page separately shows the class-specific current-buy gates; technology
+companies require all three dimensions at least 7 and a five-year P/B
+percentile no higher than 20%.  Type 7 always applies its own class-specific
+price gate even when another framework also triggers.  It shows ranges,
+rather than zeroes, whenever a required item is incomplete.

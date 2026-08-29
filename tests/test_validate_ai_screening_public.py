@@ -227,10 +227,104 @@ def _bind_source_projection(value: dict) -> None:
     )
 
 
+def _codex_luna_artifact() -> dict:
+    value = _artifact()
+    value["review_mode"] = "codex_luna_web_review"
+    value["review_models"] = ["codex-luna-max"]
+    value["review_efforts"] = ["max"]
+    review = value["packets"][0]["ai_review"]
+    review.update(
+        {
+            "model": "codex-luna-max",
+            "effort": "max",
+            "source_verification_status": "pass",
+            "source_verification_issue_count": 0,
+            "source_verification_issues": [],
+            "source_verification_issue_kinds": {},
+        }
+    )
+    projection_sha256, projection_counts = source_semantic_projection_sha256(value)
+    claim_count = projection_counts["projection_claim_count"]
+    value["source_audit"] = {
+        "available": True,
+        "audit_contract_version": 3,
+        "audit_passed": True,
+        "audit_sha256": "a" * 64,
+        "merged_sha256": "b" * 64,
+        "projection_sha256": projection_sha256,
+        **projection_counts,
+        "checked": 1,
+        "ok": 1,
+        "failed": 0,
+        "blocked": 0,
+        "invalid": 0,
+        "invalid_claim_url_count": 0,
+        "semantic_claim_count": claim_count,
+        "semantic_passed_count": claim_count,
+        "semantic_failed_count": 0,
+        "semantic_unverified_count": 0,
+        "company_pass_count": 1,
+        "company_failed_count": 0,
+        "company_unverified_count": 0,
+        "affected_company_count": 0,
+        "network_warnings_allowed": False,
+        "release_status": "passed",
+        "company_coverage": [
+            {
+                "security_code": "600000",
+                "status": "pass",
+                "semantic_claim_count": claim_count,
+                "semantic_passed_count": claim_count,
+                "semantic_failed_count": 0,
+                "semantic_unverified_count": 0,
+            }
+        ],
+    }
+    return value
+
+
 def test_public_validator_accepts_generation_bound_full_seed() -> None:
     result = validate_artifact(_artifact(), expected_generation="g1", expected_market_as_of="2026-08-21")
     assert result["candidate_total"] == 1
     assert result["searched"] == 1
+
+
+def test_public_validator_accepts_only_strict_codex_luna_source_audit() -> None:
+    result = validate_artifact(_codex_luna_artifact(), expected_generation="g1", expected_market_as_of="2026-08-21")
+
+    assert result["candidate_total"] == 1
+
+
+def test_public_validator_rejects_codex_luna_network_warning_release() -> None:
+    value = _codex_luna_artifact()
+    value["source_audit"].update(
+        {
+            "audit_passed": False,
+            "failed": 1,
+            "ok": 0,
+            "network_warnings_allowed": True,
+            "release_status": "passed_with_source_access_warnings",
+        }
+    )
+
+    with pytest.raises(ValueError, match="unreachable|warnings|did not pass"):
+        validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
+
+
+def test_public_validator_rejects_codex_luna_packet_source_warning() -> None:
+    value = _codex_luna_artifact()
+    review = value["packets"][0]["ai_review"]
+    review.update(
+        {
+            "source_verification_status": "unverified",
+            "source_verification_issue_count": 1,
+            "source_verification_issues": [{"kind": "access"}],
+            "source_verification_issue_kinds": {"access": 1},
+        }
+    )
+
+    with pytest.raises(ValueError, match="source verification did not pass"):
+        validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
 
 
 def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:

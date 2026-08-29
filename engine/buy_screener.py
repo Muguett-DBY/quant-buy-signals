@@ -8,13 +8,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime
+from datetime import date
 import math
 import os
 import re
 from statistics import median
 from typing import Any, Optional
-from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -29,6 +28,7 @@ from config import (
     LONG_HORIZON_FORECAST_YEARS,
     MARGINAL_TAX_RATE,
 )
+from data.as_of import shanghai_today as _shanghai_today
 from data.financial_indicator_evidence import derive_main_financial_indicator_evidence
 from data.growth_evidence import GrowthEvidenceError, validate_growth_evidence_record
 from data.industry import begin_industry_generation, classify_industries, classify_industry, get_industry_benchmark
@@ -327,12 +327,6 @@ class _ProcessValidationToken:
 
 
 _TYPE5_EXTERNAL_VALIDATION_TOKEN = _ProcessValidationToken()
-_SHANGHAI = ZoneInfo("Asia/Shanghai")
-
-
-def _shanghai_today() -> date:
-    """Return the A-share market calendar date, independent of host timezone."""
-    return datetime.now(_SHANGHAI).date()
 
 
 def _cached_dcf_validation(m: Mapping[str, Any], result: Any, key: str) -> Optional[bool]:
@@ -8232,12 +8226,19 @@ def screen_all_types(
                 metric["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
             dividend = normalized_dividend.get(code)
             if dividend is not None:
-                if not isinstance(dividend, Mapping) or "trailing_cash_per_share" not in dividend:
+                if not isinstance(dividend, Mapping) or dividend.get("status") not in {
+                    "available",
+                    "known_zero",
+                    "unavailable",
+                }:
                     raise ValueError(f"分红送配证据无效:{code}")
-                trailing_cash = _safe_float(dividend.get("trailing_cash_per_share"))
-                if trailing_cash is None or trailing_cash < 0:
-                    raise ValueError(f"分红送配证据无效:{code}")
-                metric["trailing_cash_per_share"] = trailing_cash
+                status = str(dividend["status"])
+                metric["dividend_evidence_status"] = status
+                if status != "unavailable":
+                    trailing_cash = _safe_float(dividend.get("trailing_cash_per_share"))
+                    if trailing_cash is None or trailing_cash < 0:
+                        raise ValueError(f"分红送配证据无效:{code}")
+                    metric["trailing_cash_per_share"] = trailing_cash
                 metric["dividend_evidence"] = (
                     dividend.get("evidence") if isinstance(dividend.get("evidence"), Mapping) else None
                 )

@@ -19,6 +19,8 @@ import re
 from statistics import median, pstdev
 from typing import Any
 
+from data.as_of import shanghai_today
+
 
 MODEL_ID = "patch6-type7-classified-equity-v2"
 SCHEMA_VERSION = 2
@@ -520,7 +522,7 @@ def _validated_evidence_reference(
     if (
         normalized["as_of"] != evidence_date.isoformat()
         or reference_as_of != reference_date.isoformat()
-        or reference_date > date.today()
+        or reference_date > shanghai_today()
         or evidence_date > reference_date
         or (reference_date - evidence_date).days > EVIDENCE_MAX_AGE_DAYS
         or not re.fullmatch(r"\d{6}", expected_code)
@@ -1848,6 +1850,13 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
     """
     g = _bounded(metric.get("trend_growth"), -1.0, 1.0)
     trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, 1e12)
+    dividend_status = str(metric.get("dividend_evidence_status") or "")
+    if not dividend_status:
+        # Older persisted ledgers predate the explicit source-state field and
+        # historically treated a missing cash amount as confirmed zero.  Keep
+        # those ledgers replayable; every new publication supplies one of the
+        # three explicit states through the dividend adapter.
+        dividend_status = "available" if trailing_cash is not None else "known_zero"
     price = _bounded(metric.get("price"), 0.0, 1e6)
     rd_intensity = _bounded(metric.get("rd_intensity"), 0.0, 1.0)
     dividend_yield = trailing_cash / price if (trailing_cash is not None and price and price > 0) else 0.0
@@ -1859,6 +1868,7 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
         "d": dividend_yield,
         "rd_intensity": rd_intensity,
         "trailing_cash_per_share": trailing_cash,
+        "dividend_evidence_status": dividend_status,
         "cycle_confirmed": cycle_confirmed,
     }
     basis = "gdN 可投滤网：g 增长引擎 × d 分红引擎 × N 时间"
@@ -1872,7 +1882,7 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
             "inputs": inputs,
             "missing_inputs": ["g"],
         }
-    if g > 0 and dividend_yield > 0:
+    if g > 0 and dividend_status != "unavailable" and dividend_yield > 0:
         passed = True
         rule = "① g>0 且 d>0：双引擎正常"
     elif g > 0 and rd_intensity is not None and rd_intensity >= 0.03:
@@ -1884,6 +1894,16 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
     elif class_code == "C" and cycle_confirmed:
         passed = True
         rule = "强周期谷底周期归一化豁免（商品周期证据确认，g 暂时为负不误杀）"
+    elif dividend_status == "unavailable":
+        return {
+            "complete": False,
+            "passed": False,
+            "required": True,
+            "basis": basis,
+            "rule": "分红引擎证据不可用（d 未知，不能按零处理）",
+            "inputs": inputs,
+            "missing_inputs": ["d"],
+        }
     elif g < 0 and dividend_yield <= 0:
         passed = False
         rule = "secular 衰退且不分红：g 与 d 两引擎全灭，坚决不投"
@@ -2501,7 +2521,7 @@ def validate_patch6_type7_ledger(
     if (
         len(code) != 6
         or not code.isdigit()
-        or (date_required and (parsed_as_of is None or parsed_as_of > date.today()))
+        or (date_required and (parsed_as_of is None or parsed_as_of > shanghai_today()))
         or (expected_code is not None and code != str(expected_code))
         or (expected_as_of is not None and as_of != str(expected_as_of))
     ):
@@ -2935,12 +2955,16 @@ def validate_patch6_type7_ledger(
                     g = _finite(gdN_inputs.get("g"))
                     d = _finite(gdN_inputs.get("d"))
                     rd = _finite(gdN_inputs.get("rd_intensity"))
+                    dividend_status = str(gdN_inputs.get("dividend_evidence_status") or "known_zero")
                     cycle_confirmed = gdN_inputs.get("cycle_confirmed") is True
                     if g is None:
                         expected_complete_gdn = False
                         expected_passed_gdn = False
                     else:
-                        expected_complete_gdn = True
+                        independent_route = bool(
+                            (g > 0 and rd is not None and rd >= 0.03) or (class_code == "C" and cycle_confirmed)
+                        )
+                        expected_complete_gdn = dividend_status != "unavailable" or independent_route
                         if g > 0 and d is not None and d > 0:
                             expected_passed_gdn = True
                         elif g > 0 and rd is not None and rd >= 0.03:
@@ -2954,7 +2978,8 @@ def validate_patch6_type7_ledger(
                     if (
                         gdN_gate.get("complete") is not expected_complete_gdn
                         or gdN_gate.get("passed") is not expected_passed_gdn
-                        or gdN_gate.get("missing_inputs") != ([] if expected_complete_gdn else ["g"])
+                        or gdN_gate.get("missing_inputs")
+                        != ([] if expected_complete_gdn else (["g"] if g is None else ["d"]))
                     ):
                         errors.append("gdN filter gate replay mismatch")
                     if expected_complete_gdn is not True:

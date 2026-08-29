@@ -24,6 +24,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from data.as_of import shanghai_today
+
 _SECUCODE = re.compile(r"^(\d{6})\.(SH|SZ)$")
 _ITEM_LINE = re.compile(r"｜\s*([^｜]+?)\s*\((行业|产品|地区)\)\s*｜\s*([^｜]+?)\s*｜\s*([^｜]+?)\s*｜")
 _CUTOFF = re.compile(r"【截止日期】(\d{4}-\d{2}-\d{2})")
@@ -153,7 +155,7 @@ def tdx_segment_records(records: tuple[dict[str, Any], ...] | list[dict[str, Any
     """Validate and normalise parsed records against the shared schema."""
     from data.growth_evidence import _validate_cached_segment_records
 
-    today = date.today()
+    today = shanghai_today()
     as_of = today.replace(year=today.year - 1) if (today.month, today.day) < (5, 1) else today
     return _validate_cached_segment_records(list(records), code=code, as_of=as_of)
 

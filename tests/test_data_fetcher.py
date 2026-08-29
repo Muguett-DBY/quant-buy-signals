@@ -1496,6 +1496,25 @@ def test_financial_merge_preserves_acquisition_cashflow_separately_from_capex():
     assert row["OBTAIN_SUBSIDIARY_OTHER"] == -6.0
 
 
+def test_financial_history_rejects_conflicting_duplicate_report_dates():
+    with pytest.raises(fetcher.DataFetchError, match="conflicting duplicate financial rows"):
+        fetcher._deduplicate_and_sort(
+            [
+                {"REPORT_DATE": "2025-12-31", "NET_PROFIT": 1.0},
+                {"REPORT_DATE": "2025-12-31", "NET_PROFIT": 2.0},
+            ]
+        )
+
+
+def test_financial_history_deduplicates_identical_report_dates():
+    records = [
+        {"REPORT_DATE": "2025-12-31", "NET_PROFIT": 1.0},
+        {"REPORT_DATE": "2025-12-31", "NET_PROFIT": 1.0},
+    ]
+
+    assert fetcher._deduplicate_and_sort(records) == [records[0]]
+
+
 def test_financial_merge_rejects_invalid_acquisition_cashflow():
     interim_cashflow = pd.DataFrame(
         [

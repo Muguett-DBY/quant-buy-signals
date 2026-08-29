@@ -2,10 +2,10 @@ name: publish website market data
 
 on:
   schedule:
-    # One weekday post-close refresh at 16:17 Asia/Shanghai. Reliability is
-    # handled inside this run so a transient publication delay cannot create
-    # several independent failed runs and notification emails.
-    - cron: "17 8 * * 1-5"
+    # The Cloudflare dispatcher starts the normal run at 16:15 Shanghai time.
+    # This later GitHub schedule is a fallback, not a competing second start;
+    # the shared concurrency group and published-session guard deduplicate it.
+    - cron: "45 8 * * 1-5"
   workflow_dispatch:
     inputs:
       rebuild_latest_closed:
@@ -130,10 +130,20 @@ jobs:
             throw 'The current main revision is malformed.'
           }
           $apiPath = "repos/$env:GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?branch=main&status=success&per_page=100"
-          $responseText = @(gh api $apiPath 2>&1)
-          if ($LASTEXITCODE -ne 0) {
-            $detail = (($responseText | ForEach-Object { [string]$_ }) -join ' ').Trim()
-            throw "Could not verify the website gate for $($env:GITHUB_SHA): $detail"
+          $responseText = @()
+          $apiFailure = 'no response'
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            $responseText = @(gh api $apiPath 2>&1)
+            if ($LASTEXITCODE -eq 0 -and $responseText.Count -gt 0) {
+              break
+            }
+            $apiFailure = (($responseText | ForEach-Object { [string]$_ }) -join ' ').Trim()
+            if ([string]::IsNullOrWhiteSpace($apiFailure)) { $apiFailure = 'no diagnostic output' }
+            Write-Warning "Website gate lookup attempt $attempt of 4 failed: $apiFailure"
+            if ($attempt -lt 4) { Start-Sleep -Seconds (2 * $attempt) }
+          }
+          if ($LASTEXITCODE -ne 0 -or $responseText.Count -eq 0) {
+            throw "Could not verify the website gate for $($env:GITHUB_SHA): $apiFailure"
           }
           $response = (($responseText | ForEach-Object { [string]$_ }) -join "`n") | ConvertFrom-Json -Depth 20
           $verifiedRun = @(
@@ -1714,8 +1724,11 @@ jobs:
             exit 1
           fi
           mirror_ok=false
-          mirror_attempt_limit=8
-          mirror_retry_base_delay_seconds=10
+          # One normal mirror call plus one delayed retry is sufficient: the
+          # Worker already retries every upstream object internally. Repeating
+          # the entire signed download eight times only amplified rate limits.
+          mirror_attempt_limit=2
+          mirror_retry_base_delay_seconds=30
           for ((attempt=1; attempt<=mirror_attempt_limit; attempt++)); do
             response_file="$(mktemp)"
             transport_ok=false
@@ -1882,22 +1895,38 @@ jobs:
           $assetVerificationAttempts = 8
           $assetVerificationBaseDelaySeconds = 10
           for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++) {
-            foreach ($name in @($pendingAssets)) {
-              $expected = Join-Path $env:MOBILE_DATA_DIR $name
-              $downloaded = Join-Path $env:RUNNER_TEMP "public-$name"
-              $expectedAssetHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
+            $pendingNames = @($pendingAssets)
+            $dataDir = $env:MOBILE_DATA_DIR
+            $temporaryDir = $env:RUNNER_TEMP
+            $repository = $env:GH_REPO
+            $runId = $env:GITHUB_RUN_ID
+            $results = @($pendingNames | ForEach-Object -Parallel {
+              $name = [string]$_
+              $currentRepository = $using:repository
+              $currentRunId = $using:runId
+              $currentAttempt = $using:attempt
+              $expected = Join-Path $using:dataDir $name
+              $downloaded = Join-Path $using:temporaryDir "public-$name"
               try {
                 Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
-                $url = "https://github.com/$env:GH_REPO/releases/download/mobile-market-data/${name}?run_id=$env:GITHUB_RUN_ID&attempt=$attempt"
+                $url = "https://github.com/$currentRepository/releases/download/mobile-market-data/${name}?run_id=$currentRunId&attempt=$currentAttempt"
                 Invoke-WebRequest -Uri $url -OutFile $downloaded -MaximumRedirection 10 -TimeoutSec 45
-                $downloadedAssetHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
-                if ($downloadedAssetHash -cne $expectedAssetHash) {
+                $expectedHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash
+                $actualHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
+                if ($actualHash -cne $expectedHash) {
                   throw "Public immutable asset $name differs from the verified build artifact."
                 }
-                [void]$pendingAssets.Remove($name)
+                [pscustomobject]@{ Name = $name; Ok = $true; Error = '' }
               } catch {
-                $assetFailures[$name] = $_.Exception.Message
-                Write-Warning "Public immutable asset $name verification attempt $attempt of $assetVerificationAttempts failed: $($assetFailures[$name])"
+                [pscustomobject]@{ Name = $name; Ok = $false; Error = $_.Exception.Message }
+              }
+            } -ThrottleLimit 6)
+            foreach ($result in $results) {
+              if ($result.Ok) {
+                [void]$pendingAssets.Remove([string]$result.Name)
+              } else {
+                $assetFailures[[string]$result.Name] = [string]$result.Error
+                Write-Warning "Public immutable asset $($result.Name) verification attempt $attempt of $assetVerificationAttempts failed: $($result.Error)"
               }
             }
             if ($pendingAssets.Count -eq 0) {
@@ -1911,7 +1940,7 @@ jobs:
             foreach ($name in @($pendingAssets)) {
               Write-Warning "Public immutable asset $name could not be verified after $assetVerificationAttempts attempts: $($assetFailures[$name])"
             }
-            'MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED=true' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            throw 'One or more public immutable release assets could not be verified after bounded parallel retries.'
           }
 
       - name: Retain only the current and previous complete generations
@@ -1923,10 +1952,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
-          }
-          if ($env:MOBILE_PUBLIC_ASSET_VERIFICATION_FAILED -eq 'true') {
-            Write-Warning 'Public immutable asset verification was deferred after bounded retries; retaining all release assets for the next run.'
-            exit 0
           }
           if ($env:MOBILE_PREVIOUS_MANIFEST_STATE -ceq 'error') {
             Write-Warning 'Skipping retention cleanup because the previous stable generation could not be validated.'

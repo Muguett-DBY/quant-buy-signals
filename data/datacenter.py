@@ -19,12 +19,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 
 from config import CONCURRENCY, REQUEST_TIMEOUT
+from data.as_of import shanghai_today as _shanghai_today
 from data.capex_evidence import (
     CAPEX_FIELD,
     EASTMONEY_DATACENTER_URL,
@@ -64,7 +64,6 @@ _DATACENTER_RECOVERY_RETRY_DELAY = 2.0
 _MAX_DATACENTER_RECOVERY_PAGES = 3
 ANNUAL_HISTORY_YEARS = 10
 DETAILED_ANNUAL_HISTORY_YEARS = 5
-_SHANGHAI = ZoneInfo("Asia/Shanghai")
 DATACENTER_REPORT_CACHE_ADAPTER_VERSION = 1
 DATACENTER_REPORT_CACHE_SCHEMA_VERSION = 1
 DATACENTER_REPORT_CACHE_DIR = Path(__file__).resolve().parent / "cache" / "datacenter_reports"
@@ -915,11 +914,6 @@ def _fetch_all_pages(
     _record_datacenter_stat("rows_from_network", len(frame))
     _save_datacenter_report_cache(contract, frame)
     return frame
-
-
-def _shanghai_today() -> date:
-    """Freeze filing cut-offs to the market timezone, not the host machine."""
-    return datetime.now(_SHANGHAI).date()
 
 
 def _latest_completed_annual_year(today: date | None = None) -> int:

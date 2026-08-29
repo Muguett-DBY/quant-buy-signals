@@ -27,6 +27,7 @@ from statistics import median
 from datetime import date
 from typing import Any
 
+from data.as_of import shanghai_today
 from engine.market_coldness import MarketColdnessScoringError, validate_market_coldness_evidence_record
 
 
@@ -2814,7 +2815,7 @@ def _latest_complete_financial_year(metric: Mapping[str, Any]) -> int | None:
             parsed = date.fromisoformat(raw_date)
         except ValueError:
             continue
-        if parsed.isoformat() != raw_date or parsed > date.today():
+        if parsed.isoformat() != raw_date or parsed > shanghai_today():
             continue
         parsed_dates[key] = parsed
     financial_date = parsed_dates.get("financial_indicator_as_of")
@@ -4520,7 +4521,7 @@ def _primary_evidence_record(
     if (
         evidence_date.isoformat() != clean["as_of"]
         or reference_date.isoformat() != reference_as_of
-        or reference_date > date.today()
+        or reference_date > shanghai_today()
         or evidence_date > reference_date
         or (reference_date - evidence_date).days > PRIMARY_EVIDENCE_MAX_AGE_DAYS
     ):
@@ -4615,7 +4616,7 @@ def validate_quantitative_evidence_record(
         parsed_as_of = date.fromisoformat(as_of)
     except ValueError as exc:
         raise ValueError("quantitative evidence date is invalid") from exc
-    if parsed_as_of.isoformat() != as_of or parsed_as_of > date.today():
+    if parsed_as_of.isoformat() != as_of or parsed_as_of > shanghai_today():
         raise ValueError("quantitative evidence date is not canonical")
     score_label = "N/A" if level == "not_applicable" else f"{float(score):.1f}"
     expected_summary = f"{key}={score_label};model={MODEL_ID};evidence_level={level}"
@@ -4644,7 +4645,7 @@ def validate_quantitative_evidence_record(
         if (
             primary_validation_token is not PRIMARY_EVIDENCE_VALIDATION_TOKEN
             or evidence_id_match is None
-            or (date.today() - parsed_as_of).days > PRIMARY_EVIDENCE_MAX_AGE_DAYS
+            or (shanghai_today() - parsed_as_of).days > PRIMARY_EVIDENCE_MAX_AGE_DAYS
             or str(evidence["source"]).startswith(_INTERNAL_PROXY_SOURCE_PREFIX)
             or str(evidence["evidence_id"]).startswith(_INTERNAL_PROXY_ID_PREFIX)
             or details.get("basis") != "dated_primary_source_score"
@@ -4759,7 +4760,7 @@ def derive_company_evidence(
                 parsed_date = date.fromisoformat(raw_date)
             except ValueError:
                 continue
-            if parsed_date.isoformat() == raw_date and parsed_date <= date.today():
+            if parsed_date.isoformat() == raw_date and parsed_date <= shanghai_today():
                 evidence_date = parsed_date
                 break
     years = metric.get("revenue_years")
@@ -4767,7 +4768,7 @@ def derive_company_evidence(
         valid_years = [int(year) for year in years if str(year).isdigit() and 1900 <= int(year) <= 9999]
         if valid_years:
             annual_date = date(max(valid_years), 12, 31)
-            if annual_date <= date.today():
+            if annual_date <= shanghai_today():
                 evidence_date = annual_date
     if evidence_date is None:
         raise ValueError(f"quantitative evidence has no valid as-of date:{code}")

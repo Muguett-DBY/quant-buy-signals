@@ -24,8 +24,9 @@ import numpy as np
 import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, REQUEST_TIMEOUT
+from data.as_of import shanghai_today
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
-from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds
+from data.provider_http import RequestRateLimiter, is_transient_request_error, retry_delay_seconds, thread_local_session
 
 
 TENCENT_HISTORY_ENDPOINT = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -142,7 +143,7 @@ def _parse_as_of(value: date | str) -> date:
             parsed = date.fromisoformat(value)
         except ValueError as exc:
             raise ValueError("as_of must be a valid calendar date") from exc
-    if parsed > date.today():
+    if parsed > shanghai_today():
         raise ValueError("as_of cannot be in the future")
     return parsed
 
@@ -361,6 +362,7 @@ class TencentWeeklyHistoryAdapter:
             raise TypeError("as_of must be a date")
 
         request_value = f"{symbol},week,,{as_of.isoformat()},{self.bar_limit},{self.stock_adjustment}"
+        http_client = thread_local_session() if self.http_client is requests else self.http_client
         last_error: Exception | None = None
         for attempt in range(self.retries):
             response = None
@@ -368,7 +370,7 @@ class TencentWeeklyHistoryAdapter:
             transient = False
             try:
                 self.rate_limiter.acquire()
-                response = self.http_client.get(
+                response = http_client.get(
                     TENCENT_HISTORY_ENDPOINT,
                     params={"param": request_value},
                     headers=_TENCENT_HEADERS,

@@ -419,8 +419,8 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     assert 'transport_ok="false"' not in mirror_script
     assert "transport_ok=false" in mirror_script
     assert mirror["timeout-minutes"] == 60
-    assert "mirror_attempt_limit=8" in mirror_script
-    assert "mirror_retry_base_delay_seconds=10" in mirror_script
+    assert "mirror_attempt_limit=2" in mirror_script
+    assert "mirror_retry_base_delay_seconds=30" in mirror_script
     assert "for ((attempt=1; attempt<=mirror_attempt_limit; attempt++))" in mirror_script
     assert "(.current_generation_id // .generation_id)" in mirror_script
     assert '"${response_generation}" == "${expected_generation}"' in mirror_script
@@ -514,6 +514,8 @@ def test_market_data_publication_requires_a_successful_tests_run_for_the_exact_m
     assert verify["if"] == "steps.guard.outputs.should_run == 'true'"
     assert verify["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert "actions/workflows/tests.yml/runs?branch=main&status=success&per_page=100" in verify["run"]
+    assert "for ($attempt = 1; $attempt -le 4; $attempt++)" in verify["run"]
+    assert "Website gate lookup attempt $attempt of 4 failed" in verify["run"]
     assert "[string]$_.head_sha -ceq $env:GITHUB_SHA" in verify["run"]
     assert "[string]$_.conclusion -ceq 'success'" in verify["run"]
     assert "No successful tests workflow exists" in verify["run"]
@@ -615,7 +617,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     parsed = _workflow(MOBILE_WORKFLOW)
     triggers = parsed.get("on", parsed.get(True))
 
-    assert triggers["schedule"] == [{"cron": "17 8 * * 1-5"}]
+    assert triggers["schedule"] == [{"cron": "45 8 * * 1-5"}]
     assert triggers["workflow_dispatch"]["inputs"]["rebuild_latest_closed"] == {
         "description": (
             "Re-score the latest already closed and published market session with the current source revision"
@@ -807,10 +809,13 @@ def test_pages_action_revisions_and_release_patterns_are_pinned_and_bounded():
     assert 240 <= total_wait_seconds <= 300
     assert verify_cleanup["timeout-minutes"] == 60
     assert "for ($attempt = 1; $attempt -le $assetVerificationAttempts; $attempt++)" in public_verification
+    assert "ForEach-Object -Parallel" in public_verification
+    assert "-ThrottleLimit 6" in public_verification
     assert "Start-Sleep -Seconds ($assetVerificationBaseDelaySeconds * $attempt)" in public_verification
     assert "verification attempt $attempt of $assetVerificationAttempts failed:" in public_verification
     assert "$($assetFailures[$name])" in public_verification
     assert "could not be verified after $assetVerificationAttempts attempts:" in public_verification
+    assert "could not be verified after bounded parallel retries" in public_verification
     assert "gh release delete-asset $tag $name --repo $env:GH_REPO --yes" in workflow
     assert "manifest\\.json" in workflow
 
@@ -846,10 +851,10 @@ def test_public_release_asset_url_preserves_the_filename_during_powershell_inter
         line.strip() for line in public_verification.splitlines() if '$url = "https://github.com/' in line
     )
     script = (
-        "$env:GH_REPO='owner/repository';"
-        "$env:GITHUB_RUN_ID='12345';"
+        "$currentRepository='owner/repository';"
+        "$currentRunId='12345';"
         "$name='catalog-0123456789abcdef.json.gz';"
-        "$attempt=2;"
+        "$currentAttempt=2;"
         f"{assignment};"
         "[Console]::Out.Write($url)"
     )

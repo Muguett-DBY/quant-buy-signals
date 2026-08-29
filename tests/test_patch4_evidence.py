@@ -10,12 +10,13 @@ from typing import Any
 import pytest
 import requests
 
+from data.as_of import shanghai_today
 from data import patch4_evidence as patch4
 
 
 CODE = "300059"
 ART_CODE = "AN202607231234567890"
-AS_OF = date.today().isoformat()
+AS_OF = shanghai_today().isoformat()
 TITLE = "测试公司:2026年限制性股票激励计划(草案)"
 
 

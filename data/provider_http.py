@@ -13,6 +13,50 @@ import requests
 
 
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
+_THREAD_LOCAL = threading.local()
+
+
+def thread_local_session() -> requests.Session:
+    """Return one requests session per worker thread.
+
+    A Session must not be shared by concurrent workers, but rebuilding one for
+    every request throws away connection pooling.  This helper gives provider
+    adapters a small common policy without hiding request-specific contracts.
+    """
+
+    session = getattr(_THREAD_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        _THREAD_LOCAL.session = session
+    return session
+
+
+def read_bounded_response_bytes(response: Any, max_bytes: int, *, chunk_size: int = 64 * 1024) -> bytes:
+    """Read a streamed requests response while enforcing its byte contract."""
+
+    if not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ValueError("response byte limit must be a positive integer")
+    headers = getattr(response, "headers", None)
+    declared = headers.get("Content-Length") if hasattr(headers, "get") else None
+    if declared not in (None, ""):
+        try:
+            if int(declared) > max_bytes:
+                raise ValueError("response exceeds its declared byte limit")
+        except (TypeError, ValueError) as exc:
+            if str(exc) == "response exceeds its declared byte limit":
+                raise
+            raise ValueError("response has an invalid Content-Length") from exc
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=chunk_size):
+        if not chunk:
+            continue
+        value = bytes(chunk)
+        total += len(value)
+        if total > max_bytes:
+            raise ValueError("response exceeds its byte limit")
+        chunks.append(value)
+    return b"".join(chunks)
 
 
 class RequestRateLimiter:
