@@ -102,7 +102,9 @@ _REQUIRED_FILES = {
     "app.py",
     "config.py",
     "data/cache.py",
+    "data/baostock_valuation.py",
     "data/capex_evidence.py",
+    "data/commodity_evidence.py",
     "data/datacenter.py",
     "data/financial_indicator_evidence.py",
     "data/financial_source_evidence.py",
@@ -110,19 +112,23 @@ _REQUIRED_FILES = {
     "data/financial_zero_capex_evidence.json",
     "data/financial_zero_revenue_evidence.json",
     "data/fetcher.py",
+    "data/exchange_financials.py",
     "data/growth_evidence.py",
     "data/industry.py",
     "data/industry_f10.json",
     "data/industry_em_map.json",
     "data/industry_capco_2025h2.json",
     "data/industry_exchange_new_listings_2026.json",
+    "data/investor_relations.py",
     "data/market_coldness.py",
     "data/market_history.py",
+    "data/nbs_commodity_evidence.py",
     "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
     "data/snapshot.py",
     "data/sina_financial.py",
+    "data/shenwan_industry_history.py",
     "data/trading_calendar.py",
     "engine/audit.py",
     "engine/buy_screener.py",
@@ -139,6 +145,7 @@ _REQUIRED_FILES = {
     "ui/leaders_page.py",
     "tools/__init__.py",
     "tools/build_official_industry_source.py",
+    "tools/audit_shenwan_industry_history.py",
     "tools/build_desktop.py",
     "tools/china_a_share_trading_calendar.json",
     "tools/run_full_audit.py",
@@ -203,6 +210,9 @@ _EXPECTED_TYPE7_SOURCE_DOCUMENTS = {
     },
 }
 _EXPECTED_DIRECT_DEPENDENCIES = {
+    "baostock",
+    "cryptography",
+    "defusedxml",
     "numpy",
     "orjson",
     "pandas",
@@ -210,6 +220,7 @@ _EXPECTED_DIRECT_DEPENDENCIES = {
     "pillow",
     "requests",
     "streamlit",
+    "xlrd",
     "gitpython",
 }
 _SSH_PRIVATE_KEY_NAMES = {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
@@ -678,7 +689,10 @@ _SECRET_SCAN_SUFFIXES = {".cfg", ".conf", ".ini", ".json", ".toml", ".yaml", ".y
 _RULE_FILES = {
     "config.py",
     "data/capex_evidence.py",
+    "data/baostock_valuation.py",
+    "data/commodity_evidence.py",
     "data/datacenter.py",
+    "data/exchange_financials.py",
     "data/financial_indicator_evidence.py",
     "data/financial_source_evidence.py",
     "data/financial_balance_sheet_evidence.json",
@@ -686,12 +700,15 @@ _RULE_FILES = {
     "data/financial_zero_revenue_evidence.json",
     "data/growth_evidence.py",
     "data/industry.py",
+    "data/investor_relations.py",
     "data/market_coldness.py",
     "data/market_history.py",
+    "data/nbs_commodity_evidence.py",
     "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
     "data/sina_financial.py",
+    "data/shenwan_industry_history.py",
     "data/trading_calendar.py",
     "tools/china_a_share_trading_calendar.json",
     "engine/buy_screener.py",
@@ -710,6 +727,7 @@ _INDUSTRY_FILES = {
     "data/industry_em_map.json",
     "data/industry_capco_2025h2.json",
     "data/industry_exchange_new_listings_2026.json",
+    "data/shenwan_industry_history.py",
 }
 _DEPENDENCY_FILES = {
     "requirements-bootstrap.txt",
@@ -1708,6 +1726,53 @@ def _audit_type5_bottom_evidence_valid(
         and score is not None
         and math.isclose(score, replay[0], rel_tol=0.0, abs_tol=1e-9)
         and reason == replay[1]
+    )
+
+
+def _audit_type5_official_context_valid(company: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
+    context = payload.get("official_cycle_context")
+    if context is None:
+        return True
+    fields = {
+        "source",
+        "source_url",
+        "source_sha256",
+        "published_at",
+        "period_title",
+        "product_name",
+        "unit",
+        "current_price_yuan",
+        "change_yuan",
+        "change_pct",
+        "as_of",
+        "score_effect",
+    }
+    if not isinstance(context, Mapping) or set(context) != fields:
+        return False
+    parsed = urlsplit(str(context.get("source_url") or ""))
+    try:
+        port = parsed.port
+        published = date.fromisoformat(str(context.get("published_at") or "")[:10])
+        cutoff = date.fromisoformat(str(company.get("source_trade_date") or ""))
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        context.get("source") == "国家统计局流通领域重要生产资料市场价格"
+        and context.get("as_of") == cutoff.isoformat()
+        and context.get("score_effect") == "context_only"
+        and published <= cutoff
+        and parsed.scheme == "https"
+        and parsed.hostname == "www.stats.gov.cn"
+        and port in {None, 443}
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+        and re.fullmatch(r"[0-9a-f]{64}", str(context.get("source_sha256") or "")) is not None
+        and (_finite_number(context.get("current_price_yuan")) or 0.0) > 0
+        and _finite_number(context.get("change_yuan")) is not None
+        and _finite_number(context.get("change_pct")) is not None
+        and bool(str(context.get("product_name") or "").strip())
+        and bool(str(context.get("unit") or "").strip())
     )
 
 
@@ -3846,8 +3911,11 @@ def _audit_company_codes(
                 dcf_result=(dcf_results.get(code) if patch7_fact_context else _AUDIT_DECISION_FACT_UNSET),
             ):
                 return None
-            if type_key == "type5" and not _audit_type5_bottom_evidence_valid(code, company, type_payload):
-                return None
+            if type_key == "type5":
+                if not _audit_type5_bottom_evidence_valid(code, company, type_payload):
+                    return None
+                if not _audit_type5_official_context_valid(company, type_payload):
+                    return None
             if type_key == "type7":
                 ledger = type_payload.get("ledger")
                 if not _audit_type7_ledger_valid(

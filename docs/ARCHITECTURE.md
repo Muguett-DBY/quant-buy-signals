@@ -37,7 +37,7 @@ GitHub Actions 的签名后自检和发布前复验都读取该文件；refresh 
 | 目录 | 职责 | 状态 |
 |---|---|---|
 | `engine/` | **评分核心**（七类型量化买入 + DCF 估值） | 活跃 |
-| `data/` | **数据抓取/缓存/证据**（东财/新浪/通达信/巨潮） | 活跃 |
+| `data/` | **数据抓取/缓存/证据**（东财/新浪/交易所/国家统计局/Baostock/巨潮；通达信仅本地可选） | 活跃 |
 | `tools/` | 发布流水线（publish_mobile_snapshot、run_full_audit、签名） | 活跃 |
 | `cloudflare/quant-dashboard/` | **网站**（Pages worker + R2 + D1，只读 API） | 活跃 · 主攻 |
 | `cloudflare-cron/` | GitHub Actions 收盘构建调度加速器（GitHub schedule 兜底） | 活跃 · 辅助 |
@@ -65,12 +65,16 @@ GitHub Actions 的签名后自检和发布前复验都读取该文件；refresh 
 
 | 文件 | 职责 |
 |---|---|
-| `fetcher.py` | 行情+财务抓取编排（东财主源 + 新浪兜底） |
+| `fetcher.py` | 行情+财务抓取编排（东财主源 → 新浪精确补缺 → 交易所结构化补缺 → 互动易非评分材料） |
 | `datacenter.py` | 东财数据中心接口 |
 | `sina_financial.py` | 新浪财务兜底（TTM 补缺 + 年度历史回填） |
+| `exchange_financials.py` | 上交所 XBRL / 深交所定期财务指标；只填仍为 `None` 的同代码同期间字段 |
+| `investor_relations.py` | 深交所互动易公司回复；标记非独立且禁止自动加分 |
 | `tdx_segment.py` | **仅本地可选**的通达信 TCP 主营构成采集器（`mootdx` 不进入生产 Runner） |
 | `growth_evidence.py` | type3 增长证据（segment/并购） |
-| `quality_history.py` | type7 长期市场历史 |
+| `quality_history.py` / `baostock_valuation.py` | type7 长期市场历史；东财估值历史不可用时整组件切换 Baostock，不混填单点 |
+| `commodity_evidence.py` / `nbs_commodity_evidence.py` | 新浪五年期货序列确认强周期属性；国家统计局生产资料报价只作官方当前背景，不证明底部 |
+| `shenwan_industry_history.py` | 申万/CNINFO 点时行业历史，仅用于同行审计，不覆盖模型行业分类 |
 | `snapshot.py` / `mobile_snapshot.py` | 快照组装/网站发布投影（后者保留兼容命名） |
 | `cache.py` | SafeFileCache（gzip + 内容寻址） |
 
@@ -79,8 +83,13 @@ GitHub Actions 的签名后自检和发布前复验都读取该文件；refresh 
 - **content-addressed**：每个 generation 有 16 位哈希，manifest/catalogue/详情分片/签名绑定同一哈希
 - **证据契约**：所有评分输入带 provenance（source/SHA-256），audit 独立重放校验
 - **补丁系统**：补丁1-7 叠加在七类型规则上（见 docs/MODEL.md），总闸门在汇总后置过滤
-- **数据源降级**：生产 Runner 使用东财/新浪及已校验缓存；通达信 TCP 只在可信本地机器采集，
-  通过内容寻址 evidence bundle 交给 Runner 校验和导入，绝不从本地直接发布 Cloudflare。
+- **数据源降级**：财务值按“东财 → 新浪 → 交易所”逐字段补缺，已有有限数值绝不覆盖；估值历史则按
+  完整组件切换 Baostock，避免同一分布混源。互动易只提供公司自述，国家统计局商品价格只提供官方背景。
+- **原始响应重放**：新增来源缓存保存原始 XLS/JSON/JSONP/DOCX 或 Baostock 原始行及 SHA-256；缓存命中
+  必须重新解析、校验代码/期间/字段/条数，不能把归一化后的可篡改对象直接送入评分。
+- **本地与 Runner 协同**：通达信 TCP 只在可信本地机器采集；内容寻址 evidence bundle 现在也可携带
+  `commodity_cycle`、`exchange_financials`、`industry_history`、`investor_relations` 的既有验证缓存，Runner
+  逐文件验摘要后导入，仍由 Runner 统一评分、签名和发布，绝不从本地直接发布 Cloudflare。
 
 ## 已知巨型文件改造风险
 

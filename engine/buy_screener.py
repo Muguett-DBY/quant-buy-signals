@@ -14,6 +14,7 @@ import os
 import re
 from statistics import median
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
@@ -8209,21 +8210,82 @@ def screen_all_types(
             metric["code"] = code
             commodity = normalized_commodity.get(code)
             if commodity is not None:
-                if not isinstance(commodity, Mapping) or "score" not in commodity or "evidence" not in commodity:
+                if (
+                    not isinstance(commodity, Mapping)
+                    or not {"score", "evidence"} <= set(commodity)
+                    or not set(commodity) <= {"score", "evidence", "official_context"}
+                ):
                     raise ValueError(f"商品周期证据无效:{code}")
                 score = _safe_float(commodity.get("score"))
                 evidence = commodity.get("evidence")
+                source_url = urlsplit(str(evidence.get("source_url") or "")) if isinstance(evidence, Mapping) else None
                 if (
                     score is None
                     or not 0 <= score <= 10
                     or not isinstance(evidence, Mapping)
-                    or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
+                    or set(evidence) != {"source", "evidence_id", "as_of", "summary", "source_url", "source_sha256"}
+                    or evidence.get("as_of") != metric.get("source_trade_date")
+                    or code not in str(evidence.get("evidence_id") or "")
+                    or source_url is None
+                    or source_url.scheme != "https"
+                    or not source_url.hostname
+                    or source_url.username
+                    or source_url.password
+                    or source_url.fragment
+                    or re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("source_sha256") or "")) is None
                 ):
                     raise ValueError(f"商品周期证据无效:{code}")
                 metric["type5_cycle_attribute_score"] = score
                 metric["type5_cycle_attribute_score_evidence"] = dict(evidence)
                 metric["type5_cycle_attribute_score_evidence_level"] = "primary"
                 metric["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
+                official = commodity.get("official_context")
+                if official is not None:
+                    expected_official_fields = {
+                        "source",
+                        "source_url",
+                        "source_sha256",
+                        "published_at",
+                        "period_title",
+                        "product_name",
+                        "unit",
+                        "current_price_yuan",
+                        "change_yuan",
+                        "change_pct",
+                        "as_of",
+                        "score_effect",
+                    }
+                    official_url = (
+                        urlsplit(str(official.get("source_url") or "")) if isinstance(official, Mapping) else None
+                    )
+                    published = str(official.get("published_at") or "") if isinstance(official, Mapping) else ""
+                    try:
+                        published_date = date.fromisoformat(published[:10])
+                    except ValueError:
+                        published_date = None
+                    if (
+                        not isinstance(official, Mapping)
+                        or set(official) != expected_official_fields
+                        or official.get("as_of") != metric.get("source_trade_date")
+                        or official.get("score_effect") != "context_only"
+                        or published_date is None
+                        or published_date > date.fromisoformat(str(metric.get("source_trade_date")))
+                        or official_url is None
+                        or official_url.scheme != "https"
+                        or official_url.hostname != "www.stats.gov.cn"
+                        or official_url.username
+                        or official_url.password
+                        or official_url.fragment
+                        or re.fullmatch(r"[0-9a-f]{64}", str(official.get("source_sha256") or "")) is None
+                        or _safe_float(official.get("current_price_yuan")) is None
+                        or float(official["current_price_yuan"]) <= 0
+                        or _safe_float(official.get("change_yuan")) is None
+                        or _safe_float(official.get("change_pct")) is None
+                        or not str(official.get("product_name") or "").strip()
+                        or not str(official.get("unit") or "").strip()
+                    ):
+                        raise ValueError(f"商品周期官方交叉核验证据无效:{code}")
+                    metric["type5_official_cycle_context"] = dict(official)
             dividend = normalized_dividend.get(code)
             if dividend is not None:
                 if not isinstance(dividend, Mapping) or dividend.get("status") not in {
@@ -8702,6 +8764,9 @@ def screen_all_types(
                 _DECISION_MARKET_CONTEXT: market_context,
             }
             if key == "type5":
+                official_cycle_context = m.get("type5_official_cycle_context")
+                if isinstance(official_cycle_context, Mapping):
+                    payloads[key]["official_cycle_context"] = dict(official_cycle_context)
                 bottom_mode = "incomplete"
                 if status == STATUS_NOT_APPLICABLE:
                     bottom_mode = "not_applicable"

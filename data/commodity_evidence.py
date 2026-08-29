@@ -18,6 +18,7 @@ with Type 5's own bottom-signal gate, which this adapter never touches.
 
 from __future__ import annotations
 
+import base64
 import json
 import hashlib
 import math
@@ -26,13 +27,14 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import requests
 
 from data.cache import SafeFileCache
 from data.as_of import shanghai_today
 from data.provider_http import read_bounded_response_bytes, thread_local_session
+from data.nbs_commodity_evidence import NbsCommodityEvidenceError, load_nbs_commodity_context
 
 # One representative main-contract commodity per direct cyclical industry.
 INDUSTRY_COMMODITY_SYMBOLS: dict[str, str] = {
@@ -50,7 +52,7 @@ SINA_DAILY_KLINE_URL = (
 SINA_REFERER = "https://finance.sina.com.cn/"
 COMMODITY_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache" / "commodity_cycle"
 COMMODITY_CACHE_MODEL_ID = "commodity-cycle-sina-v2"
-COMMODITY_CACHE_SCHEMA_VERSION = 2
+COMMODITY_CACHE_SCHEMA_VERSION = 3
 COMMODITY_CACHE_TTL_SECONDS = 18 * 3600  # price data refresh daily after close
 REQUEST_TIMEOUT = (15, 30)
 REQUEST_ATTEMPTS = 3
@@ -79,7 +81,78 @@ def _parse_iso_date(value: Any) -> date | None:
         return None
 
 
-def _fetch_kline(symbol: str, *, session: Any = requests) -> tuple[list[dict[str, Any]], str]:
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CommodityCycleError(f"sina futures JSON contains a duplicate key: {key}")
+        result[key] = value
+    return result
+
+
+def _validate_sina_url(value: Any, symbol: str) -> None:
+    parsed = urlsplit(str(value or ""))
+    expected = urlsplit(SINA_DAILY_KLINE_URL)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise CommodityCycleError("sina futures response URL is invalid") from exc
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname != expected.hostname
+        or parsed.path != expected.path
+        or port not in {None, 443}
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or parse_qs(parsed.query, strict_parsing=True) != {"symbol": [symbol]}
+    ):
+        raise CommodityCycleError("sina futures redirected outside the fixed endpoint")
+
+
+def _parse_kline_raw(symbol: str, raw: bytes) -> tuple[list[dict[str, Any]], str]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CommodityCycleError(f"sina futures response is not UTF-8: {symbol}") from exc
+    start = text.find("([")
+    end = text.rfind("])")
+    if start < 0 or end <= start:
+        raise CommodityCycleError(f"sina futures response is not a JSONP array: {symbol}")
+    try:
+        payload = json.loads(
+            text[start + 1 : end + 1],
+            object_pairs_hook=_unique_json_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                CommodityCycleError(f"sina futures JSON contains a non-finite value: {value}")
+            ),
+        )
+    except json.JSONDecodeError as exc:
+        raise CommodityCycleError(f"sina futures response is invalid JSON: {symbol}") from exc
+    if not isinstance(payload, list):
+        raise CommodityCycleError(f"sina futures payload is not a list: {symbol}")
+    by_date: dict[str, float] = {}
+    for item in payload:
+        if not isinstance(item, Mapping):
+            continue
+        close = _finite(item.get("c"))
+        trade_date = _parse_iso_date(item.get("d"))
+        if close is None or trade_date is None:
+            continue
+        if close <= 0 or trade_date > shanghai_today():
+            raise CommodityCycleError(f"sina futures returned an invalid bar: {symbol}")
+        key = trade_date.isoformat()
+        previous = by_date.get(key)
+        if previous is not None and previous != close:
+            raise CommodityCycleError(f"sina futures returned conflicting duplicate bars: {symbol}")
+        by_date[key] = close
+    rows = [{"date": key, "close": by_date[key]} for key in sorted(by_date)]
+    if len(rows) < MIN_CYCLE_OBSERVATIONS:
+        raise CommodityCycleError(f"sina futures returned too few bars: {symbol}")
+    return rows, hashlib.sha256(raw).hexdigest()
+
+
+def _fetch_kline(symbol: str, *, session: Any = requests) -> tuple[list[dict[str, Any]], str, bytes]:
     """Fetch one symbol's daily closes from Sina with bounded retries."""
     last_error: BaseException | None = None
     for attempt in range(REQUEST_ATTEMPTS):
@@ -93,38 +166,14 @@ def _fetch_kline(symbol: str, *, session: Any = requests) -> tuple[list[dict[str
             )
             try:
                 response.raise_for_status()
+                _validate_sina_url(getattr(response, "url", _source_url(symbol)), symbol)
                 raw = read_bounded_response_bytes(response, MAX_KLINE_RESPONSE_BYTES)
             finally:
                 close = getattr(response, "close", None)
                 if callable(close):
                     close()
-            text = raw.decode("utf-8")
-            start = text.find("([")
-            end = text.rfind("])")
-            if start < 0 or end <= start:
-                raise CommodityCycleError(f"sina futures response is not a JSONP array: {symbol}")
-            payload = json.loads(text[start + 1 : end + 1])
-            if not isinstance(payload, list):
-                raise CommodityCycleError(f"sina futures payload is not a list: {symbol}")
-            by_date: dict[str, float] = {}
-            for item in payload:
-                if not isinstance(item, Mapping):
-                    continue
-                close = _finite(item.get("c"))
-                trade_date = _parse_iso_date(item.get("d"))
-                if close is None or trade_date is None:
-                    continue
-                if close <= 0 or trade_date > shanghai_today():
-                    raise CommodityCycleError(f"sina futures returned an invalid bar: {symbol}")
-                key = trade_date.isoformat()
-                previous = by_date.get(key)
-                if previous is not None and previous != close:
-                    raise CommodityCycleError(f"sina futures returned conflicting duplicate bars: {symbol}")
-                by_date[key] = close
-            rows = [{"date": key, "close": by_date[key]} for key in sorted(by_date)]
-            if len(rows) < MIN_CYCLE_OBSERVATIONS:
-                raise CommodityCycleError(f"sina futures returned too few bars: {symbol}")
-            return rows, hashlib.sha256(raw).hexdigest()
+            rows, source_sha256 = _parse_kline_raw(symbol, raw)
+            return rows, source_sha256, raw
         except (requests.RequestException, CommodityCycleError, ValueError) as exc:
             last_error = exc
             if attempt < REQUEST_ATTEMPTS - 1:
@@ -150,35 +199,38 @@ def _load_cached_kline(symbol: str, cache: SafeFileCache) -> tuple[list[dict[str
         or value.get("model_id") != COMMODITY_CACHE_MODEL_ID
         or value.get("symbol") != symbol
         or value.get("source_url") != _source_url(symbol)
+        or set(value)
+        != {
+            "model_id",
+            "symbol",
+            "source_url",
+            "source_sha256",
+            "raw_response_base64",
+            "captured_at",
+        }
         or not isinstance(value.get("source_sha256"), str)
         or len(value["source_sha256"]) != 64
-        or not isinstance(value.get("bars"), list)
+        or not isinstance(value.get("raw_response_base64"), str)
     ):
         return None
-    bars = value["bars"]
-    previous = ""
-    if len(bars) < MIN_CYCLE_OBSERVATIONS:
+    try:
+        raw = base64.b64decode(value["raw_response_base64"], validate=True)
+        bars, source_sha256 = _parse_kline_raw(symbol, raw)
+    except (ValueError, CommodityCycleError):
         return None
-    for row in bars:
-        if not isinstance(row, Mapping) or set(row) != {"date", "close"}:
-            return None
-        parsed = _parse_iso_date(row.get("date"))
-        close = _finite(row.get("close"))
-        key = str(row.get("date") or "")
-        if parsed is None or parsed > shanghai_today() or close is None or close <= 0 or key <= previous:
-            return None
-        previous = key
-    return list(bars), value["source_sha256"]
+    if source_sha256 != value["source_sha256"]:
+        return None
+    return bars, source_sha256
 
 
-def _save_cached_kline(symbol: str, bars: list[dict[str, Any]], source_sha256: str, cache: SafeFileCache) -> None:
+def _save_cached_kline(symbol: str, raw: bytes, source_sha256: str, cache: SafeFileCache) -> None:
     cache.save(
         {
             "model_id": COMMODITY_CACHE_MODEL_ID,
             "symbol": symbol,
             "source_url": _source_url(symbol),
             "source_sha256": source_sha256,
-            "bars": bars,
+            "raw_response_base64": base64.b64encode(raw).decode("ascii"),
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -221,6 +273,7 @@ def load_commodity_cycle_evidence(
     as_of: str,
     cache_dir: str | Path = COMMODITY_CACHE_DIR,
     session: Any = requests,
+    official_context_loader: Any = load_nbs_commodity_context,
 ) -> dict[str, dict[str, Any]]:
     """Return dated, code-bound cycle-attribute evidence for direct-cyclical companies.
 
@@ -241,6 +294,14 @@ def load_commodity_cycle_evidence(
 
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    try:
+        official_context = official_context_loader(
+            as_of=cutoff.isoformat(),
+            cache_dir=directory,
+            session=session,
+        )
+    except (NbsCommodityEvidenceError, requests.RequestException, TypeError, ValueError, OSError):
+        official_context = {}
     evidence_by_code: dict[str, dict[str, Any]] = {}
     for industry, codes in sorted(by_industry.items()):
         symbol = INDUSTRY_COMMODITY_SYMBOLS[industry]
@@ -251,8 +312,8 @@ def load_commodity_cycle_evidence(
         )
         cached = _load_cached_kline(symbol, cache)
         if cached is None:
-            bars, source_sha256 = _fetch_kline(symbol, session=session)
-            _save_cached_kline(symbol, bars, source_sha256, cache)
+            bars, source_sha256, raw = _fetch_kline(symbol, session=session)
+            _save_cached_kline(symbol, raw, source_sha256, cache)
         else:
             bars, source_sha256 = cached
         latest = _parse_iso_date(bars[-1]["date"]) if bars else None
@@ -271,7 +332,7 @@ def load_commodity_cycle_evidence(
         for code in codes:
             evidence_id = f"{COMMODITY_CACHE_MODEL_ID}:{symbol}:{code}:{cutoff.strftime('%Y%m%d')}"
             summary = f"{industry}商品{symbol}近五年振幅{swing:.0%}；cycle_attribute={score:.1f};model={COMMODITY_CACHE_MODEL_ID}"
-            evidence_by_code[code] = {
+            record: dict[str, Any] = {
                 "score": score,
                 "evidence": {
                     "source": f"新浪期货主力连续{symbol}",
@@ -282,6 +343,10 @@ def load_commodity_cycle_evidence(
                     "source_sha256": source_sha256,
                 },
             }
+            official = official_context.get(industry) if isinstance(official_context, Mapping) else None
+            if isinstance(official, Mapping):
+                record["official_context"] = dict(official)
+            evidence_by_code[code] = record
     return evidence_by_code
 
 

@@ -102,11 +102,18 @@ $bundleName = .venv\Scripts\python.exe -m tools.evidence_bundle resolve `
   --pointer build\evidence-bundle\evidence-cache-pointer.json `
   --bundle (Join-Path build\evidence-bundle $bundleName) `
   --expected-as-of YYYY-MM-DD
+
+# 审计两个时点之间的申万行业归属变化；输出只用于同行映射检查，不覆盖生产分类
+.venv\Scripts\python.exe -m tools.audit_shenwan_industry_history `
+  --codes-file data\cache\tdx3d_gap_codes.json `
+  --from-as-of YYYY-MM-DD `
+  --to-as-of YYYY-MM-DD `
+  --output build\audit\shenwan-industry-drift.json
 ```
 
 发布时必须先上传不可变 `evidence-cache-<sha256>.zip`，从 Release 重新下载并完整验证，最后才原子覆盖 `evidence-cache-pointer.json`。pointer 缺失时流水线可回退 Actions cache；pointer 存在但非法、摘要不符或导入失败时必须失败，不能静默退回。旧 mutable cache ZIP 只能在新证据包已导入、市场数据 generation 已发布且线上深度健康通过后删除。
 
-`a-stock-data` 只作为端点和故障经验参考。生产不整体引入其 Skill、`mootdx` 或关闭 TLS 的实现；新浪财报备用源已经按本项目合同重写，只针对东财留下的精确 TTM 字段缺口调用。
+`a-stock-data` 只作为端点和故障经验参考。生产不整体引入其 Skill、`mootdx` 或关闭 TLS 的实现；新浪财报备用源已经按本项目合同重写，只针对东财留下的精确 TTM 字段缺口调用。Baostock 仅在东财五年估值历史组件不可用时整组件接管；上交所 XBRL/深交所财务指标只填剩余空字段；互动易材料明确为公司自述、不可自动加分。所有新增缓存均保存并重放原始响应及 SHA-256。
 
 ## 数据与模型审计
 

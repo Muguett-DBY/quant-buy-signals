@@ -90,6 +90,7 @@ def test_load_commodity_cycle_evidence_binds_code_dated_records(tmp_path, monkey
         as_of="2026-07-31",
         cache_dir=tmp_path,
         session=session,
+        official_context_loader=lambda **_kwargs: {},
     )
 
     assert set(evidence) == {"000001", "000002"}
@@ -113,7 +114,12 @@ def test_load_commodity_cycle_evidence_binds_code_dated_records(tmp_path, monkey
 def test_load_commodity_cycle_evidence_reuses_cache(tmp_path, monkeypatch):
     session = _FakeSession({"RB0": _bars([100.0] * 1300)})
     industry_by_code = {"000001": "STEEL"}
-    kwargs = {"as_of": "2026-07-31", "cache_dir": tmp_path, "session": session}
+    kwargs = {
+        "as_of": "2026-07-31",
+        "cache_dir": tmp_path,
+        "session": session,
+        "official_context_loader": lambda **_kwargs: {},
+    }
     first = load_commodity_cycle_evidence(industry_by_code, **kwargs)
     second = load_commodity_cycle_evidence(industry_by_code, **kwargs)
     assert first == second

@@ -137,11 +137,14 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
         paths = step["with"]["path"].splitlines()
         assert "data/cache/datacenter_reports" in paths
         assert "data/cache/sina_financial" in paths
+        assert "data/cache/exchange_financials" in paths
 
     workflow = _workflow_text(MOBILE_WORKFLOW)
     assert workflow.count("data/cache/datacenter_reports") == 2
     assert workflow.count("data/cache/sina_financial") == 2
+    assert workflow.count("data/cache/exchange_financials") == 2
     assert workflow.count("data/sina_financial.py") >= 2
+    assert workflow.count("data/exchange_financials.py") >= 2
     build = next(step for step in steps if step.get("name") == "Build validated market data")["run"]
     assert "$forceGapRefresh = '${{ inputs.force_gap_refresh }}' -eq 'true'" in build
     assert "$forceFreshRefresh = '${{ inputs.force_fresh_refresh }}' -eq 'true'" in build
@@ -657,7 +660,11 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/cache/market_coldness",
         "data/cache/market_history",
         "data/cache/quality_history",
+        "data/cache/commodity_cycle",
+        "data/cache/exchange_financials",
         "data/cache/growth_evidence",
+        "data/cache/industry_history",
+        "data/cache/investor_relations",
         "data/cache/research_reports",
         "data/cache/patch4_evidence",
         "data/cache/cninfo_annual",

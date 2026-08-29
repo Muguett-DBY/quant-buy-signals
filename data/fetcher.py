@@ -18,6 +18,7 @@ import pandas as pd
 import requests
 
 from config import CONCURRENCY, REQUEST_TIMEOUT
+from data.as_of import shanghai_today
 from data.capex_evidence import (
     CAPEX_FIELD,
     NON_CAPEX_OUTFLOW_FIELDS,
@@ -39,6 +40,8 @@ from data.datacenter import (
     get_datacenter_fetch_diagnostics,
     reset_datacenter_fetch_diagnostics,
 )
+from data.exchange_financials import backfill_exchange_financial_gaps
+from data.investor_relations import attach_investor_relations_evidence
 from data.sina_financial import backfill_history_gaps, backfill_strict_ttm_gaps
 
 
@@ -1617,6 +1620,14 @@ class DataFetcher:
             "strategy": "eastmoney_primary_sina_annual_history_secondary",
             "status": "not_run",
         }
+        self._exchange_financial_diagnostic: Mapping[str, Any] = {
+            "strategy": "eastmoney_then_sina_then_exchange_structured_gap_only",
+            "status": "not_run",
+        }
+        self._investor_relations_diagnostic: Mapping[str, Any] = {
+            "strategy": "cninfo_ir_company_statements_non_independent_no_automatic_score",
+            "status": "not_run",
+        }
 
     def get_stock_list(self, include_hk: bool = False) -> pd.DataFrame:
         """Return SH/SZ quotes and, only when requested, quote-only HK rows.
@@ -1677,6 +1688,18 @@ class DataFetcher:
         self._primary_financial_companies = 0
         self._financial_fallback_diagnostic = {
             "strategy": "eastmoney_bulk_primary_sina_gap_only_secondary",
+            "status": "not_run",
+        }
+        self._history_fallback_diagnostic = {
+            "strategy": "eastmoney_primary_sina_annual_history_secondary",
+            "status": "not_run",
+        }
+        self._exchange_financial_diagnostic = {
+            "strategy": "eastmoney_then_sina_then_exchange_structured_gap_only",
+            "status": "not_run",
+        }
+        self._investor_relations_diagnostic = {
+            "strategy": "cninfo_ir_company_statements_non_independent_no_automatic_score",
             "status": "not_run",
         }
         requested_codes = None
@@ -1748,7 +1771,7 @@ class DataFetcher:
         contract: Mapping[str, Any],
         codes: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Use Sina only for exact strict-TTM gaps left by the bulk primary."""
+        """Fill exact gaps in source order, preserving every finite primary fact."""
 
         requested = tuple(codes) if codes is not None else self._requested_financial_codes
         outcome = backfill_strict_ttm_gaps(
@@ -1783,7 +1806,33 @@ class DataFetcher:
             f"{history_outcome.diagnostic.get('filled_fields', 0)} fields, "
             f"{history_outcome.diagnostic.get('budget_exhausted', False)}"
         )
-        return history_outcome.financials
+        exchange_outcome = backfill_exchange_financial_gaps(
+            history_outcome.financials,
+            contract,
+            codes=requested or None,
+            as_of=shanghai_today(),
+            force_refresh=self.force_financial_fallback_refresh,
+        )
+        self._exchange_financial_diagnostic = dict(exchange_outcome.diagnostic)
+        print(
+            "[Fetcher] Exchange structured overlay: "
+            f"{exchange_outcome.diagnostic.get('source_records', 0)} records, "
+            f"{exchange_outcome.diagnostic.get('filled_fields', 0)} fields, "
+            f"{exchange_outcome.diagnostic.get('conflicts', 0)} conflicts"
+        )
+        enriched, ir_diagnostic = attach_investor_relations_evidence(
+            exchange_outcome.financials,
+            codes=requested or None,
+            as_of=shanghai_today(),
+            force_refresh=self.force_financial_fallback_refresh,
+        )
+        self._investor_relations_diagnostic = dict(ir_diagnostic)
+        print(
+            "[Fetcher] Investor-relations evidence: "
+            f"{ir_diagnostic.get('attached_items', 0)} items for "
+            f"{len(ir_diagnostic.get('attached_codes', []))} companies; automatic score disabled"
+        )
+        return enriched
 
     def _history_target_codes(self, requested: Collection[str]) -> list[str]:
         """Gap codes the last build already flagged, intersected with the run.
@@ -1814,6 +1863,9 @@ class DataFetcher:
             "primary_duration_ms": self._primary_financial_duration_ms,
             "eastmoney_report_cache": get_datacenter_fetch_diagnostics(),
             "sina_fallback": dict(self._financial_fallback_diagnostic),
+            "sina_history_overlay": dict(self._history_fallback_diagnostic),
+            "exchange_structured_overlay": dict(self._exchange_financial_diagnostic),
+            "investor_relations_evidence": dict(self._investor_relations_diagnostic),
         }
 
     def financial_publication_provenance(self) -> dict[str, Any]:
@@ -1849,5 +1901,44 @@ class DataFetcher:
                 key: deepcopy(self._history_fallback_diagnostic[key])
                 for key in stable_keys
                 if key in self._history_fallback_diagnostic
+            },
+            "exchange_structured_overlay": {
+                key: deepcopy(self._exchange_financial_diagnostic[key])
+                for key in (
+                    "adapter_version",
+                    "strategy",
+                    "candidate_codes",
+                    "sse_candidate_codes",
+                    "sse_target_codes",
+                    "sse_skipped_codes",
+                    "szse_candidate_codes",
+                    "szse_target_codes",
+                    "szse_skipped_codes",
+                    "source_records",
+                    "filled_fields",
+                    "filled_codes",
+                    "conflicts",
+                    "conflict_codes",
+                    "status_counts",
+                )
+                if key in self._exchange_financial_diagnostic
+            },
+            "investor_relations_evidence": {
+                key: deepcopy(self._investor_relations_diagnostic[key])
+                for key in (
+                    "adapter_version",
+                    "strategy",
+                    "candidate_codes",
+                    "cached_codes",
+                    "target_codes",
+                    "skipped_uncached_codes",
+                    "attached_codes",
+                    "attached_items",
+                    "status_counts",
+                    "company_statement_only",
+                    "independent_evidence",
+                    "automatic_score_enabled",
+                )
+                if key in self._investor_relations_diagnostic
             },
         }

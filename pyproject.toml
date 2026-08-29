@@ -19,6 +19,10 @@ dependencies = [
   "gitpython==3.1.58",
   "orjson==3.11.9",
   "pymupdf==1.28.0",
+  "baostock==0.9.3",
+  "cryptography==50.0.1",
+  "defusedxml==0.7.1",
+  "xlrd==2.0.2",
 ]
 
 [tool.setuptools]

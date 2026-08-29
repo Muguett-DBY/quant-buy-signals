@@ -6684,6 +6684,64 @@ class TestMarketScreen(unittest.TestCase):
         duplicated = pd.concat([result, result.iloc[[0]]], ignore_index=True)
         self.assertTrue(any("code重复" in error for error in bs.validate_screening_result(duplicated)))
 
+    def test_type5_accepts_bound_sina_evidence_and_keeps_official_context_non_scoring(self):
+        def neutral_outcome(type_key):
+            return bs._finish(
+                type_key,
+                {key: 4.0 for key in bs.TYPE_WEIGHTS[type_key]},
+                {key: "测试证据" for key in bs.TYPE_WEIGHTS[type_key]},
+            )
+
+        commodity = {
+            "000001": {
+                "score": 8.0,
+                "evidence": {
+                    "source": "新浪期货主力连续RB0",
+                    "evidence_id": "commodity-cycle-sina-v2:RB0:000001:20260715",
+                    "as_of": "2026-07-15",
+                    "summary": "钢铁商品近五年周期振幅",
+                    "source_url": "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var=/GlobalFuturesService.getGlobalFuturesDailyKLine?symbol=RB0",
+                    "source_sha256": "a" * 64,
+                },
+                "official_context": {
+                    "source": "国家统计局流通领域重要生产资料市场价格",
+                    "source_url": "https://www.stats.gov.cn/sj/zxfbhjd/202607/t20260714_1964000.html",
+                    "source_sha256": "b" * 64,
+                    "published_at": "2026-07-14",
+                    "period_title": "2026年7月上旬",
+                    "product_name": "螺纹钢",
+                    "unit": "元/吨",
+                    "current_price_yuan": 3210.5,
+                    "change_yuan": -18.2,
+                    "change_pct": -0.6,
+                    "as_of": "2026-07-15",
+                    "score_effect": "context_only",
+                },
+            }
+        }
+        quotes = pd.DataFrame([{"code": "1", "name": "甲", "price": 1.0, "source_trade_date": "2026-07-15"}])
+        with (
+            patch.object(bs, "classify_industry", return_value="STEEL"),
+            patch.object(bs, "score_type1_dcf", return_value=neutral_outcome("type1")),
+            patch.object(bs, "score_type2_two_hot_one_cold", return_value=neutral_outcome("type2")),
+            patch.object(bs, "score_type3_sustainable_growth", return_value=neutral_outcome("type3")),
+            patch.object(bs, "score_type4_long_runway", return_value=neutral_outcome("type4")),
+            patch.object(bs, "score_type5_counter_cyclical", return_value=neutral_outcome("type5")),
+            patch.object(bs, "score_type6_vc", return_value=neutral_outcome("type6")),
+        ):
+            result = bs.screen_all_types(
+                {"1": {}},
+                quotes,
+                commodity_cycle_evidence=commodity,
+            )
+
+        self.assertEqual(result.iloc[0]["type5"]["official_cycle_context"], commodity["000001"]["official_context"])
+
+        forged = copy.deepcopy(commodity)
+        forged["000001"]["evidence"].pop("source_sha256")
+        with self.assertRaisesRegex(ValueError, "商品周期证据无效"):
+            bs.screen_all_types({"1": {}}, quotes, commodity_cycle_evidence=forged)
+
     def test_no_trigger_means_no_primary_buy_framework_but_keeps_diagnostic_context(self):
         def outcome(type_key, total):
             weights = bs.TYPE_WEIGHTS[type_key]

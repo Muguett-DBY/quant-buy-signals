@@ -54,7 +54,10 @@ from tools.verify_release_zip import (
 _EXPECTED_RULE_FILES = {
     "config.py",
     "data/capex_evidence.py",
+    "data/baostock_valuation.py",
+    "data/commodity_evidence.py",
     "data/datacenter.py",
+    "data/exchange_financials.py",
     "data/financial_indicator_evidence.py",
     "data/financial_source_evidence.py",
     "data/financial_balance_sheet_evidence.json",
@@ -62,12 +65,15 @@ _EXPECTED_RULE_FILES = {
     "data/financial_zero_revenue_evidence.json",
     "data/growth_evidence.py",
     "data/industry.py",
+    "data/investor_relations.py",
     "data/market_coldness.py",
     "data/market_history.py",
+    "data/nbs_commodity_evidence.py",
     "data/patch4_evidence.py",
     "data/quality_history.py",
     "data/research_reports.py",
     "data/sina_financial.py",
+    "data/shenwan_industry_history.py",
     "data/trading_calendar.py",
     "engine/buy_screener.py",
     "engine/dcf.py",
@@ -1016,6 +1022,7 @@ def _audit_payload(files):
         "data/industry_em_map.json",
         "data/industry_capco_2025h2.json",
         "data/industry_exchange_new_listings_2026.json",
+        "data/shenwan_industry_history.py",
     }
     dependency_files = {
         "requirements-bootstrap.txt",
@@ -1221,6 +1228,9 @@ def _audit_payload(files):
             "runtime": {
                 "python": "3.12.10",
                 "packages": {
+                    "baostock": "0.9.3",
+                    "cryptography": "50.0.1",
+                    "defusedxml": "0.7.1",
                     "numpy": "2.4.6",
                     "orjson": "3.11.9",
                     "pandas": "3.0.3",
@@ -1228,6 +1238,7 @@ def _audit_payload(files):
                     "pillow": "12.3.0",
                     "requests": "2.34.2",
                     "streamlit": "1.59.2",
+                    "xlrd": "2.0.2",
                     "gitpython": "3.1.55",
                 },
             },
@@ -1403,6 +1414,9 @@ def _write_minimal_release(
 ):
     prefix = "DS_DCF-v11.1.0/"
     runtime_versions = {
+        "baostock": "0.9.3",
+        "cryptography": "50.0.1",
+        "defusedxml": "0.7.1",
         "numpy": "2.4.6",
         "orjson": "3.11.9",
         "pandas": "3.0.3",
@@ -1410,6 +1424,7 @@ def _write_minimal_release(
         "pillow": "12.3.0",
         "requests": "2.34.2",
         "streamlit": "1.59.2",
+        "xlrd": "2.0.2",
         "gitpython": "3.1.55",
     }
     files = {
@@ -1420,8 +1435,11 @@ def _write_minimal_release(
         "app.py": b"# app\n",
         "config.py": b"# config\n",
         "data/cache.py": b"# cache\n",
+        "data/baostock_valuation.py": b"# Baostock valuation fallback\n",
         "data/capex_evidence.py": b"# capex evidence\n",
+        "data/commodity_evidence.py": b"# commodity cycle evidence\n",
         "data/datacenter.py": b"# datacenter\n",
+        "data/exchange_financials.py": b"# official exchange financial overlay\n",
         "data/financial_indicator_evidence.py": b"# financial indicator evidence\n",
         "data/financial_source_evidence.py": b"# financial source evidence\n",
         "data/financial_balance_sheet_evidence.json": b"{}\n",
@@ -1434,12 +1452,15 @@ def _write_minimal_release(
         "data/industry_em_map.json": b"{}\n",
         "data/industry_capco_2025h2.json": b"{}\n",
         "data/industry_exchange_new_listings_2026.json": b"{}\n",
+        "data/investor_relations.py": b"# company-statement IR evidence\n",
         "data/market_coldness.py": b"# market coldness source\n",
         "data/market_history.py": b"# market history\n",
+        "data/nbs_commodity_evidence.py": b"# official NBS commodity context\n",
         "data/patch4_evidence.py": b"# Patch 4 announcement evidence\n",
         "data/quality_history.py": b"# quality history\n",
         "data/research_reports.py": b"# Type 7 research report evidence\n",
         "data/sina_financial.py": b"# Sina gap-only financial fallback\n",
+        "data/shenwan_industry_history.py": b"# point-in-time Shenwan industry history\n",
         "data/snapshot.py": b"# snapshot\n",
         "data/trading_calendar.py": b"# pinned trading calendar\n",
         "desktop/__init__.py": b"\n",
@@ -1469,13 +1490,14 @@ def _write_minimal_release(
         "ui/leaders_page.py": b"# leaders page\n",
         "tools/__init__.py": b"",
         "tools/build_official_industry_source.py": b"# official industry source generator\n",
+        "tools/audit_shenwan_industry_history.py": b"# Shenwan history audit CLI\n",
         "tools/build_desktop.py": b"# desktop builder\n",
         "tools/china_a_share_trading_calendar.json": b'{"schema_version":1}\n',
         "tools/run_full_audit.py": b"# audit cli\n",
         "tools/sign_desktop_update_manifest.ps1": b"# desktop manifest signer\n",
         "tools/verify_release_zip.py": b"# verifier\n",
         "requirements-bootstrap.txt": _locked_line("pip", "26.1.2").encode(),
-        "requirements.txt": b"numpy==2.4.6\norjson==3.11.9\npandas==3.0.3\nplotly==6.9.0\npillow==12.3.0\nrequests==2.34.2\nstreamlit==1.59.2\ngitpython==3.1.55\n",
+        "requirements.txt": b"baostock==0.9.3\ncryptography==50.0.1\ndefusedxml==0.7.1\nnumpy==2.4.6\norjson==3.11.9\npandas==3.0.3\nplotly==6.9.0\npillow==12.3.0\nrequests==2.34.2\nstreamlit==1.59.2\nxlrd==2.0.2\ngitpython==3.1.55\n",
         "requirements-lock.txt": "".join(
             _locked_line(name, version) for name, version in runtime_versions.items()
         ).encode(),
@@ -1488,8 +1510,9 @@ def _write_minimal_release(
         "pyproject.toml": (
             b"[project]\nname='ds-dcf'\nversion='11.1.0'\nrequires-python='>=3.11,<3.15'\n"
             b"license='LicenseRef-PolyForm-Noncommercial-1.0.0'\nlicense-files=['LICENSE']\n"
-            b"dependencies=['numpy==2.4.6','orjson==3.11.9','pandas==3.0.3','plotly==6.9.0','pillow==12.3.0',"
-            b"'requests==2.34.2','streamlit==1.59.2','gitpython==3.1.55']\n"
+            b"dependencies=['baostock==0.9.3','cryptography==50.0.1','defusedxml==0.7.1','numpy==2.4.6','orjson==3.11.9',"
+            b"'pandas==3.0.3','plotly==6.9.0','pillow==12.3.0','requests==2.34.2','streamlit==1.59.2',"
+            b"'xlrd==2.0.2','gitpython==3.1.55']\n"
         ),
     }
     payload = _audit_payload(files)
@@ -2295,6 +2318,50 @@ def test_release_zip_verifier_accepts_trusted_external_type5_without_automatic_c
     )
 
     assert _verify(path) == ()
+
+
+def _install_official_type5_cycle_context(payload):
+    payload["companies"][0]["type5"]["official_cycle_context"] = {
+        "source": "国家统计局流通领域重要生产资料市场价格",
+        "source_url": "https://www.stats.gov.cn/sj/zxfbhjd/202607/t20260714_1964000.html",
+        "source_sha256": "a" * 64,
+        "published_at": "2026-07-14",
+        "period_title": "2026年7月上旬流通领域重要生产资料市场价格变动情况",
+        "product_name": "螺纹钢（Φ20mm，HRB400E）",
+        "unit": "元/吨",
+        "current_price_yuan": 3210.5,
+        "change_yuan": -18.2,
+        "change_pct": -0.6,
+        "as_of": payload["companies"][0]["source_trade_date"],
+        "score_effect": "context_only",
+    }
+
+
+def test_release_zip_verifier_accepts_official_type5_context_as_non_scoring_evidence(tmp_path):
+    path = tmp_path / "official-type5-context.zip"
+    _write_minimal_release(
+        path,
+        mutate_payload=_install_official_type5_cycle_context,
+        rerender_companions=True,
+    )
+
+    assert _verify(path) == ()
+
+
+def test_release_zip_verifier_rejects_official_type5_context_that_claims_score_effect(tmp_path):
+    path = tmp_path / "forged-official-type5-context.zip"
+
+    def install_and_forge(payload):
+        _install_official_type5_cycle_context(payload)
+        payload["companies"][0]["type5"]["official_cycle_context"]["score_effect"] = "automatic_score"
+
+    _write_minimal_release(
+        path,
+        mutate_payload=install_and_forge,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
 
 
 def test_release_zip_verifier_rejects_type7_claim_after_validated_dcf_is_removed(tmp_path):

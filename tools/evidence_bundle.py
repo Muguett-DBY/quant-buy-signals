@@ -34,12 +34,20 @@ DEFAULT_CODES_FILE = DEFAULT_CACHE_ROOT / "tdx3d_gap_codes.json"
 SCHEMA_VERSION = 1
 MODEL_ID = "ds-dcf-evidence-bundle-v1"
 POINTER_NAME = "evidence-cache-pointer.json"
-ALLOWED_CACHE_DIRECTORIES = ("growth_evidence", "quality_history", "research_reports")
+ALLOWED_CACHE_DIRECTORIES = (
+    "commodity_cycle",
+    "exchange_financials",
+    "growth_evidence",
+    "industry_history",
+    "investor_relations",
+    "quality_history",
+    "research_reports",
+)
 
 MAX_CODES = 6_000
 MAX_POINTER_BYTES = 16 * 1024 * 1024
 MAX_BUNDLE_BYTES = 512 * 1024 * 1024
-MAX_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_MEMBER_BYTES = 40 * 1024 * 1024
 MAX_TOTAL_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
 MAX_MEMBERS = 50_000
 
@@ -48,7 +56,8 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BUNDLE_NAME = re.compile(r"^evidence-cache-([0-9a-f]{64})\.zip$")
 _MEMBER_NAME = re.compile(
-    r"^data/cache/(growth_evidence|quality_history|research_reports)/"
+    r"^data/cache/(commodity_cycle|exchange_financials|growth_evidence|industry_history|"
+    r"investor_relations|quality_history|research_reports)/"
     r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
 )
 
@@ -237,20 +246,25 @@ def _collect_quality(
     cache_root: Path,
     max_workers: int,
 ) -> dict[str, Any]:
-    from data.quality_history import fetch_quality_history
+    from data.quality_history import MAX_BATCH_COMPANIES, fetch_quality_history_batch
 
     cache_dir = cache_root / "quality_history"
-
-    def fetch(code: str) -> Any:
-        return fetch_quality_history(code, as_of, cache_dir=cache_dir, use_cache=True)
-
     counts = {"available": 0, "unavailable": 0, "worker_failure": 0, "cache_hit": 0}
-    for _code, result, error in _run_company_workers(codes, fetch, max_workers=min(max_workers, 8)):
-        if error is not None:
-            counts["worker_failure"] += 1
-            continue
-        counts["available" if result.available else "unavailable"] += 1
-        counts["cache_hit"] += int(bool(result.cache_hit))
+    for offset in range(0, len(codes), MAX_BATCH_COMPANIES):
+        tranche = tuple(codes[offset : offset + MAX_BATCH_COMPANIES])
+        requests_ = [{"code": code, "as_of": as_of.isoformat()} for code in tranche]
+        results = fetch_quality_history_batch(
+            requests_,
+            max_workers=min(max_workers, 8),
+            cache_dir=cache_dir,
+        )
+        for code in tranche:
+            result = results.get(code)
+            if not isinstance(result, Mapping):
+                counts["worker_failure"] += 1
+                continue
+            counts["available" if result.get("available") is True else "unavailable"] += 1
+            counts["cache_hit"] += int(result.get("cache_hit") is True)
     return {"requested": len(codes), **counts}
 
 

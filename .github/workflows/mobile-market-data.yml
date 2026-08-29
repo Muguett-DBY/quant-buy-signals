@@ -187,9 +187,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: data/cache/market_snapshot.json.gz
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/exchange_financials.py', 'data/investor_relations.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/baostock_valuation.py', 'data/research_reports.py', 'data/patch4_evidence.py', 'data/commodity_evidence.py', 'data/nbs_commodity_evidence.py', 'data/shenwan_industry_history.py') }}-${{ github.run_id }}
           restore-keys: |
-            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-
+            mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/exchange_financials.py', 'data/investor_relations.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/baostock_valuation.py', 'data/research_reports.py', 'data/patch4_evidence.py', 'data/commodity_evidence.py', 'data/nbs_commodity_evidence.py', 'data/shenwan_industry_history.py') }}-
             mobile-market-v1-${{ runner.os }}-
 
       - name: Restore accumulated contract-validated deep evidence
@@ -200,6 +200,10 @@ jobs:
             data/cache/market_coldness
             data/cache/market_history
             data/cache/quality_history
+            data/cache/commodity_cycle
+            data/cache/exchange_financials
+            data/cache/industry_history
+            data/cache/investor_relations
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
@@ -247,7 +251,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'The local evidence bundle failed digest/member verification or atomic import.'
           }
-          foreach ($directory in @('growth_evidence', 'quality_history', 'research_reports')) {
+          foreach ($directory in @('commodity_cycle', 'exchange_financials', 'growth_evidence', 'industry_history', 'investor_relations', 'quality_history', 'research_reports')) {
             $path = Join-Path 'data/cache' $directory
             $count = (Get-ChildItem -LiteralPath $path -File -Filter '*.json.gz' -ErrorAction SilentlyContinue |
               Measure-Object).Count
@@ -815,7 +819,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: data/cache/market_snapshot.json.gz
-          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/research_reports.py', 'data/patch4_evidence.py') }}-${{ github.run_id }}
+          key: mobile-market-v1-${{ runner.os }}-${{ hashFiles('requirements-lock.txt', 'data/cache.py', 'data/snapshot.py', 'data/fetcher.py', 'data/datacenter.py', 'data/sina_financial.py', 'data/exchange_financials.py', 'data/investor_relations.py', 'data/growth_evidence.py', 'data/quality_history.py', 'data/baostock_valuation.py', 'data/research_reports.py', 'data/patch4_evidence.py', 'data/commodity_evidence.py', 'data/nbs_commodity_evidence.py', 'data/shenwan_industry_history.py') }}-${{ github.run_id }}
 
       - name: Save accumulated contract-validated deep evidence
         continue-on-error: true
@@ -825,6 +829,10 @@ jobs:
             data/cache/market_coldness
             data/cache/market_history
             data/cache/quality_history
+            data/cache/commodity_cycle
+            data/cache/exchange_financials
+            data/cache/industry_history
+            data/cache/investor_relations
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence

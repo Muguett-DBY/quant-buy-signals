@@ -443,7 +443,10 @@ _RULE_FILES = (
     _ROOT / "engine" / "type7_patch6.py",
     _ROOT / "engine" / "valuation_status.py",
     _ROOT / "data" / "capex_evidence.py",
+    _ROOT / "data" / "baostock_valuation.py",
+    _ROOT / "data" / "commodity_evidence.py",
     _ROOT / "data" / "datacenter.py",
+    _ROOT / "data" / "exchange_financials.py",
     _ROOT / "data" / "financial_indicator_evidence.py",
     _ROOT / "data" / "financial_source_evidence.py",
     _ROOT / "data" / "financial_balance_sheet_evidence.json",
@@ -451,12 +454,15 @@ _RULE_FILES = (
     _ROOT / "data" / "financial_zero_revenue_evidence.json",
     _ROOT / "data" / "growth_evidence.py",
     _ROOT / "data" / "industry.py",
+    _ROOT / "data" / "investor_relations.py",
     _ROOT / "data" / "market_coldness.py",
     _ROOT / "data" / "market_history.py",
+    _ROOT / "data" / "nbs_commodity_evidence.py",
     _ROOT / "data" / "patch4_evidence.py",
     _ROOT / "data" / "quality_history.py",
     _ROOT / "data" / "research_reports.py",
     _ROOT / "data" / "sina_financial.py",
+    _ROOT / "data" / "shenwan_industry_history.py",
     _ROOT / "data" / "trading_calendar.py",
     _ROOT / "tools" / "china_a_share_trading_calendar.json",
 )
@@ -466,6 +472,7 @@ _INDUSTRY_FILES = (
     _ROOT / "data" / "industry_em_map.json",
     _ROOT / "data" / "industry_capco_2025h2.json",
     _ROOT / "data" / "industry_exchange_new_listings_2026.json",
+    _ROOT / "data" / "shenwan_industry_history.py",
 )
 _DEPENDENCY_FILES = (
     _ROOT / "requirements-bootstrap.txt",
@@ -565,7 +572,20 @@ def _git_metadata() -> dict[str, Any]:
 
 def _runtime_versions() -> dict[str, str | None]:
     versions: dict[str, str | None] = {}
-    for package in ("numpy", "orjson", "pandas", "pillow", "plotly", "requests", "streamlit", "gitpython"):
+    for package in (
+        "baostock",
+        "cryptography",
+        "defusedxml",
+        "numpy",
+        "orjson",
+        "pandas",
+        "pillow",
+        "plotly",
+        "requests",
+        "streamlit",
+        "xlrd",
+        "gitpython",
+    ):
         try:
             versions[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
@@ -1748,6 +1768,59 @@ def _audit_type5_bottom_evidence_errors(
         or reason != replay[1]
     ):
         return [f"{code}:type5:automatic bottom evidence replay mismatch"]
+    return []
+
+
+def _audit_type5_official_context_errors(
+    code: str,
+    row: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> list[str]:
+    context = payload.get("official_cycle_context")
+    if context is None:
+        return []
+    fields = {
+        "source",
+        "source_url",
+        "source_sha256",
+        "published_at",
+        "period_title",
+        "product_name",
+        "unit",
+        "current_price_yuan",
+        "change_yuan",
+        "change_pct",
+        "as_of",
+        "score_effect",
+    }
+    if not isinstance(context, Mapping) or set(context) != fields:
+        return [f"{code}:type5:official cycle context shape invalid"]
+    parsed = urlsplit(str(context.get("source_url") or ""))
+    try:
+        port = parsed.port
+        published = date.fromisoformat(str(context.get("published_at") or "")[:10])
+        cutoff = date.fromisoformat(str(row.get("source_trade_date") or ""))
+    except (TypeError, ValueError):
+        return [f"{code}:type5:official cycle context identity invalid"]
+    if (
+        context.get("source") != "国家统计局流通领域重要生产资料市场价格"
+        or context.get("as_of") != cutoff.isoformat()
+        or context.get("score_effect") != "context_only"
+        or published > cutoff
+        or parsed.scheme != "https"
+        or parsed.hostname != "www.stats.gov.cn"
+        or port not in {None, 443}
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or re.fullmatch(r"[0-9a-f]{64}", str(context.get("source_sha256") or "")) is None
+        or (_finite(context.get("current_price_yuan")) or 0.0) <= 0
+        or _finite(context.get("change_yuan")) is None
+        or _finite(context.get("change_pct")) is None
+        or not str(context.get("product_name") or "").strip()
+        or not str(context.get("unit") or "").strip()
+    ):
+        return [f"{code}:type5:official cycle context invalid"]
     return []
 
 
@@ -6562,6 +6635,7 @@ def _independent_checks(
                 errors.append(f"{code}:{type_key}: invalid or inconsistent status")
             if type_key == "type5":
                 errors.extend(_audit_type5_bottom_evidence_errors(code, row, payload))
+                errors.extend(_audit_type5_official_context_errors(code, row, payload))
             if type_key == "type7":
                 errors.extend(
                     _audit_type7_ledger(

@@ -24,6 +24,7 @@ from engine.audit import (
     _audit_patch4_evidence_valid,
     _audit_type5_bottom_evidence_errors,
     _audit_type5_market_replay,
+    _audit_type5_official_context_errors,
     _audit_type7_ledger,
     _audit_validate_capex_provenance,
     _independent_checks,
@@ -835,6 +836,23 @@ def _replayable_type5_payload():
     }
 
 
+def _official_type5_cycle_context():
+    return {
+        "source": "国家统计局流通领域重要生产资料市场价格",
+        "source_url": "https://www.stats.gov.cn/sj/zxfbhjd/202607/t20260714_1964000.html",
+        "source_sha256": "a" * 64,
+        "published_at": "2026-07-14",
+        "period_title": "2026年7月上旬流通领域重要生产资料市场价格变动情况",
+        "product_name": "螺纹钢（Φ20mm，HRB400E）",
+        "unit": "元/吨",
+        "current_price_yuan": 3210.5,
+        "change_yuan": -18.2,
+        "change_pct": -0.6,
+        "as_of": "2026-07-15",
+        "score_effect": "context_only",
+    }
+
+
 def _type5_market_record_002522_rounding_boundary():
     """Production-shaped record whose six-decimal ranks lose replay precision."""
 
@@ -996,6 +1014,31 @@ def test_independent_type5_audit_replays_automatic_bottom_raw_contract(mutation)
     mutation(payload)
 
     assert _audit_type5_bottom_evidence_errors("000001", row, payload)
+
+
+def test_independent_type5_audit_accepts_official_context_without_using_it_for_scoring():
+    row = {"source_trade_date": "2026-07-15"}
+    payload = {"official_cycle_context": _official_type5_cycle_context()}
+
+    assert _audit_type5_official_context_errors("000001", row, payload) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda context: context.update(score_effect="automatic_score"),
+        lambda context: context.update(as_of="2026-07-14"),
+        lambda context: context.update(published_at="2026-07-16"),
+        lambda context: context.update(source_url="https://example.com/forged"),
+        lambda context: context.update(source_sha256="not-a-sha256"),
+    ),
+)
+def test_independent_type5_audit_rejects_forged_official_context(mutation):
+    row = {"source_trade_date": "2026-07-15"}
+    context = _official_type5_cycle_context()
+    mutation(context)
+
+    assert _audit_type5_official_context_errors("000001", row, {"official_cycle_context": context})
 
 
 def test_independent_type5_audit_accepts_limited_history_recent_listing():

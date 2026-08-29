@@ -2092,8 +2092,36 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
             },
         )
 
+    def fake_exchange_backfill(financials, contract, *, codes, as_of, force_refresh):
+        observed["exchange_codes"] = codes
+        observed["exchange_force_refresh"] = force_refresh
+        return SimpleNamespace(
+            financials=source,
+            diagnostic={
+                "adapter_version": 1,
+                "strategy": "eastmoney_then_sina_then_exchange_structured_gap_only",
+                "filled_fields": 3,
+                "conflicts": 0,
+                "filled_codes": ["600519"],
+                "status_counts": {"sse_ok": 1},
+            },
+        )
+
+    def fake_ir(financials, *, codes, as_of, force_refresh):
+        observed["ir_codes"] = codes
+        observed["ir_force_refresh"] = force_refresh
+        return source, {
+            "adapter_version": 1,
+            "strategy": "cninfo_ir_company_statements_non_independent_no_automatic_score",
+            "attached_codes": ["600519"],
+            "attached_items": 1,
+            "automatic_score_enabled": False,
+        }
+
     monkeypatch.setattr(fetcher, "backfill_strict_ttm_gaps", fake_backfill)
     monkeypatch.setattr(fetcher, "backfill_history_gaps", fake_history_backfill)
+    monkeypatch.setattr(fetcher, "backfill_exchange_financial_gaps", fake_exchange_backfill)
+    monkeypatch.setattr(fetcher, "attach_investor_relations_evidence", fake_ir)
     monkeypatch.setattr(fetcher, "get_datacenter_fetch_diagnostics", lambda: {"cache_hits": 7})
     # The history overlay targets the last build's gap-code list; pin it so
     # the assertion is independent of any cache restored by CI.
@@ -2111,6 +2139,10 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
         # 600519 is in the pinned gap-code list (see below), so the history
         # overlay targets exactly it.
         "history_codes": ["600519"],
+        "exchange_codes": ("600519",),
+        "exchange_force_refresh": True,
+        "ir_codes": ("600519",),
+        "ir_force_refresh": True,
     }
     runtime = instance.financial_fetch_diagnostic()
     public = instance.financial_publication_provenance()
@@ -2124,6 +2156,8 @@ def test_financial_fallback_facade_forwards_scope_refresh_and_separates_public_p
     assert "duration_ms" not in public["sina_history_overlay"]
     assert "client" not in public["sina_history_overlay"]
     assert "status_counts" not in public["sina_history_overlay"]
+    assert public["exchange_structured_overlay"]["filled_fields"] == 3
+    assert public["investor_relations_evidence"]["automatic_score_enabled"] is False
 
 
 def test_financial_fetch_options_are_boolean_and_empty_scope_resets_prior_diagnostics():

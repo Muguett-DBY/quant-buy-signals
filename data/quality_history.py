@@ -27,6 +27,14 @@ import requests
 
 from config import CACHE_DIRECTORY, CACHE_TTL_SECONDS, REQUEST_TIMEOUT
 from data.as_of import shanghai_today
+from data.baostock_valuation import (
+    BAOSTOCK_MAX_BATCH_COMPANIES,
+    BAOSTOCK_SOURCE_NAME,
+    BAOSTOCK_SOURCE_URL,
+    BaostockValuationError,
+    fetch_baostock_valuation_batch,
+    load_baostock_valuation_cache_batch,
+)
 from data.cache import SafeCacheConflict, SafeCacheError, SafeFileCache
 from data.market_history import (
     TENCENT_HISTORY_ENDPOINT,
@@ -1062,6 +1070,51 @@ def fetch_quality_history(
         return replace(result, cache_diagnostic=f"{diagnostic};write_failed:{_error_label(exc)}")
 
 
+def _apply_baostock_valuation_fallback(
+    results: dict[str, dict[str, Any]],
+    requests_: Sequence[Mapping[str, Any]],
+    fallback: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Overlay one fully validated valuation component without mixing fields."""
+
+    for request in requests_:
+        code = str(request["code"])
+        record = fallback.get(code)
+        rows = record.get("rows") if isinstance(record, Mapping) else None
+        if record is None or record.get("available") is not True or not isinstance(rows, list):
+            continue
+        result = results.get(code)
+        if not isinstance(result, dict):
+            continue
+        cutoff = date.fromisoformat(str(request["as_of"]))
+        candidate = _calculate_evidence(
+            code,
+            cutoff,
+            [],
+            rows,
+            cache_hit=bool(record.get("cache_hit")),
+            cache_diagnostic="baostock_component",
+        ).valuation_history
+        if candidate.get("available") is not True:
+            continue
+        result["valuation_history"] = candidate
+        sources = result.get("sources")
+        sources = list(sources) if isinstance(sources, list) else []
+        source: dict[str, str] = {"name": BAOSTOCK_SOURCE_NAME, "url": BAOSTOCK_SOURCE_URL}
+        source_sha256 = record.get("source_sha256")
+        if isinstance(source_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", source_sha256):
+            source["sha256"] = source_sha256
+        if source not in sources:
+            sources.append(source)
+        result["sources"] = sources
+        shareholder = result.get("shareholder_return")
+        shareholder_available = isinstance(shareholder, Mapping) and shareholder.get("available") is True
+        result["available"] = shareholder_available
+        result["reason"] = "" if shareholder_available else "missing:shareholder_return"
+        diagnostic = str(result.get("cache_diagnostic") or "")
+        result["cache_diagnostic"] = ";".join(part for part in (diagnostic, "baostock_valuation_fallback") if part)
+
+
 def load_quality_history_cache_batch_state(
     requests_: Sequence[Mapping[str, Any]],
     *,
@@ -1120,6 +1173,20 @@ def load_quality_history_cache_batch_state(
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
+    fallback_requests = [
+        {"code": code, "as_of": as_of.isoformat()}
+        for code, as_of in prepared
+        if code in results
+        and isinstance(results[code].get("valuation_history"), Mapping)
+        and results[code]["valuation_history"].get("available") is not True
+    ][:BAOSTOCK_MAX_BATCH_COMPANIES]
+    if fallback_requests:
+        fallback = load_baostock_valuation_cache_batch(
+            fallback_requests,
+            cache_dir=cache_root,
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
+        _apply_baostock_valuation_fallback(results, fallback_requests, fallback)
     ordered_results = {code: results[code] for code, _ in prepared if code in results}
     return ordered_results, tuple(code for code, _ in prepared if code in refresh_due)
 
@@ -1149,6 +1216,8 @@ def fetch_quality_history_batch(
     *,
     max_workers: int = 8,
     progress_cb: Any = None,
+    cache_dir: str | Path | None = None,
+    cache_ttl_seconds: int = CACHE_TTL_SECONDS,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for preflight-approved candidates."""
 
@@ -1158,6 +1227,8 @@ def fetch_quality_history_batch(
         raise ValueError("market-history batch exceeds the company limit")
     if isinstance(max_workers, bool) or not isinstance(max_workers, int) or not 1 <= max_workers <= 32:
         raise ValueError("max_workers must be between 1 and 32")
+    if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
+        raise ValueError("cache_ttl_seconds must be non-negative")
     prepared: list[tuple[str, str]] = []
     seen: set[str] = set()
     for request in requests_:
@@ -1173,9 +1244,19 @@ def fetch_quality_history_batch(
     if not prepared:
         return {}
 
+    def fetch_primary(code: str, as_of: str) -> QualityHistoryEvidence:
+        if cache_dir is None:
+            return fetch_quality_history(code, as_of)
+        return fetch_quality_history(
+            code,
+            as_of,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
+
     results: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=min(int(max_workers), len(prepared))) as executor:
-        future_to_code = {executor.submit(fetch_quality_history, code, as_of): code for code, as_of in prepared}
+        future_to_code = {executor.submit(fetch_primary, code, as_of): code for code, as_of in prepared}
         completed = 0
         for future in as_completed(future_to_code):
             code = future_to_code[future]
@@ -1198,11 +1279,30 @@ def fetch_quality_history_batch(
             completed += 1
             if progress_cb:
                 progress_cb(completed, len(prepared))
+
+    fallback_requests = [
+        {"code": code, "as_of": as_of}
+        for code, as_of in prepared
+        if isinstance(results.get(code, {}).get("valuation_history"), Mapping)
+        and results[code]["valuation_history"].get("available") is not True
+    ][:BAOSTOCK_MAX_BATCH_COMPANIES]
+    if fallback_requests:
+        try:
+            fallback_kwargs: dict[str, Any] = {}
+            if cache_dir is not None:
+                fallback_kwargs["cache_dir"] = cache_dir
+            if cache_ttl_seconds != CACHE_TTL_SECONDS:
+                fallback_kwargs["cache_ttl_seconds"] = cache_ttl_seconds
+            fallback = fetch_baostock_valuation_batch(fallback_requests, **fallback_kwargs)
+        except (BaostockValuationError, OSError, ValueError):
+            fallback = {}
+        _apply_baostock_valuation_fallback(results, fallback_requests, fallback)
     return {code: results[code] for code, _ in prepared}
 
 
 __all__ = [
     "EASTMONEY_VALUATION_ENDPOINT",
+    "MAX_BATCH_COMPANIES",
     "MODEL_ID",
     "PARTIAL_STRUCTURAL_RETRY_DAYS",
     "PARTIAL_TRANSIENT_RETRY_DAYS",
