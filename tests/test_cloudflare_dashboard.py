@@ -1,5 +1,6 @@
-from pathlib import Path
+from contextlib import closing
 import json
+from pathlib import Path
 import re
 import shutil
 import sqlite3
@@ -1876,41 +1877,41 @@ def test_refresh_worker_generation_upsert_repairs_missing_same_generation_but_re
 
     # D1 normally enforces this reference, but a damaged/legacy database can
     # contain the pointer without its generation row when foreign keys were off.
-    missing_row_database = sqlite3.connect(":memory:")
-    missing_row_database.executescript(SCHEMA.read_text(encoding="utf-8"))
-    missing_row_database.execute("PRAGMA foreign_keys = OFF")
-    missing_row_database.execute(
-        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
-        (expected[0], expected[10]),
-    )
-    inserted = missing_row_database.execute(generation_sql, expected)
-    assert inserted.rowcount == 1
-    repaired_pointer = missing_row_database.execute(pointer_sql, pointer_parameters)
-    assert repaired_pointer.rowcount == 1
-    assert missing_row_database.execute(
-        "SELECT market_as_of, manifest_sha256, company_count FROM generations WHERE generation_id = ?",
-        (expected[0],),
-    ).fetchone() == (expected[1], expected[4], expected[5])
-    assert missing_row_database.execute(
-        "SELECT generation_id, updated_at FROM current_generation WHERE singleton = 1"
-    ).fetchone() == (expected[0], expected[11])
+    with closing(sqlite3.connect(":memory:")) as missing_row_database:
+        missing_row_database.executescript(SCHEMA.read_text(encoding="utf-8"))
+        missing_row_database.execute("PRAGMA foreign_keys = OFF")
+        missing_row_database.execute(
+            "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+            (expected[0], expected[10]),
+        )
+        inserted = missing_row_database.execute(generation_sql, expected)
+        assert inserted.rowcount == 1
+        repaired_pointer = missing_row_database.execute(pointer_sql, pointer_parameters)
+        assert repaired_pointer.rowcount == 1
+        assert missing_row_database.execute(
+            "SELECT market_as_of, manifest_sha256, company_count FROM generations WHERE generation_id = ?",
+            (expected[0],),
+        ).fetchone() == (expected[1], expected[4], expected[5])
+        assert missing_row_database.execute(
+            "SELECT generation_id, updated_at FROM current_generation WHERE singleton = 1"
+        ).fetchone() == (expected[0], expected[11])
 
-    mismatch_database = sqlite3.connect(":memory:")
-    mismatch_database.executescript(SCHEMA.read_text(encoding="utf-8"))
-    mismatched = list(expected)
-    mismatched[5] += 1
-    mismatch_database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", mismatched)
-    mismatch_database.execute(
-        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
-        (expected[0], expected[10]),
-    )
-    rejected = mismatch_database.execute(generation_sql, expected)
-    assert rejected.rowcount == 0
-    rejected_pointer = mismatch_database.execute(pointer_sql, pointer_parameters)
-    assert rejected_pointer.rowcount == 0
-    assert mismatch_database.execute(
-        "SELECT company_count FROM generations WHERE generation_id = ?", (expected[0],)
-    ).fetchone() == (mismatched[5],)
+    with closing(sqlite3.connect(":memory:")) as mismatch_database:
+        mismatch_database.executescript(SCHEMA.read_text(encoding="utf-8"))
+        mismatched = list(expected)
+        mismatched[5] += 1
+        mismatch_database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", mismatched)
+        mismatch_database.execute(
+            "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+            (expected[0], expected[10]),
+        )
+        rejected = mismatch_database.execute(generation_sql, expected)
+        assert rejected.rowcount == 0
+        rejected_pointer = mismatch_database.execute(pointer_sql, pointer_parameters)
+        assert rejected_pointer.rowcount == 0
+        assert mismatch_database.execute(
+            "SELECT company_count FROM generations WHERE generation_id = ?", (expected[0],)
+        ).fetchone() == (mismatched[5],)
 
 
 def test_refresh_worker_never_moves_the_public_pointer_back_to_an_older_generation():
@@ -1965,27 +1966,27 @@ def test_refresh_worker_never_moves_the_public_pointer_back_to_an_older_generati
             generated_at,
         )
 
-    database = sqlite3.connect(":memory:")
-    database.executescript(SCHEMA.read_text(encoding="utf-8"))
-    database.executemany("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [older, newer])
-    database.execute(
-        "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
-        (newer[0], newer[3]),
-    )
-    rejected = database.execute(pointer_sql, pointer_parameters(older))
-    assert rejected.rowcount == 0
-    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
+    with closing(sqlite3.connect(":memory:")) as database:
+        database.executescript(SCHEMA.read_text(encoding="utf-8"))
+        database.executemany("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [older, newer])
+        database.execute(
+            "INSERT INTO current_generation(singleton, generation_id, updated_at) VALUES (1, ?, ?)",
+            (newer[0], newer[3]),
+        )
+        rejected = database.execute(pointer_sql, pointer_parameters(older))
+        assert rejected.rowcount == 0
+        assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
 
-    database.execute("UPDATE current_generation SET generation_id = ?, updated_at = ?", (older[0], older[3]))
-    advanced = database.execute(pointer_sql, pointer_parameters(newer))
-    assert advanced.rowcount == 1
-    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
+        database.execute("UPDATE current_generation SET generation_id = ?, updated_at = ?", (older[0], older[3]))
+        advanced = database.execute(pointer_sql, pointer_parameters(newer))
+        assert advanced.rowcount == 1
+        assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (newer[0],)
 
-    rebuilt = generation("3333333333333333", newer[1], newer[2], newer[3])
-    database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rebuilt)
-    replaced = database.execute(pointer_sql, pointer_parameters(rebuilt))
-    assert replaced.rowcount == 1
-    assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (rebuilt[0],)
+        rebuilt = generation("3333333333333333", newer[1], newer[2], newer[3])
+        database.execute("INSERT INTO generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rebuilt)
+        replaced = database.execute(pointer_sql, pointer_parameters(rebuilt))
+        assert replaced.rowcount == 1
+        assert database.execute("SELECT generation_id FROM current_generation").fetchone() == (rebuilt[0],)
 
 
 def test_cloudflare_pipeline_validates_mirrors_and_serves_all_company_detail_shards():
