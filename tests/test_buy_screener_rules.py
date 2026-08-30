@@ -3941,6 +3941,73 @@ class TestTypeRules(unittest.TestCase):
                     expected_replay,
                 )
 
+    def test_type5_cycle_contract_replays_company_corroborated_commodity_proxy(self):
+        metric = complete_type5_bottom_metrics()
+        as_of = metric["source_trade_date"]
+        evidence = {
+            "source": "新浪期货行业参照主力连续JM0",
+            "evidence_id": "commodity-cycle-sina-v2:JM0:000001:20260717",
+            "as_of": as_of,
+            "summary": "COAL行业参照商品JM0近五年周期",
+            "source_url": (
+                "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/"
+                "InnerFuturesNewService.getDailyKLine?symbol=JM0"
+            ),
+            "source_sha256": "a" * 64,
+        }
+        metric.update(
+            {
+                "type5_cycle_attribute_score": 8.0,
+                "type5_cycle_attribute_score_evidence": evidence,
+                "type5_cycle_attribute_score_evidence_level": "primary",
+                "_type5_external_validation_token": bs._TYPE5_EXTERNAL_VALIDATION_TOKEN,
+            }
+        )
+
+        _triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+        contract = bs._type5_automatic_cycle_contract(metric)
+
+        self.assertEqual(scores["5a"], 7.0)
+        self.assertEqual(reasons["5a"], "行业商品行情/公司毛利率/利润周期互证")
+        self.assertEqual(contract["route"], "industry_commodity_proxy")
+        self.assertEqual(contract["commodity_proxy"]["symbol"], "JM0")
+        self.assertEqual(
+            bs.replay_type5_cycle_evidence_contract(
+                contract,
+                expected_code=metric["code"],
+                expected_as_of=as_of,
+                expected_industry=metric["industry"],
+            ),
+            {"score": 7.0, "reason": reasons["5a"]},
+        )
+
+        mutations = {
+            "code": lambda value: value.update(code="000002"),
+            "as_of": lambda value: value.update(as_of="2026-07-16"),
+            "endpoint": lambda value: value["commodity_proxy"].update(source_url="https://example.test"),
+            "evidence_id": lambda value: value["commodity_proxy"].update(evidence_id="forged"),
+            "source_as_of": lambda value: value["commodity_proxy"].update(as_of="2026-07-16"),
+            "source_sha256": lambda value: value["commodity_proxy"].update(source_sha256="forged"),
+            "margin_year": lambda value: value["company_cycle"]["gross_margin_years"].pop(),
+            "profit_cycle": lambda value: value["company_cycle"].update(net_profit_history=list(range(10, 110, 10))),
+        }
+        for label, mutate in mutations.items():
+            forged = copy.deepcopy(contract)
+            mutate(forged)
+            with self.subTest(contract_mutation=label):
+                self.assertIsNone(
+                    bs.replay_type5_cycle_evidence_contract(
+                        forged,
+                        expected_code=metric["code"],
+                        expected_as_of=as_of,
+                        expected_industry=metric["industry"],
+                    )
+                )
+
     def test_type5_missing_coldness_keeps_bottom_evidence_incomplete(self):
         metric = complete_type5_bottom_metrics(
             market_coldness_score=None,
@@ -4196,6 +4263,7 @@ class TestTypeRules(unittest.TestCase):
         rebased = bs._rebase_quality_history_to_current_quote(metric, history)
 
         self.assertIsNone(rebased["valuation_history"]["current_pe_ttm"])
+        self.assertIsNone(rebased["valuation_history"]["median_pe_ttm"])
         self.assertIsNone(rebased["valuation_history"]["pe_percentile"])
         self.assertEqual(rebased["valuation_history"]["pe_distribution"], distribution)
         self.assertEqual(rebased["valuation_history"]["current_pb_mrq"], 1.20)
@@ -4203,12 +4271,19 @@ class TestTypeRules(unittest.TestCase):
         inputs = bs._type2_valuation_history_inputs(metric, rebased)
         self.assertEqual(set(inputs["percentiles"]), {"pb"})
 
-        # A separately identified current TTM quote can update the TTM history.
+        # A quote-layer field named pe_ttm still has no archived raw-source
+        # contract, so it cannot update a historical TTM distribution.
         metric["pe_ttm"] = 12.48
         rebased_ttm = bs._rebase_quality_history_to_current_quote(metric, history)
-        self.assertEqual(rebased_ttm["valuation_history"]["current_pe_ttm"], 12.48)
-        self.assertEqual(rebased_ttm["valuation_history"]["pe_percentile"], 0.75)
+        self.assertIsNone(rebased_ttm["valuation_history"]["current_pe_ttm"])
+        self.assertIsNone(rebased_ttm["valuation_history"]["median_pe_ttm"])
+        self.assertIsNone(rebased_ttm["valuation_history"]["pe_percentile"])
         self.assertEqual(valuation["current_pe_ttm"], 10.0)
+
+        metric_without_pb = {**metric, "pb": None}
+        pe_only = bs._rebase_quality_history_to_current_quote(metric_without_pb, history)
+        self.assertNotIn("current_valuation_date", pe_only["valuation_history"])
+        self.assertNotIn("current_valuation_source", pe_only["valuation_history"])
 
         # A same-session observation from the historical TTM source needs no
         # quote rebasing, and must not be discarded because Sina differs.
@@ -4294,6 +4369,13 @@ class TestTypeRules(unittest.TestCase):
     def test_type5_shared_industry_commodity_proxy_requires_company_cycle_corroboration(self):
         context = trusted_type5_scores(type5_cycle_attribute_score=10.0)
         context["type5_cycle_attribute_score_evidence"]["evidence_id"] = "commodity-cycle-sina-v2:MA0:000001:20260715"
+        context["type5_cycle_attribute_score_evidence"].update(
+            source_url=(
+                "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/"
+                "InnerFuturesNewService.getDailyKLine?symbol=MA0"
+            ),
+            source_sha256="a" * 64,
+        )
         flat_company = base_metrics(
             industry="CHEMICAL",
             net_profit_history=[100.0, 102.0, 104.0, 106.0, 108.0],
@@ -4309,7 +4391,11 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(rejected[3]["_status"], bs.STATUS_NOT_APPLICABLE)
         self.assertIn("未得到公司毛利率与利润周期互证", rejected[3]["_scope"])
 
-        corroborated = complete_type5_bottom_metrics(industry="CHEMICAL", **context)
+        corroborated = complete_type5_bottom_metrics(
+            industry="CHEMICAL",
+            source_trade_date="2026-07-15",
+            **context,
+        )
         accepted = bs.score_type5_counter_cyclical(corroborated, benchmarks())
         self.assertEqual(accepted[2]["5a"], 7.0)
         self.assertEqual(accepted[3]["5a"], "行业商品行情/公司毛利率/利润周期互证")
@@ -6463,11 +6549,18 @@ class TestMarketScreen(unittest.TestCase):
             by_code.loc["000001", "type5"]["bottom_evidence_contract"]["model_id"],
             bs.TYPE5_BOTTOM_EVIDENCE_MODEL_ID,
         )
+        self.assertEqual(by_code.loc["000001", "type5"]["cycle_evidence_mode"], "automatic_replay")
+        self.assertEqual(
+            by_code.loc["000001", "type5"]["cycle_evidence_contract"]["model_id"],
+            bs.TYPE5_CYCLE_EVIDENCE_MODEL_ID,
+        )
         self.assertEqual(by_code.loc["000001", "type5"]["bottom_evidence_mode"], "automatic_replay")
         self.assertEqual(by_code.loc["000002", "type5"]["status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(by_code.loc["000002", "type5"]["cycle_evidence_mode"], "trusted_external")
         self.assertNotIn("bottom_evidence_contract", by_code.loc["000002", "type5"])
         self.assertEqual(by_code.loc["000002", "type5"]["bottom_evidence_mode"], "incomplete")
         self.assertEqual(by_code.loc["000003", "type5"]["status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertEqual(by_code.loc["000003", "type5"]["cycle_evidence_mode"], "not_applicable")
         self.assertEqual(by_code.loc["000003", "type5"]["bottom_evidence_mode"], "not_applicable")
 
     def test_type7_is_not_scored_twice_when_preflight_history_does_not_change(self):

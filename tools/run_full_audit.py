@@ -2203,6 +2203,7 @@ def _load_market_coldness_evidence(
     eligible_codes: Sequence[str],
     *,
     force_refresh: bool,
+    cache_only: bool = False,
     reference_artifact_out: MutableMapping[str, object] | None = None,
     archive_candidate_out: MutableSequence[object] | None = None,
 ) -> tuple[dict[str, Mapping[str, object]], dict[str, object]]:
@@ -2267,6 +2268,7 @@ def _load_market_coldness_evidence(
             coldness_snapshot = fetch_market_coldness_snapshot(
                 force_refresh=False,
                 allow_expired_cache=True,
+                cache_only=cache_only,
             )
         evidence_diagnostics: dict[str, object] = {}
         evidence = build_market_coldness_evidence(
@@ -2298,6 +2300,7 @@ def _load_market_coldness_evidence(
             coldness_snapshot = fetch_market_coldness_snapshot(
                 force_refresh=True,
                 allow_expired_cache=False,
+                cache_only=cache_only,
             )
             evidence_diagnostics = {}
             evidence = build_market_coldness_evidence(

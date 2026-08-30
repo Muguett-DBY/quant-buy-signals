@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from data import nbs_commodity_evidence as nbs
 from data.cache import SafeFileCache
 from data.nbs_commodity_evidence import (
     NBS_CACHE_MODEL_ID,
@@ -104,3 +105,34 @@ def test_nbs_cache_payload_contains_raw_responses_not_normalized_rows(tmp_path):
     assert "index_raw_base64" in payload
     assert "article_raw_base64" in payload
     assert "rows" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_nbs_cache_only_miss_never_fetches(tmp_path):
+    session = _Session()
+
+    assert (
+        load_nbs_commodity_context(
+            as_of="2026-08-28",
+            cache_dir=tmp_path,
+            session=session,
+            cache_only=True,
+        )
+        == {}
+    )
+    assert session.calls == []
+
+
+def test_nbs_cache_only_replays_expired_valid_raw_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(nbs, "NBS_CACHE_TTL_SECONDS", 0)
+    expected = load_nbs_commodity_context(as_of="2026-08-28", cache_dir=tmp_path, session=_Session())
+    offline = _Session()
+
+    replayed = load_nbs_commodity_context(
+        as_of="2026-08-28",
+        cache_dir=tmp_path,
+        session=offline,
+        cache_only=True,
+    )
+
+    assert replayed == expected
+    assert offline.calls == []

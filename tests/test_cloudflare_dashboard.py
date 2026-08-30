@@ -1393,6 +1393,10 @@ assert.match(payload.patch7_total_gate.rules[3].requirement, /明确失败则否
 assert.match(payload.patch7_total_gate.rules[3].requirement, /资料不足则待补/);
 assert.match(payload.patch7_total_gate.outside_extra_gate, /共同未来自由现金流前提/);
 
+assert.match(payload.types.type4.trigger, /4a至少5分/);
+assert.match(payload.types.type4.trigger, /4a门槛不是一票否决/);
+assert.ok(payload.types.type4.key_thresholds.includes("4a≥5才具备触发资格（非一票否决）"));
+
 assert.equal(payload.type5_appendix.applicability, "5a≥7");
 assert.equal(payload.type5_appendix.trigger, "5b至5e证据完整且五项加权总分≥7");
 assert.match(payload.type5_appendix.no_extra_gate, /5c/);

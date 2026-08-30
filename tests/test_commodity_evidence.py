@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from data import commodity_evidence as commodity
 from data.commodity_evidence import (
     INDUSTRY_COMMODITY_SYMBOLS,
     _cycle_swing_score,
@@ -17,6 +18,7 @@ from data.commodity_evidence import (
 class _FakeSession:
     def __init__(self, rows_by_symbol: dict[str, list[dict]]) -> None:
         self._rows = rows_by_symbol
+        self.calls: list[str] = []
 
     def get(self, url, *, params, headers, timeout, stream):
         class _Response:
@@ -35,6 +37,7 @@ class _FakeSession:
                 return None
 
         symbol = str(params.get("symbol") or "")
+        self.calls.append(symbol)
         rows = self._rows.get(symbol, [])
         import json as _json
 
@@ -125,3 +128,48 @@ def test_load_commodity_cycle_evidence_reuses_cache(tmp_path, monkeypatch):
     second = load_commodity_cycle_evidence(industry_by_code, **kwargs)
     assert first == second
     assert (tmp_path / "RB0.json.gz").exists()
+
+
+def test_commodity_cache_only_miss_never_fetches(tmp_path):
+    session = _FakeSession({"RB0": _bars([100.0] * 1300)})
+    official_calls = []
+
+    evidence = load_commodity_cycle_evidence(
+        {"000001": "STEEL"},
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=session,
+        cache_only=True,
+        official_context_loader=lambda **kwargs: official_calls.append(kwargs) or {},
+    )
+
+    assert evidence == {}
+    assert session.calls == []
+    assert official_calls[0]["cache_only"] is True
+
+
+def test_commodity_cache_only_replays_expired_valid_raw_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(commodity, "COMMODITY_CACHE_TTL_SECONDS", 0)
+    industry_by_code = {"000001": "STEEL"}
+    initial = _FakeSession({"RB0": _bars([100.0] * 1300)})
+    expected = load_commodity_cycle_evidence(
+        industry_by_code,
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=initial,
+        official_context_loader=lambda **_kwargs: {},
+    )
+    offline = _FakeSession({})
+
+    replayed = load_commodity_cycle_evidence(
+        industry_by_code,
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=offline,
+        official_context_loader=lambda **_kwargs: {},
+        cache_only=True,
+    )
+
+    assert replayed == expected
+    assert initial.calls == ["RB0"]
+    assert offline.calls == []

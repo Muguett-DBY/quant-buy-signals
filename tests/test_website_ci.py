@@ -38,9 +38,23 @@ def test_model_rebuild_reuses_evidence_but_forced_gap_refresh_keeps_network():
     workflow = _workflow(ROOT / ".github" / "workflows" / "mobile-market-data.yml")
     steps = workflow["jobs"]["build"]["steps"]
     build = next(step["run"] for step in steps if step.get("name") == "Build validated market data")
+    verify = next(
+        step["run"] for step in steps if step.get("name") == "Verify the post-close, content-addressed manifest"
+    )
+    deep_cache_steps = [
+        step for step in steps if "accumulated contract-validated deep evidence" in step.get("name", "")
+    ]
     assert "if ($rebuildLatestClosed -and -not $forceGapRefresh)" in build
     assert "$publisherArguments += '--reuse-evidence-only'" in build
     assert "$publisherArguments += '--refresh-financials-only'" in build
+    assert len(deep_cache_steps) == 2
+    assert all("data/cache/dividend_history" in step["with"]["path"] for step in deep_cache_steps)
+    assert "$expectedEvidenceMode" in verify
+    assert "company_evidence_mode" in verify
+    assert "snapshot_source" in verify
+    assert "$null -eq $networkTrancheCompanies" in verify
+    assert "network_tranche_companies" in verify
+    assert "[TimeSpan]::FromDays(7)" in verify
 
 
 def _classifier_module():

@@ -138,11 +138,13 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
         assert "data/cache/datacenter_reports" in paths
         assert "data/cache/sina_financial" in paths
         assert "data/cache/exchange_financials" in paths
+        assert "data/cache/dividend_history" in paths
 
     workflow = _workflow_text(MOBILE_WORKFLOW)
     assert workflow.count("data/cache/datacenter_reports") == 2
     assert workflow.count("data/cache/sina_financial") == 2
     assert workflow.count("data/cache/exchange_financials") == 2
+    assert workflow.count("data/cache/dividend_history") == 2
     assert workflow.count("data/sina_financial.py") >= 2
     assert workflow.count("data/exchange_financials.py") >= 2
     build = next(step for step in steps if step.get("name") == "Build validated market data")["run"]
@@ -622,9 +624,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
 
     assert triggers["schedule"] == [{"cron": "45 8 * * 1-5"}]
     assert triggers["workflow_dispatch"]["inputs"]["rebuild_latest_closed"] == {
-        "description": (
-            "Re-score the latest already closed and published market session with the current source revision"
-        ),
+        "description": "Re-score the latest published close using validated company-evidence caches, without per-company backfills",
         "required": False,
         "default": False,
         "type": "boolean",
@@ -661,6 +661,7 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/cache/market_history",
         "data/cache/quality_history",
         "data/cache/commodity_cycle",
+        "data/cache/dividend_history",
         "data/cache/exchange_financials",
         "data/cache/growth_evidence",
         "data/cache/industry_history",
@@ -714,7 +715,12 @@ def test_manual_model_rebuild_reuses_only_the_latest_validated_closed_session():
     assert "model_rebuild=$env:GITHUB_RUN_ID" in verify
     assert "$publishedManifest.market_as_of" in verify
     assert "is not the latest published closed session" in verify
-    assert "older than 14 days" in verify
+    assert "older than 7 days" in verify
+    assert "$cacheOnlyRebuild = '${{ inputs.rebuild_latest_closed }}' -eq 'true'" in verify
+    assert "$expectedEvidenceMode = if ($cacheOnlyRebuild) { 'cache_only' } else { 'network_backfill' }" in verify
+    assert "manifest.provenance.company_evidence_mode" in verify
+    assert "manifest.provenance.snapshot_source" in verify
+    assert "quality_history_backfill.network_tranche_companies" in verify
 
 
 def test_manual_fresh_refresh_is_explicit_and_does_not_require_the_cached_snapshot():

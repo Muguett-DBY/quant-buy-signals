@@ -889,6 +889,9 @@ def test_type3_to_type6_rule_text_matches_the_current_engine_hard_gates():
     assert "总分封顶4.9分" in type3
 
     type4 = _type_trigger_rule_text("type4")
+    assert "坡的长度（4a）至少5分" in type4
+    assert "4a门槛不是一票否决" in type4
+    assert "低于5分仍保留诊断但不能触发" in type4
     assert "护城河耐久度（4c）不高于3分时否决" in type4
     assert "4e）和股价泡沫防范（4f）同时不高于3分才否决" in type4
 

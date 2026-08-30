@@ -147,6 +147,20 @@ _AUDIT_TYPE7_VALUATION_MIN_OBSERVATIONS = 500
 _AUDIT_TYPE7_VALUATION_MAX_OBSERVATIONS = 2_000
 _AUDIT_TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION = 1
 _AUDIT_TYPE5_BOTTOM_EVIDENCE_MODEL_ID = "type5-bottom-observables-v1"
+_AUDIT_TYPE5_CYCLE_EVIDENCE_SCHEMA_VERSION = 1
+_AUDIT_TYPE5_CYCLE_EVIDENCE_MODEL_ID = "type5-cycle-attributes-v1"
+_AUDIT_TYPE5_COMMODITY_MODEL_ID = "commodity-cycle-sina-v2"
+_AUDIT_TYPE5_COMMODITY_ENDPOINT = (
+    "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/InnerFuturesNewService.getDailyKLine"
+)
+_AUDIT_TYPE5_COMMODITY_SYMBOLS = {
+    "STEEL": "RB0",
+    "NONFERROUS": "CU0",
+    "CHEMICAL": "MA0",
+    "BUILDING_MATERIAL": "FG0",
+    "OIL_GAS": "SC0",
+    "COAL": "JM0",
+}
 _AUDIT_TYPE5_HISTORY_MIN_SPAN_DAYS = 1_743
 _AUDIT_TYPE5_HISTORY_MAX_START_DELAY_DAYS = 62
 _AUDIT_TYPE5_HISTORY_MAX_LATEST_AGE_DAYS = 21
@@ -1165,6 +1179,8 @@ def _audit_type7_valuation_history_replay(
         or not 0 <= (as_of - end).days <= _AUDIT_TYPE7_HISTORY_LATEST_MAX_AGE_DAYS
     ):
         return None
+    if end < as_of and any(value.get(key) is not None for key in ("current_pe_ttm", "median_pe_ttm", "pe_percentile")):
+        return None
 
     usable: dict[str, dict[str, float | int]] = {}
     for prefix, current_key, median_key in (
@@ -1672,6 +1688,145 @@ def _audit_type5_financial_replay(value: Any, *, as_of: date) -> tuple[float, st
             if score is not None:
                 candidates.append((score, "利"))
     return max(candidates, default=None, key=lambda item: (item[0], item[1]))
+
+
+def _audit_type5_cycle_contract_replay(
+    contract: Any,
+    *,
+    code: str,
+    as_of: Any,
+    industry: Any,
+) -> tuple[float, str] | None:
+    fields = {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "industry",
+        "route",
+        "commodity_proxy",
+        "company_cycle",
+    }
+    reference = _audit_type7_history_date(as_of)
+    industry_code = str(industry or "")
+    if (
+        not isinstance(contract, Mapping)
+        or set(contract) != fields
+        or contract.get("schema_version") != _AUDIT_TYPE5_CYCLE_EVIDENCE_SCHEMA_VERSION
+        or contract.get("model_id") != _AUDIT_TYPE5_CYCLE_EVIDENCE_MODEL_ID
+        or contract.get("code") != code
+        or contract.get("as_of") != as_of
+        or contract.get("industry") != industry_code
+        or reference is None
+        or reference > shanghai_today()
+    ):
+        return None
+    company_cycle = contract.get("company_cycle")
+    if not isinstance(company_cycle, Mapping) or set(company_cycle) != {
+        "gross_margin_history",
+        "gross_margin_years",
+        "net_profit_history",
+        "net_profit_years",
+    }:
+        return None
+    margins = _audit_type5_cycle_series(
+        company_cycle.get("gross_margin_history"),
+        company_cycle.get("gross_margin_years"),
+        as_of=reference,
+    )
+    profits = _audit_type5_cycle_series(
+        company_cycle.get("net_profit_history"),
+        company_cycle.get("net_profit_years"),
+        as_of=reference,
+    )
+    if margins is None or profits is None:
+        return None
+    margin_values, _margin_years = margins
+    profit_values, _profit_years = profits
+    profit_changes = [current - prior for prior, current in zip(profit_values, profit_values[1:])]
+    profit_scale = max(abs(float(statistics.median(profit_values))), 1.0)
+    company_cycle_confirmed = bool(
+        len(margin_values) >= 4
+        and max(margin_values) - min(margin_values) > 0.15
+        and len(profit_values) >= 4
+        and any(change < 0 for change in profit_changes)
+        and any(change > 0 for change in profit_changes)
+        and (max(profit_values) - min(profit_values)) / profit_scale >= 0.50
+    )
+    if not company_cycle_confirmed:
+        return None
+    route = contract.get("route")
+    commodity = contract.get("commodity_proxy")
+    if route == "direct_industry_financial":
+        if commodity is not None or industry_code not in _AUDIT_TYPE5_COMMODITY_SYMBOLS:
+            return None
+        reason = "大宗行业/毛利/利润周期"
+    elif route == "industry_commodity_proxy":
+        symbol = _AUDIT_TYPE5_COMMODITY_SYMBOLS.get(industry_code)
+        if not isinstance(commodity, Mapping) or set(commodity) != {
+            "model_id",
+            "symbol",
+            "evidence_id",
+            "as_of",
+            "source_url",
+            "source_sha256",
+        }:
+            return None
+        expected_id = f"{_AUDIT_TYPE5_COMMODITY_MODEL_ID}:{symbol}:{code}:{reference.strftime('%Y%m%d')}"
+        if (
+            symbol is None
+            or commodity.get("model_id") != _AUDIT_TYPE5_COMMODITY_MODEL_ID
+            or commodity.get("symbol") != symbol
+            or commodity.get("evidence_id") != expected_id
+            or commodity.get("as_of") != as_of
+            or commodity.get("source_url") != f"{_AUDIT_TYPE5_COMMODITY_ENDPOINT}?symbol={symbol}"
+            or re.fullmatch(r"[0-9a-f]{64}", str(commodity.get("source_sha256") or "")) is None
+        ):
+            return None
+        reason = "行业商品行情/公司毛利率/利润周期互证"
+    else:
+        return None
+    return 7.0, reason
+
+
+def _audit_type5_cycle_evidence_errors(
+    code: str,
+    row: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> list[str]:
+    reasons = payload.get("reasons")
+    sub_scores = payload.get("sub_scores")
+    reason = reasons.get("5a") if isinstance(reasons, Mapping) else None
+    score = _finite(sub_scores.get("5a")) if isinstance(sub_scores, Mapping) else None
+    mode = payload.get("cycle_evidence_mode")
+    contract = payload.get("cycle_evidence_contract")
+    if mode not in {"automatic_replay", "trusted_external", "incomplete", "not_applicable"}:
+        return [f"{code}:type5:cycle evidence mode invalid"]
+    status = payload.get("status")
+    if (status == "not_applicable") != (mode == "not_applicable"):
+        return [f"{code}:type5:cycle evidence mode differs from status"]
+    if mode == "trusted_external":
+        return [f"{code}:type5:trusted external cycle evidence is not independently replayable"]
+    if mode != "automatic_replay":
+        if contract is not None:
+            return [f"{code}:type5:non-automatic path carries a cycle evidence contract"]
+        if score is None or not math.isclose(score, 0.0, rel_tol=0.0, abs_tol=1e-9):
+            return [f"{code}:type5:unverified cycle evidence carries a nonzero score"]
+        return []
+    replay = _audit_type5_cycle_contract_replay(
+        contract,
+        code=code,
+        as_of=row.get("source_trade_date"),
+        industry=row.get("industry"),
+    )
+    if (
+        replay is None
+        or score is None
+        or not math.isclose(score, replay[0], rel_tol=0.0, abs_tol=1e-9)
+        or reason != replay[1]
+    ):
+        return [f"{code}:type5:automatic cycle evidence replay mismatch"]
+    return []
 
 
 def _audit_type5_bottom_contract_replay(
@@ -6634,6 +6789,7 @@ def _independent_checks(
             if status not in _AUDIT_TYPE_STATUSES or status != reasons.get("_status"):
                 errors.append(f"{code}:{type_key}: invalid or inconsistent status")
             if type_key == "type5":
+                errors.extend(_audit_type5_cycle_evidence_errors(code, row, payload))
                 errors.extend(_audit_type5_bottom_evidence_errors(code, row, payload))
                 errors.extend(_audit_type5_official_context_errors(code, row, payload))
             if type_key == "type7":

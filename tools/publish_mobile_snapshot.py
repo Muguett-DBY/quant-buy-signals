@@ -352,6 +352,7 @@ def _prepare_commodity_cycle_evidence(
     financials: Mapping[str, Mapping[str, Any]],
     *,
     as_of: str,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Bind Sina commodity-cycle attributes to direct-cyclical companies.
 
@@ -369,7 +370,11 @@ def _prepare_commodity_cycle_evidence(
     ]
     industry_by_code = classify_industries(industry_inputs)
     try:
-        evidence = load_commodity_cycle_evidence(industry_by_code, as_of=as_of)
+        evidence = load_commodity_cycle_evidence(
+            industry_by_code,
+            as_of=as_of,
+            cache_only=cache_only,
+        )
     except (CommodityCycleError, TypeError, ValueError, OSError) as exc:
         print(f"COMMODITY_CYCLE_DIAGNOSTIC unavailable; Type 5 commodity gate skipped: {exc!r}", flush=True)
         return {}
@@ -380,6 +385,7 @@ def _prepare_dividend_evidence(
     eligible_codes: Sequence[str],
     *,
     as_of: str,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Bind Eastmoney dividend history to the whole universe for the gdN gate.
 
@@ -391,7 +397,11 @@ def _prepare_dividend_evidence(
     from data.dividend_evidence import DividendEvidenceError, load_dividend_evidence
 
     try:
-        evidence = load_dividend_evidence(eligible_codes, as_of=as_of)
+        evidence = load_dividend_evidence(
+            eligible_codes,
+            as_of=as_of,
+            cache_only=cache_only,
+        )
     except (DividendEvidenceError, TypeError, ValueError, OSError) as exc:
         print(f"DIVIDEND_DIAGNOSTIC unavailable; gdN filter keeps d unknown: {exc!r}", flush=True)
         return {
@@ -774,6 +784,7 @@ def publish_mobile_snapshot(
         force_refresh=refresh,
         refresh_financials_only=refresh_financials_only,
         allow_expired_cache=reuse_evidence_only,
+        cache_only=reuse_evidence_only,
         persist_network=False,
     )
     requires_network_candidate = refresh or refresh_financials_only
@@ -805,6 +816,7 @@ def publish_mobile_snapshot(
         snapshot,
         eligible_codes,
         force_refresh=refresh,
+        cache_only=reuse_evidence_only,
         reference_artifact_out=coldness_reference_artifact,
         archive_candidate_out=coldness_archive_candidates,
     )
@@ -828,8 +840,13 @@ def publish_mobile_snapshot(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
         as_of=market_as_of,
+        cache_only=reuse_evidence_only,
     )
-    dividend_evidence = _prepare_dividend_evidence(eligible_codes, as_of=market_as_of)
+    dividend_evidence = _prepare_dividend_evidence(
+        eligible_codes,
+        as_of=market_as_of,
+        cache_only=reuse_evidence_only,
+    )
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,

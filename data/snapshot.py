@@ -2176,6 +2176,7 @@ def get_market_snapshot(
     force_refresh: bool = False,
     refresh_financials_only: bool = False,
     allow_expired_cache: bool = False,
+    cache_only: bool = False,
     persist_network: bool = True,
     min_quotes: int = MIN_MARKET_QUOTES,
     min_financial_coverage: float = MIN_FINANCIAL_COVERAGE,
@@ -2192,10 +2193,18 @@ def get_market_snapshot(
     intraday run never publishes today's live prices) while re-fetching the
     financial statements and running the gap overlays, then re-scores.  This is
     the manual ``force_gap_refresh`` path: same session, more complete evidence.
+    ``cache_only`` revalidates a cached generation within the hard stale limit
+    and fails without constructing a network candidate when none is usable.
     """
     active_cache = cache or SafeFileCache(DEFAULT_SNAPSHOT_PATH, schema_version=SNAPSHOT_SCHEMA_VERSION)
-    if not isinstance(force_refresh, bool) or not isinstance(refresh_financials_only, bool):
+    if (
+        not isinstance(force_refresh, bool)
+        or not isinstance(refresh_financials_only, bool)
+        or not isinstance(cache_only, bool)
+    ):
         raise TypeError("snapshot refresh and cache replay options must be boolean")
+    if cache_only and (force_refresh or refresh_financials_only):
+        raise ValueError("cache_only cannot be combined with a snapshot refresh")
     now = float(clock())
     if not force_refresh:
         cached, cache_diagnostic = _cached_outcome(
@@ -2204,7 +2213,7 @@ def get_market_snapshot(
             # acquisition TTL has elapsed.  The embedded market timestamp is
             # still checked below against ``max_stale_age``, so this cannot
             # turn an arbitrarily old generation into admissible data.
-            allow_expired=allow_expired_cache,
+            allow_expired=allow_expired_cache or cache_only,
             source="cache",
             now=now,
             enforce_stale_limit=True,
@@ -2234,6 +2243,10 @@ def get_market_snapshot(
                 return migrated
     else:
         cache_diagnostic = {}
+
+    if cache_only:
+        reason = str(cache_diagnostic.get("reason") or "validated cache unavailable")
+        raise SnapshotUnavailableError(f"cache-only snapshot replay failed: {reason}")
 
     # A structurally valid prior generation remains the relative-count baseline
     # even if it is too old to serve to users.

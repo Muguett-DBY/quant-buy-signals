@@ -308,9 +308,16 @@ def load_nbs_commodity_context(
     as_of: str,
     cache_dir: str | Path = NBS_CACHE_DIR,
     session: Any = requests,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    """Load the latest official report published no later than ``as_of``."""
+    """Load the latest official report published no later than ``as_of``.
 
+    ``cache_only`` replays a validated raw-response cache or returns no context;
+    it never requests the NBS index or an article.
+    """
+
+    if not isinstance(cache_only, bool):
+        raise TypeError("cache_only must be boolean")
     cutoff = _parse_as_of(as_of)
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -320,11 +327,14 @@ def load_nbs_commodity_context(
         ttl=NBS_CACHE_TTL_SECONDS,
         max_uncompressed_bytes=2 * (NBS_MAX_RESPONSE_BYTES + NBS_MAX_ARTICLE_BYTES),
     )
-    loaded = cache.load(allow_expired=(shanghai_today() - cutoff).days > 2)
+    loaded = cache.load(allow_expired=cache_only or (shanghai_today() - cutoff).days > 2)
     if loaded.hit:
         replayed = _replay_cache(loaded.value, cutoff)
         if replayed is not None:
             return replayed
+
+    if cache_only:
+        return {}
 
     if session is requests:
         session = thread_local_session()

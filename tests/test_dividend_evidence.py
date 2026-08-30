@@ -35,8 +35,10 @@ class _FakeResponse:
 class _FakeSession:
     def __init__(self, rows_by_code: dict[str, list[dict]]) -> None:
         self._rows = rows_by_code
+        self.calls = 0
 
     def get(self, url, *, params, headers, timeout, stream):
+        self.calls += 1
         assert stream is True
         code = str(params.get("filter") or "").split('"')[1]
         return _FakeResponse(self._rows.get(code, []))
@@ -187,6 +189,56 @@ def test_invalid_cached_row_is_refetched_instead_of_becoming_evidence(tmp_path):
 
     assert evidence["600519"]["status"] == "available"
     assert evidence["600519"]["trailing_cash_per_share"] == 1.0
+
+
+def test_dividend_cache_only_miss_is_explicit_and_never_fetches(tmp_path):
+    session = _FakeSession({"600519": []})
+
+    evidence = load_dividend_evidence(
+        ["600519"],
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=session,
+        cache_only=True,
+    )
+
+    assert evidence["600519"]["status"] == "unavailable"
+    assert evidence["600519"]["reason"] == "cache_miss"
+    assert session.calls == 0
+
+
+def test_dividend_cache_only_replays_expired_valid_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(dividend, "DIVIDEND_CACHE_TTL_SECONDS", 0)
+    rows = {
+        "600519": [
+            {
+                "REPORT_DATE": "2025-12-31",
+                "EX_DIVIDEND_DATE": "2026-06-01",
+                "PRETAX_BONUS_RMB": 10.0,
+                "DIVIDENT_RATIO": 0.1,
+            }
+        ]
+    }
+    initial = _FakeSession(rows)
+    expected = load_dividend_evidence(
+        ["600519"],
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=initial,
+    )
+    offline = _FakeSession({})
+
+    replayed = load_dividend_evidence(
+        ["600519"],
+        as_of="2026-07-31",
+        cache_dir=tmp_path,
+        session=offline,
+        cache_only=True,
+    )
+
+    assert replayed == expected
+    assert initial.calls == 1
+    assert offline.calls == 0
 
 
 def test_dividend_retry_honours_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:

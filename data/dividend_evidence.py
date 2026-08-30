@@ -195,8 +195,13 @@ def _fetch_dividend_rows(code: str, *, session: Any = requests) -> list[dict[str
     return sorted(rows, key=lambda row: (row["report_date"], row.get("notice_date") or ""))
 
 
-def _load_cached_rows(code: str, cache: SafeFileCache) -> list[dict[str, Any]] | None:
-    loaded = cache.load()
+def _load_cached_rows(
+    code: str,
+    cache: SafeFileCache,
+    *,
+    allow_expired: bool = False,
+) -> list[dict[str, Any]] | None:
+    loaded = cache.load(allow_expired=allow_expired)
     if not loaded.hit:
         return None
     value = loaded.value
@@ -351,6 +356,7 @@ def load_dividend_evidence(
     cache_dir: str | Path = DIVIDEND_CACHE_DIR,
     session: Any = requests,
     max_workers: int = 8,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Return dated, code-bound dividend evidence for each requested company.
 
@@ -361,8 +367,11 @@ def load_dividend_evidence(
 
     Cache hits are read serially from the local cache; only companies whose
     cache generation is missing are fetched over the network, concurrently
-    with up to ``max_workers`` threads.
+    with up to ``max_workers`` threads.  ``cache_only`` also accepts an expired
+    but contract-valid cache generation and records a cache miss without I/O.
     """
+    if not isinstance(cache_only, bool):
+        raise TypeError("cache_only must be boolean")
     cutoff = date.fromisoformat(as_of)
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -377,9 +386,17 @@ def load_dividend_evidence(
             ttl=DIVIDEND_CACHE_TTL_SECONDS,
         )
         cache_by_code[code] = cache
-        rows = _load_cached_rows(code, cache)
+        rows = _load_cached_rows(code, cache, allow_expired=cache_only)
         if rows is not None:
             _bind_dividend_evidence(code, rows, cutoff, evidence_by_code)
+        elif cache_only:
+            _bind_dividend_evidence(
+                code,
+                [],
+                cutoff,
+                evidence_by_code,
+                unavailable_reason="cache_miss",
+            )
         else:
             pending.append(code)
 

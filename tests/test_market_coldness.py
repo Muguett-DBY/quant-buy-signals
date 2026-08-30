@@ -630,6 +630,57 @@ def test_expired_cache_can_be_replayed_explicitly_without_network(tmp_path):
     assert replay.records == first.records
 
 
+def test_cache_only_replays_expired_cache_without_network(tmp_path):
+    cache_path = tmp_path / "coldness.json.gz"
+    first = fetch_market_coldness_snapshot(
+        adapter=_adapter(_FakeHttpClient({1: _page(1, [_row()])})),
+        cache_path=cache_path,
+        cache_ttl_seconds=0,
+    )
+
+    class _MustNotFetch:
+        calls = 0
+
+        def fetch_all(self):
+            self.calls += 1
+            raise AssertionError("cache-only replay must not call the network")
+
+    offline = _MustNotFetch()
+    replay = fetch_market_coldness_snapshot(
+        adapter=offline,
+        cache_path=cache_path,
+        cache_ttl_seconds=0,
+        cache_only=True,
+    )
+
+    assert first.available
+    assert replay.available
+    assert replay.cache_hit
+    assert replay.records == first.records
+    assert offline.calls == 0
+
+
+def test_cache_only_miss_returns_unavailable_without_network(tmp_path):
+    class _MustNotFetch:
+        calls = 0
+
+        def fetch_all(self):
+            self.calls += 1
+            raise AssertionError("cache-only miss must not call the network")
+
+    offline = _MustNotFetch()
+    snapshot = fetch_market_coldness_snapshot(
+        adapter=offline,
+        cache_path=tmp_path / "missing.json.gz",
+        cache_only=True,
+    )
+
+    assert snapshot.available is False
+    assert snapshot.reason == "source_unavailable:MarketColdnessError:cache_only_miss"
+    assert snapshot.failure["detail"] == "cache_only_miss"
+    assert offline.calls == 0
+
+
 def test_semantically_invalid_checksummed_cache_is_refetched(tmp_path):
     cache_path = tmp_path / "coldness.json.gz"
     first = fetch_market_coldness_snapshot(
@@ -663,6 +714,8 @@ def test_constructor_rejects_invalid_retry_and_page_contract_before_io():
         EastmoneyMarketColdnessAdapter(timeout=True)
     with pytest.raises(ValueError, match="allow_expired_cache"):
         fetch_market_coldness_snapshot(use_cache=False, allow_expired_cache=1)
+    with pytest.raises(ValueError, match="cache_only"):
+        fetch_market_coldness_snapshot(use_cache=False, cache_only=1)
 
 
 def test_session_archive_replays_an_exact_generation_after_the_rolling_cache_advances(tmp_path):

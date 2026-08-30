@@ -703,6 +703,7 @@ def test_type3_growth_loader_rejects_invalid_budget(limit):
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path, reuse_evidence_only):
     snapshot = _snapshot()
     snapshot_options = {}
+    evidence_modes = {}
     cache = SimpleNamespace(read_bytes_if_payload=lambda payload: b"verified-" + payload.encode("ascii"))
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
@@ -716,11 +717,22 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     monkeypatch.setattr(publisher, "get_market_snapshot", load_snapshot)
     monkeypatch.setattr(publisher, "_snapshot_reporting_period_contract", lambda _snapshot: object())
     monkeypatch.setattr(publisher, "_comparison_quality", lambda _snapshot: {})
-    monkeypatch.setattr(
-        publisher,
-        "_load_market_coldness_evidence",
-        _valid_market_coldness_loader,
-    )
+
+    def load_coldness(*args, cache_only=False, **kwargs):
+        evidence_modes["coldness"] = cache_only
+        return _valid_market_coldness_loader(*args, **kwargs)
+
+    def load_commodity(*_args, cache_only=False, **_kwargs):
+        evidence_modes["commodity"] = cache_only
+        return {}
+
+    def load_dividend(*_args, cache_only=False, **_kwargs):
+        evidence_modes["dividend"] = cache_only
+        return {}
+
+    monkeypatch.setattr(publisher, "_load_market_coldness_evidence", load_coldness)
+    monkeypatch.setattr(publisher, "_prepare_commodity_cycle_evidence", load_commodity)
+    monkeypatch.setattr(publisher, "_prepare_dividend_evidence", load_dividend)
     monkeypatch.setattr(
         publisher,
         "run_market_analysis",
@@ -745,6 +757,12 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
 
     assert manifest["market_as_of"] == "2026-07-17"
     assert snapshot_options["allow_expired_cache"] is reuse_evidence_only
+    assert snapshot_options["cache_only"] is reuse_evidence_only
+    assert evidence_modes == {
+        "coldness": reuse_evidence_only,
+        "commodity": reuse_evidence_only,
+        "dividend": reuse_evidence_only,
+    }
     assert (tmp_path / "manifest.json").is_file()
     assert (tmp_path / manifest["catalogue"]["filename"]).is_file()
     assert (tmp_path / manifest["signals"]["filename"]).is_file()

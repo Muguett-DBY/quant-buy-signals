@@ -1025,12 +1025,15 @@ def fetch_market_coldness_snapshot(
     use_cache: bool = True,
     force_refresh: bool = False,
     allow_expired_cache: bool = False,
+    cache_only: bool = False,
 ) -> MarketColdnessSnapshot:
     """Return one complete, cached Shanghai/Shenzhen market snapshot.
 
     A verified cache hit returns before constructing or calling the network
     adapter.  A source failure returns ``available=False`` and keeps every
     market metric unavailable; callers never need to interpret a zero sentinel.
+    ``cache_only`` turns a missing or invalid cache into that unavailable state
+    without constructing or calling the adapter.
     """
 
     if isinstance(cache_ttl_seconds, bool) or not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds < 0:
@@ -1039,6 +1042,10 @@ def fetch_market_coldness_snapshot(
         raise ValueError("force_refresh must be boolean")
     if not isinstance(allow_expired_cache, bool):
         raise ValueError("allow_expired_cache must be boolean")
+    if not isinstance(cache_only, bool):
+        raise ValueError("cache_only must be boolean")
+    if cache_only and force_refresh:
+        raise ValueError("cache_only cannot be combined with force_refresh")
 
     cache: SafeFileCache | None = None
     initial_load = None
@@ -1053,7 +1060,7 @@ def fetch_market_coldness_snapshot(
         # A forced refresh still reads the existing generation metadata so
         # the subsequent compare-and-swap cannot overwrite a concurrent
         # winner.  It simply does not return the cached value early.
-        initial_load = cache.load(allow_expired=force_refresh or allow_expired_cache)
+        initial_load = cache.load(allow_expired=force_refresh or allow_expired_cache or cache_only)
         if initial_load.hit and not force_refresh:
             try:
                 return _snapshot_from_cache(initial_load.value)
@@ -1063,6 +1070,9 @@ def fetch_market_coldness_snapshot(
             cache_diagnostic = "forced_refresh"
         else:
             cache_diagnostic = f"miss:{initial_load.reason}"
+
+    if cache_only:
+        return _unavailable_snapshot(MarketColdnessError("cache_only_miss"), cache_diagnostic)
 
     source_adapter = adapter if adapter is not None else EastmoneyMarketColdnessAdapter()
     try:

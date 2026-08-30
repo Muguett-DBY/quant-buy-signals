@@ -42,6 +42,7 @@ from tools.verify_release_zip import (
     _audit_decision_contract_valid,
     _audit_patch4_evidence_valid,
     _audit_type7_ledger_valid,
+    _audit_type7_valuation_history_replay as _release_type7_valuation_history_replay,
     _desktop_launcher_errors,
     _expected_audit_bear_case,
     _git_tree_entries,
@@ -975,6 +976,7 @@ def _audit_payload(files):
                 },
             }
         row["type5"]["bottom_evidence_mode"] = "incomplete"
+        row["type5"]["cycle_evidence_mode"] = "incomplete"
         type7_reason = "金融需专属优质股权模型"
         row["type7"] = {
             "triggered": False,
@@ -1706,9 +1708,11 @@ def _refresh_fixture_company_summary(company):
 def _set_all_scoring_statuses(payload, status, score):
     company = payload["companies"][0]
     type_key = {
+        "triggered": "type4",
         "conditional": "type6",
         "vetoed": "type2",
-        "blocked": "type5",
+        "blocked": "type4",
+        "observe": "type4",
     }.get(status, "type5")
     type_payload = company[type_key]
     applicable = status != "not_applicable"
@@ -1754,6 +1758,8 @@ def _set_all_scoring_statuses(payload, status, score):
     )
     type_payload["reasons"] = reasons
     if type_key == "type5":
+        type_payload["cycle_evidence_mode"] = "not_applicable" if not applicable else "incomplete"
+        type_payload.pop("cycle_evidence_contract", None)
         type_payload["bottom_evidence_mode"] = "not_applicable" if not applicable else "incomplete"
         type_payload.pop("bottom_evidence_contract", None)
     type_payload["decision"] = replay_buy_decision(type_key, type_payload)
@@ -1960,16 +1966,132 @@ def _automatic_type5_bottom_contract_fixture():
     }
 
 
+def _automatic_type5_cycle_contract_fixture(code):
+    return {
+        "schema_version": 1,
+        "model_id": "type5-cycle-attributes-v1",
+        "code": code,
+        "as_of": "2026-07-15",
+        "industry": "COAL",
+        "route": "industry_commodity_proxy",
+        "commodity_proxy": {
+            "model_id": "commodity-cycle-sina-v2",
+            "symbol": "JM0",
+            "evidence_id": f"commodity-cycle-sina-v2:JM0:{code}:20260715",
+            "as_of": "2026-07-15",
+            "source_url": (
+                "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/"
+                "InnerFuturesNewService.getDailyKLine?symbol=JM0"
+            ),
+            "source_sha256": "a" * 64,
+        },
+        "company_cycle": {
+            "gross_margin_history": [0.42, 0.22, 0.31, 0.18],
+            "gross_margin_years": [2022, 2023, 2024, 2025],
+            "net_profit_history": [100.0, 20.0, 80.0, 30.0],
+            "net_profit_years": [2022, 2023, 2024, 2025],
+        },
+    }
+
+
+def _release_valuation_history_contract(*, end_date="2026-07-17", include_pe=False):
+    start = date(2021, 7, 28)
+    end = date.fromisoformat(end_date)
+    return {
+        "available": True,
+        "window_years": 5,
+        "target_start_date": "2021-07-28",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "row_count": 801,
+        "span_days": (end - start).days,
+        "start_delay_days": 0,
+        "limited_history": False,
+        "pe_observations": 800,
+        "pb_observations": 800,
+        "current_pe_ttm": 10.0 if include_pe else None,
+        "median_pe_ttm": 12.0 if include_pe else None,
+        "pe_percentile": 0.25 if include_pe else None,
+        "current_pb_mrq": 1.2,
+        "median_pb_mrq": 1.0,
+        "pb_percentile": 0.75,
+        "pe_distribution": {"values": [8.0, 12.0, 20.0], "counts": [200, 400, 200]},
+        "pb_distribution": {"values": [0.8, 1.0, 1.5], "counts": [200, 400, 200]},
+        "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+    }
+
+
+def test_release_replay_accepts_stale_pb_only_but_never_stale_pe_ttm():
+    as_of = date(2026, 7, 28)
+
+    pb_only = _release_type7_valuation_history_replay(
+        _release_valuation_history_contract(),
+        as_of,
+    )
+    assert pb_only is not None
+    assert set(pb_only) == {"pb"}
+
+    assert (
+        _release_type7_valuation_history_replay(
+            _release_valuation_history_contract(include_pe=True),
+            as_of,
+        )
+        is None
+    )
+
+    same_session = _release_type7_valuation_history_replay(
+        _release_valuation_history_contract(end_date=as_of.isoformat(), include_pe=True),
+        as_of,
+    )
+    assert same_session is not None
+    assert set(same_session) == {"pe", "pb"}
+
+
+def _install_automatic_type5_cycle_contract(payload):
+    company = payload["companies"][0]
+    code = company["code"]
+    company["industry"] = "COAL"
+    payload["dcf_results"][code]["industry_code"] = "COAL"
+    type5 = company["type5"]
+    type5["sub_scores"] = {key: 7.0 for key in _TYPE_WEIGHTS["type5"]}
+    type5["reasons"] = {
+        "5a": "行业商品行情/公司毛利率/利润周期互证",
+        "5b": "审计夹具",
+        "5c": "审计夹具",
+        "5d": "审计夹具",
+        "5e": "审计夹具",
+        "_status": "triggered",
+        "_applicable": "yes",
+        "_evidence": "complete",
+        "_decision_missing_dimensions": [],
+    }
+    type5.update(
+        total=7.0,
+        triggered=True,
+        veto=False,
+        status="triggered",
+        applicable=True,
+        evidence_complete=True,
+        cycle_evidence_mode="automatic_replay",
+        cycle_evidence_contract=_automatic_type5_cycle_contract_fixture(code),
+    )
+    type5["decision"] = replay_buy_decision("type5", type5)
+    company["type5_score"] = 7.0
+    _refresh_fixture_company_summary(company)
+
+
 def _install_automatic_type5_contract(payload):
     company = payload["companies"][0]
     code = company["code"]
+    company["industry"] = "COAL"
+    payload["dcf_results"][code]["industry_code"] = "COAL"
     contract = _automatic_type5_bottom_contract_fixture()
     contract["code"] = code
     contract["market_coldness_record"]["evidence"]["evidence_id"] = f"market-coldness:{code}:20260715"
     type5 = company["type5"]
-    type5["sub_scores"] = {"5a": 5.0, "5b": 9.6, "5c": 5.0, "5d": 5.0, "5e": 5.0}
+    type5["sub_scores"] = {"5a": 7.0, "5b": 9.6, "5c": 5.0, "5d": 5.0, "5e": 5.0}
     type5["reasons"] = {
-        "5a": "审计夹具",
+        "5a": "行业商品行情/公司毛利率/利润周期互证",
         "5b": "PB8%/0.95;冷8;毛10",
         "5c": "审计夹具",
         "5d": "审计夹具",
@@ -1980,17 +2102,19 @@ def _install_automatic_type5_contract(payload):
         "_decision_missing_dimensions": [],
     }
     type5.update(
-        total=6.2,
+        total=6.8,
         triggered=False,
         veto=False,
         status="observe",
         applicable=True,
         evidence_complete=True,
+        cycle_evidence_mode="automatic_replay",
+        cycle_evidence_contract=_automatic_type5_cycle_contract_fixture(code),
         bottom_evidence_mode="automatic_replay",
         bottom_evidence_contract=contract,
     )
     type5["decision"] = replay_buy_decision("type5", type5)
-    company["type5_score"] = 6.2
+    company["type5_score"] = 6.8
     _refresh_fixture_company_summary(company)
 
 
@@ -2248,6 +2372,99 @@ def test_release_zip_verifier_accepts_an_independently_replayable_type5_bottom_c
     )
 
     assert _verify(path) == ()
+
+
+def test_release_zip_verifier_accepts_an_independently_replayable_type5_cycle_contract(tmp_path):
+    path = tmp_path / "automatic-type5-cycle.zip"
+    _write_minimal_release(
+        path,
+        mutate_payload=_install_automatic_type5_cycle_contract,
+        rerender_companions=True,
+    )
+
+    assert _verify(path) == ()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda type5: type5.pop("cycle_evidence_contract"),
+        lambda type5: type5["cycle_evidence_contract"].update(code="000002"),
+        lambda type5: type5["cycle_evidence_contract"].update(as_of="2026-07-14"),
+        lambda type5: type5["cycle_evidence_contract"]["commodity_proxy"].update(
+            evidence_id="commodity-cycle-sina-v2:JM0:000001:20260714"
+        ),
+        lambda type5: type5["cycle_evidence_contract"]["commodity_proxy"].update(
+            source_url="https://example.test/?symbol=JM0"
+        ),
+        lambda type5: type5["cycle_evidence_contract"]["commodity_proxy"].update(as_of="2026-07-14"),
+        lambda type5: type5["cycle_evidence_contract"]["commodity_proxy"].update(source_sha256="forged"),
+        lambda type5: type5["cycle_evidence_contract"]["company_cycle"]["gross_margin_years"].pop(),
+        lambda type5: type5["cycle_evidence_contract"]["company_cycle"].update(
+            net_profit_history=[10.0, 20.0, 30.0, 40.0]
+        ),
+        lambda type5: type5["sub_scores"].update({"5a": 8.0}),
+        lambda type5: type5["reasons"].update({"5a": "伪造的周期属性理由"}),
+    ),
+)
+def test_release_zip_verifier_replays_automatic_type5_cycle_raw_contract(tmp_path, mutation):
+    path = tmp_path / "forged-automatic-type5-cycle.zip"
+
+    def install_and_tamper(payload):
+        _install_automatic_type5_cycle_contract(payload)
+        mutation(payload["companies"][0]["type5"])
+
+    _write_minimal_release(
+        path,
+        mutate_payload=install_and_tamper,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
+
+
+def test_release_zip_verifier_rejects_coordinated_type5_cycle_score_and_decision_tampering(tmp_path):
+    path = tmp_path / "coordinated-type5-cycle-forgery.zip"
+
+    def install_and_tamper(payload):
+        _install_automatic_type5_cycle_contract(payload)
+        company = payload["companies"][0]
+        type5 = company["type5"]
+        type5["sub_scores"]["5a"] = 10.0
+        type5["total"] = round(
+            sum(type5["sub_scores"][key] * weight for key, weight in _TYPE_WEIGHTS["type5"].items()),
+            1,
+        )
+        type5["decision"] = replay_buy_decision("type5", type5)
+        company["type5_score"] = type5["total"]
+        _refresh_fixture_company_summary(company)
+
+    _write_minimal_release(
+        path,
+        mutate_payload=install_and_tamper,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
+
+
+@pytest.mark.parametrize("mode", ("trusted_external", "incomplete"))
+def test_release_zip_verifier_rejects_unreplayable_type5_cycle_mode(tmp_path, mode):
+    path = tmp_path / f"unreplayable-{mode}-type5-cycle.zip"
+
+    def mark_unreplayable(payload):
+        _install_automatic_type5_cycle_contract(payload)
+        type5 = payload["companies"][0]["type5"]
+        type5["cycle_evidence_mode"] = mode
+        type5.pop("cycle_evidence_contract", None)
+
+    _write_minimal_release(
+        path,
+        mutate_payload=mark_unreplayable,
+        rerender_companions=True,
+    )
+
+    assert any("100 complete company rows" in error for error in _verify(path))
 
 
 @pytest.mark.parametrize(

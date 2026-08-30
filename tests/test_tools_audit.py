@@ -642,6 +642,62 @@ def _complete_framework_row(*, quantitative_evidence=...):
     return row
 
 
+def _type5_cycle_contract(*, code="000001", as_of="2026-07-15", industry="COAL"):
+    symbol = "JM0"
+    return {
+        "schema_version": 1,
+        "model_id": "type5-cycle-attributes-v1",
+        "code": code,
+        "as_of": as_of,
+        "industry": industry,
+        "route": "industry_commodity_proxy",
+        "commodity_proxy": {
+            "model_id": "commodity-cycle-sina-v2",
+            "symbol": symbol,
+            "evidence_id": f"commodity-cycle-sina-v2:{symbol}:{code}:{as_of.replace('-', '')}",
+            "as_of": as_of,
+            "source_url": (
+                "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/"
+                f"InnerFuturesNewService.getDailyKLine?symbol={symbol}"
+            ),
+            "source_sha256": "a" * 64,
+        },
+        "company_cycle": {
+            "gross_margin_history": [0.42, 0.22, 0.31, 0.18],
+            "gross_margin_years": [2022, 2023, 2024, 2025],
+            "net_profit_history": [100.0, 20.0, 80.0, 30.0],
+            "net_profit_years": [2022, 2023, 2024, 2025],
+        },
+    }
+
+
+def _valuation_history_contract(*, end_date="2026-07-17", include_pe=False):
+    start = date(2021, 7, 28)
+    end = date.fromisoformat(end_date)
+    return {
+        "available": True,
+        "window_years": 5,
+        "target_start_date": "2021-07-28",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "row_count": 801,
+        "span_days": (end - start).days,
+        "start_delay_days": 0,
+        "limited_history": False,
+        "pe_observations": 800,
+        "pb_observations": 800,
+        "current_pe_ttm": 10.0 if include_pe else None,
+        "median_pe_ttm": 12.0 if include_pe else None,
+        "pe_percentile": 0.25 if include_pe else None,
+        "current_pb_mrq": 1.2,
+        "median_pb_mrq": 1.0,
+        "pb_percentile": 0.75,
+        "pe_distribution": {"values": [8.0, 12.0, 20.0], "counts": [200, 400, 200]},
+        "pb_distribution": {"values": [0.8, 1.0, 1.5], "counts": [200, 400, 200]},
+        "formula": "percentile=(count(x<current)+0.5*count(x=current))/historical_count",
+    }
+
+
 def test_analysis_coverage_summary_counts_triggers_statuses_and_evidence_levels():
     first_evidence = _quantitative_evidence()
     first_evidence["technology_score"] = _quantitative_record(
@@ -809,6 +865,75 @@ def test_analysis_coverage_summary_proves_a_complete_seven_framework_contract():
     assert summary["quantitative_evidence_contract"]["valid_rows"] == 1
     assert summary["quantitative_evidence_contract"]["invalid_rows"] == 0
     assert summary["quantitative_evidence_contract"]["expected_metrics_per_row"] == 13
+
+
+def test_independent_audit_replays_type5_cycle_identity_and_company_corroboration():
+    row = {
+        "code": "000001",
+        "source_trade_date": "2026-07-15",
+        "industry": "COAL",
+    }
+    payload = {
+        "status": "not_triggered",
+        "sub_scores": {"5a": 7.0},
+        "reasons": {"5a": "行业商品行情/公司毛利率/利润周期互证"},
+        "cycle_evidence_mode": "automatic_replay",
+        "cycle_evidence_contract": _type5_cycle_contract(),
+    }
+
+    assert audit_engine._audit_type5_cycle_evidence_errors("000001", row, payload) == []
+
+    mutations = {
+        "endpoint": lambda value: value["commodity_proxy"].update(source_url="https://example.test"),
+        "identity": lambda value: value.update(code="000002"),
+        "year_gap": lambda value: value["company_cycle"].update(gross_margin_years=[2021, 2023, 2024, 2025]),
+        "no_profit_cycle": lambda value: value["company_cycle"].update(net_profit_history=[10.0, 20.0, 30.0, 40.0]),
+    }
+    for label, mutate in mutations.items():
+        forged = deepcopy(payload)
+        mutate(forged["cycle_evidence_contract"])
+        errors = audit_engine._audit_type5_cycle_evidence_errors("000001", row, forged)
+        assert errors == ["000001:type5:automatic cycle evidence replay mismatch"], label
+
+    unverified = deepcopy(payload)
+    unverified["cycle_evidence_mode"] = "trusted_external"
+    unverified.pop("cycle_evidence_contract")
+    assert audit_engine._audit_type5_cycle_evidence_errors("000001", row, unverified) == [
+        "000001:type5:trusted external cycle evidence is not independently replayable"
+    ]
+
+    incomplete = deepcopy(payload)
+    incomplete["cycle_evidence_mode"] = "incomplete"
+    incomplete.pop("cycle_evidence_contract")
+    assert audit_engine._audit_type5_cycle_evidence_errors("000001", row, incomplete) == [
+        "000001:type5:unverified cycle evidence carries a nonzero score"
+    ]
+
+
+def test_independent_audit_accepts_stale_pb_only_but_never_stale_pe_ttm():
+    as_of = date(2026, 7, 28)
+
+    pb_only = audit_engine._audit_type7_valuation_history_replay(
+        _valuation_history_contract(),
+        as_of,
+    )
+    assert pb_only is not None
+    assert set(pb_only) == {"pb"}
+
+    assert (
+        audit_engine._audit_type7_valuation_history_replay(
+            _valuation_history_contract(include_pe=True),
+            as_of,
+        )
+        is None
+    )
+
+    same_session = audit_engine._audit_type7_valuation_history_replay(
+        _valuation_history_contract(end_date=as_of.isoformat(), include_pe=True),
+        as_of,
+    )
+    assert same_session is not None
+    assert set(same_session) == {"pe", "pb"}
 
 
 def test_independent_decision_replay_rejects_tampering_and_preserves_type3_theoretical_range():
@@ -1566,8 +1691,8 @@ def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_sn
     )
     calls = []
 
-    def fake_fetch(*, force_refresh, allow_expired_cache):
-        calls.append(("fetch", force_refresh, allow_expired_cache))
+    def fake_fetch(*, force_refresh, allow_expired_cache, cache_only=False):
+        calls.append(("fetch", force_refresh, allow_expired_cache, cache_only))
         return source_snapshot
 
     evidence = {
@@ -1587,11 +1712,12 @@ def test_market_coldness_loader_uses_single_validated_trade_date_and_one_bulk_sn
         snapshot,
         ("000001",),
         force_refresh=False,
+        cache_only=True,
     )
 
     assert actual == {"000001": {"market_coldness_score": 6.0}}
     assert calls == [
-        ("fetch", False, True),
+        ("fetch", False, True, True),
         ("build", source_snapshot, "2026-07-15", ("000001", "000002")),
     ]
     assert status["available"] is True
@@ -1673,8 +1799,8 @@ def test_fresh_publication_refetches_when_cached_coldness_belongs_to_another_ses
     )
     calls = []
 
-    def fake_fetch(*, force_refresh, allow_expired_cache):
-        calls.append(("fetch", force_refresh, allow_expired_cache))
+    def fake_fetch(*, force_refresh, allow_expired_cache, cache_only=False):
+        calls.append(("fetch", force_refresh, allow_expired_cache, cache_only))
         return fresh if force_refresh else stale
 
     def fake_build(value, *, as_of_session, listed_quote_codes, diagnostics):
@@ -1705,9 +1831,9 @@ def test_fresh_publication_refetches_when_cached_coldness_belongs_to_another_ses
     assert evidence == {"000001": {"market_coldness_score": 6.0}}
     assert status["source"] == run_full_audit.EASTMONEY_SOURCE
     assert calls == [
-        ("fetch", False, True),
+        ("fetch", False, True, False),
         ("build", "old", "2026-07-16", ("000001",)),
-        ("fetch", True, False),
+        ("fetch", True, False, False),
         ("build", run_full_audit.EASTMONEY_SOURCE, "2026-07-16", ("000001",)),
     ]
 
@@ -1732,8 +1858,8 @@ def test_fresh_publication_does_not_refetch_coldness_that_is_newer_than_quotes(m
     )
     fetch_calls = []
 
-    def fake_fetch(*, force_refresh, allow_expired_cache):
-        fetch_calls.append((force_refresh, allow_expired_cache))
+    def fake_fetch(*, force_refresh, allow_expired_cache, cache_only=False):
+        fetch_calls.append((force_refresh, allow_expired_cache, cache_only))
         return newer
 
     def fake_build(_value, *, diagnostics, **_kwargs):
@@ -1758,7 +1884,7 @@ def test_fresh_publication_does_not_refetch_coldness_that_is_newer_than_quotes(m
 
     assert evidence == {}
     assert status["evidence_reason"] == "session_retrieval_mismatch"
-    assert fetch_calls == [(False, True)]
+    assert fetch_calls == [(False, True, False)]
 
 
 def test_release_market_coldness_gate_requires_complete_applicable_coverage():

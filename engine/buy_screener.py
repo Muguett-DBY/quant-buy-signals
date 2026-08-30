@@ -272,6 +272,8 @@ def _type5_limited_history_minimum_span(window_years: float) -> int:
 
 TYPE5_BOTTOM_EVIDENCE_SCHEMA_VERSION = 1
 TYPE5_BOTTOM_EVIDENCE_MODEL_ID = "type5-bottom-observables-v1"
+TYPE5_CYCLE_EVIDENCE_SCHEMA_VERSION = 1
+TYPE5_CYCLE_EVIDENCE_MODEL_ID = "type5-cycle-attributes-v1"
 # 第19模板明确区分两类VC标的：高景气赛道不超过300亿元、平稳
 # 产业反转不超过100亿元。旧值 ``30e8`` 只有30亿元，缩小了10倍。
 TYPE6_GROWTH_MARKET_CAP_LIMIT = 300e8  # 300亿元
@@ -5072,6 +5074,22 @@ def _type5_external_score(m: Mapping[str, Any], key: str) -> tuple[Optional[floa
         or m.get(f"{key}_evidence_level") != "primary"
     ):
         return None, None
+    evidence = m.get(f"{key}_evidence")
+    if key in {"type5_cycle_attribute_score", "cyclical_industry_score"} and _type5_industry_commodity_context(m, key):
+        score = _safe_float(m.get(key))
+        if (
+            score is None
+            or not 0 <= score <= 10
+            or not isinstance(evidence, Mapping)
+            or not _validate_type5_commodity_evidence(
+                evidence,
+                code=_canonical_evidence_code(m.get("code")),
+                industry=str(m.get("industry") or ""),
+                as_of=m.get("source_trade_date"),
+            )
+        ):
+            return None, None
+        return score, None
     score = _verified_score(m, key)
     if score is None:
         return None, None
@@ -5085,6 +5103,161 @@ def _type5_industry_commodity_context(m: Mapping[str, Any], key: str) -> bool:
     return bool(
         isinstance(evidence, Mapping) and str(evidence.get("evidence_id") or "").startswith("commodity-cycle-sina-")
     )
+
+
+def _type5_company_cycle_contract(m: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Return the company histories that corroborate a strong-cycle 5a."""
+
+    margins, margin_years = _type5_consecutive_history(
+        m,
+        "gross_margin_history",
+        "gross_margin_years",
+    )
+    profits, profit_years = _type5_consecutive_history(
+        m,
+        "net_profit_history",
+        "net_profit_years",
+    )
+    if (
+        len(margins) < 4
+        or len(profits) < 4
+        or max(margins) - min(margins) <= 0.15
+        or not _has_cycle_history(profits, profit_years)
+    ):
+        return None
+    return {
+        "gross_margin_history": margins,
+        "gross_margin_years": margin_years,
+        "net_profit_history": profits,
+        "net_profit_years": profit_years,
+    }
+
+
+def _type5_automatic_cycle_contract(m: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Publish the raw company and optional commodity inputs behind 5a=7."""
+
+    company_cycle = _type5_company_cycle_contract(m)
+    if company_cycle is None:
+        return None
+    industry = str(m.get("industry") or "")
+    commodity_evidence = next(
+        (
+            m.get(f"{key}_evidence")
+            for key in ("type5_cycle_attribute_score", "cyclical_industry_score")
+            if _type5_industry_commodity_context(m, key)
+        ),
+        None,
+    )
+    if isinstance(commodity_evidence, Mapping):
+        symbol = INDUSTRY_COMMODITY_SYMBOLS.get(industry)
+        if symbol is None or not _validate_type5_commodity_evidence(
+            commodity_evidence,
+            code=_canonical_evidence_code(m.get("code")),
+            industry=industry,
+            as_of=m.get("source_trade_date"),
+        ):
+            return None
+        route = "industry_commodity_proxy"
+        commodity_proxy: dict[str, Any] | None = {
+            "model_id": COMMODITY_CACHE_MODEL_ID,
+            "symbol": symbol,
+            "evidence_id": commodity_evidence.get("evidence_id"),
+            "as_of": commodity_evidence.get("as_of"),
+            "source_url": commodity_evidence.get("source_url"),
+            "source_sha256": commodity_evidence.get("source_sha256"),
+        }
+    elif industry in TYPE5_DIRECT_CYCLICAL_INDUSTRIES:
+        route = "direct_industry_financial"
+        commodity_proxy = None
+    else:
+        return None
+    return {
+        "schema_version": TYPE5_CYCLE_EVIDENCE_SCHEMA_VERSION,
+        "model_id": TYPE5_CYCLE_EVIDENCE_MODEL_ID,
+        "code": _canonical_evidence_code(m.get("code")),
+        "as_of": str(m.get("source_trade_date") or ""),
+        "industry": industry,
+        "route": route,
+        "commodity_proxy": commodity_proxy,
+        "company_cycle": company_cycle,
+    }
+
+
+def replay_type5_cycle_evidence_contract(
+    value: Any,
+    *,
+    expected_code: Any,
+    expected_as_of: Any,
+    expected_industry: Any,
+) -> Optional[dict[str, Any]]:
+    """Replay one exported 5a contract without trusting its displayed score."""
+
+    fields = {
+        "schema_version",
+        "model_id",
+        "code",
+        "as_of",
+        "industry",
+        "route",
+        "commodity_proxy",
+        "company_cycle",
+    }
+    code = _canonical_evidence_code(expected_code)
+    as_of = str(expected_as_of or "")
+    industry = str(expected_industry or "")
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != fields
+        or value.get("schema_version") != TYPE5_CYCLE_EVIDENCE_SCHEMA_VERSION
+        or value.get("model_id") != TYPE5_CYCLE_EVIDENCE_MODEL_ID
+        or _canonical_evidence_code(value.get("code")) != code
+        or value.get("as_of") != as_of
+        or value.get("industry") != industry
+    ):
+        return None
+    company_cycle = value.get("company_cycle")
+    if not isinstance(company_cycle, Mapping) or set(company_cycle) != {
+        "gross_margin_history",
+        "gross_margin_years",
+        "net_profit_history",
+        "net_profit_years",
+    }:
+        return None
+    metric = {
+        "source_trade_date": as_of,
+        **{key: company_cycle[key] for key in company_cycle},
+    }
+    replayed_cycle = _type5_company_cycle_contract(metric)
+    if replayed_cycle != dict(company_cycle):
+        return None
+    route = value.get("route")
+    commodity = value.get("commodity_proxy")
+    if route == "direct_industry_financial":
+        if commodity is not None or industry not in TYPE5_DIRECT_CYCLICAL_INDUSTRIES:
+            return None
+        reason = "大宗行业/毛利/利润周期"
+    elif route == "industry_commodity_proxy":
+        symbol = INDUSTRY_COMMODITY_SYMBOLS.get(industry)
+        if (
+            symbol is None
+            or not isinstance(commodity, Mapping)
+            or set(commodity) != {"model_id", "symbol", "evidence_id", "as_of", "source_url", "source_sha256"}
+            or commodity.get("model_id") != COMMODITY_CACHE_MODEL_ID
+            or commodity.get("symbol") != symbol
+            or commodity.get("as_of") != as_of
+            or re.fullmatch(r"[0-9a-f]{64}", str(commodity.get("source_sha256") or "")) is None
+            or not _validate_type5_commodity_evidence(
+                commodity,
+                code=code,
+                industry=industry,
+                as_of=as_of,
+            )
+        ):
+            return None
+        reason = "行业商品行情/公司毛利率/利润周期互证"
+    else:
+        return None
+    return {"score": 7.0, "reason": reason}
 
 
 def _validate_type5_commodity_evidence(
@@ -5101,10 +5274,9 @@ def _validate_type5_commodity_evidence(
     the model id, representative symbol, company code, date, and exact Sina
     endpoint here; company-level corroboration remains in the Type 5 scorer.
 
-    Generic URL scheme/credential and source hash/date checks belong to the
-    surrounding release-input validator.  Keep this adapter-specific check
-    limited to the stable identity and endpoint contract so legacy cache
-    records remain usable when their explanatory text changes.
+    The commodity score bypasses the generic four-field evidence parser because
+    the adapter also carries its raw-response URL and digest.  Validate those
+    extra fields here so a partial legacy record cannot receive 5a credit.
     """
 
     symbol = INDUSTRY_COMMODITY_SYMBOLS.get(industry)
@@ -5117,7 +5289,11 @@ def _validate_type5_commodity_evidence(
     expected_id = f"{COMMODITY_CACHE_MODEL_ID}:{symbol}:{code}:{source_date.strftime('%Y%m%d')}"
     if evidence.get("evidence_id") != expected_id:
         return False
-    return evidence.get("source_url") == f"{SINA_DAILY_KLINE_URL}?symbol={symbol}"
+    return bool(
+        evidence.get("as_of") == source_date.isoformat()
+        and evidence.get("source_url") == f"{SINA_DAILY_KLINE_URL}?symbol={symbol}"
+        and re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("source_sha256") or "")) is not None
+    )
 
 
 def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
@@ -5156,12 +5332,11 @@ def _rebase_quality_history_to_current_quote(
 
     The long-horizon loader may reuse a source capture for up to 21 days.  Its
     distributions remain a valid five-year history during that interval, but
-    the last row's PE/PB is not the current session's valuation. Sina's generic
-    ``per`` quote is not a TTM multiple and must not replace ``current_pe_ttm``.
-    Replaying the old current value would also label a new quote with a stale percentile. Keep
-    the immutable distribution and its end date, independently validate its
-    original summary, then rebase only the current value and percentile to the
-    security-bound closing quote already validated by the market snapshot.
+    the last row's PE/PB is not the current session's valuation.  No quote field
+    currently carries an independently replayable TTM-PE source contract, so a
+    stale PE current value, median and percentile must all become unavailable.
+    PB alone can be rebased to the security-bound closing quote already
+    validated by the market snapshot.
     """
 
     if not isinstance(history_evidence, Mapping):
@@ -5181,17 +5356,14 @@ def _rebase_quality_history_to_current_quote(
         return history_evidence
 
     rebased_valuation = dict(valuation)
-    updated = False
-    # Preserve the PE distribution, but a stale TTM multiple is not a current
-    # observation. Type 2 can still use its independently rebased PB history.
-    if "current_pe_ttm" in rebased_valuation:
-        rebased_valuation["current_pe_ttm"] = None
-        rebased_valuation["pe_percentile"] = None
-        updated = True
-    for prefix, history_current_key, quote_key in (
-        ("pe", "current_pe_ttm", "pe_ttm"),
-        ("pb", "current_pb_mrq", "pb"),
-    ):
+    changed = False
+    for key in ("current_pe_ttm", "median_pe_ttm", "pe_percentile"):
+        if rebased_valuation.get(key) is not None:
+            changed = True
+        rebased_valuation[key] = None
+
+    pb_rebased = False
+    for prefix, history_current_key, quote_key in (("pb", "current_pb_mrq", "pb"),):
         observations = valuation.get(f"{prefix}_observations")
         stored_current = _type5_contract_number(valuation.get(history_current_key))
         declared_median = _type5_contract_number(
@@ -5231,12 +5403,17 @@ def _rebase_quality_history_to_current_quote(
             current_replay["median"]
         )
         rebased_valuation[f"{prefix}_percentile"] = float(current_replay["percentile"])
-        updated = True
+        changed = True
+        pb_rebased = True
 
-    if not updated:
+    if not changed:
         return history_evidence
-    rebased_valuation["current_valuation_date"] = reference_date.isoformat()
-    rebased_valuation["current_valuation_source"] = "validated_closing_quote"
+    if pb_rebased:
+        rebased_valuation["current_valuation_date"] = reference_date.isoformat()
+        rebased_valuation["current_valuation_source"] = "validated_closing_quote"
+    else:
+        rebased_valuation.pop("current_valuation_date", None)
+        rebased_valuation.pop("current_valuation_source", None)
     rebased = dict(history_evidence)
     rebased["valuation_history"] = rebased_valuation
     return rebased
@@ -7983,6 +8160,38 @@ def validate_screening_result(result: pd.DataFrame) -> list[str]:
             if status == STATUS_VETOED and not source_hard_veto:
                 errors.append(f"{row_index}:{type_key}否决状态缺少模型依据")
             if type_key == "type5":
+                cycle_mode = payload.get("cycle_evidence_mode")
+                cycle_contract = payload.get("cycle_evidence_contract")
+                if cycle_mode not in {
+                    "automatic_replay",
+                    "trusted_external",
+                    "incomplete",
+                    "not_applicable",
+                }:
+                    errors.append(f"{row_index}:type5周期属性证据模式错误")
+                elif cycle_mode == "automatic_replay":
+                    cycle_replay = replay_type5_cycle_evidence_contract(
+                        cycle_contract,
+                        expected_code=row.get("code"),
+                        expected_as_of=row.get("source_trade_date"),
+                        expected_industry=row.get("industry"),
+                    )
+                    if (
+                        cycle_replay is None
+                        or not math.isclose(
+                            float(sub_scores.get("5a", -1.0)),
+                            float(cycle_replay["score"]),
+                            abs_tol=1e-9,
+                        )
+                        or reasons.get("5a") != cycle_replay["reason"]
+                    ):
+                        errors.append(f"{row_index}:type5自动周期属性证据重放错误")
+                elif cycle_contract is not None:
+                    errors.append(f"{row_index}:type5非自动路径携带周期属性合同")
+                if status == STATUS_NOT_APPLICABLE and cycle_mode != "not_applicable":
+                    errors.append(f"{row_index}:type5不适用周期属性模式错误")
+                if status != STATUS_NOT_APPLICABLE and cycle_mode == "not_applicable":
+                    errors.append(f"{row_index}:type5适用周期属性模式错误")
                 bottom_mode = payload.get("bottom_evidence_mode")
                 bottom_contract = payload.get("bottom_evidence_contract")
                 if bottom_mode not in {
@@ -8847,6 +9056,39 @@ def screen_all_types(
                 official_cycle_context = m.get("type5_official_cycle_context")
                 if isinstance(official_cycle_context, Mapping):
                     payloads[key]["official_cycle_context"] = dict(official_cycle_context)
+                cycle_mode = "incomplete"
+                if status == STATUS_NOT_APPLICABLE:
+                    cycle_mode = "not_applicable"
+                else:
+                    cycle_contract = _type5_automatic_cycle_contract(m)
+                    cycle_replay = replay_type5_cycle_evidence_contract(
+                        cycle_contract,
+                        expected_code=code,
+                        expected_as_of=m.get("source_trade_date"),
+                        expected_industry=m.get("industry"),
+                    )
+                    if (
+                        cycle_replay is not None
+                        and math.isclose(
+                            float(sub_scores.get("5a", -1.0)),
+                            float(cycle_replay["score"]),
+                            abs_tol=1e-9,
+                        )
+                        and reasons.get("5a") == cycle_replay["reason"]
+                    ):
+                        cycle_mode = "automatic_replay"
+                        payloads[key]["cycle_evidence_contract"] = cycle_contract
+                    else:
+                        direct_score, direct_reason = _type5_external_score(m, "type5_cycle_attribute_score")
+                        if direct_score is None:
+                            direct_score, direct_reason = _type5_external_score(m, "cyclical_industry_score")
+                        if (
+                            direct_score is not None
+                            and math.isclose(float(sub_scores.get("5a", -1.0)), direct_score, abs_tol=1e-9)
+                            and reasons.get("5a") == (direct_reason or "公司级外部证据确认强周期")
+                        ):
+                            cycle_mode = "trusted_external"
+                payloads[key]["cycle_evidence_mode"] = cycle_mode
                 bottom_mode = "incomplete"
                 if status == STATUS_NOT_APPLICABLE:
                     bottom_mode = "not_applicable"

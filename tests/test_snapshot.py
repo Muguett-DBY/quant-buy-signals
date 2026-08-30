@@ -1548,6 +1548,49 @@ def test_expired_routine_cache_can_be_replayed_within_hard_stale_limit(tmp_path)
     assert fetcher.quote_calls == 0
 
 
+def test_cache_only_replays_an_expired_valid_snapshot_without_network(tmp_path):
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
+    save_market_snapshot(
+        cache,
+        _quotes(),
+        _financials(),
+        data_timestamp=NOW - 100,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        now=NOW,
+    )
+    fetcher = _Fetcher(error=AssertionError("cache-only replay must not run the network"))
+
+    outcome = get_market_snapshot(
+        fetcher,
+        cache,
+        cache_only=True,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        clock=lambda: NOW,
+    )
+
+    assert outcome.source == "cache"
+    assert fetcher.quote_calls == 0
+
+
+def test_cache_only_rejects_a_missing_snapshot_without_network(tmp_path):
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
+    fetcher = _Fetcher(error=AssertionError("cache-only replay must not run the network"))
+
+    with pytest.raises(SnapshotUnavailableError, match="cache-only snapshot replay failed"):
+        get_market_snapshot(
+            fetcher,
+            cache,
+            cache_only=True,
+            min_quotes=2,
+            min_financial_coverage=0.5,
+            clock=lambda: NOW,
+        )
+
+    assert fetcher.quote_calls == 0
+
+
 def test_expired_routine_cache_replay_still_enforces_hard_stale_limit(tmp_path):
     cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
     old_timestamp = NOW - MAX_STALE_AGE_SECONDS - 1
@@ -1570,6 +1613,33 @@ def test_expired_routine_cache_replay_still_enforces_hard_stale_limit(tmp_path):
             min_financial_coverage=0.5,
             clock=lambda: NOW,
         )
+
+
+def test_cache_only_replay_still_enforces_hard_stale_limit(tmp_path):
+    cache = SafeFileCache(tmp_path / "market.json.gz", ttl=0)
+    old_timestamp = NOW - MAX_STALE_AGE_SECONDS - 1
+    save_market_snapshot(
+        cache,
+        _move_quote_generation(_quotes(), old_timestamp),
+        _financials(),
+        data_timestamp=old_timestamp,
+        min_quotes=2,
+        min_financial_coverage=0.5,
+        now=old_timestamp,
+    )
+    fetcher = _Fetcher(error=AssertionError("cache-only replay must not run the network"))
+
+    with pytest.raises(SnapshotUnavailableError, match="cache-only snapshot replay failed"):
+        get_market_snapshot(
+            fetcher,
+            cache,
+            cache_only=True,
+            min_quotes=2,
+            min_financial_coverage=0.5,
+            clock=lambda: NOW,
+        )
+
+    assert fetcher.quote_calls == 0
 
 
 def test_schema3_cache_requires_top_level_retrieval_identity(tmp_path):

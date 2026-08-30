@@ -201,6 +201,7 @@ jobs:
             data/cache/market_history
             data/cache/quality_history
             data/cache/commodity_cycle
+            data/cache/dividend_history
             data/cache/exchange_financials
             data/cache/industry_history
             data/cache/investor_relations
@@ -491,6 +492,20 @@ jobs:
           if ([string]$manifest.provenance.source_commit -cne $env:GITHUB_SHA) {
             throw 'The mobile manifest is not bound to the checked-out main source revision.'
           }
+          $cacheOnlyRebuild = '${{ inputs.rebuild_latest_closed }}' -eq 'true'
+          $expectedEvidenceMode = if ($cacheOnlyRebuild) { 'cache_only' } else { 'network_backfill' }
+          if ([string]$manifest.provenance.company_evidence_mode -cne $expectedEvidenceMode) {
+            throw "The mobile manifest company evidence mode does not match this workflow mode."
+          }
+          if ($cacheOnlyRebuild) {
+            if ([string]$manifest.provenance.snapshot_source -notin @('cache', 'migrated_cache')) {
+              throw 'The model-only rebuild did not reuse a validated cached market snapshot.'
+            }
+            $networkTrancheCompanies = $manifest.provenance.quality_history_backfill.network_tranche_companies
+            if ($null -eq $networkTrancheCompanies -or [int]$networkTrancheCompanies -ne 0) {
+              throw 'The model-only rebuild unexpectedly entered a company-evidence network tranche.'
+            }
+          }
           $shanghaiZone = [TimeZoneInfo]::FindSystemTimeZoneById('China Standard Time')
           $nowShanghai = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $shanghaiZone)
           $rebuildLatestClosed = ('${{ inputs.rebuild_latest_closed }}' -eq 'true') -or ('${{ inputs.force_gap_refresh }}' -eq 'true')
@@ -521,8 +536,8 @@ jobs:
           )
           $dataTimestampShanghai = [TimeZoneInfo]::ConvertTime($dataTimestamp, $shanghaiZone)
           if ($rebuildLatestClosed) {
-            if ($marketDate.Date -gt $nowShanghai.Date -or ($nowShanghai - $dataTimestampShanghai) -gt [TimeSpan]::FromDays(14)) {
-              throw 'The model-only rebuild snapshot is future-dated or older than 14 days.'
+            if ($marketDate.Date -gt $nowShanghai.Date -or ($nowShanghai - $dataTimestampShanghai) -gt [TimeSpan]::FromDays(7)) {
+              throw 'The model-only rebuild snapshot is future-dated or older than 7 days.'
             }
             $publishedManifestUrl = (
               "https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json" +
@@ -540,7 +555,7 @@ jobs:
           # 16:15 on the market date.  A model-only rebuild may reuse a cached
           # closed snapshot or re-fetch the same closed session hours/days
           # later, so its data_timestamp is a scoring time, not the capture
-          # time; the session identity is still pinned by the 14-day/future
+          # time; the session identity is still pinned by the 7-day/future
           # checks above and by the source-quote timestamp check below.
           if (-not $rebuildLatestClosed) {
             # Generated after 16:15 on the market date.  A backfill that
@@ -833,6 +848,7 @@ jobs:
             data/cache/market_history
             data/cache/quality_history
             data/cache/commodity_cycle
+            data/cache/dividend_history
             data/cache/exchange_financials
             data/cache/industry_history
             data/cache/investor_relations

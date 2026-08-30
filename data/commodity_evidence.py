@@ -190,8 +190,13 @@ def _finite(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _load_cached_kline(symbol: str, cache: SafeFileCache) -> tuple[list[dict[str, Any]], str] | None:
-    loaded = cache.load()
+def _load_cached_kline(
+    symbol: str,
+    cache: SafeFileCache,
+    *,
+    allow_expired: bool = False,
+) -> tuple[list[dict[str, Any]], str] | None:
+    loaded = cache.load(allow_expired=allow_expired)
     if not loaded.hit:
         return None
     value = loaded.value
@@ -275,13 +280,17 @@ def load_commodity_cycle_evidence(
     cache_dir: str | Path = COMMODITY_CACHE_DIR,
     session: Any = requests,
     official_context_loader: Any = load_nbs_commodity_context,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Return dated, code-bound commodity context for direct-cyclical companies.
 
     One commodity series per industry is fetched once and reused for every
     company in that industry.  The code binding prevents cross-company cache
     mix-ups; it does not turn an industry proxy into company-specific exposure.
+    ``cache_only`` replays validated raw-response caches and skips cache misses.
     """
+    if not isinstance(cache_only, bool):
+        raise TypeError("cache_only must be boolean")
     cutoff = date.fromisoformat(as_of)
     if session is requests:
         session = thread_local_session()
@@ -300,6 +309,7 @@ def load_commodity_cycle_evidence(
             as_of=cutoff.isoformat(),
             cache_dir=directory,
             session=session,
+            cache_only=cache_only,
         )
     except (NbsCommodityEvidenceError, requests.RequestException, TypeError, ValueError, OSError):
         official_context = {}
@@ -311,8 +321,10 @@ def load_commodity_cycle_evidence(
             schema_version=COMMODITY_CACHE_SCHEMA_VERSION,
             ttl=COMMODITY_CACHE_TTL_SECONDS,
         )
-        cached = _load_cached_kline(symbol, cache)
+        cached = _load_cached_kline(symbol, cache, allow_expired=cache_only)
         if cached is None:
+            if cache_only:
+                continue
             bars, source_sha256, raw = _fetch_kline(symbol, session=session)
             _save_cached_kline(symbol, raw, source_sha256, cache)
         else:
