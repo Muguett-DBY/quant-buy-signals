@@ -1,3 +1,4 @@
+from contextlib import closing
 import sqlite3
 
 import pytest
@@ -14,18 +15,18 @@ def test_recovery_downloads_cannot_target_an_arbitrary_origin(url):
 
 
 def test_pointer_restore_is_atomic_and_checks_both_expected_current_and_manifest():
-    db = sqlite3.connect(":memory:")
-    db.executescript(
-        "CREATE TABLE generations (generation_id TEXT PRIMARY KEY, manifest_sha256 TEXT);"
-        "CREATE TABLE current_generation (singleton INTEGER PRIMARY KEY, generation_id TEXT, updated_at TEXT);"
-        "INSERT INTO generations VALUES ('old','approved'),('new','newhash'),('newer','newerhash');"
-        "INSERT INTO current_generation VALUES (1,'new','before');"
-    )
-    assert db.execute(recovery.RESTORE_SQL, ["old", "now", "new", "old", "wrong"]).rowcount == 0
-    assert db.execute(recovery.RESTORE_SQL, ["old", "now", "newer", "old", "approved"]).rowcount == 0
-    assert db.execute(recovery.RESTORE_SQL, ["old", "now", "new", "old", "approved"]).rowcount == 1
-    assert db.execute("SELECT generation_id FROM current_generation").fetchone() == ("old",)
-    assert db.execute("SELECT COUNT(*) FROM generations").fetchone() == (3,)
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.executescript(
+            "CREATE TABLE generations (generation_id TEXT PRIMARY KEY, manifest_sha256 TEXT);"
+            "CREATE TABLE current_generation (singleton INTEGER PRIMARY KEY, generation_id TEXT, updated_at TEXT);"
+            "INSERT INTO generations VALUES ('old','approved'),('new','newhash'),('newer','newerhash');"
+            "INSERT INTO current_generation VALUES (1,'new','before');"
+        )
+        assert db.execute(recovery.RESTORE_SQL, ["old", "now", "new", "old", "wrong"]).rowcount == 0
+        assert db.execute(recovery.RESTORE_SQL, ["old", "now", "newer", "old", "approved"]).rowcount == 0
+        assert db.execute(recovery.RESTORE_SQL, ["old", "now", "new", "old", "approved"]).rowcount == 1
+        assert db.execute("SELECT generation_id FROM current_generation").fetchone() == ("old",)
+        assert db.execute("SELECT COUNT(*) FROM generations").fetchone() == (3,)
 
 
 def test_restore_refuses_an_unhealthy_target_before_any_write(monkeypatch):
