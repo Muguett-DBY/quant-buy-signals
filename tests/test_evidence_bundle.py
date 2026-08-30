@@ -22,10 +22,12 @@ def _cache_payload(label: str) -> bytes:
 def _seed_cache(cache_root: Path) -> dict[str, bytes]:
     payloads = {
         "commodity_cycle/commodity-cycle-sina-v2_RB0.json.gz": _cache_payload("commodity"),
+        "dividend_history/000001.json.gz": _cache_payload("dividend"),
         "exchange_financials/sse-xbrl-test.json.gz": _cache_payload("exchange"),
         "growth_evidence/type3-segment-growth-v1_000001_20260810.json.gz": _cache_payload("segment"),
         "industry_history/shenwan-industry-history-v1_cninfo_000001_20260810.json.gz": _cache_payload("industry"),
         "investor_relations/cninfo-ir-000001.json.gz": _cache_payload("ir"),
+        "market_coldness/eastmoney_sh_sz_a.json.gz": _cache_payload("coldness"),
         "quality_history/type7-market-history-v1_000002_20260810.json.gz": _cache_payload("quality"),
         "research_reports/type7-research-report-content-v4_000003_20260810.json.gz": _cache_payload("research"),
     }

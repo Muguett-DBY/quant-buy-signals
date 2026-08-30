@@ -36,10 +36,12 @@ MODEL_ID = "ds-dcf-evidence-bundle-v1"
 POINTER_NAME = "evidence-cache-pointer.json"
 ALLOWED_CACHE_DIRECTORIES = (
     "commodity_cycle",
+    "dividend_history",
     "exchange_financials",
     "growth_evidence",
     "industry_history",
     "investor_relations",
+    "market_coldness",
     "quality_history",
     "research_reports",
 )
@@ -56,8 +58,8 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BUNDLE_NAME = re.compile(r"^evidence-cache-([0-9a-f]{64})\.zip$")
 _MEMBER_NAME = re.compile(
-    r"^data/cache/(commodity_cycle|exchange_financials|growth_evidence|industry_history|"
-    r"investor_relations|quality_history|research_reports)/"
+    r"^data/cache/(commodity_cycle|dividend_history|exchange_financials|growth_evidence|industry_history|"
+    r"investor_relations|market_coldness|quality_history|research_reports)/"
     r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
 )
 

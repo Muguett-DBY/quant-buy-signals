@@ -112,6 +112,17 @@ def test_mobile_publication_artifacts_survive_failed_job_and_full_workflow_rerun
         step for step in jobs["publish"]["steps"] if step.get("name") == "Download the verified release bundle"
     )
     assert publish_download["with"]["name"] == build_upload["with"]["name"]
+    evidence_upload = next(
+        step
+        for step in jobs["build"]["steps"]
+        if step.get("name") == "Upload the verified stable evidence bundle between jobs"
+    )
+    evidence_download = next(
+        step for step in jobs["publish"]["steps"] if step.get("name") == "Download the verified stable evidence bundle"
+    )
+    assert evidence_upload["with"]["name"] == "mobile-stable-evidence-${{ github.run_id }}"
+    assert evidence_upload["with"]["overwrite"] is True
+    assert evidence_download["with"]["name"] == evidence_upload["with"]["name"]
 
     canonical_upload = next(
         step
@@ -564,6 +575,37 @@ def test_release_retention_never_manages_local_evidence_assets():
     assert managed.fullmatch("evidence-cache-" + "a" * 64 + ".zip") is None
     assert managed.fullmatch("catalog-0123456789abcdef.json.gz") is not None
     assert managed.fullmatch("company-details-0123456789abcdef-0f.json.gz") is not None
+
+
+def test_stable_replay_evidence_is_verified_published_and_retained_separately():
+    jobs = _workflow(MOBILE_WORKFLOW)["jobs"]
+    build_steps = jobs["build"]["steps"]
+    publish_steps = jobs["publish"]["steps"]
+    build = next(step for step in build_steps if step.get("name") == "Build the verified stable evidence bundle")
+    reverify = next(
+        step for step in publish_steps if step.get("name") == "Reverify the transferred stable evidence bundle"
+    )
+    publish = next(
+        step for step in publish_steps if step.get("name") == "Publish and remotely verify the stable replay evidence"
+    )
+
+    assert "tools.evidence_bundle bundle" in build["run"]
+    assert "tools.evidence_bundle verify" in build["run"]
+    assert "--expected-source-commit $env:GITHUB_SHA" in build["run"]
+    assert "--expected-as-of $asOf" in build["run"]
+    assert "tools.evidence_bundle verify" in reverify["run"]
+    assert publish["if"] == "steps.release.outputs.published == 'true'"
+    assert publish["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "GH_REPO": "${{ github.repository }}",
+    }
+    script = publish["run"]
+    assert script.index("content-addressed stable replay-evidence bundle") < script.index(
+        'gh release upload $tag "$pointer#evidence-cache-pointer.json"'
+    )
+    assert "Published stable replay evidence failed remote verification." in script
+    assert "^evidence-cache-[0-9a-f]{64}\\.zip$" in script
+    assert "evidence-cache-pointer.json" in script
 
 
 def test_mobile_publication_archives_only_the_signed_manifest_on_a_data_branch():

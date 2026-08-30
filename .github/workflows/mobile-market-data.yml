@@ -260,7 +260,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'The local evidence bundle failed digest/member verification or atomic import.'
           }
-          foreach ($directory in @('commodity_cycle', 'exchange_financials', 'growth_evidence', 'industry_history', 'investor_relations', 'quality_history', 'research_reports')) {
+          foreach ($directory in @('commodity_cycle', 'dividend_history', 'exchange_financials', 'growth_evidence', 'industry_history', 'investor_relations', 'market_coldness', 'quality_history', 'research_reports')) {
             $path = Join-Path 'data/cache' $directory
             $count = (Get-ChildItem -LiteralPath $path -File -Filter '*.json.gz' -ErrorAction SilentlyContinue |
               Measure-Object).Count
@@ -830,11 +830,59 @@ jobs:
             }
           }
 
+      - name: Build the verified stable evidence bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $manifestPath = Join-Path $env:MOBILE_DATA_DIR 'manifest.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding utf8 | ConvertFrom-Json
+          $asOf = [string]$manifest.market_as_of
+          $output = Join-Path $env:RUNNER_TEMP 'ds-dcf-stable-evidence-bundle'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          & python -m tools.evidence_bundle bundle `
+            --as-of $asOf --source-commit $env:GITHUB_SHA `
+            --cache-root data/cache --output-dir $output
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not build the stable replay-evidence bundle.'
+          }
+          $pointer = Join-Path $output 'evidence-cache-pointer.json'
+          $bundleName = [string](& python -m tools.evidence_bundle resolve `
+            --pointer $pointer --expected-source-commit $env:GITHUB_SHA --expected-as-of $asOf)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The stable replay-evidence pointer is invalid.'
+          }
+          $bundleName = $bundleName.Trim()
+          $bundle = Join-Path $output $bundleName
+          & python -m tools.evidence_bundle verify `
+            --pointer $pointer --bundle $bundle `
+            --expected-source-commit $env:GITHUB_SHA --expected-as-of $asOf
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The stable replay-evidence bundle failed local verification.'
+          }
+          $actual = @(Get-ChildItem -LiteralPath $output -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $expected = @('evidence-cache-pointer.json', $bundleName) | Sort-Object
+          if (Compare-Object $actual $expected) {
+            throw "Unexpected stable replay-evidence asset set: $($actual -join ', ')"
+          }
+
       - name: Upload the verified bundle between jobs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mobile-market-data-build-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release/*
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+          overwrite: true
+
+      - name: Upload the verified stable evidence bundle between jobs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mobile-stable-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/ds-dcf-stable-evidence-bundle/*
           if-no-files-found: error
           retention-days: 2
           compression-level: 0
@@ -898,6 +946,10 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
       - name: Set the private release directory
         shell: pwsh
         run: |
@@ -909,6 +961,12 @@ jobs:
         with:
           name: mobile-market-data-build-${{ github.run_id }}
           path: ${{ runner.temp }}/ds-dcf-mobile-market-data-release
+
+      - name: Download the verified stable evidence bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mobile-stable-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/ds-dcf-stable-evidence-bundle
 
       - name: Reverify the transferred release bundle
         shell: pwsh
@@ -1033,6 +1091,34 @@ jobs:
           "MOBILE_SIGNATURE_NAME=$signatureName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_DETAIL_NAMES=$($detailNames -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MOBILE_PUBLIC_KEY=$publicKeyBase64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Reverify the transferred stable evidence bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $manifest = Get-Content -LiteralPath (Join-Path $env:MOBILE_DATA_DIR 'manifest.json') `
+            -Raw -Encoding utf8 | ConvertFrom-Json
+          $asOf = [string]$manifest.market_as_of
+          $directory = Join-Path $env:RUNNER_TEMP 'ds-dcf-stable-evidence-bundle'
+          $pointer = Join-Path $directory 'evidence-cache-pointer.json'
+          $bundleName = [string](& python -m tools.evidence_bundle resolve `
+            --pointer $pointer --expected-source-commit $env:GITHUB_SHA --expected-as-of $asOf)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Transferred stable replay-evidence pointer is invalid.'
+          }
+          $bundleName = $bundleName.Trim()
+          $bundle = Join-Path $directory $bundleName
+          & python -m tools.evidence_bundle verify `
+            --pointer $pointer --bundle $bundle `
+            --expected-source-commit $env:GITHUB_SHA --expected-as-of $asOf
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Transferred stable replay-evidence bundle is invalid.'
+          }
+          "MOBILE_EVIDENCE_AS_OF=$asOf" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MOBILE_EVIDENCE_BUNDLE_NAME=$bundleName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish immutable payload assets and validate the previous generation
         id: release
@@ -1587,6 +1673,86 @@ jobs:
           "previous_assets=$($previousNames -join '|')" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "previous_manifest_state=$previousManifestState" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           'published=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish and remotely verify the stable replay evidence
+        if: steps.release.outputs.published == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $tag = 'mobile-market-data'
+          $directory = Join-Path $env:RUNNER_TEMP 'ds-dcf-stable-evidence-bundle'
+          $pointer = Join-Path $directory 'evidence-cache-pointer.json'
+          $bundle = Join-Path $directory $env:MOBILE_EVIDENCE_BUNDLE_NAME
+          $release = (gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not inspect stable replay-evidence assets.'
+          }
+          $assetNames = @($release.assets.name)
+          $previousDirectory = Join-Path $env:RUNNER_TEMP 'previous-stable-evidence'
+          New-Item -ItemType Directory -Force -Path $previousDirectory | Out-Null
+          $previousPointer = Join-Path $previousDirectory 'evidence-cache-pointer.json'
+          $previousBundleName = $null
+          if ('evidence-cache-pointer.json' -cin $assetNames) {
+            gh release download $tag --repo $env:GH_REPO `
+              --pattern 'evidence-cache-pointer.json' --dir $previousDirectory --clobber
+            if ($LASTEXITCODE -eq 0) {
+              $resolvedPrevious = [string](& python -m tools.evidence_bundle resolve --pointer $previousPointer)
+              if ($LASTEXITCODE -eq 0) {
+                $previousBundleName = $resolvedPrevious.Trim()
+              }
+            }
+          }
+          if ($env:MOBILE_EVIDENCE_BUNDLE_NAME -cnotin $assetNames) {
+            gh release upload $tag "$bundle#$($env:MOBILE_EVIDENCE_BUNDLE_NAME)" --repo $env:GH_REPO
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not upload the content-addressed stable replay-evidence bundle.'
+            }
+          }
+          if ('evidence-cache-pointer.json' -cin $assetNames) {
+            gh release delete-asset $tag 'evidence-cache-pointer.json' --repo $env:GH_REPO --yes
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not replace the stable replay-evidence pointer.'
+            }
+          }
+          gh release upload $tag "$pointer#evidence-cache-pointer.json" --repo $env:GH_REPO
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $previousPointer -PathType Leaf) {
+              gh release upload $tag "$previousPointer#evidence-cache-pointer.json" --repo $env:GH_REPO
+            }
+            throw 'Could not publish the stable replay-evidence pointer.'
+          }
+          $remoteDirectory = Join-Path $env:RUNNER_TEMP 'remote-stable-evidence'
+          New-Item -ItemType Directory -Force -Path $remoteDirectory | Out-Null
+          gh release download $tag --repo $env:GH_REPO `
+            --pattern 'evidence-cache-pointer.json' `
+            --pattern $env:MOBILE_EVIDENCE_BUNDLE_NAME `
+            --dir $remoteDirectory --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not download the published stable replay-evidence assets.'
+          }
+          & python -m tools.evidence_bundle verify `
+            --pointer (Join-Path $remoteDirectory 'evidence-cache-pointer.json') `
+            --bundle (Join-Path $remoteDirectory $env:MOBILE_EVIDENCE_BUNDLE_NAME) `
+            --expected-source-commit $env:GITHUB_SHA --expected-as-of $env:MOBILE_EVIDENCE_AS_OF
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Published stable replay evidence failed remote verification.'
+          }
+          $retained = @($env:MOBILE_EVIDENCE_BUNDLE_NAME, $previousBundleName) | Where-Object { $_ }
+          $updatedRelease = (gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json)
+          foreach ($name in @($updatedRelease.assets.name)) {
+            if ($name -match '^evidence-cache-[0-9a-f]{64}\.zip$' -and $name -cnotin $retained) {
+              gh release delete-asset $tag $name --repo $env:GH_REPO --yes
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not delete obsolete stable replay-evidence asset $name."
+              }
+            }
+          }
 
       - name: Upload the canonical published bundle for downstream jobs
         if: steps.release.outputs.published == 'true'
