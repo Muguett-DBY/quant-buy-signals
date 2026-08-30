@@ -4178,6 +4178,53 @@ class TestTypeRules(unittest.TestCase):
         self.assertEqual(history["valuation_history"]["current_pb_mrq"], 0.95)
         self.assertEqual(history["valuation_history"]["pb_percentile"], 0.08)
 
+    def test_static_quote_pe_is_not_rebased_into_a_ttm_distribution(self):
+        metric = base_metrics(source_trade_date="2026-07-28", pe=15.586, pb=1.20)
+        history = type5_history_evidence(code=metric["code"], as_of="2026-07-28")
+        valuation = history["valuation_history"]
+        valuation["end_date"] = "2026-07-17"
+        distribution = {"values": [8.0, 12.0, 20.0], "counts": [200, 400, 200]}
+        replay = replay_valuation_distribution(distribution, 10.0)
+        valuation.update(
+            pe_distribution=distribution,
+            pe_observations=800,
+            current_pe_ttm=10.0,
+            median_pe_ttm=replay["median"],
+            pe_percentile=replay["percentile"],
+        )
+
+        rebased = bs._rebase_quality_history_to_current_quote(metric, history)
+
+        self.assertIsNone(rebased["valuation_history"]["current_pe_ttm"])
+        self.assertIsNone(rebased["valuation_history"]["pe_percentile"])
+        self.assertEqual(rebased["valuation_history"]["pe_distribution"], distribution)
+        self.assertEqual(rebased["valuation_history"]["current_pb_mrq"], 1.20)
+        self.assertEqual(valuation["current_pe_ttm"], 10.0)
+        inputs = bs._type2_valuation_history_inputs(metric, rebased)
+        self.assertEqual(set(inputs["percentiles"]), {"pb"})
+
+        # A separately identified current TTM quote can update the TTM history.
+        metric["pe_ttm"] = 12.48
+        rebased_ttm = bs._rebase_quality_history_to_current_quote(metric, history)
+        self.assertEqual(rebased_ttm["valuation_history"]["current_pe_ttm"], 12.48)
+        self.assertEqual(rebased_ttm["valuation_history"]["pe_percentile"], 0.75)
+        self.assertEqual(valuation["current_pe_ttm"], 10.0)
+
+        # A same-session observation from the historical TTM source needs no
+        # quote rebasing, and must not be discarded because Sina differs.
+        valuation["end_date"] = metric["source_trade_date"]
+        same_session = bs._rebase_quality_history_to_current_quote(metric, history)
+        self.assertIs(same_session, history)
+        self.assertEqual(same_session["valuation_history"]["current_pe_ttm"], 10.0)
+
+    def test_metric_extraction_does_not_relabel_generic_pe_as_ttm(self):
+        quote = {"code": "603444", "name": "吉比特", "pe": 15.586}
+        metric = bs.extract_metrics({}, quote, "MEDIA")
+        self.assertEqual(metric["pe"], 15.586)
+        self.assertIsNone(metric["pe_ttm"])
+        metric = bs.extract_metrics({}, {**quote, "pe_ttm": 12.48}, "MEDIA")
+        self.assertEqual(metric["pe_ttm"], 12.48)
+
     def test_type5_rejects_history_bound_to_another_security_or_date(self):
         metric = complete_type5_bottom_metrics()
         for field, value in (("code", "000002"), ("as_of", "2026-07-16")):

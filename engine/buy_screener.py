@@ -1532,6 +1532,7 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         "industry": industry_code,
         "price": _safe_float(quote_row.get("price")),
         "pe": _safe_float(quote_row.get("pe")),
+        "pe_ttm": _safe_float(quote_row.get("pe_ttm")),
         "pb": _safe_float(quote_row.get("pb")),
         "market_cap": _safe_float(quote_row.get("market_cap")),
         # Eligibility normally removes these rows upstream.  Preserve the
@@ -5155,8 +5156,9 @@ def _rebase_quality_history_to_current_quote(
 
     The long-horizon loader may reuse a source capture for up to 21 days.  Its
     distributions remain a valid five-year history during that interval, but
-    the last row's PE/PB is not the current session's valuation.  Replaying the
-    old current value would label a new quote with a stale percentile.  Keep
+    the last row's PE/PB is not the current session's valuation. Sina's generic
+    ``per`` quote is not a TTM multiple and must not replace ``current_pe_ttm``.
+    Replaying the old current value would also label a new quote with a stale percentile. Keep
     the immutable distribution and its end date, independently validate its
     original summary, then rebase only the current value and percentile to the
     security-bound closing quote already validated by the market snapshot.
@@ -5180,8 +5182,14 @@ def _rebase_quality_history_to_current_quote(
 
     rebased_valuation = dict(valuation)
     updated = False
+    # Preserve the PE distribution, but a stale TTM multiple is not a current
+    # observation. Type 2 can still use its independently rebased PB history.
+    if "current_pe_ttm" in rebased_valuation:
+        rebased_valuation["current_pe_ttm"] = None
+        rebased_valuation["pe_percentile"] = None
+        updated = True
     for prefix, history_current_key, quote_key in (
-        ("pe", "current_pe_ttm", "pe"),
+        ("pe", "current_pe_ttm", "pe_ttm"),
         ("pb", "current_pb_mrq", "pb"),
     ):
         observations = valuation.get(f"{prefix}_observations")
@@ -6107,7 +6115,7 @@ def _type3_has_local_growth_history(m: Mapping[str, Any]) -> bool:
 
 
 PATCH7_GATE_VERSION = "2026-08-04"
-METHODOLOGY_VERSION = "patch7-seven-types-buy-gate-2026-08-04-v5"
+METHODOLOGY_VERSION = "patch7-seven-types-buy-gate-2026-08-30-v6"
 
 
 def _patch7_industry_growth_evidence(

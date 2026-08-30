@@ -1,4 +1,4 @@
-const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-04-v5";
+const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-30-v6";
 const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）";
 const CATALOGUE_INDEX_CONTRACT_VERSION=4;
 const CODE_COMMIT="__QUANT_CODE_COMMIT__";
@@ -427,7 +427,7 @@ function renderDetail(r){
   const box=$("detailRows"),fragment=document.createDocumentFragment();
   const facts=document.createElement("div");facts.className="facts";
   const priceText=metricText(r.price);addFact(facts,"收盘价",priceText==="—"?priceText:"¥"+priceText);
-  addFact(facts,"市盈率 PE",peText(r.pe));
+  addFact(facts,"行情市盈率 PE（非滚动 TTM）",peText(r.pe));
   addFact(facts,"市净率 PB",metricText(r.pb));
   addFact(facts,"总市值",marketCapText(r.market_cap));
   addFact(facts,"行情日期",String(r.source_trade_date||marketAsOf||"—"));

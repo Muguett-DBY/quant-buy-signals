@@ -149,7 +149,7 @@ assert.equal(peText(null), "—");
         check=False,
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    assert 'addFact(facts,"市盈率 PE",peText(r.pe))' in source
+    assert 'addFact(facts,"行情市盈率 PE（非滚动 TTM）",peText(r.pe))' in source
 
 
 def test_ai_screening_labels_nonpositive_pe_as_loss_or_not_applicable():
@@ -428,7 +428,7 @@ const catalogue = {
 const catalogueRaw = Buffer.from(JSON.stringify(catalogue));
 const catalogueBytes = gzipSync(catalogueRaw);
 const manifest = {
-  provenance: { methodology_version: "patch7-seven-types-buy-gate-2026-08-04-v5" },
+  provenance: { methodology_version: "patch7-seven-types-buy-gate-2026-08-30-v6" },
   catalogue: {
     filename: "catalog.json.gz",
     size: catalogueBytes.byteLength,
@@ -468,7 +468,7 @@ const response = await worker.fetch(
 assert.equal(response.status, 200);
 const payload = await response.json();
 assert.equal(payload.index_contract, 4);
-assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-04-v5");
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-30-v6");
 assert.equal(payload.methodology_current, true);
 assert.equal(payload.summary.company_count, 8);
 assert.equal(payload.summary.evidence_gap_company_count, 4);
@@ -1324,7 +1324,7 @@ def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert 'const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）"' in source
-    assert 'const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-04-v5"' in source
+    assert 'const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-30-v6"' in source
     assert '" · 量化口径："+METHODOLOGY_LABEL' in source
     assert '" · 量化口径："+METHODOLOGY_VERSION' not in source
     assert '.replace("__QUANT_METHODOLOGY_LABEL__",METHODOLOGY_LABEL)' in source
@@ -1375,7 +1375,7 @@ assert.equal(response.status, 200);
 const payload = await response.json();
 
 assert.equal(payload.schema_version, 2);
-assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-04-v5");
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-30-v6");
 assert.equal(payload.decision_domain, "new_buy_or_add");
 assert.equal(payload.qualify_threshold, 7);
 assert.equal(payload.patch7_total_gate.version, "2026-08-04");
