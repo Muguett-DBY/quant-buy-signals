@@ -3557,6 +3557,36 @@ def test_release_zip_verifier_replays_nested_decision_contract_instead_of_trusti
     assert any("100 complete company rows" in error for error in _verify(path))
 
 
+def test_release_zip_verifier_mirrors_type4_minimum_runway_gate():
+    scores = {"4a": 1.5, "4b": 10.0, "4c": 10.0, "4d": 10.0, "4e": 10.0, "4f": 10.0}
+    payload = {
+        "triggered": False,
+        "total": 7.9,
+        "sub_scores": scores,
+        "reasons": {
+            **{key: "完整可复核证据" for key in scores},
+            "_condition": "坡长至少达到中坡（4a≥5）",
+            "_status": "conditional",
+            "_applicable": "yes",
+            "_evidence": "complete",
+            "_decision_missing_dimensions": [],
+        },
+        "veto": False,
+        "status": "conditional",
+        "applicable": True,
+        "evidence_complete": True,
+        "decision_market_context": {
+            "tradable": True,
+            "reference_price": False,
+            "risk_status": "",
+        },
+    }
+    payload["decision"] = replay_buy_decision("type4", payload)
+
+    assert payload["decision"]["potentially_triggerable"] is False
+    assert _audit_decision_contract_valid("type4", payload)
+
+
 @pytest.mark.parametrize("forgery", ("type5_observe_buy", "type2_false_veto"))
 def test_release_zip_verifier_rejects_coordinated_decision_status_forgery(tmp_path, forgery):
     path = tmp_path / f"{forgery}.zip"

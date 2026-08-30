@@ -3,12 +3,13 @@
 Type 5 requires an independently observable strong-cycle attribute (5a)
 before the bottom model applies.  Direct commodity industries whose
 financial volatility alone is not conclusive (``现有财务波动不足以确认强周期
-属性``) can be confirmed by the actual commodity price series.  This
+属性``) can be checked against the actual commodity price series.  This
 adapter fetches the continuous main-contract daily closes from Sina
-Futures (free, no auth, data to the latest session), computes the
-five-year peak-to-trough swing as a reproducible 0..10 cycle-attribute
-score, and binds a dated, code-bound evidence record per company so the
-strict ``_type5_external_score`` path accepts it.
+Futures (free, no auth, data to the latest session) and computes the
+five-year peak-to-trough swing as a reproducible 0..10 industry-context
+score.  The same market series may be shared by companies in one industry,
+so it is never company-level proof by itself: the Type 5 scorer must also
+observe the company's own cross-cycle margin and profit history.
 
 Scores are deliberately conservative and independent of the current
 price level: a high swing confirms the industry is strongly cyclical
@@ -275,11 +276,11 @@ def load_commodity_cycle_evidence(
     session: Any = requests,
     official_context_loader: Any = load_nbs_commodity_context,
 ) -> dict[str, dict[str, Any]]:
-    """Return dated, code-bound cycle-attribute evidence for direct-cyclical companies.
+    """Return dated, code-bound commodity context for direct-cyclical companies.
 
     One commodity series per industry is fetched once and reused for every
-    company in that industry; each company gets its own code-bound evidence
-    record so the strict Type 5 validator accepts it.
+    company in that industry.  The code binding prevents cross-company cache
+    mix-ups; it does not turn an industry proxy into company-specific exposure.
     """
     cutoff = date.fromisoformat(as_of)
     if session is requests:
@@ -331,11 +332,14 @@ def load_commodity_cycle_evidence(
         )
         for code in codes:
             evidence_id = f"{COMMODITY_CACHE_MODEL_ID}:{symbol}:{code}:{cutoff.strftime('%Y%m%d')}"
-            summary = f"{industry}商品{symbol}近五年振幅{swing:.0%}；cycle_attribute={score:.1f};model={COMMODITY_CACHE_MODEL_ID}"
+            summary = (
+                f"{industry}行业参照商品{symbol}近五年振幅{swing:.0%}；"
+                f"industry_context={score:.1f};须公司毛利率与利润周期互证;model={COMMODITY_CACHE_MODEL_ID}"
+            )
             record: dict[str, Any] = {
                 "score": score,
                 "evidence": {
-                    "source": f"新浪期货主力连续{symbol}",
+                    "source": f"新浪期货行业参照主力连续{symbol}",
                     "evidence_id": evidence_id,
                     "as_of": cutoff.isoformat(),
                     "summary": summary,

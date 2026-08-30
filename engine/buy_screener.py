@@ -30,6 +30,7 @@ from config import (
     MARGINAL_TAX_RATE,
 )
 from data.as_of import shanghai_today as _shanghai_today
+from data.commodity_evidence import COMMODITY_CACHE_MODEL_ID, INDUSTRY_COMMODITY_SYMBOLS, SINA_DAILY_KLINE_URL
 from data.financial_indicator_evidence import derive_main_financial_indicator_evidence
 from data.growth_evidence import GrowthEvidenceError, validate_growth_evidence_record
 from data.industry import begin_industry_generation, classify_industries, classify_industry, get_industry_benchmark
@@ -91,6 +92,7 @@ from engine.valuation_status import (
 
 QUALIFY_THRESHOLD = 7.0
 VETO_SCORE = 3.0
+TYPE4_MIN_RUNWAY_SCORE = 5.0
 # Public cards keep each evidence sentence within 20 characters.  Compaction
 # must end at a semantic separator where possible and always show an ellipsis;
 # silently slicing through a percentage or unit makes the explanation false.
@@ -4591,8 +4593,8 @@ def score_type4_long_runway(
     evidence_complete = (
         runway_complete and snow_complete and moat_complete and bubble_complete and not valuation_missing
     )
-    # 补丁6只规定4c以及4e+4f为一票否决。公司收缩、最新期恶化和
-    # 估值缺失可以降低对应子项，但不能再偷偷添加第三、第四个否决项。
+    # 将模板的中坡档量化为最低触发资格，不冒充原文的一票否决。
+    # 公司收缩、最新期恶化和估值缺失仍只降低对应子项。
     moat_veto = moat_complete and scores["4c"] <= 3
     double_bubble_veto = bubble_complete and implied_years is not None and scores["4e"] <= 3 and scores["4f"] <= 3
     veto = moat_veto or double_bubble_veto
@@ -4612,11 +4614,15 @@ def score_type4_long_runway(
     if not evidence_complete:
         missing_dimensions = list(dict.fromkeys(label for complete, _key, label in missing_contract if not complete))
         reasons["_missing"] = "缺" + "/".join(missing_dimensions) + "证据"
+    runway_ready = scores["4a"] >= TYPE4_MIN_RUNWAY_SCORE
+    if evidence_complete and not runway_ready:
+        reasons["_condition"] = "坡长至少达到中坡（4a≥5）"
     return _finish(
         "type4",
         scores,
         reasons,
         veto=veto,
+        extra_condition=runway_ready,
         evidence_complete=evidence_complete,
         missing_dimensions=missing_dimension_keys,
     )
@@ -5069,6 +5075,48 @@ def _type5_external_score(m: Mapping[str, Any], key: str) -> tuple[Optional[floa
     if score is None:
         return None, None
     return score, _evidence_reason(m, key, "已登记的外部证据")
+
+
+def _type5_industry_commodity_context(m: Mapping[str, Any], key: str) -> bool:
+    """Identify the shared Sina industry proxy that cannot prove company 5a alone."""
+
+    evidence = m.get(f"{key}_evidence")
+    return bool(
+        isinstance(evidence, Mapping) and str(evidence.get("evidence_id") or "").startswith("commodity-cycle-sina-")
+    )
+
+
+def _validate_type5_commodity_evidence(
+    evidence: Mapping[str, Any],
+    *,
+    code: str,
+    industry: str,
+    as_of: Any,
+) -> bool:
+    """Validate the fixed Sina industry-proxy contract before trusting it.
+
+    The commodity series is intentionally reusable within one industry, but
+    it must not be accepted as a generic caller-supplied primary score. Bind
+    the model id, representative symbol, company code, date, and exact Sina
+    endpoint here; company-level corroboration remains in the Type 5 scorer.
+
+    Generic URL scheme/credential and source hash/date checks belong to the
+    surrounding release-input validator.  Keep this adapter-specific check
+    limited to the stable identity and endpoint contract so legacy cache
+    records remain usable when their explanatory text changes.
+    """
+
+    symbol = INDUSTRY_COMMODITY_SYMBOLS.get(industry)
+    if symbol is None or not isinstance(as_of, str):
+        return False
+    try:
+        source_date = date.fromisoformat(as_of)
+    except ValueError:
+        return False
+    expected_id = f"{COMMODITY_CACHE_MODEL_ID}:{symbol}:{code}:{source_date.strftime('%Y%m%d')}"
+    if evidence.get("evidence_id") != expected_id:
+        return False
+    return evidence.get("source_url") == f"{SINA_DAILY_KLINE_URL}?symbol={symbol}"
 
 
 def _type5_normalised_pe(m: Mapping[str, Any]) -> tuple[Optional[float], int]:
@@ -5730,8 +5778,24 @@ def score_type5_counter_cyclical(
     if cycle_score is not None:
         if cycle_score < 7.0:
             return _not_applicable("type5", "外部证据未确认强周期属性")
-        scores["5a"] = cycle_score
-        reasons["5a"] = cycle_reason or "外部证据确认强周期"
+        if _type5_industry_commodity_context(m, "type5_cycle_attribute_score") or _type5_industry_commodity_context(
+            m, "cyclical_industry_score"
+        ):
+            if not profit_history_ready or not margin_history_ready:
+                return _insufficient_evidence("type5", "行业商品行情尚缺公司连续毛利率或利润历史互证")
+            if not margin_swing or not profit_cycle:
+                return _not_applicable("type5", "行业商品行情未得到公司毛利率与利润周期互证")
+            # The Sina series is a shared industry proxy.  Even with the
+            # company's own margin/profit cycle corroboration it establishes
+            # the appendix's majority-of-four strong-cycle attribute test
+            # (5a=7), not the 9-10 "turning-point + supply/demand + sentiment"
+            # band, which needs company/industry phase evidence that this
+            # adapter does not provide.
+            scores["5a"] = 7.0
+            reasons["5a"] = "行业商品行情/公司毛利率/利润周期互证"
+        else:
+            scores["5a"] = cycle_score
+            reasons["5a"] = cycle_reason or "公司级外部证据确认强周期"
     elif direct_commodity_industry and margin_swing and profit_cycle:
         # This is the only automatic route: a narrow commodity-industry label
         # plus two independently observable cross-cycle outcomes.  It does
@@ -7525,6 +7589,8 @@ def _decision_theoretically_triggerable(
             upper_dimensions["2d"] >= 5.0
             or (hot_upper >= 7.0 and upper_dimensions["2c"] >= 7.0 and 4.0 <= upper_dimensions["2d"] <= 5.0)
         )
+    if type_key == "type4":
+        return upper_dimensions["4a"] >= TYPE4_MIN_RUNWAY_SCORE
     if type_key == "type6":
         core = ("6a", "6b", "6c", "6d")
         if sum(upper_dimensions[key] >= 5.0 for key in core) < 2:
@@ -8233,6 +8299,12 @@ def screen_all_types(
                     or source_url.password
                     or source_url.fragment
                     or re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("source_sha256") or "")) is None
+                    or not _validate_type5_commodity_evidence(
+                        evidence,
+                        code=code,
+                        industry=industry,
+                        as_of=metric.get("source_trade_date"),
+                    )
                 ):
                     raise ValueError(f"商品周期证据无效:{code}")
                 metric["type5_cycle_attribute_score"] = score

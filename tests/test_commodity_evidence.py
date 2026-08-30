@@ -106,7 +106,8 @@ def test_load_commodity_cycle_evidence_binds_code_dated_records(tmp_path, monkey
         }
         assert record["evidence"]["as_of"] == "2026-07-31"
         assert code in record["evidence"]["evidence_id"]
-        assert "新浪期货主力连续CU0" in record["evidence"]["source"]
+        assert "新浪期货行业参照主力连续CU0" in record["evidence"]["source"]
+        assert "须公司毛利率与利润周期互证" in record["evidence"]["summary"]
         assert record["evidence"]["source_url"].startswith("https://")
         assert len(record["evidence"]["source_sha256"]) == 64
 

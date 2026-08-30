@@ -3203,6 +3203,20 @@ class TestTypeRules(unittest.TestCase):
         self.assertGreater(scores["4f"], 8.0)
         self.assertIn("10年中性估值", reasons["4d"])
 
+    def test_type4_short_runway_cannot_be_labelled_long_runway_trigger(self):
+        outcome = bs.score_type4_long_runway(
+            complete_type4_metrics(runway_score=1.5, price=20.0),
+            benchmarks(),
+            complete_dcf_evidence(current_price=20.0),
+        )
+
+        self.assertGreaterEqual(outcome[1], bs.QUALIFY_THRESHOLD)
+        self.assertFalse(outcome[0])
+        self.assertEqual(outcome[3]["_status"], bs.STATUS_CONDITIONAL)
+        self.assertEqual(outcome[3]["_condition"], "坡长至少达到中坡（4a≥5）")
+        payload = {"sub_scores": outcome[2], "reasons": outcome[3]}
+        self.assertFalse(bs.replay_buy_decision("type4", payload)["potentially_triggerable"])
+
     def test_type4_financial_company_is_explicitly_not_applicable(self):
         outcome = bs.score_type4_long_runway(
             base_metrics(industry="INSURANCE"),
@@ -4229,6 +4243,29 @@ class TestTypeRules(unittest.TestCase):
         self.assertNotIn("_veto", reasons)
         self.assertEqual(reasons["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
         self.assertIn("证据", reasons["_missing"])
+
+    def test_type5_shared_industry_commodity_proxy_requires_company_cycle_corroboration(self):
+        context = trusted_type5_scores(type5_cycle_attribute_score=10.0)
+        context["type5_cycle_attribute_score_evidence"]["evidence_id"] = "commodity-cycle-sina-v2:MA0:000001:20260715"
+        flat_company = base_metrics(
+            industry="CHEMICAL",
+            net_profit_history=[100.0, 102.0, 104.0, 106.0, 108.0],
+            net_profit_years=[2021, 2022, 2023, 2024, 2025],
+            gross_margin_history=[0.20, 0.21, 0.22, 0.21, 0.20],
+            gross_margin_years=[2021, 2022, 2023, 2024, 2025],
+            **context,
+        )
+
+        rejected = bs.score_type5_counter_cyclical(flat_company, benchmarks())
+
+        self.assertFalse(rejected[0])
+        self.assertEqual(rejected[3]["_status"], bs.STATUS_NOT_APPLICABLE)
+        self.assertIn("未得到公司毛利率与利润周期互证", rejected[3]["_scope"])
+
+        corroborated = complete_type5_bottom_metrics(industry="CHEMICAL", **context)
+        accepted = bs.score_type5_counter_cyclical(corroborated, benchmarks())
+        self.assertEqual(accepted[2]["5a"], 7.0)
+        self.assertEqual(accepted[3]["5a"], "行业商品行情/公司毛利率/利润周期互证")
 
     def test_type5_ancient_gap_cannot_create_a_current_cycle(self):
         outcome = bs.score_type5_counter_cyclical(
@@ -6696,11 +6733,11 @@ class TestMarketScreen(unittest.TestCase):
             "000001": {
                 "score": 8.0,
                 "evidence": {
-                    "source": "新浪期货主力连续RB0",
+                    "source": "新浪期货行业参照主力连续RB0",
                     "evidence_id": "commodity-cycle-sina-v2:RB0:000001:20260715",
                     "as_of": "2026-07-15",
-                    "summary": "钢铁商品近五年周期振幅",
-                    "source_url": "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var=/GlobalFuturesService.getGlobalFuturesDailyKLine?symbol=RB0",
+                    "summary": "STEEL行业参照商品RB0近五年振幅80%；industry_context=8.0;须公司毛利率与利润周期互证;model=commodity-cycle-sina-v2",
+                    "source_url": "https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_=/InnerFuturesNewService.getDailyKLine?symbol=RB0",
                     "source_sha256": "a" * 64,
                 },
                 "official_context": {

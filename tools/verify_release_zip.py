@@ -3561,6 +3561,8 @@ def _audit_decision_contract_valid(
                 or (hot_upper >= 7.0 and upper_dimensions["2c"] >= 7.0 and 4.0 <= upper_dimensions["2d"] <= 5.0)
             )
             theoretical = theoretical and valuation_possible
+        elif type_key == "type4":
+            theoretical = theoretical and upper_dimensions["4a"] >= 5.0
         elif type_key == "type6":
             theoretical = theoretical and sum(upper_dimensions[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) >= 2
             if "6e" not in missing:
