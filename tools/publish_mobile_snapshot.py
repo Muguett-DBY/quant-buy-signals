@@ -773,6 +773,7 @@ def publish_mobile_snapshot(
         cache,
         force_refresh=refresh,
         refresh_financials_only=refresh_financials_only,
+        allow_expired_cache=reuse_evidence_only,
         persist_network=False,
     )
     requires_network_candidate = refresh or refresh_financials_only

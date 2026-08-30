@@ -702,12 +702,18 @@ def test_type3_growth_loader_rejects_invalid_budget(limit):
 @pytest.mark.parametrize("reuse_evidence_only", [False, True])
 def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path, reuse_evidence_only):
     snapshot = _snapshot()
+    snapshot_options = {}
     cache = SimpleNamespace(read_bytes_if_payload=lambda payload: b"verified-" + payload.encode("ascii"))
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setattr(publisher, "audit_state_hashes", lambda: {"code_sha256": "a" * 64})
     monkeypatch.setattr(publisher, "SafeFileCache", lambda *_args, **_kwargs: cache)
     monkeypatch.setattr(publisher, "DataFetcher", lambda **_kwargs: object())
-    monkeypatch.setattr(publisher, "get_market_snapshot", lambda *_args, **_kwargs: snapshot)
+
+    def load_snapshot(*_args, **kwargs):
+        snapshot_options.update(kwargs)
+        return snapshot
+
+    monkeypatch.setattr(publisher, "get_market_snapshot", load_snapshot)
     monkeypatch.setattr(publisher, "_snapshot_reporting_period_contract", lambda _snapshot: object())
     monkeypatch.setattr(publisher, "_comparison_quality", lambda _snapshot: {})
     monkeypatch.setattr(
@@ -738,6 +744,7 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     )
 
     assert manifest["market_as_of"] == "2026-07-17"
+    assert snapshot_options["allow_expired_cache"] is reuse_evidence_only
     assert (tmp_path / "manifest.json").is_file()
     assert (tmp_path / manifest["catalogue"]["filename"]).is_file()
     assert (tmp_path / manifest["signals"]["filename"]).is_file()
