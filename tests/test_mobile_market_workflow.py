@@ -157,10 +157,14 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
     assert all(step["with"]["path"] == "data/cache/dividend_history" for step in dividend_steps)
 
     workflow = _workflow_text(MOBILE_WORKFLOW)
-    assert workflow.count("data/cache/datacenter_reports") == 2
-    assert workflow.count("data/cache/sina_financial") == 2
-    assert workflow.count("data/cache/exchange_financials") == 2
-    assert workflow.count("data/cache/dividend_history") == 2
+    legacy_restore = next(
+        step for step in steps if step.get("name") == "Recover the legacy nine-directory evidence cache"
+    )
+    legacy_paths = legacy_restore["with"]["path"].splitlines()
+    assert "data/cache/datacenter_reports" in legacy_paths
+    assert "data/cache/sina_financial" in legacy_paths
+    assert "data/cache/exchange_financials" not in legacy_paths
+    assert "data/cache/dividend_history" not in legacy_paths
     assert workflow.count("data/sina_financial.py") >= 2
     assert workflow.count("data/exchange_financials.py") >= 2
     build = next(step for step in steps if step.get("name") == "Build validated market data")["run"]
@@ -464,7 +468,21 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     # backfill (segment + annual cash-flow rows) in addition to the snapshot
     # fetch and full-market scoring.
     assert "timeout-minutes: 240" in workflow
-    assert workflow.count("continue-on-error: true") == 6
+    optional_steps = {
+        (job_name, step["name"])
+        for job_name, job in jobs.items()
+        for step in job.get("steps", [])
+        if step.get("continue-on-error") is True
+    }
+    assert optional_steps == {
+        ("build", "Restore the last validated data baseline"),
+        ("build", "Restore accumulated contract-validated deep evidence"),
+        ("build", "Recover the legacy nine-directory evidence cache"),
+        ("build", "Restore accumulated contract-validated dividend evidence"),
+        ("build", "Save the validated data baseline"),
+        ("build", "Save accumulated contract-validated deep evidence"),
+        ("build", "Save accumulated contract-validated dividend evidence"),
+    }
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
@@ -749,7 +767,15 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     assert "research-reports-cache-latest.zip" not in workflow
     assert workflow.count("mobile-market-v1-${{ runner.os }}-") == 4
     assert "mobile-market-v1-${{ runner.os }}-\n" in workflow
-    assert workflow.count("mobile-deep-evidence-v1-${{ runner.os }}-") == 3
+    assert deep_restore["with"]["key"] == deep_save["with"]["key"]
+    assert deep_restore["with"]["key"] == "mobile-deep-evidence-v2-${{ runner.os }}-${{ github.run_id }}"
+    assert deep_restore["with"]["restore-keys"] == "mobile-deep-evidence-v2-${{ runner.os }}-\n"
+    legacy_restore = next(
+        step for step in steps if step.get("name") == "Recover the legacy nine-directory evidence cache"
+    )
+    assert legacy_restore["if"] == "steps.deep_cache.outputs.cache-matched-key == ''"
+    assert legacy_restore["with"]["key"] == "mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}"
+    assert legacy_restore["with"]["restore-keys"] == "mobile-deep-evidence-v1-${{ runner.os }}-\n"
 
 
 def test_manual_model_rebuild_reuses_only_the_latest_validated_closed_session():
