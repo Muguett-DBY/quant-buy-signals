@@ -190,6 +190,22 @@ def _rule_chunks(root: Path) -> list[dict[str, str]]:
     return chunks
 
 
+def _knowledge_base_manifest(root: Path) -> dict[str, str]:
+    """Hash every Markdown document in the research library.
+
+    ``rule_source_sha256`` intentionally describes only excerpts injected into
+    candidate packets.  The collection manifest is separate: it proves which
+    complete knowledge library the research summary and review protocol were
+    derived from without pretending that all files were pasted into every
+    company prompt.
+    """
+
+    files = sorted(path for path in root.rglob("*.md") if path.is_file())
+    if not files:
+        raise ValueError(f"rules root has no Markdown documents: {root}")
+    return {path.relative_to(root).as_posix(): _sha256_bytes(path.read_bytes()) for path in files}
+
+
 def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[str, str]]:
     if type_key not in _TYPE_RULE_FILES:
         raise ValueError(f"unsupported AI screening type: {type_key}")
@@ -217,6 +233,16 @@ def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[st
     return [{**chunk, "text": chunk["text"][:_MAX_RULE_CHARS]} for chunk in selected]
 
 
+def _rules_for_types(chunks: list[dict[str, str]], type_keys: list[str]) -> list[dict[str, str]]:
+    """Retain every admitted type's rules while sharing common excerpts once."""
+
+    selected: dict[tuple[str, str, str], dict[str, str]] = {}
+    for type_key in type_keys:
+        for rule in _relevant_rules(chunks, type_key):
+            selected.setdefault((rule["source_id"], rule["line_start"], rule["heading"]), rule)
+    return list(selected.values())
+
+
 def _align_type7_score_bounds(type_key: str, value: Mapping[str, Any]) -> dict[str, Any]:
     """Keep a complete Type 7 score and its zero-width bounds identical.
 
@@ -232,6 +258,10 @@ def _align_type7_score_bounds(type_key: str, value: Mapping[str, Any]) -> dict[s
     result = dict(value)
     if type_key != "type7" or result.get("has_missing_dimensions") is True or result.get("bounded") is True:
         return result
+    decision = result.get("decision")
+    decision = decision if isinstance(decision, Mapping) else {}
+    if result.get("evidence_complete") is False or decision.get("missing_dimensions"):
+        return result
 
     def number(raw: Any) -> float | None:
         if isinstance(raw, bool) or raw is None:
@@ -243,15 +273,16 @@ def _align_type7_score_bounds(type_key: str, value: Mapping[str, Any]) -> dict[s
         return parsed if math.isfinite(parsed) else None
 
     score = number(result.get("score"))
-    lower = number(result.get("score_lower_bound"))
-    upper = number(result.get("score_upper_bound"))
+    lower = number(result.get("score_lower_bound", decision.get("score_lower_bound")))
+    upper = number(result.get("score_upper_bound", decision.get("score_upper_bound")))
     if score is None or lower is None or upper is None or lower != upper:
+        return result
+    if abs(lower - score) > 0.050000001:
         return result
 
     result["score_lower_bound"] = score
     result["score_upper_bound"] = score
-    decision = result.get("decision")
-    if isinstance(decision, Mapping):
+    if decision:
         decision_copy = dict(decision)
         decision_copy["score_lower_bound"] = score
         decision_copy["score_upper_bound"] = score
@@ -283,6 +314,8 @@ def _compact_company(
         "primary_label",
     )
     compact = {key: company.get(key) for key in fields if key in company}
+    if "pe" in compact:
+        compact["pe_basis"] = "quote_provider_not_ttm"
     types = company.get("types") or company.get("type_results") or {}
     if isinstance(types, dict):
         other: dict[str, Any] = {}
@@ -360,6 +393,7 @@ def build_input(
             raise ValueError("limit must be positive")
         selected = selected[:limit]
     chunks = _rule_chunks(rules_root)
+    knowledge_base_hashes = _knowledge_base_manifest(rules_root)
     packets: list[dict[str, Any]] = []
     selected_rule_hashes: dict[str, str] = {}
     for raw_candidate in selected:
@@ -368,15 +402,7 @@ def build_input(
         type_keys = candidate.get("type_keys")
         if not isinstance(type_keys, list) or not type_keys:
             type_keys = [candidate["type_key"]]
-        rule_context: list[dict[str, str]] = []
-        seen_rules: set[tuple[str, str, str]] = set()
-        for type_key in type_keys:
-            for rule in _relevant_rules(chunks, str(type_key)):
-                identity = (rule["source_id"], rule["line_start"], rule["heading"])
-                if identity in seen_rules:
-                    continue
-                seen_rules.add(identity)
-                rule_context.append(rule)
+        rule_context = _rules_for_types(chunks, [str(type_key) for type_key in type_keys])
         for rule in rule_context:
             source_id = rule["source_id"]
             digest = rule["source_sha256"]
@@ -410,6 +436,8 @@ def build_input(
         "rules_root": str(rules_root),
         "rule_file_count": len(selected_rule_hashes),
         "rule_source_sha256": dict(sorted(selected_rule_hashes.items())),
+        "knowledge_base_file_count": len(knowledge_base_hashes),
+        "knowledge_base_source_sha256": knowledge_base_hashes,
         "candidate_count": len(packets),
         "candidate_total": len(candidates),
         "type_pair_candidate_count": selected_type_pair_count,
@@ -449,6 +477,8 @@ def build_input(
         "full_coverage_final_recommendation": payload["full_coverage_final_recommendation"],
         "rule_file_count": payload["rule_file_count"],
         "rule_source_sha256": payload["rule_source_sha256"],
+        "knowledge_base_file_count": payload["knowledge_base_file_count"],
+        "knowledge_base_source_sha256": payload["knowledge_base_source_sha256"],
         "input_sha256": _sha256_bytes(input_path.read_bytes()),
     }
     atomic_write_text(

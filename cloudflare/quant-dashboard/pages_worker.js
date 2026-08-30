@@ -1,4 +1,4 @@
-const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-30-v6";
+const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-31-v7";
 const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）";
 const CATALOGUE_INDEX_CONTRACT_VERSION=4;
 const CODE_COMMIT="__QUANT_CODE_COMMIT__";
@@ -596,7 +596,7 @@ const MAX_UNCOMPRESSED_ASSET_BYTES=32_000_000;
 const MAX_AI_SCREENING_BYTES=32*1024*1024;
 const AI_SCREENING_SCHEMA_VERSION=2;
 const AI_SCREENING_ARTIFACT_KIND="ai_screening_overlay";
-const AI_SOURCE_AUDIT_CONTRACT_VERSION=3;
+const AI_SOURCE_AUDIT_CONTRACT_VERSION=4;
 // Pages advanced mode deploys this Worker as one file, so the official closure
 // periods from tools/china_a_share_trading_calendar.json are embedded here.
 // Add each newly published exchange calendar explicitly; unlisted years fall

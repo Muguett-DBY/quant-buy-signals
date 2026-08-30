@@ -30,12 +30,14 @@ from tools.ai_screening_contract import (
     candidate_identity_sha256,
     decision_text_conflicts,
     native_company_research_profile_matches,
+    stale_current_period_fields,
     validate_review,
     valuation_snapshot_errors,
 )
-from tools.audit_ai_screening_sources import source_semantic_projection_sha256
+from tools.audit_ai_screening_sources import AUDIT_CONTRACT_VERSION, source_semantic_projection_sha256
 from tools.ai_quantitative_facts import has_numeric_fact
 from tools.ai_source_urls import (
+    canonical_urls,
     claim_source_urls,
     finding_source_url,
     iter_review_url_bindings,
@@ -50,6 +52,11 @@ _CATEGORIES = ("recommend_buy", "observe", "do_not_recommend")
 _VERDICTS = ("confirmed", "caution", "misclassified", "missed_candidate", "needs_review")
 _ACTION_PRIORITY = {action: index for index, action in enumerate(_ACTIONS)}
 MAX_PUBLIC_ARTIFACT_BYTES = 32 * 1024 * 1024
+_LOCAL_MARKET_FACT_RE = re.compile(
+    r"^(?:20\d{2}(?:-\d{2}-\d{2})?\s*[：:]?\s*)?"
+    r"(?:估值快照|candidate valuation snapshot|candidate snapshot)(?:\s|[：:]|$)",
+    re.IGNORECASE,
+)
 
 
 def _int(value: Any, field: str, *, maximum: int | None = None) -> int:
@@ -71,6 +78,74 @@ def _source_binding_key(binding: Mapping[str, Any]) -> tuple[Any, ...]:
         str(binding.get("url") or ""),
         str(binding.get("kind") or ""),
     )
+
+
+def _local_market_fact(value: Any) -> bool:
+    """Identify the generated quote/valuation row that has its own contract."""
+
+    return bool(_LOCAL_MARKET_FACT_RE.match(str(value or "").strip()))
+
+
+def _fact_matches(left: Any, right: Any) -> bool:
+    """Require the displayed statement, not merely one coincident number."""
+
+    left_text = re.sub(r"[\s，,；;。:：]+", "", str(left or "")).casefold()
+    right_text = re.sub(r"[\s，,；;。:：]+", "", str(right or "")).casefold()
+    return bool(left_text and right_text and left_text in right_text)
+
+
+def _validate_published_financial_facts(review: Mapping[str, Any], *, code: str) -> None:
+    """Require every displayed non-market fact to have an auditable URL edge."""
+
+    facts = review.get("quantitative_facts")
+    bindings = review.get("financial_fact_bindings")
+    if facts is None and bindings is None:
+        return
+    if facts is not None and not isinstance(facts, list):
+        raise ValueError(f"AI screening quantitative facts are invalid for {code}")
+    if bindings is not None and not isinstance(bindings, list):
+        raise ValueError(f"AI screening financial fact bindings are invalid for {code}")
+
+    claims = review.get("claims") if isinstance(review.get("claims"), list) else []
+    claim_urls = {url for claim in claims if isinstance(claim, Mapping) for url in claim_source_urls(claim)}
+    non_market_bindings: list[tuple[Mapping[str, Any], str]] = []
+    for binding in bindings or []:
+        if not isinstance(binding, Mapping):
+            raise ValueError(f"AI screening financial fact binding is invalid for {code}")
+        if str(binding.get("metric") or "") == "估值快照" and _local_market_fact(binding.get("value_text")):
+            continue
+        raw_source = str(binding.get("source_url") or "").strip()
+        urls = canonical_urls(raw_source)
+        if not raw_source.lower().startswith("https://") or len(urls) != 1:
+            raise ValueError(f"AI screening financial fact binding has no HTTPS source for {code}")
+        source_url = urls[0]
+        if source_url not in claim_urls:
+            raise ValueError(f"AI screening financial fact binding source is not in a sourced claim for {code}")
+        non_market_bindings.append((binding, source_url))
+
+    non_market_facts = [fact for fact in facts or [] if not _local_market_fact(fact)]
+    if not non_market_facts:
+        return
+    if not non_market_bindings:
+        raise ValueError(f"AI screening quantitative fact has no financial binding for {code}")
+    for fact in non_market_facts:
+        supported_claim_urls = {
+            url
+            for claim in claims
+            if isinstance(claim, Mapping) and _fact_matches(fact, claim.get("statement"))
+            for url in claim_source_urls(claim)
+        }
+        if not supported_claim_urls:
+            raise ValueError(f"AI screening quantitative fact has no sourced claim for {code}")
+        matched = False
+        for binding, source_url in non_market_bindings:
+            statements = binding.get("statements")
+            statements = statements if isinstance(statements, list) else [binding.get("value_text")]
+            if source_url in supported_claim_urls and any(_fact_matches(fact, text) for text in statements):
+                matched = True
+                break
+        if not matched:
+            raise ValueError(f"AI screening quantitative fact is not bound to its sourced claim for {code}")
 
 
 def _native_source_packet_contract(
@@ -137,10 +212,10 @@ def _native_source_packet_contract(
 
 
 def _validate_native_company_source_audit(source_audit: Mapping[str, Any], packets: list[Any]) -> None:
-    """Require the v3 audit matrix used by native-company publication."""
+    """Require the current audit matrix used by native-company publication."""
 
-    if source_audit.get("audit_contract_version") != 3:
-        raise ValueError("native company research requires source audit contract v3")
+    if source_audit.get("audit_contract_version") != AUDIT_CONTRACT_VERSION:
+        raise ValueError(f"native company research requires source audit contract v{AUDIT_CONTRACT_VERSION}")
     if source_audit.get("audit_passed") is not True:
         raise ValueError("native company research source audit did not pass")
     projection_sha256, projection_counts = source_semantic_projection_sha256(
@@ -269,7 +344,10 @@ def _validate_codex_luna_source_audit(source_audit: Mapping[str, Any], packets: 
     verified and the audit projection still matches the packets being served.
     """
 
-    if source_audit.get("audit_contract_version") != 3 or source_audit.get("audit_passed") is not True:
+    if (
+        source_audit.get("audit_contract_version") != AUDIT_CONTRACT_VERSION
+        or source_audit.get("audit_passed") is not True
+    ):
         raise ValueError("Codex/Luna source audit contract did not pass")
     for field in ("audit_sha256", "merged_sha256", "projection_sha256"):
         if not _HASH_RE.fullmatch(str(source_audit.get(field) or "")):
@@ -493,6 +571,21 @@ def validate_artifact(
             raise ValueError("mixed full AI screening seed has invalid claim URLs")
         if _int(source_audit.get("failed", 0), "source_audit.failed") != 0:
             raise ValueError("mixed full AI screening seed has unreachable claim URLs")
+    # Report stale current-period language before any per-fact provenance
+    # failure, so an old checked-in seed remains diagnosable even when its
+    # historical bindings also need regeneration.
+    for packet in packets:
+        if not isinstance(packet, Mapping):
+            continue
+        code = str(packet.get("security_code") or "")
+        review = packet.get("ai_review")
+        if not isinstance(review, Mapping):
+            continue
+        stale_fields = stale_current_period_fields(_review_for_validation(review, packet))
+        if stale_fields:
+            raise ValueError(
+                f"AI screening review has stale current-period wording for {code}: {','.join(stale_fields)}"
+            )
     seen_codes: set[str] = set()
     seen_ranks: set[int] = set()
     action_counts: Counter[str] = Counter()
@@ -542,6 +635,8 @@ def validate_artifact(
         )
         if errors:
             raise ValueError(f"AI screening review is semantically invalid for {code}: {','.join(errors)}")
+        if external_full or mixed_full:
+            _validate_published_financial_facts(review_value, code=code)
         if company_research_review:
             snapshot_errors = valuation_snapshot_errors(
                 review_value,
@@ -796,7 +891,12 @@ def validate_artifact(
     }
 
 
-def validate_artifact_file(path: Path, *, expected_generation: str, expected_market_as_of: str) -> dict[str, Any]:
+def validate_artifact_file(
+    path: Path,
+    *,
+    expected_generation: str,
+    expected_market_as_of: str,
+) -> dict[str, Any]:
     size = path.stat().st_size
     if size < 1 or size > MAX_PUBLIC_ARTIFACT_BYTES:
         raise ValueError(f"AI screening seed size {size} is outside the 1..{MAX_PUBLIC_ARTIFACT_BYTES} byte limit")

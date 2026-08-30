@@ -5969,7 +5969,10 @@ def score_type5_counter_cyclical(
             if not profit_history_ready or not margin_history_ready:
                 return _insufficient_evidence("type5", "行业商品行情尚缺公司连续毛利率或利润历史互证")
             if not margin_swing or not profit_cycle:
-                return _not_applicable("type5", "行业商品行情未得到公司毛利率与利润周期互证")
+                return _insufficient_evidence(
+                    "type5",
+                    "行业商品行情未得到公司毛利率与利润周期互证，尚缺产能或价格敏感度证据",
+                )
             # The Sina series is a shared industry proxy.  Even with the
             # company's own margin/profit cycle corroboration it establishes
             # the appendix's majority-of-four strong-cycle attribute test
@@ -6292,7 +6295,7 @@ def _type3_has_local_growth_history(m: Mapping[str, Any]) -> bool:
 
 
 PATCH7_GATE_VERSION = "2026-08-04"
-METHODOLOGY_VERSION = "patch7-seven-types-buy-gate-2026-08-30-v6"
+METHODOLOGY_VERSION = "patch7-seven-types-buy-gate-2026-08-31-v7"
 
 
 def _patch7_industry_growth_evidence(

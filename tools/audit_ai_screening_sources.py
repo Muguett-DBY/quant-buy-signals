@@ -7,13 +7,18 @@ same finding URL and do not relabel an old HTML article as a newer disclosure.
 Text-bearing PDFs are parsed with the project's pinned PyMuPDF dependency and
 checked for company identity, report period and cited fact; malformed or
 image-only PDFs remain explicitly unverified.
-Contract v3 also hashes the exact claim/finding semantics that publication can
+Contract v4 also hashes the exact claim/finding semantics that publication can
 expose, so changing cited prose while retaining a URL cannot reuse an audit.
+When a claim declares a report period, the source must prove that same period;
+a coincidental company name, year or number is not sufficient.
+V4 requires every cited numeric component to match its metric, report period
+and units/signs. A V3 audit cannot be reused after these checks changed.
 """
 
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import gzip
 import hashlib
 import ipaddress
@@ -32,7 +37,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from tools.ai_source_urls import (
@@ -80,7 +85,7 @@ _MAX_PDF_BYTES = 12 * 1024 * 1024
 # release job.  A bounded prefix is reported as unverified when it cannot
 # prove the claim, never as a semantic pass.
 _MAX_PDF_PAGES = 120
-AUDIT_CONTRACT_VERSION = 3
+AUDIT_CONTRACT_VERSION = 4
 _MALFORMED_PE_RE = re.compile(r"(?<![A-Za-z])tyPE(?=\s*[-+]?\d)")
 _NEGATIVE_PE_RE = re.compile(r"(?<![A-Za-z])(?<!原始)(?<!原始 )PE\s*(-\d+(?:\.\d+)?)\s*(?:倍)?", re.IGNORECASE)
 _DUPLICATE_PERCENT_SUFFIX_RE = re.compile(r"(百分点|期末口径)%")
@@ -220,6 +225,28 @@ def public_source_semantic_projection(payload: Mapping[str, Any]) -> dict[str, A
                 "security_code": _public_text(packet.get("security_code"), 16),
                 "name": _public_text(packet.get("name"), 160),
                 "type_key": _public_text(packet.get("type_key"), 16),
+                "web_search_event_evidence": {
+                    "queries": [
+                        _public_text(value, 240)
+                        for value in review.get("web_search_queries", [])
+                        if _public_text(value, 240)
+                    ],
+                    "event_ids": [
+                        _public_text(value, 160)
+                        for value in review.get("web_search_event_ids", [])
+                        if _public_text(value, 160)
+                    ],
+                    "event_log_sha256": [
+                        _public_text(value, 64)
+                        for value in review.get("web_search_event_log_sha256", [])
+                        if _public_text(value, 64)
+                    ],
+                    "thread_ids": [
+                        _public_text(value, 160)
+                        for value in review.get("web_search_thread_ids", [])
+                        if _public_text(value, 160)
+                    ],
+                },
                 "claims": claim_rows,
                 "search_findings": finding_rows,
             }
@@ -277,6 +304,8 @@ class _VisibleTextParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         folded = tag.casefold()
+        if folded in {"p", "div", "br", "tr", "li", "h1", "h2", "h3"} and not self._skip_depth:
+            self.text_parts.append("\n")
         if folded == "meta":
             values = {key.casefold(): str(value or "") for key, value in attrs}
             key = (values.get("property") or values.get("name") or values.get("itemprop") or "").casefold()
@@ -291,6 +320,8 @@ class _VisibleTextParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         folded = tag.casefold()
+        if folded in {"td", "th"} and not self._skip_depth:
+            self.text_parts.append("\t")
         if folded == "title":
             self._title_depth = max(0, self._title_depth - 1)
         if folded in {"script", "style", "noscript", "template"}:
@@ -396,9 +427,9 @@ def _html_visible_text(body: bytes, content_type: str) -> tuple[str, str, str]:
         parser.feed(text)
     except Exception:  # pragma: no cover - malformed pages should fail closed below
         return "", "", ""
-    visible = re.sub(r"\s+", "", "".join(parser.text_parts)).casefold()
-    title = re.sub(r"\s+", "", "".join(parser.title_parts)).casefold()
-    metadata = re.sub(r"\s+", "", "".join(parser.metadata_parts)).casefold()
+    visible = re.sub(r"[^\S\n]+", " ", "".join(parser.text_parts)).casefold()
+    title = re.sub(r"\s+", " ", "".join(parser.title_parts)).casefold()
+    metadata = re.sub(r"\s+", " ", " ".join(parser.metadata_parts)).casefold()
     return visible, title, metadata
 
 
@@ -411,6 +442,10 @@ def _normalised_company_name(value: Any) -> str:
             text = text[: -len(suffix)]
             break
     return text
+
+
+def _security_code_in_text(text: str, code: str) -> bool:
+    return bool(code and re.search(rf"(?<!\d){re.escape(code)}(?!\d)", text))
 
 
 def _pdf_company_identity_matches(text: str, security_code: str, name: str) -> bool:
@@ -426,7 +461,7 @@ def _pdf_company_identity_matches(text: str, security_code: str, name: str) -> b
     visible = re.sub(r"\s+", "", text).casefold()
     code = re.sub(r"\s+", "", str(security_code or "")).casefold()
     normal_name = _normalised_company_name(name)
-    if (code and code in visible) or (normal_name and normal_name in visible):
+    if _security_code_in_text(text, code) or (normal_name and normal_name in visible):
         return True
     if len(normal_name) < 3 or not all("\u4e00" <= char <= "\u9fff" for char in normal_name):
         return False
@@ -530,7 +565,7 @@ def _report_period_tokens(value: Any) -> set[str]:
                 f"{year}0930",
             }
         )
-    elif "q4" in raw or "h2" in raw or "年度" in raw or "年报" in raw:
+    elif "q4" in raw or "h2" in raw or "下半年" in raw or "年度" in raw or "年报" in raw or "fy" in raw:
         tokens.update(
             {
                 f"{year}q4",
@@ -550,14 +585,21 @@ def _report_period_tokens(value: Any) -> set[str]:
 
 
 def _claim_numbers(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> set[str]:
+    # The finding can contain unrelated figures; it must not rescue a wrong
+    # number in the actual claim. Dates and issuer identifiers are not facts.
+    text = str(claim.get("statement") or finding.get("finding") or "")
+    text = re.sub(r"(?i)^[036]\d{5}(?=\s+20\d{2}(?:[-/年]|Q|H))", "", text)
+    text = re.sub(r"20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年\d{1,2}月(?:\d{1,2}日)?", "", text)
+    text = re.sub(r"(?i)(?<![a-z])(?:q[1-4]|h[12])(?!\d)", "", text)
+    text = re.sub(r"(?:代码\s*[：:]?\s*|[（(])[036]\d{5}[）)]?", "", text)
     numbers: set[str] = set()
-    for value in (claim.get("statement"), finding.get("finding")):
-        for match in re.findall(r"(?<![A-Za-z0-9])[-+]?\d+(?:\.\d+)?", str(value or "")):
-            raw = match.lstrip("+")
-            unsigned = raw.lstrip("-")
-            if unsigned.isdigit() and (1900 <= int(unsigned) <= 2100 or len(unsigned) == 6):
+    for match in re.finditer(r"(?<![A-Za-z0-9])[-+]?\d+(?:,\d{3})*(?:\.\d+)?", text):
+        raw = match.group().lstrip("+").replace(",", "")
+        unsigned = raw.lstrip("-")
+        if unsigned.isdigit() and 1900 <= int(unsigned) <= 2100:
+            if not re.match(r"\s*(?:元|万|亿|%|％|倍|股|吨)", text[match.end() :]):
                 continue
-            numbers.add(raw)
+        numbers.add(raw)
     return numbers
 
 
@@ -592,6 +634,230 @@ def _structured_period_tokens(claim: Mapping[str, Any], finding: Mapping[str, An
     return tokens
 
 
+_REPORT_PERIOD_MARKER_RE = re.compile(
+    r"(?P<year>20\d{2})\s*(?:"
+    r"(?:年\s*)?(?:q(?P<q>[1-4])|h(?P<h>[12])|(?P<fy>fy))"
+    r"|年?\s*(?P<quarter>第?[一二三四1-4]\s*季度|[一二三四1-4]\s*季报)"
+    r"|年?\s*(?P<half>上半年|下半年|半年度|半年报|中报)"
+    r"|年?\s*(?P<annual>年度报告?|年报|全年|年末)"
+    r")",
+    re.IGNORECASE,
+)
+_REPORT_PERIOD_RANGE_RE = re.compile(
+    r"(?P<year>20\d{2})年?\s*"
+    r"(?:1\s*月\s*1\s*[日号]?\s*)?"
+    r"(?P<start>1[0-2]|[1-9])\s*(?:月\s*)?"
+    r"(?:-|至|到|—|–|~|～)\s*"
+    r"(?P<end>1[0-2]|[1-9])\s*月",
+    re.IGNORECASE,
+)
+_FY_PREFIX_RE = re.compile(r"^fy(?P<year>20\d{2})$", re.IGNORECASE)
+_EXPLICIT_DATE_TOKEN_RE = re.compile(
+    r"(?<!\d)(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年\d{1,2}月\d{1,2}日|20\d{6})(?!\d)"
+)
+_PUBLICATION_DATE_PREFIX_RE = re.compile(
+    r"(?:披露日期?|发布日期?|公告日期|发布时间|发布于|发表于|刊登于|更新时间|更新于|"
+    r"检索日期?|检索于|抓取日期?|抓取于|采集日期?|采集于|列示于|报道于|"
+    r"disclosure\s+date|publication\s+date|published\s+(?:on|at)?|"
+    r"posted\s+(?:on|at)?|updated\s+(?:on|at)?)$",
+    re.IGNORECASE,
+)
+
+
+def _period_marker_ends(value: Any) -> list[date]:
+    """Extract explicit quarter/half/year or month-range reporting periods."""
+
+    text = str(value or "").strip().casefold().replace(" ", "")
+    if not text:
+        return []
+    ends: list[date] = []
+    if match := _FY_PREFIX_RE.fullmatch(text):
+        ends.append(date(int(match.group("year")), 12, 31))
+    for match in _REPORT_PERIOD_MARKER_RE.finditer(text):
+        year = int(match.group("year"))
+        quarter = match.group("q")
+        if quarter is None and match.group("quarter"):
+            token = match.group("quarter")
+            quarter = next((str(index) for index, marker in enumerate("一二三四", 1) if marker in token), None)
+            if quarter is None:
+                digit = re.search(r"[1-4]", token)
+                quarter = digit.group(0) if digit else None
+        if quarter:
+            month = int(quarter) * 3
+            next_month = date(year + (month == 12), month % 12 + 1, 1)
+            ends.append(date.fromordinal(next_month.toordinal() - 1))
+            continue
+        half = match.group("h")
+        if half is None and match.group("half"):
+            half = (
+                "1" if any(marker in match.group("half") for marker in ("上半年", "半年度", "半年报", "中报")) else "2"
+            )
+        if half:
+            ends.append(date(year, 6 if half == "1" else 12, 30 if half == "1" else 31))
+            continue
+        if match.group("fy") or match.group("annual"):
+            ends.append(date(year, 12, 31))
+    for match in _REPORT_PERIOD_RANGE_RE.finditer(text):
+        year = int(match.group("year"))
+        month = int(match.group("end"))
+        next_month = date(year + (month == 12), month % 12 + 1, 1)
+        ends.append(date.fromordinal(next_month.toordinal() - 1))
+    return ends
+
+
+def _specific_period_end(value: Any) -> date | None:
+    """Return a period end while ignoring publication dates in source titles."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    # A report marker is authoritative over nearby publication dates, e.g.
+    # ``2026年半年度报告（披露日期 2026-08-25）`` means 2026-06-30.
+    marker_ends = _period_marker_ends(text)
+    if marker_ends:
+        return max(marker_ends)
+    compact = re.sub(r"\s+", "", text).casefold()
+    if re.fullmatch(r"20\d{2}年?", compact):
+        return date(int(re.search(r"20\d{2}", compact).group(0)), 12, 31)
+    for match in _EXPLICIT_DATE_TOKEN_RE.finditer(text):
+        prefix = re.sub(r"[\s\u3000（(【\[]+$", "", text[: match.start()])
+        if _PUBLICATION_DATE_PREFIX_RE.search(prefix):
+            continue
+        parsed = _date_value(match.group(0))
+        if parsed:
+            # A leading ISO date is commonly the period-end prefix in a fact
+            # statement.  Dates embedded after publication labels are skipped;
+            # non-quarter-end dates are treated as publication/as-of dates and
+            # do not silently become a reporting-period assertion.
+            if (match.start() == 0 or not prefix) and (parsed.month, parsed.day) in {
+                (3, 31),
+                (6, 30),
+                (9, 30),
+                (12, 31),
+            }:
+                return parsed
+    return None
+
+
+def _period_end_tokens(period: date) -> set[str]:
+    """Return canonical body tokens for one reporting-period endpoint."""
+
+    year = str(period.year)
+    tokens = set(_report_period_tokens(period.isoformat()))
+    if period.month == 3 and period.day == 31:
+        tokens.update(_report_period_tokens(f"{year}Q1"))
+    elif period.month == 6 and period.day == 30:
+        tokens.update(_report_period_tokens(f"{year}H1"))
+    elif period.month == 9 and period.day == 30:
+        tokens.update(_report_period_tokens(f"{year}Q3"))
+    elif period.month == 12 and period.day == 31:
+        tokens.update(_report_period_tokens(f"{year}FY"))
+        tokens.update(_report_period_tokens(f"{year}年度"))
+    return tokens
+
+
+def _period_marker_tokens(value: Any, period: date) -> set[str]:
+    """Extract only the marker that names ``period``; ignore nearby dates."""
+
+    text = str(value or "")
+    tokens: set[str] = set()
+    if _FY_PREFIX_RE.fullmatch(text.strip()):
+        tokens.update(_report_period_tokens(text))
+    for match in _REPORT_PERIOD_MARKER_RE.finditer(text):
+        if period in _period_marker_ends(match.group(0)):
+            tokens.update(_report_period_tokens(match.group(0)))
+    for match in _REPORT_PERIOD_RANGE_RE.finditer(text):
+        if period in _period_marker_ends(match.group(0)):
+            tokens.add(match.group(0).casefold().replace(" ", ""))
+    for match in _EXPLICIT_DATE_TOKEN_RE.finditer(text):
+        if _date_value(match.group(0)) == period:
+            tokens.update(_report_period_tokens(match.group(0)))
+    compact = re.sub(r"\s+", "", text).casefold()
+    if not tokens and compact == str(period.year):
+        tokens.update(_report_period_tokens(f"{period.year}年度"))
+    return tokens
+
+
+def _is_filing_period_value(value: Any) -> bool:
+    """Return whether a value names a quarter/half/year filing period."""
+
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if _FY_PREFIX_RE.fullmatch(text) or _REPORT_PERIOD_MARKER_RE.search(text):
+        return True
+    for match in _REPORT_PERIOD_RANGE_RE.finditer(text):
+        if int(match.group("end")) in {3, 6, 9, 12}:
+            return True
+    for match in _EXPLICIT_DATE_TOKEN_RE.finditer(text):
+        parsed = _date_value(match.group(0))
+        if parsed and (parsed.month, parsed.day) in {(3, 31), (6, 30), (9, 30), (12, 31)}:
+            return True
+    return False
+
+
+def _specific_period_tokens(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> set[str]:
+    # Prefer the claim's own declared period.  Finding text is a fallback for
+    # legacy rows that omitted it; unioning both lets a wrong-period finding
+    # satisfy the body check for an otherwise explicit claim.
+    primary = [claim.get("report_period"), claim.get("statement")]
+    expected = next((period for value in primary if (period := _specific_period_end(value)) is not None), None)
+    values = (
+        primary
+        if expected is not None
+        else [
+            claim.get("source_context"),
+            finding.get("report_period"),
+            finding.get("finding"),
+        ]
+    )
+    tokens: set[str] = set()
+    for value in values:
+        period = _specific_period_end(value)
+        if period is None or expected is not None and period != expected:
+            continue
+        tokens.update(_period_end_tokens(period))
+        tokens.update(_period_marker_tokens(value, period))
+    return tokens
+
+
+def _source_context_period_issue(claim: Mapping[str, Any], finding: Mapping[str, Any]) -> str | None:
+    """Reject a filing title/context that names a different reporting period."""
+
+    expected = next(
+        (
+            period
+            for value in (claim.get("report_period"), claim.get("statement"))
+            if (period := _specific_period_end(value)) is not None
+        ),
+        None,
+    )
+    if expected is None or not any(
+        _is_filing_period_value(value) for value in (claim.get("report_period"), claim.get("statement"))
+    ):
+        return None
+    contexts = (
+        ("claim source context", claim.get("source_context")),
+        ("finding title", finding.get("title")),
+        ("finding report period", finding.get("report_period")),
+        ("finding text", finding.get("finding")),
+    )
+    for label, value in contexts:
+        actual = _specific_period_end(value)
+        if actual is not None and not _is_filing_period_value(value):
+            continue
+        # A later filing can legitimately quote an earlier comparative period;
+        # an earlier filing cannot prove a claim about a later period.  Keep
+        # the directionally safe check so historical facts in a current report
+        # are not rejected while future-period misbindings still fail closed.
+        if actual is not None and actual < expected:
+            return (
+                f"{label} names report period ending {actual.isoformat()}, "
+                f"but the claim requires {expected.isoformat()}"
+            )
+    return None
+
+
 def _period_matches(text: str, tokens: set[str]) -> bool:
     """Match a declared period without letting a bare year mask a mismatch."""
 
@@ -620,11 +886,13 @@ def _structured_field_tokens(url: str) -> set[str]:
 
 
 _NUMBER_WITH_UNIT_RE = re.compile(
-    r"(?P<sign>[+-]?)\s*(?P<number>\d+(?:[,.]\d+)?)\s*"
-    r"(?P<unit>千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|万元|元|"
-    r"亿股|万股|千股|股|万吨|万件|万台|吨|件|台|%|％|倍)"
+    r"(?<![\d.])(?P<sign>[+-]?)\s*(?P<number>\d+(?:,\d{3})*(?:\.\d+)?)\s*"
+    r"(?P<unit>元/股|元／股|千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|元|"
+    r"亿股|万股|千股|股|万吨|万件|万台|吨|件|台|个百分点|百分点|%|％|倍)"
 )
 _NUMBER_UNIT_FACTORS = {
+    "元/股": 1.0,
+    "元／股": 1.0,
     "千亿元": 1e11,
     "百亿元": 1e10,
     "十亿元": 1e9,
@@ -646,26 +914,114 @@ _NUMBER_UNIT_FACTORS = {
     "吨": 1.0,
     "件": 1.0,
     "台": 1.0,
+    "个百分点": 1.0,
+    "百分点": 1.0,
     "%": 1.0,
     "％": 1.0,
     "倍": 1.0,
 }
 
+# Do not let another row with the same amount prove a financial claim. Keep
+# genuinely different fields (parent/consolidated profit, total/segment
+# revenue, operating/free cash flow) separate even when their wording overlaps.
+_FACT_METRIC_ALIASES = {
+    "parent_profit": ("归属于上市公司股东的净利润", "归属于母公司股东的净利润", "归母净利润", "PARENT_NETPROFIT"),
+    "adjusted_profit": (
+        "归属于上市公司股东的扣除非经常性损益的净利润",
+        "扣非归母净利润",
+        "扣非净利润",
+        "DEDUCT_PARENT_NETPROFIT",
+    ),
+    "operating_cash": (
+        "经营活动产生的现金流量净额",
+        "经营活动现金流量净额",
+        "经营现金流",
+        "NETCASH_OPERATE",
+        "operating_cash_flow",
+    ),
+    "free_cash": ("自由现金流", "free_cash_flow"),
+    "cash_flow": ("现金流", "cash flow"),
+    "overseas_revenue": ("海外收入", "海外营业收入", "境外收入", "境外营业收入"),
+    "domestic_revenue": ("境内收入", "国内收入"),
+    "other_revenue": ("其他业务收入", "其他收入"),
+    "main_revenue": ("主营业务收入",),
+    "revenue": ("营业总收入", "营业收入", "营收", "收入", "TOTAL_OPERATE_INCOME", "OPERATE_INCOME", "REVENUE"),
+    "profit": ("净利润", "NETPROFIT", "net_profit"),
+    "operating_profit": ("营业利润", "OPERATE_PROFIT"),
+    "gross_margin": ("毛利率", "SALE_GPR", "gross_margin"),
+    "net_margin": ("净利率", "SALE_NPR", "net_margin"),
+    "roe": ("净资产收益率", "ROE"),
+    "eps": ("基本每股收益", "每股收益", "EPS"),
+    "pe": ("市盈率", "PE"),
+    "pb": ("市净率", "PB"),
+    "assets": ("资产总额", "总资产", "TOTAL_ASSETS"),
+    "liabilities": ("负债总额", "总负债", "TOTAL_LIABILITIES"),
+    "receivables": ("应收账款", "ACCOUNTS_RECE"),
+    "inventory": ("存货", "INVENTORY"),
+    "cash": ("货币资金", "MONETARYFUNDS"),
+    "capex": ("购建固定资产、无形资产和其他长期资产支付的现金", "资本开支", "CONSTRUCT_LONG_ASSET", "CAPEX"),
+    "rd_expense": ("研发费用", "研发支出", "RDEXPENSE", "研发投入"),
+    "npl": ("不良贷款率", "不良率"),
+    "coverage": ("拨备覆盖率",),
+    "capital": ("核心一级资本充足率",),
+    "penetration": ("渗透率",),
+    "price": ("价格", "股价"),
+}
+_FACT_METRIC_NAMES = {alias.casefold(): key for key, aliases in _FACT_METRIC_ALIASES.items() for alias in aliases}
+_FACT_METRIC_RE = re.compile(
+    "|".join(
+        r"(?<![A-Za-z_])" + re.escape(alias) + r"(?![A-Za-z_])"
+        if alias.isascii()
+        else r"\s*".join(re.escape(char) for char in alias)
+        for alias in sorted(_FACT_METRIC_NAMES, key=len, reverse=True)
+    ),
+    re.IGNORECASE,
+)
+_TABLE_UNIT_RE = re.compile(
+    r'(?:单位\s*[：:]?|["\']unit["\']\s*:\s*["\'])\s*(?:人民币\s*)?'
+    r"(千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|元|%|％|倍)",
+    re.IGNORECASE,
+)
+_CNY_SOURCE_FIELDS = frozenset(
+    {
+        "total_operate_income",
+        "operate_income",
+        "parent_netprofit",
+        "deduct_parent_netprofit",
+        "netprofit",
+        "netcash_operate",
+        "operate_profit",
+        "total_assets",
+        "total_liabilities",
+        "accounts_rece",
+        "inventory",
+        "monetaryfunds",
+        "construct_long_asset",
+    }
+)
+_RAW_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.+-])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?![\d.])")
 
-def _number_unit_facts(values: Iterable[Any]) -> list[tuple[float, str]]:
-    facts: list[tuple[float, str]] = []
-    for value in values:
-        for match in _NUMBER_WITH_UNIT_RE.finditer(str(value or "")):
-            try:
-                number = float(match.group("number").replace(",", ""))
-            except ValueError:
-                continue
-            if not math.isfinite(number):
-                continue
-            sign = -1.0 if match.group("sign") == "-" else 1.0
-            unit = match.group("unit")
-            facts.append((sign * number * _NUMBER_UNIT_FACTORS[unit], unit))
-    return facts
+
+def _number_metric_context(text: str):
+    """Return row lookup without joining neighbouring HTML/PDF numeric cells."""
+
+    labels = list(_FACT_METRIC_RE.finditer(text))
+    ends = [match.end() for match in labels]
+
+    def context(position: int) -> tuple[str, str]:
+        index = bisect_right(ends, position) - 1
+        if index < 0:
+            return "", ""
+        label = labels[index]
+        between = text[label.end() : position]
+        if len(between) > 240 or "。" in between:
+            return "", ""
+        alias = re.sub(r"\s+", "", label.group()).casefold()
+        # English multi-word labels retain their single space in the index.
+        key = _FACT_METRIC_NAMES.get(alias, _FACT_METRIC_NAMES.get(label.group().casefold(), ""))
+        return key, alias
+
+    return context
 
 
 def _structured_number_match(
@@ -675,34 +1031,83 @@ def _structured_number_match(
     claim: Mapping[str, Any] | None = None,
     finding: Mapping[str, Any] | None = None,
 ) -> bool:
-    compact = re.sub(r"[,\s]", "", text)
-    for number in numbers:
-        token = re.sub(r"[,\s]", "", number)
-        if token and token in compact:
-            return True
-        if "." in token:
-            integer, fraction = token.split(".", 1)
-            if fraction.rstrip("0") and f"{integer}.{fraction.rstrip('0')}" in compact:
-                return True
-    # Financial statements routinely switch between yuan, ten-thousand yuan
-    # and hundred-million yuan.  Compare explicitly unit-tagged facts after
-    # normalising their units, while retaining the exact-token fast path above.
-    target_facts = _number_unit_facts(
-        [
-            (claim or {}).get("statement"),
-            (finding or {}).get("finding"),
-        ]
-    )
-    body_facts = _number_unit_facts([text])
-    for target, target_unit in target_facts:
-        for actual, actual_unit in body_facts:
-            if target_unit in {"%", "％", "倍"} or actual_unit in {"%", "％", "倍"}:
-                tolerance = max(0.05, abs(target) * 0.002)
-            else:
-                tolerance = max(1.0, abs(target) * 0.002)
-            if abs(target - actual) <= tolerance:
-                return True
-    return False
+    claim_text = str((claim or {}).get("statement") or (finding or {}).get("finding") or "")
+    target_matches = list(_NUMBER_WITH_UNIT_RE.finditer(claim_text))
+    claim_metric = _number_metric_context(claim_text)
+    body_metric = _number_metric_context(text)
+    body_matches = list(_NUMBER_WITH_UNIT_RE.finditer(text))
+    body_facts = [
+        (
+            float(match.group("sign") + match.group("number").replace(",", ""))
+            * _NUMBER_UNIT_FACTORS[match.group("unit")],
+            match.group("unit"),
+            body_metric(match.start())[0],
+        )
+        for match in body_matches
+    ]
+    # Preserve offsets when masking inline units, so the remaining values can
+    # only inherit their actual table header or a known typed source field.
+    unitless_text = _NUMBER_WITH_UNIT_RE.sub(lambda match: " " * len(match.group()), text)
+    headers = list(_TABLE_UNIT_RE.finditer(text))
+    header_ends = [match.end() for match in headers]
+    raw_facts: list[tuple[float, str]] = []
+    for match in _RAW_NUMBER_RE.finditer(unitless_text):
+        raw = float(match.group().replace(",", ""))
+        metric, alias = body_metric(match.start())
+        raw_facts.append((raw, metric))
+        header_index = bisect_right(header_ends, match.start()) - 1
+        unit = headers[header_index].group(1) if header_index >= 0 else "元" if alias in _CNY_SOURCE_FIELDS else ""
+        if unit and metric:
+            body_facts.append((raw * _NUMBER_UNIT_FACTORS[unit], unit, metric))
+
+    def unit_family(unit: str) -> str:
+        if unit in {"%", "％"}:
+            return "%"
+        if unit in {"个百分点", "百分点"}:
+            return "百分点"
+        if unit in {"元/股", "元／股"}:
+            return "元/股"
+        return unit[-1]  # 元、股、吨、件、台、倍 are distinct dimensions.
+
+    # Check *every* explicit amount, including its sign and unit family. A
+    # percentage cannot prove a PE multiple, and one correct amount cannot
+    # prove the other amounts in a compound claim.
+    for match in target_matches:
+        raw_number = match.group("number").replace(",", "")
+        raw_target = float(match.group("sign") + raw_number)
+        target_unit = match.group("unit")
+        scale = _NUMBER_UNIT_FACTORS[target_unit]
+        target = raw_target * scale
+        if not math.isfinite(target):
+            return False
+        decimals = len(raw_number.partition(".")[2])
+        # Only allow rounding at the precision actually quoted, not a fixed
+        # percentage error that becomes material on large financial amounts.
+        tolerance = 0.000_001 if target == 0 else 0.5 * scale * 10 ** (-decimals)
+        metric = claim_metric(match.start())[0]
+        if not metric:
+            return False
+        if not any(
+            unit_family(target_unit) == unit_family(actual_unit)
+            and metric == actual_metric
+            and (target < 0) == (actual < 0)
+            and abs(target - actual) <= tolerance
+            for actual, actual_unit, actual_metric in body_facts
+        ):
+            return False
+
+    tagged_numbers = {(m.group("sign") + m.group("number")).lstrip("+").replace(",", "") for m in target_matches}
+    untagged = numbers - tagged_numbers
+    for number in untagged:
+        token = float(number)
+        metrics = {
+            claim_metric(match.start())[0]
+            for match in _RAW_NUMBER_RE.finditer(claim_text)
+            if float(match.group().replace(",", "")) == token
+        } - {""}
+        if not metrics or not any(raw == token and metric in metrics for raw, metric in raw_facts):
+            return False
+    return bool(target_matches or numbers)
 
 
 def _structured_source_issues(
@@ -723,17 +1128,25 @@ def _structured_source_issues(
         return ["structured source body is empty"]
     code = re.sub(r"\s+", "", str(security_code or "")).casefold()
     normal_name = _normalised_company_name(name)
-    if not ((code and code in visible) or (normal_name and normal_name in visible)):
+    if not (_security_code_in_text(text, code) or (normal_name and normal_name in visible)):
         return ["structured source body does not match company code or normalized company name"]
-    period_match = _period_matches(text, _structured_period_tokens(claim, finding))
+    if period_issue := _source_context_period_issue(claim, finding):
+        return [period_issue]
+    period_tokens = _specific_period_tokens(claim, finding)
+    period_match = _period_matches(text, period_tokens)
+    numbers = _claim_numbers(claim, finding)
     number_match = _structured_number_match(
-        visible,
-        _claim_numbers(claim, finding),
+        text,
+        numbers,
         claim=claim,
         finding=finding,
     )
     field_match = any(field in visible for field in _structured_field_tokens(url))
-    if not (period_match or number_match or field_match):
+    if period_tokens and not period_match:
+        return ["structured source body does not match the claimed report period"]
+    if numbers and not number_match:
+        return ["structured source body does not match the claimed fact number/field"]
+    if not period_tokens and not numbers and not field_match:
         return ["structured source body does not match report period or fact number/field"]
     return []
 
@@ -812,20 +1225,27 @@ def _pdf_text_semantic_issues(
         # text layer drops the heading (a common outcome for generated
         # attachments).  Keep this fallback limited to official market hosts;
         # an arbitrary third-party URL must still prove identity in its body.
-        url_digits = re.sub(r"\D", "", str(source_url or ""))
         code = re.sub(r"\s+", "", str(security_code or ""))
-        official_url_identity = _official_domain(source_url) and bool(code and code in url_digits)
+        official_url_identity = _official_domain(source_url) and _security_code_in_text(str(source_url or ""), code)
         if not official_url_identity:
             return ["PDF text does not match company code or normalized company name"]
-    period_match = _period_matches(text, _structured_period_tokens(claim, finding))
+    if period_issue := _source_context_period_issue(claim, finding):
+        return [period_issue]
+    period_tokens = _specific_period_tokens(claim, finding)
+    period_match = _period_matches(text, period_tokens)
+    numbers = _claim_numbers(claim, finding)
     number_match = _structured_number_match(
-        visible,
-        _claim_numbers(claim, finding),
+        text,
+        numbers,
         claim=claim,
         finding=finding,
     )
-    if not (period_match or number_match):
-        return ["PDF text does not match report period or fact number"]
+    if period_tokens and not period_match:
+        return ["PDF text does not match the claimed report period"]
+    if numbers and not number_match:
+        return ["PDF text does not match the claimed fact number"]
+    if not period_tokens and not numbers:
+        return ["PDF text does not expose a report period or fact number"]
     return []
 
 
@@ -867,7 +1287,8 @@ def _html_semantic_issues(
 ) -> list[str]:
     """Run the deliberately small HTML identity/content gate."""
 
-    visible, title, metadata = _html_visible_text(body, content_type)
+    source_text, title, metadata = _html_visible_text(body, content_type)
+    visible = re.sub(r"\s+", "", source_text)
     if not visible:
         return ["HTML body has no visible text"]
     charset_match = re.search(r"charset=([^;\s]+)", content_type, re.IGNORECASE)
@@ -898,28 +1319,36 @@ def _html_semantic_issues(
 
     code = re.sub(r"\s+", "", str(security_code or "")).casefold()
     normal_name = _normalised_company_name(name)
-    identity_text = f"{title}{metadata}{visible}"
-    if require_identity and not ((code and code in identity_text) or (normal_name and normal_name in identity_text)):
-        url_digits = re.sub(r"\D", "", str(url or ""))
-        official_url_identity = _official_domain(url) and bool(code and code in url_digits)
+    identity_text = f"{title} {metadata} {source_text}"
+    compact_identity = re.sub(r"\s+", "", identity_text)
+    if require_identity and not (
+        _security_code_in_text(identity_text, code) or (normal_name and normal_name in compact_identity)
+    ):
+        official_url_identity = _official_domain(url) and _security_code_in_text(str(url or ""), code)
         if not official_url_identity:
             return ["HTML正文未匹配公司代码或规范化公司名"]
 
-    period_tokens = _report_period_tokens(report_period)
+    if period_issue := _source_context_period_issue(claim, finding):
+        return [period_issue]
+    period_tokens = _report_period_tokens(report_period) if _specific_period_end(report_period) is not None else set()
     # Legacy Codex reviews did not carry a separate report_period field.  The
     # statement itself still declares the period, so use those tokens rather
     # than treating every HTML claim as undated.
-    period_tokens.update(_structured_period_tokens(claim, finding))
+    period_tokens.update(_specific_period_tokens(claim, finding))
     period_match = _period_matches("".join((title, metadata, visible)), period_tokens)
     numbers = _claim_numbers(claim, finding)
     number_match = _structured_number_match(
-        visible,
+        source_text,
         numbers,
         claim=claim,
         finding=finding,
     )
-    if not period_match and not number_match:
-        return ["HTML正文未匹配报告期或关键数字"]
+    if period_tokens and not period_match:
+        return ["HTML正文未匹配声明的报告期"]
+    if numbers and not number_match:
+        return ["HTML正文未匹配声明的关键数字"]
+    if not period_tokens and not numbers:
+        return ["HTML正文未提供可核验的报告期或关键数字"]
     return []
 
 
@@ -1960,12 +2389,17 @@ def main() -> int:
         timeout=args.timeout,
         max_bytes=args.max_bytes,
     )
-    print(
-        json.dumps(
-            {key: report[key] for key in ("checked", "reachable", "blocked", "failed", "invalid", "audit_passed")},
-            sort_keys=True,
-        )
-    )
+    summary = {key: report[key] for key in ("checked", "reachable", "blocked", "failed", "invalid", "audit_passed")}
+    summary["affected_companies"] = [
+        {
+            "security_code": item.get("security_code"),
+            "name": item.get("name"),
+            "status": item.get("status"),
+        }
+        for item in report["company_coverage"]
+        if item.get("status") not in {"pass", "searched_no_source"}
+    ]
+    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0 if report["audit_passed"] else 1
 
 

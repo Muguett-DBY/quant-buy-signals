@@ -58,6 +58,7 @@ markers = [
   "android: Android application tests outside the website release gate",
   "desktop: Windows desktop application tests outside the website release gate",
   "parked_client: local Streamlit client tests outside the website release gate",
+  "ai_release: checked-in AI overlay release-artifact tests run only by the publication lane",
 ]
 filterwarnings = [
   "error::RuntimeWarning",

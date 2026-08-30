@@ -125,12 +125,13 @@ def _write_clean_source_audit(source, audit_path) -> None:
                 "semantic_passed_count": company_semantic_count,
                 "semantic_failed_count": 0,
                 "semantic_unverified_count": 0,
+                "status": "pass",
             }
         )
     audit_path.write_text(
         json.dumps(
             {
-                "audit_contract_version": 3,
+                "audit_contract_version": 4,
                 "merged_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "projection_sha256": projection_sha256,
                 **projection_counts,
@@ -598,7 +599,8 @@ def test_full_coverage_publish_requires_model_and_effort_metadata(tmp_path) -> N
         )
 
 
-def test_publish_retains_external_search_event_and_claim_binding_proof(tmp_path) -> None:
+@pytest.mark.parametrize("review_mode", ["opencode_web_review", "codex_luna_web_review"])
+def test_publish_retains_external_search_event_and_claim_binding_proof(tmp_path, review_mode) -> None:
     review = {
         **_external_review("watchlist", 60),
         "effort": "max",
@@ -613,7 +615,9 @@ def test_publish_retains_external_search_event_and_claim_binding_proof(tmp_path)
         ],
         "web_search_performed": True,
         "web_search_event_verified": True,
-        "web_search_claim_urls_verified": True,
+        "web_search_claim_urls_verified": review_mode != "codex_luna_web_review",
+        "research_source_urls_verified": False,
+        "web_search_verified": review_mode != "codex_luna_web_review",
         "web_search_queries": ["600000 浦发银行 2026 最新报告"],
         "web_search_verified_claim_urls": ["https://example.test/2026-report.pdf"],
         "web_search_dropped_claim_url_count": 1,
@@ -632,7 +636,7 @@ def test_publish_retains_external_search_event_and_claim_binding_proof(tmp_path)
                     "candidate_count": 1,
                     "candidate_total": 1,
                     "full_coverage_final_recommendation": True,
-                    "review_mode": "opencode_web_review",
+                    "review_mode": review_mode,
                     "packets": [
                         {
                             "security_code": "600000",
@@ -669,6 +673,9 @@ def test_publish_retains_external_search_event_and_claim_binding_proof(tmp_path)
     assert artifact["packets"][0]["ai_review"]["web_search_event_verified"] is True
     assert artifact["packets"][0]["ai_review"]["web_search_claim_urls_verified"] is True
     assert artifact["packets"][0]["ai_review"]["web_search_dropped_claim_url_count"] == 1
+    if review_mode == "codex_luna_web_review":
+        assert artifact["research_source_urls_verified_count"] == 1
+        assert artifact["packets"][0]["ai_review"]["source_verification_status"] == "pass"
 
 
 def test_native_company_research_separates_search_event_from_financial_sources(tmp_path) -> None:

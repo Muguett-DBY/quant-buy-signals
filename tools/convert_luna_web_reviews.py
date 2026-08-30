@@ -19,11 +19,14 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from tools.ai_screening_contract import (
+    ECONOMIC_CATEGORIES,
     REVIEW_SCHEMA_VERSION,
     _research_dimensions,
     decision_text_conflicts,
+    infer_economic_category,
     validate_review,
 )
+from tools.codex_web_events import CompanyWebEvidence, bind_codex_web_events, load_codex_web_events
 
 
 MODEL = "codex-luna-max"
@@ -199,14 +202,15 @@ _FACT_UNIT_FACTORS: dict[str, Decimal] = {
     "万元": Decimal("10000"),
     "百万元": Decimal("1000000"),
     "亿元": Decimal("100000000"),
+    "十亿元": Decimal("1000000000"),
     "万": Decimal("10000"),
     "亿": Decimal("100000000"),
 }
 _AMOUNT_RE = re.compile(
-    r"(?<![\d.])(?P<number>[+-]?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?))\s*"
+    r"(?<![\d.,])(?P<number>[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?))\s*"
     # Chinese prose commonly runs the unit into the next Chinese character;
     # only an ASCII identifier/percent suffix should terminate this match.
-    r"(?P<unit>百万元|亿元|万元|千元|元|亿|万)(?![0-9A-Za-z_%])"
+    r"(?P<unit>十亿元|百万元|亿元|万元|千元|元|亿|万)(?![0-9A-Za-z_%])"
 )
 _CHANGE_NUMBER_RE = re.compile(r"^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)$")
 _METRIC_ALIAS_GROUPS: tuple[tuple[str, ...], ...] = (
@@ -224,7 +228,7 @@ _METRIC_ALIAS_GROUPS: tuple[tuple[str, ...], ...] = (
 
 _SCALAR_WITH_UNIT_RE = re.compile(
     r"(?<![\d.])(?P<number>[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?))\s*"
-    r"(?P<unit>百万元|亿元|万元|千元|元/股|元／股|元|亿|万|%|％|人|万人|户|台|吨|公里|股|次|个|项|年|倍|家)"
+    r"(?P<unit>十亿元|百万元|亿元|万元|千元|元/股|元／股|元|亿|万|%|％|人|万人|户|台|吨|公里|股|次|个|项|年|倍|家)"
 )
 
 
@@ -250,7 +254,9 @@ def _inferred_fact_unit(metric: Any) -> str | None:
         return "亿吨"
     if "eflops" in text:
         return "EFLOPS"
-    if text.endswith(("_yi_cny", "_billion_cny", "_cny_billion")):
+    if text.endswith(("_billion_cny", "_cny_billion", "_billion_rmb", "_rmb_billion")):
+        return "十亿元"
+    if text.endswith("_yi_cny"):
         return "亿元"
     if text.endswith(("_cny_100m", "_rmb_100m", "_100m_cny")) or "_cny_100m_" in text:
         return "亿元"
@@ -478,6 +484,8 @@ def _binding_unit(metric: Any, explicit_unit: Any, parsed_unit: Any) -> str:
             "_yi_cny",
             "_billion_cny",
             "_cny_billion",
+            "_billion_rmb",
+            "_rmb_billion",
             "_cny_100m",
             "_rmb_100m",
             "_100m_cny",
@@ -787,6 +795,9 @@ def _financial_fact_source_urls(item: Mapping[str, Any], row: Mapping[str, Any] 
         if candidate.lower().startswith("http://"):
             raise ValueError(f"financial fact source must use HTTPS: {candidate!r}")
         if _URL_RE.fullmatch(candidate) and candidate not in urls:
+            target_code = _text(row.get("code"), 16) if isinstance(row, Mapping) else ""
+            if target_code and any(code != target_code for code in _source_codes(candidate)):
+                raise ValueError(f"financial fact source belongs to another company: {target_code}: {candidate!r}")
             urls.append(candidate)
     return urls
 
@@ -1093,6 +1104,7 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
     if isinstance(raw, list):
         items: list[dict[str, Any] | str] = []
         metric_labels = {
+            "value": "",
             "revenue_rmb": "营业收入",
             "revenue_yoy_pct": "营业收入同比",
             "net_income_rmb": "净利润",
@@ -1343,6 +1355,16 @@ def _financial_fact_items(row: Mapping[str, Any]) -> list[dict[str, Any] | str]:
     return items
 
 
+def _display_fact_text(value: Any) -> str:
+    """Use one rendering for a displayed fact and its source-bound statement."""
+
+    if isinstance(value, Mapping):
+        fact = _sanitize_reason_text(value.get("fact") or "", 520)
+        period = _period_label(value.get("period"))
+        return _public_fact_text(f"{period}：{fact}" if period else fact) if fact else ""
+    return _sanitize_reason_text(_clean_fact_text(value, 240), 240) if _text(value) else ""
+
+
 def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Keep dated facts while separating scalars from compound source text.
 
@@ -1359,6 +1381,8 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
 
     def common_fields(item: Mapping[str, Any]) -> dict[str, Any]:
         binding: dict[str, Any] = {}
+        normalized = _financial_fact_items({"financial_facts": [item], "sources": row.get("sources", [])})
+        binding["statements"] = [text for fact in normalized if (text := _display_fact_text(fact))]
         for key in (
             "date",
             "period",
@@ -1444,6 +1468,9 @@ def _financial_fact_bindings(row: Mapping[str, Any]) -> list[dict[str, Any]]:
                 if binding:
                     bindings.append(binding)
             else:
+                if value in (None, "") and item.get("fact") not in (None, ""):
+                    value = item.get("fact")
+                    metric = metric or "公开资料事实"
                 append_value(
                     base,
                     metric=metric,
@@ -1533,6 +1560,162 @@ def _source_period_score(statement: str, source: Mapping[str, str]) -> int:
     return score
 
 
+def _report_period_signature(value: Any) -> tuple[set[str], set[str]]:
+    """Extract only reporting years/periods, excluding publication dates."""
+
+    text = _text(value, 900).casefold()
+    years = set(re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", text))
+    periods: set[str] = set()
+    for period, pattern in (
+        ("h1", r"上半年|半年度|半年报|1\s*[-—至]\s*6月|h1"),
+        ("h2", r"下半年|h2"),
+        ("q1", r"一季度|第一季度|一季报|1\s*[-—至]\s*3月|q1"),
+        ("q2", r"二季度|第二季度|二季报|q2"),
+        ("q3", r"三季度|第三季度|三季报|前三季度|1\s*[-—至]\s*9月|q3"),
+        ("q4", r"四季度|第四季度|四季报|q4"),
+        ("fy", r"(?<!半)年报|(?<!半)年度报告|(?<=\d)年度|全年|(?<![a-z])fy(?![a-z])"),
+    ):
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            periods.add(period)
+    return years, periods
+
+
+def _source_period_compatible(statement: Any, source_title: Any) -> bool:
+    """Reject future actuals, while allowing a later filing's comparatives.
+
+    A title is only a pre-screen; the source-body audit still has to locate the
+    exact financial fact and period. Later reports can legitimately reproduce
+    earlier figures, so a different title year alone is not a contradiction.
+    """
+
+    fact_years, fact_periods = _report_period_signature(statement)
+    source_years, source_periods = _report_period_signature(source_title)
+    if fact_years and source_years:
+        if min(fact_years) > max(source_years):
+            return False
+        if max(fact_years) < max(source_years):
+            return True
+    if fact_periods and source_periods:
+        period_end = {"q1": 3, "q2": 6, "h1": 6, "q3": 9, "q4": 12, "h2": 12, "fy": 12}
+        return min(period_end[value] for value in fact_periods) <= max(period_end[value] for value in source_periods)
+    return True
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _economic_category(packet: Mapping[str, Any], row: Mapping[str, Any]) -> str:
+    context = packet.get("company_context")
+    context = context if isinstance(context, Mapping) else {}
+    category = infer_economic_category(
+        supplied=row.get("economic_category"),
+        industry=row.get("industry") or context.get("industry"),
+    )
+    if category not in ECONOMIC_CATEGORIES:
+        raise ValueError(f"invalid inferred economic category for {row.get('code')}: {category}")
+    return category
+
+
+def _structured_fact_dimensions(bindings: list[dict[str, Any]]) -> tuple[set[str], int]:
+    dimensions: set[str] = set()
+    bound_count = 0
+    for binding in bindings:
+        if not _text(binding.get("source_url"), 1200).startswith("https://"):
+            continue
+        row_dimensions = _research_dimensions(
+            f"{binding.get('period', '')} {binding.get('metric', '')} {binding.get('value_text', '')}"
+        ) - {"valuation"}
+        if row_dimensions:
+            bound_count += 1
+            dimensions.update(row_dimensions)
+    return dimensions, bound_count
+
+
+def _scenario_value(raw: Mapping[str, Any], name: str) -> float | None:
+    scenarios = raw.get("scenarios")
+    item = scenarios.get(name) if isinstance(scenarios, Mapping) else None
+    if isinstance(item, Mapping):
+        return _finite_float(item.get("value_per_share") or item.get("fair_value") or item.get("value"))
+    if item not in (None, ""):
+        return _finite_float(item)
+    return _finite_float(raw.get(f"{name}_value_per_share") or raw.get(f"{name}_fair_value"))
+
+
+def _valuation_loop(
+    row: Mapping[str, Any],
+    *,
+    category: str,
+    market_as_of: str,
+    fact_dimensions: set[str],
+    bound_fact_count: int,
+) -> dict[str, Any]:
+    """Check the declared valuation evidence, never choose an investment action.
+
+    Scenario assumptions and the required return belong to the researcher.
+    A losing bear case is normal downside analysis, not an automatic veto.
+    """
+
+    raw = next(
+        (
+            value
+            for value in (row.get("valuation_loop"), row.get("valuation_analysis"), row.get("valuation"))
+            if isinstance(value, Mapping)
+        ),
+        {},
+    )
+    method = _text(raw.get("method"), 80).casefold()
+    as_of = _text(raw.get("as_of") or raw.get("valuation_as_of"), 10)
+    basis = _text(raw.get("basis") or raw.get("normalization_basis"), 1000)
+    snapshot = row.get("valuation_snapshot")
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    snapshot_price = _finite_float(snapshot.get("price_cny") or snapshot.get("current_price"))
+    current_price = _finite_float(raw.get("current_price"))
+    bear = _scenario_value(raw, "bear")
+    base = _scenario_value(raw, "base")
+    bull = _scenario_value(raw, "bull")
+    reasons: list[str] = []
+    if not method:
+        reasons.append("valuation_method_missing")
+    if as_of != market_as_of:
+        reasons.append("valuation_date_mismatch")
+    if not basis:
+        reasons.append("normalization_basis_missing")
+    if snapshot_price is None or snapshot_price <= 0 or current_price is None or current_price <= 0:
+        reasons.append("current_price_missing")
+    elif abs(snapshot_price - current_price) > max(0.01, snapshot_price * 0.001):
+        reasons.append("current_price_mismatch")
+    if any(value is None or value <= 0 for value in (bear, base, bull)):
+        reasons.append("scenario_values_missing")
+    elif not (bear <= base <= bull):
+        reasons.append("scenario_order_invalid")
+    if bound_fact_count < 2:
+        reasons.append("two_source_bound_facts_required")
+    return {
+        "closed": not reasons,
+        "economic_category": category,
+        "economic_category_basis": "model_research"
+        if row.get("economic_category") not in (None, "", "other")
+        else "legacy_industry_hint",
+        "method": method or None,
+        "as_of": as_of or None,
+        "current_price": current_price,
+        "bear_value_per_share": bear,
+        "base_value_per_share": base,
+        "bull_value_per_share": bull,
+        "basis": basis or None,
+        "structured_fact_dimensions": sorted(fact_dimensions),
+        "source_bound_fact_count": bound_fact_count,
+        "issues": reasons,
+    }
+
+
 def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     raw_sources = row.get("sources")
     if not isinstance(raw_sources, list) or len(raw_sources) < 2:
@@ -1573,15 +1756,8 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     fact_entries: list[dict[str, Any]] = []
     for fact in facts:
-        if isinstance(fact, Mapping):
-            statement = _sanitize_reason_text(
-                f"{_period_label(fact.get('period'))}：{_clean_fact_text(fact.get('fact'), 520)}",
-                600,
-            )
-            explicit_urls = _financial_fact_source_urls(fact, row)
-        else:
-            statement = _sanitize_reason_text(_clean_fact_text(fact), 600)
-            explicit_urls = []
+        statement = _display_fact_text(fact)
+        explicit_urls = _financial_fact_source_urls(fact, row) if isinstance(fact, Mapping) else []
         is_valuation_statement = bool(re.search(r"交易日|收盘价|现价|PE|PB|市值|估值", statement, flags=re.IGNORECASE))
         if is_valuation_statement:
             # Valuation is generated from the generation-bound market
@@ -1589,6 +1765,11 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             # searched financial fact.
             explicit_urls = []
         source_url = next((url for url in explicit_urls if url in sources_by_url), None)
+        if source_url is not None and not _source_period_compatible(statement, sources_by_url[source_url].get("title")):
+            raise ValueError(
+                f"financial fact period does not match source title: {row.get('code')}: "
+                f"{statement!r} -> {sources_by_url[source_url].get('title')!r}"
+            )
         if source_url is None and explicit_urls:
             # An explicit fact URL may not have been repeated in the top-level
             # list.  It was validated by _financial_fact_source_urls, so add
@@ -1609,6 +1790,7 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                         source,
                     )
                     for source in sources
+                    if _source_period_compatible(statement, source.get("title"))
                 ),
                 key=lambda item: (-item[0], item[1]),
             )
@@ -1694,7 +1876,13 @@ def _claims(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     return claims[:12], list(dict.fromkeys(used_urls))[:16]
 
 
-def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: str) -> dict[str, Any]:
+def _review(
+    packet: Mapping[str, Any],
+    row: Mapping[str, Any],
+    *,
+    market_as_of: str,
+    web_event_evidence: CompanyWebEvidence | None = None,
+) -> dict[str, Any]:
     code = _text(packet.get("security_code"), 16)
     if _text(row.get("code"), 16) != code:
         raise ValueError(f"Luna review identity mismatch: {code}")
@@ -1712,8 +1900,21 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     if decision == "do_not_recommend" and score >= 50:
         raise ValueError(f"do_not_recommend score must be <50 for {code}: {score}")
     research_as_of = _research_date(row, market_as_of)
-    claims, urls = _claims(row)
+    claims, _ = _claims(row)
     fact_bindings = _financial_fact_bindings(row)
+    category = _economic_category(packet, row)
+    fact_dimensions, bound_fact_count = _structured_fact_dimensions(fact_bindings)
+    valuation_loop = _valuation_loop(
+        row,
+        category=category,
+        market_as_of=market_as_of,
+        fact_dimensions=fact_dimensions,
+        bound_fact_count=bound_fact_count,
+    )
+    if decision == "recommend_buy" and not valuation_loop["closed"]:
+        raise ValueError(
+            f"recommend_buy needs completed valuation research for {code}: {','.join(valuation_loop['issues'])}"
+        )
     numeric_fact_repairs: list[dict[str, Any]] = []
 
     def repaired(value: Any, field: str) -> str:
@@ -1738,20 +1939,7 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         cleaned = _sanitize_reason_text(repaired(value, "risk_flags"), 240)
         if cleaned:
             risks.append(cleaned)
-    facts = []
-    for value in _financial_fact_items(row):
-        if isinstance(value, Mapping):
-            # Keep the numeric tail (value/change/unit) that many packet
-            # writers place after a short metric label.  Truncating at 200
-            # characters could remove the only unit and make an otherwise
-            # valid dated fact fail the research contract.
-            fact_text = _sanitize_reason_text(value.get("fact") or "", 520)
-            if fact_text:
-                facts.append(_public_fact_text(f"{_period_label(value.get('period'))}：{fact_text}"))
-        elif _text(value):
-            cleaned = _sanitize_reason_text(_clean_fact_text(value, 240), 240)
-            if cleaned:
-                facts.append(cleaned)
+    facts = [text for value in _financial_fact_items(row) if (text := _display_fact_text(value))]
     if not risks:
         raise ValueError(f"Luna review has no risk flags: {code}")
     if not facts:
@@ -1763,24 +1951,16 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         "observe": ("watchlist", "observe", "do_not_recommend_buy", "观察", "caution", "manual_review"),
         "do_not_recommend": ("avoid", "do_not_recommend", "do_not_recommend_buy", "不建议", "confirmed", "demote"),
     }[decision]
-    if decision == "recommend_buy":
-        supported_dimensions: set[str] = set()
-        for claim in claims:
-            if claim.get("support") == "supports":
-                supported_dimensions.update(_research_dimensions(claim.get("statement")))
-        if len(supported_dimensions) < 2:
-            for claim in claims:
-                if claim.get("support") == "supports":
-                    continue
-                dimensions = _research_dimensions(claim.get("statement"))
-                if dimensions - supported_dimensions:
-                    claim["support"] = "supports"
-                    supported_dimensions.update(dimensions)
-                    if len(supported_dimensions) >= 2:
-                        break
     summary = _sanitize_reason_text(repaired(row.get("summary"), "summary"), 1200)
+    summary = re.sub(
+        r"(?:[；;，,。]\s*)?独立结论(?:为|是|：|:)?\s*"
+        r"(?:recommend_buy|observe|do_not_recommend(?:_buy)?|priority_buy|watchlist|avoid)[。；;]?",
+        "",
+        summary,
+        flags=re.IGNORECASE,
+    ).strip(" ；;，,。")
     if decision_text_conflicts(action[0], summary):
-        summary = f"{facts[0]} 风险核验：{risks[0]} 独立结论：{action[3]}。"
+        raise ValueError(f"Luna decision conflicts with company explanation: {code}")
     market_year = int(market_as_of[:4])
     years = _date_years(row, market_year) or [market_year]
     latest_year = max(years)
@@ -1799,6 +1979,7 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     freshness = "current_or_recent" if latest_source_year >= int(market_as_of[:4]) - 1 else "historical"
     if freshness == "historical" and decision == "recommend_buy":
         raise ValueError(f"historical-only evidence cannot support recommend_buy: {code}")
+    web_event_verified = web_event_evidence is not None
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "security_code": code,
@@ -1812,7 +1993,8 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         "final_recommendation": action[2],
         "recommendation_label": action[3],
         "ai_independent": True,
-        "economic_category": "other",
+        "economic_category": category,
+        "valuation_loop": valuation_loop,
         "score_components": {
             "risk_adjusted_expected_return": score,
             "evidence_confidence": 85.0 if _evidence_grade(row) == "high" else 65.0,
@@ -1822,6 +2004,7 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
             "raw_score": score,
             "final_score": score,
             "quality_hard_block": False,
+            "valuation_loop_closed": valuation_loop["closed"],
         },
         "summary": summary,
         "key_strengths": strengths[:8],
@@ -1832,15 +2015,18 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         "claims": claims[:12],
         "model": MODEL,
         "effort": EFFORT,
-        "web_search_performed": True,
-        "web_search_verified": True,
-        "web_search_event_verified": True,
-        "web_search_claim_urls_verified": True,
-        "research_source_urls_verified": True,
-        "web_search_queries": list(
-            dict.fromkeys(_text(value, 240) for value in row.get("search_queries", []) if _text(value))
-        )[:16],
-        "web_search_verified_claim_urls": urls[:16],
+        "web_search_performed": web_event_verified,
+        "web_search_verified": False,
+        "web_search_event_verified": web_event_verified,
+        # The CLI event proves a search, not the returned document contents.
+        # Publication sets source flags only after the bound source audit.
+        "web_search_claim_urls_verified": False,
+        "research_source_urls_verified": False,
+        "web_search_queries": list(web_event_evidence.queries[:16]) if web_event_evidence else [],
+        "web_search_event_ids": list(web_event_evidence.event_ids[:32]) if web_event_evidence else [],
+        "web_search_event_log_sha256": list(web_event_evidence.log_sha256s[:16]) if web_event_evidence else [],
+        "web_search_thread_ids": list(web_event_evidence.thread_ids[:16]) if web_event_evidence else [],
+        "web_search_verified_claim_urls": [],
         "web_search_dropped_claim_url_count": 0,
         "codex_web_tool": True,
         "provider_native_search": False,
@@ -1848,7 +2034,11 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
         "freshness_status": freshness,
         "freshness_years": years[:12],
         "freshness_penalty": 0.0 if freshness == "current_or_recent" else 5.0,
-        "freshness_note": f"Luna Max 逐家公司直接 web__run 检索；研究日 {research_as_of}，估值快照日 {market_as_of} 分开记录。",
+        "freshness_note": (
+            f"Luna Max 逐家公司联网检索；研究日 {research_as_of}，估值快照日 {market_as_of} 分开记录。"
+            if web_event_verified
+            else f"研究日 {research_as_of}，估值快照日 {market_as_of} 分开记录；尚未绑定联网事件日志。"
+        ),
         "_candidate_type_keys": [
             _text(item.get("type_key"), 16)
             for item in packet.get("candidate_types", [])
@@ -1858,7 +2048,13 @@ def _review(packet: Mapping[str, Any], row: Mapping[str, Any], *, market_as_of: 
     }
 
 
-def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dict[str, int]:
+def convert(
+    input_path: Path,
+    shard_paths: list[Path],
+    output_path: Path,
+    *,
+    event_log_paths: list[Path] | None = None,
+) -> dict[str, int]:
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping) or not isinstance(payload.get("packets"), list):
         raise ValueError("input queue packets are missing")
@@ -1868,6 +2064,8 @@ def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dic
         if isinstance(packet, Mapping)
     }
     rows = _load_rows(shard_paths, expected_codes_by_index=expected_codes_by_index)
+    raw_packets = [packet for packet in payload["packets"] if isinstance(packet, Mapping)]
+    event_evidence = bind_codex_web_events(load_codex_web_events(event_log_paths or []), raw_packets)
     packets: list[dict[str, Any]] = []
     for expected_index, raw_packet in enumerate(payload["packets"]):
         if not isinstance(raw_packet, Mapping):
@@ -1879,7 +2077,12 @@ def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dic
         if row.get("index") != expected_index:
             raise ValueError(f"Luna review index mismatch for {code}: {row.get('index')} != {expected_index}")
         packet = dict(raw_packet)
-        review = _review(packet, row, market_as_of=_text(payload.get("market_as_of"), 10))
+        review = _review(
+            packet,
+            row,
+            market_as_of=_text(payload.get("market_as_of"), 10),
+            web_event_evidence=event_evidence[code],
+        )
         errors = validate_review(review, require_readable_reason=True)
         if errors:
             raise ValueError(f"invalid converted Luna review for {code}: {','.join(errors)}")
@@ -1916,7 +2119,9 @@ def convert(input_path: Path, shard_paths: list[Path], output_path: Path) -> dic
     return {
         "candidate_total": len(packets),
         "reviewed": len(rows),
-        "recommend_buy": sum(row.get("decision") == "recommend_buy" for row in rows.values()),
+        "recommend_buy": sum(
+            packet.get("ai_review", {}).get("final_category") == "recommend_buy" for packet in packets
+        ),
     }
 
 
@@ -1924,9 +2129,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--event-log", type=Path, action="append", required=True)
     parser.add_argument("shards", type=Path, nargs="+")
     args = parser.parse_args()
-    print(json.dumps(convert(args.input, args.shards, args.out), ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            convert(args.input, args.shards, args.out, event_log_paths=args.event_log),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

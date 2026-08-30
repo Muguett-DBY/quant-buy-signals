@@ -10,39 +10,6 @@ on:
       - main
     paths:
       - cloudflare/quant-dashboard/ai_screening_seed.json
-      - tools/ai_screening_contract.py
-      - tools/validate_ai_screening_public.py
-      - tools/calibrate_ai_screening_ranking.py
-      - tools/ai_screening_identity.py
-      - tools/audit_ai_screening_full.py
-      - tools/sanitize_ai_screening_identity.py
-      - tools/build_codex_luna_review.py
-      - tools/ai_company_research_knowledge.md
-      - tools/ai_screening_dual_channel_contract.py
-      - tools/publish_ai_screening.py
-      - tools/build_ai_screening.py
-      - tools/atomic_io.py
-      - tools/ai_screening_narrative.py
-      - tools/ai_screening_comparison.py
-      - tools/audit_ai_screening_sources.py
-      - tools/convert_luna_web_reviews.py
-      - tools/sanitize_codex_luna_reviews.py
-      - tests/test_ai_screening_contract.py
-      - tests/test_validate_ai_screening_public.py
-      - tests/test_convert_luna_web_reviews.py
-      - tests/test_ai_screening_release_contract.py
-      - tests/test_ai_screening_narrative.py
-      - tests/test_ai_screening_comparison.py
-      - tests/test_ai_screening_source_audit.py
-      - tests/test_calibrate_ai_screening_ranking.py
-      - tests/test_ai_screening_identity_audit.py
-      - tests/test_build_codex_luna_review.py
-      - tests/test_ai_screening_dual_channel_contract.py
-      - tests/test_sanitize_codex_luna_reviews.py
-      - tests/test_assemble_ai_screening_reviews.py
-      - tests/test_merge_ai_screening_reviews.py
-      - tests/test_atomic_io.py
-      - .github/workflows/publish-ai-screening.yml
 
 permissions:
   contents: read
@@ -115,7 +82,12 @@ jobs:
             tests/test_assemble_ai_screening_reviews.py \
             tests/test_merge_ai_screening_reviews.py \
             tests/test_atomic_io.py \
-            tests/test_website_ci.py -q
+            tests/test_ai_quantitative_facts.py \
+            tests/test_ai_screening_websearch_events.py \
+            tests/test_local_ai_review.py \
+            tests/test_shard_ai_screening_candidates.py \
+            tests/test_website_ci.py \
+            -q
           python -m pip check
 
       - name: Validate the seed against the live market generation
@@ -158,6 +130,8 @@ jobs:
             --expected-generation "${generation}" \
             --expected-market-as-of "${market_as_of}" \
             --expected-count "$(jq -er '.candidate_total' "${seed}")"
+          # Source retrieval belongs to research; publication only checks the
+          # current audit contract and exact claim bindings before R2 upload.
           jq -e '
             .review_mode == "codex_luna_web_review"
             and .full_coverage_final_recommendation == true
@@ -178,7 +152,7 @@ jobs:
             and .research_source_urls_verified_count == .candidate_total
             and .type_pair_research_source_urls_verified_count == .type_pair_candidate_total
             and .source_audit.available == true
-            and .source_audit.audit_contract_version == 3
+            and .source_audit.audit_contract_version == 4
             and .source_audit.audit_passed == true
             and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
             and (.source_audit.merged_sha256 | test("^[0-9a-f]{64}$"))
@@ -267,7 +241,7 @@ jobs:
               and .research_source_urls_verified_count == .candidate_total
               and .type_pair_research_source_urls_verified_count == .type_pair_candidate_total
               and .source_audit.available == true
-              and .source_audit.audit_contract_version == 3
+              and .source_audit.audit_contract_version == 4
               and .source_audit.audit_passed == true
               and (.source_audit.audit_sha256 | test("^[0-9a-f]{64}$"))
               and (.source_audit.merged_sha256 | test("^[0-9a-f]{64}$"))

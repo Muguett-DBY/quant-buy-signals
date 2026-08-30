@@ -15,9 +15,13 @@ from tools.convert_luna_web_reviews import (
     _repair_fact_unit_mentions,
     _review,
     _sanitize_reason_text,
+    _source_period_compatible,
+    _unit_factor,
     convert,
 )
+from tools.codex_web_events import CodexWebEvent, bind_codex_web_events, parse_codex_web_event_log
 from tools.ai_screening_contract import validate_review
+from tools.validate_ai_screening_public import _validate_published_financial_facts
 
 
 def _queue() -> dict:
@@ -36,6 +40,7 @@ def _queue() -> dict:
                 "type_keys": ["type1"],
                 "type_pair_count": 1,
                 "candidate_types": [{"type_key": "type1"}],
+                "company_context": {"industry": "食品饮料"},
             }
         ],
     }
@@ -52,8 +57,16 @@ def _row(score: int = 72, decision: str = "recommend_buy") -> dict:
         "buy_reasons": ["2026年一季度收入 120 亿元，经营现金流 18 亿元。"],
         "risks": ["行业需求波动可能压低利润。"],
         "financial_facts": [
-            {"period": "2026Q1", "fact": "营业收入 120 亿元，归母净利润 9 亿元。"},
-            {"period": "2025FY", "fact": "经营活动现金流 18 亿元，自由现金流 10 亿元。"},
+            {
+                "period": "2026Q1",
+                "fact": "营业收入 120 亿元，归母净利润 9 亿元。",
+                "source": "https://example.com/report",
+            },
+            {
+                "period": "2025FY",
+                "fact": "经营活动现金流 18 亿元，自由现金流 10 亿元。",
+                "source": "https://example.com/industry",
+            },
         ],
         "sources": [
             {
@@ -72,7 +85,41 @@ def _row(score: int = 72, decision: str = "recommend_buy") -> dict:
         "search_queries": ["600000 2026 一季报", "600000 行业竞争"],
         "research_as_of": "2026-08-26",
         "evidence_quality": "high",
+        "valuation_snapshot": {"as_of": "2026-08-25", "price_cny": 10.0},
+        "valuation_loop": {
+            "method": "normalized_earnings_multiple",
+            "as_of": "2026-08-25",
+            "current_price": 10.0,
+            "basis": "以近三年正常化每股收益和可比公司估值中位数交叉验证。",
+            "scenarios": {
+                "bear": {"value_per_share": 11.0},
+                "base": {"value_per_share": 13.0},
+                "bull": {"value_per_share": 15.0},
+            },
+        },
     }
+
+
+def _event_log(tmp_path, *, code: str = "600000", name: str = "测试公司", failed: bool = False):
+    path = tmp_path / f"events-{code}.jsonl"
+    event_id = f"exec-{code}"
+    events = [
+        {"type": "thread.started", "thread_id": f"thread-{code}"},
+        {"type": "turn.started"},
+        {"type": "item.started", "item": {"id": event_id, "type": "web_search", "action": {"type": "other"}}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": event_id,
+                "type": "web_search",
+                "query": f"{code} {name} 财报",
+                "action": {"type": "search", "queries": [f"{code} {name} 2026 财报"]},
+            },
+        },
+        {"type": "turn.failed" if failed else "turn.completed"},
+    ]
+    path.write_text("\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n", encoding="utf-8")
+    return path
 
 
 def test_sanitize_reason_text_removes_search_result_metadata() -> None:
@@ -84,6 +131,31 @@ def test_sanitize_reason_text_removes_search_result_metadata() -> None:
     assert "Published:" not in result
     assert "Crawled:" not in result
     assert "2026H1收入 37.27亿元" in result
+
+
+def test_converted_facts_retain_their_exact_source_bound_statements() -> None:
+    row = _row(score=62, decision="observe")
+    row["financial_facts"] = [
+        {
+            "period": "2026Q1",
+            "metric": "营业收入",
+            "value": 120,
+            "unit": "亿元",
+            "source_url": "https://example.com/report",
+        },
+        {
+            "period": "2025FY",
+            "metric": "经营现金流",
+            "value": 18,
+            "unit": "亿元",
+            "source_url": "https://example.com/industry",
+        },
+    ]
+    review = _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+
+    for fact in review["quantitative_facts"][:2]:
+        assert any(fact in binding.get("statements", []) for binding in review["financial_fact_bindings"])
+    _validate_published_financial_facts(review, code="600000")
 
 
 def test_change_text_does_not_add_percent_to_point_or_period_basis() -> None:
@@ -106,7 +178,7 @@ def test_convert_sets_generation_bound_luna_web_mode(tmp_path) -> None:
     input_path.write_text(json.dumps(_queue(), ensure_ascii=False), encoding="utf-8")
     shard_path.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
 
-    result = convert(input_path, [shard_path], output_path)
+    result = convert(input_path, [shard_path], output_path, event_log_paths=[_event_log(tmp_path)])
 
     assert result == {"candidate_total": 1, "reviewed": 1, "recommend_buy": 1}
     payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -115,8 +187,20 @@ def test_convert_sets_generation_bound_luna_web_mode(tmp_path) -> None:
     review = payload["packets"][0]["ai_review"]
     assert review["model"] == "codex-luna-max"
     assert review["web_search_event_verified"] is True
+    assert review["web_search_claim_urls_verified"] is False
+    assert review["research_source_urls_verified"] is False
+    assert review["web_search_verified"] is False
+    assert review["web_search_verified_claim_urls"] == []
+    assert review["web_search_queries"] == ["600000 测试公司 2026 财报"]
+    assert review["web_search_event_ids"] == ["exec-600000"]
+    assert len(review["web_search_event_log_sha256"]) == 1
+    assert review["web_search_thread_ids"] == ["thread-600000"]
     assert review["claims"][0]["source_ref"].startswith("https://")
-    assert [item["period"] for item in review["financial_fact_bindings"]] == ["2026Q1", "2025FY"]
+    assert [item["period"] for item in review["financial_fact_bindings"]] == [
+        "2026Q1",
+        "2025FY",
+        "2026-08-25",
+    ]
     assert validate_review(review, require_readable_reason=True) == []
 
 
@@ -128,7 +212,12 @@ def test_convert_rejects_buy_score_in_observe_band(tmp_path) -> None:
     shard_path.write_text(json.dumps(bad, ensure_ascii=False) + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="recommend_buy score"):
-        convert(input_path, [shard_path], tmp_path / "merged.json")
+        convert(
+            input_path,
+            [shard_path],
+            tmp_path / "merged.json",
+            event_log_paths=[_event_log(tmp_path)],
+        )
 
 
 def test_convert_rejects_duplicate_shard_index(tmp_path) -> None:
@@ -146,6 +235,71 @@ def test_convert_rejects_duplicate_shard_index(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="duplicate Luna review index"):
         convert(input_path, [shard_path], tmp_path / "merged.json")
+
+
+def test_convert_rejects_model_claim_without_real_event_log(tmp_path) -> None:
+    input_path = tmp_path / "input.json"
+    shard_path = tmp_path / "shard.jsonl"
+    input_path.write_text(json.dumps(_queue(), ensure_ascii=False), encoding="utf-8")
+    shard_path.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="successful Codex --json event log"):
+        convert(input_path, [shard_path], tmp_path / "merged.json")
+
+
+def test_convert_rejects_failed_codex_turn_even_when_row_claims_search(tmp_path) -> None:
+    input_path = tmp_path / "input.json"
+    shard_path = tmp_path / "shard.jsonl"
+    input_path.write_text(json.dumps(_queue(), ensure_ascii=False), encoding="utf-8")
+    shard_path.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="did not complete successfully"):
+        convert(
+            input_path,
+            [shard_path],
+            tmp_path / "merged.json",
+            event_log_paths=[_event_log(tmp_path, failed=True)],
+        )
+
+
+def test_convert_rejects_search_event_for_a_different_company(tmp_path) -> None:
+    input_path = tmp_path / "input.json"
+    shard_path = tmp_path / "shard.jsonl"
+    input_path.write_text(json.dumps(_queue(), ensure_ascii=False), encoding="utf-8")
+    shard_path.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no completed Codex web-search event matches company"):
+        convert(
+            input_path,
+            [shard_path],
+            tmp_path / "merged.json",
+            event_log_paths=[_event_log(tmp_path, code="000001", name="另一家公司")],
+        )
+
+
+def test_codex_event_parser_ignores_cli_warnings_but_requires_complete_pairs(tmp_path) -> None:
+    complete = _event_log(tmp_path)
+    complete.write_text(
+        "2026-08-30 WARN harmless CLI diagnostic\n" + complete.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    assert parse_codex_web_event_log(complete)[0].queries == ("600000 测试公司 2026 财报",)
+
+    broken = tmp_path / "broken-events.jsonl"
+    broken.write_text(
+        "\n".join(
+            json.dumps(value, ensure_ascii=False)
+            for value in (
+                {"type": "thread.started", "thread_id": "thread-broken"},
+                {"type": "item.started", "item": {"id": "exec-broken", "type": "web_search"}},
+                {"type": "turn.completed"},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="event pairs are incomplete"):
+        parse_codex_web_event_log(broken)
 
 
 def test_financial_fact_projection_preserves_period_dates_units_and_source_edges() -> None:
@@ -390,7 +544,7 @@ def test_repair_fact_unit_mentions_does_not_rewrite_percentages() -> None:
 
 
 def test_review_applies_fact_scale_repairs_to_summary_strengths_and_risks() -> None:
-    row = _row()
+    row = _row(score=60, decision="observe")
     row["summary"] = "2026年上半年收入372.68亿元。"
     row["buy_reasons"] = ["2026年上半年营业收入372.68亿元。"]
     row["risks"] = ["2026年上半年营业收入372.68亿元但仍需跟踪。"]
@@ -512,6 +666,7 @@ def test_fact_binding_keeps_prose_quote_as_text_and_replaces_stale_valuation() -
 
 def test_non_evidence_fact_rows_are_not_published_as_company_facts() -> None:
     row = _row()
+    row.pop("valuation_snapshot")
     row["financial_facts"] = [
         {
             "period": "2026-08-28",
@@ -535,3 +690,121 @@ def test_non_evidence_fact_rows_are_not_published_as_company_facts() -> None:
     assert all("量化事实" not in str(item) for item in facts)
     assert len(bindings) == 1
     assert bindings[0].get("metric") != "联网检索状态"
+
+
+def test_review_rejects_incomplete_buy_research_without_rewriting_decision() -> None:
+    row = _row()
+    row.pop("valuation_loop")
+
+    with pytest.raises(ValueError, match="needs completed valuation research"):
+        _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+    assert row["decision"] == "recommend_buy"
+    assert row["score"] == 72
+
+
+def test_review_allows_real_downside_without_automatic_downgrade() -> None:
+    row = _row()
+    row["valuation_loop"]["scenarios"]["bear"]["value_per_share"] = 7.0
+
+    review = _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+
+    assert review["economic_category"] == "compounder"
+    assert review["final_category"] == "recommend_buy"
+    assert review["buy_attractiveness_score"] == 72.0
+    assert review["valuation_loop"]["closed"] is True
+
+
+def test_review_preserves_valid_supplied_economic_category() -> None:
+    row = _row()
+    row["economic_category"] = "deep_value"
+    row["valuation_loop"]["method"] = "asset_value"
+
+    review = _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+
+    assert review["economic_category"] == "deep_value"
+    assert review["final_category"] == "recommend_buy"
+
+
+def test_review_rejects_invalid_supplied_economic_category() -> None:
+    row = _row()
+    row["economic_category"] = "generic"
+
+    with pytest.raises(ValueError, match="invalid economic category"):
+        _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+
+
+def test_claim_rejects_annual_report_used_for_later_half_year_fact() -> None:
+    row = _row()
+    row["financial_facts"][0] = {
+        "period": "2026H1",
+        "fact": "2026年上半年营业收入 120 亿元。",
+        "source": "https://example.com/report",
+    }
+    row["sources"][0]["title"] = "测试公司2025年年度报告"
+
+    with pytest.raises(ValueError, match="period does not match source title"):
+        _claims(row)
+
+
+def test_period_prescreen_allows_prior_comparatives_but_not_future_actuals() -> None:
+    assert _source_period_compatible("2025FY：营业收入100亿元", "测试公司2026年半年度报告")
+    assert not _source_period_compatible("2026FY：营业收入100亿元", "测试公司2026年半年度报告")
+    assert not _source_period_compatible("2026H1：营业收入100亿元", "测试公司2026年第一季度报告")
+
+
+def test_do_not_recommend_summary_cannot_claim_current_observe() -> None:
+    row = _row(score=44, decision="do_not_recommend")
+    row["summary"] = "当前结论：维持观察。收入承压，现金流尚未改善。"
+
+    with pytest.raises(ValueError, match="decision conflicts with company explanation"):
+        _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+
+
+@pytest.mark.parametrize("suffix", ["billion_cny", "cny_billion", "billion_rmb", "rmb_billion"])
+def test_billion_currency_suffix_retains_its_billion_scale(suffix) -> None:
+    row = {"financial_facts": [{"period": "2025FY", "metric": f"revenue_{suffix}", "value": 2, "unit": "元"}]}
+    binding = _financial_fact_bindings(row)[0]
+    assert binding["unit"] == "十亿元"
+    assert _unit_factor(binding["unit"]) == 1_000_000_000
+    assert _inferred_fact_unit("revenue_yi_cny") == "亿元"
+
+
+def test_filing_title_is_never_promoted_to_numeric_buy_support() -> None:
+    row = _row()
+    for fact in row["financial_facts"]:
+        fact["source"] = "https://example.com/report"
+        fact["period"] = "2026Q1"
+    row["sources"][1]["title"] = "2025年行业产量20万吨公告"
+    row["sources"][1]["key_facts"] = ""
+    review = _review(_queue()["packets"][0], row, market_as_of="2026-08-25")
+    title_claims = [claim for claim in review["claims"] if claim["fact_id"].startswith("luna-source-")]
+    assert title_claims
+    assert all(claim["support"] == "corroborates" for claim in title_claims)
+
+
+@pytest.mark.parametrize("query", ["1600000 完全不同公司", "另一测试公司 财报", "测试公司集团 财报"])
+def test_search_identity_does_not_match_partial_code_or_company_name(query) -> None:
+    event = CodexWebEvent(event_id="search-1", queries=(query,), log_sha256="a" * 64, thread_id="thread-1")
+    with pytest.raises(ValueError, match="no completed Codex web-search event matches"):
+        bind_codex_web_events([event], [{"security_code": "600000", "name": "测试公司"}])
+
+
+@pytest.mark.parametrize("query", ["SH600000 财报", "600000.SH 财报", "测试公司 2026 财报", "测试公司2026 财报"])
+def test_search_identity_accepts_exchange_codes_and_exact_company_name(query) -> None:
+    event = CodexWebEvent(event_id="search-1", queries=(query,), log_sha256="a" * 64, thread_id="thread-1")
+    assert bind_codex_web_events([event], [{"security_code": "600000", "name": "测试公司"}])["600000"].queries == (
+        query,
+    )
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "若未来现金流改善，再转为观察。收入仍然承压。",
+        "当前不建议买入，若未来现金流改善，再转为观察。",
+    ],
+)
+def test_avoid_explanation_can_define_future_watchlist_conditions(summary) -> None:
+    row = _row(score=44, decision="do_not_recommend")
+    row["summary"] = summary
+    assert _review(_queue()["packets"][0], row, market_as_of="2026-08-25")["final_category"] == "do_not_recommend"

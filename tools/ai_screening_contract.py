@@ -105,6 +105,82 @@ ECONOMIC_CATEGORIES = frozenset(
         "other",
     }
 )
+
+_ECONOMIC_INDUSTRY_GROUPS: dict[str, frozenset[str]] = {
+    "quality_equity": frozenset({"银行", "证券", "保险", "房地产"}),
+    "cyclical": frozenset(
+        {
+            "化工",
+            "工业机械",
+            "建材",
+            "有色金属",
+            "钢铁",
+            "煤炭",
+            "石油天然气",
+            "汽车整车",
+            "汽车零部件",
+            "工程机械",
+            "电气设备",
+            "交通运输",
+            "新能源",
+            "旅游酒店",
+            "建筑装饰",
+            "商贸零售",
+        }
+    ),
+    "growth": frozenset(
+        {
+            "半导体",
+            "电子元器件",
+            "软件互联网",
+            "通信设备",
+            "传媒游戏",
+            "医疗服务",
+            "化学制药",
+            "生物制药",
+            "中药",
+            "专业技术服务",
+        }
+    ),
+    "compounder": frozenset(
+        {
+            "食品饮料",
+            "家电",
+            "纺织服装",
+            "轻工制造",
+            "酿酒行业",
+            "农林牧渔",
+            "公用事业",
+        }
+    ),
+}
+
+
+def infer_economic_category(
+    *,
+    supplied: Any = None,
+    industry: Any = None,
+) -> str:
+    """Keep the researcher's category, with a labelled legacy industry fallback.
+
+    This taxonomy never sets a rating or a required valuation method. Unknown
+    businesses stay unknown; a candidate rule is not a company classification.
+    """
+
+    declared = str(supplied or "").strip().casefold()
+    if declared and declared not in ECONOMIC_CATEGORIES:
+        raise ValueError(f"invalid economic category: {supplied!r}")
+    if declared and declared != "other":
+        return declared
+
+    industry_text = str(industry or "").strip()
+    for category, names in _ECONOMIC_INDUSTRY_GROUPS.items():
+        if industry_text in names:
+            return category
+
+    return "other"
+
+
 SCORE_COMPONENT_FIELDS = (
     "risk_adjusted_expected_return",
     "evidence_confidence",
@@ -340,10 +416,18 @@ _CURRENT_NON_BUY_RE = re.compile(
     r"(?:观察|观望|等待)(?:为主|清单)?(?:$|[，,])"
     r"|(?:当前|现在|现阶段|本轮|目前)?(?:继续)?持币观望"
 )
+_CURRENT_OBSERVE_CONCLUSION_RE = re.compile(
+    r"(?:当前|现在|现阶段|本轮|综合判断|独立)?(?:的)?结论(?:为|是|：|:)?(?:暂时|暂列|维持)?(?:观察|观望)"
+    r"|(?:当前|现在|现阶段|本轮|目前)?(?:仍|暂时|继续)?(?:维持|暂列|列为|归入)?(?:观察|观望)(?:而非|为主|清单|$|[，,。；;])"
+)
+_CURRENT_AVOID_CONCLUSION_RE = re.compile(
+    r"(?:当前|现在|现阶段|本轮|综合判断|独立)?(?:的)?结论(?:为|是|：|:)?(?:明确)?(?:不建议|不推荐|回避|避免)"
+    r"|(?:当前|现在|现阶段|本轮)?明确(?:不建议|不推荐)(?:买入|建仓|配置)?"
+)
 _QUALIFIED_DECISION_PREFIX_RE = re.compile(
     r"(?:若|如果|待|一旦|除非|只有|前提(?:是|为)|条件(?:是|为)|"
     r"回落至?|跌至|低于|高于|改善后|确认后|触发后|满足后|兑现后|企稳后|完成后|之后|后再|再考虑)"
-    r"[^，,。！？!?；;]{0,24}[，,]?$"
+    r"[^，,。！？!?；;]{0,24}(?:[，,](?:则|才|可以|可|再|将|届时|便|就|考虑|转为|列为|调整为|升级为|降级为){0,4})?$"
 )
 _NEGATED_BUY_PREFIX_RE = re.compile(
     r"(?:不|暂不|并不|并非|未|尚未|不能|不可|不构成|不足以|难以|避免|谨慎)"
@@ -697,7 +781,15 @@ def _has_unqualified_decision(text: str, pattern: re.Pattern[str], *, buy_decisi
 def _decision_text_conflicts(action: str, text: str) -> bool:
     if action == "priority_buy":
         return _has_unqualified_decision(text, _CURRENT_NON_BUY_RE, buy_decision=False)
-    if action in {"watchlist", "avoid", "insufficient_evidence"}:
+    if action == "watchlist":
+        return _has_unqualified_decision(text, _CURRENT_BUY_RE, buy_decision=True) or _has_unqualified_decision(
+            text, _CURRENT_AVOID_CONCLUSION_RE, buy_decision=False
+        )
+    if action == "avoid":
+        return _has_unqualified_decision(text, _CURRENT_BUY_RE, buy_decision=True) or _has_unqualified_decision(
+            text, _CURRENT_OBSERVE_CONCLUSION_RE, buy_decision=False
+        )
+    if action == "insufficient_evidence":
         return _has_unqualified_decision(text, _CURRENT_BUY_RE, buy_decision=True)
     return False
 
@@ -1641,6 +1733,35 @@ def validate_review(
             or len(set(values)) != len(values)
         ):
             errors.append(field)
+    for field, limit in (("web_search_event_ids", 32), ("web_search_thread_ids", 16)):
+        if field not in review:
+            continue
+        values = review.get(field)
+        if (
+            not isinstance(values, list)
+            or len(values) > limit
+            or any(not isinstance(value, str) or not value.strip() for value in values)
+            or len(set(values)) != len(values)
+        ):
+            errors.append(field)
+    if "web_search_event_log_sha256" in review:
+        values = review.get("web_search_event_log_sha256")
+        if (
+            not isinstance(values, list)
+            or len(values) > 16
+            or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in values)
+            or len(set(values)) != len(values)
+        ):
+            errors.append("web_search_event_log_sha256")
+    if review.get("web_search_event_verified") is True and str(review.get("model") or "") == CODEX_LUNA_REVIEW_MODEL:
+        for field in (
+            "web_search_queries",
+            "web_search_event_ids",
+            "web_search_event_log_sha256",
+            "web_search_thread_ids",
+        ):
+            if not review.get(field):
+                errors.append(f"{field}_required")
     if "web_search_dropped_claim_url_count" in review:
         dropped = review.get("web_search_dropped_claim_url_count")
         if isinstance(dropped, bool) or not isinstance(dropped, int) or dropped < 0:

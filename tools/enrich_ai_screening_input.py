@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.ai_screening_contract import candidate_identity_sha256
-from tools.build_ai_screening import _relevant_rules, _rule_chunks
+from tools.build_ai_screening import _knowledge_base_manifest, _rule_chunks, _rules_for_types
 
 
 def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, Any]:
@@ -21,6 +21,7 @@ def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, An
     if not isinstance(payload, dict) or not isinstance(payload.get("packets"), list):
         raise ValueError("AI screening input packets are missing")
     chunks = _rule_chunks(rules_root)
+    knowledge_base_hashes = _knowledge_base_manifest(rules_root)
     source_hashes: dict[str, str] = {}
     for packet in payload["packets"]:
         if not isinstance(packet, dict):
@@ -28,7 +29,10 @@ def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, An
         type_key = str(packet.get("type_key") or "")
         if type_key not in {f"type{i}" for i in range(1, 8)}:
             raise ValueError(f"invalid candidate type: {type_key}")
-        packet["rule_context"] = _relevant_rules(chunks, type_key)
+        type_keys = packet.get("type_keys") or [type_key]
+        if not isinstance(type_keys, list):
+            raise ValueError("candidate type keys must be a list")
+        packet["rule_context"] = _rules_for_types(chunks, type_keys)
         if not packet["rule_context"]:
             raise ValueError(f"no knowledge fragments selected for {type_key}")
         for item in packet["rule_context"]:
@@ -40,6 +44,8 @@ def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, An
     payload["rules_root"] = str(rules_root)
     payload["rule_file_count"] = len(source_hashes)
     payload["rule_source_sha256"] = dict(sorted(source_hashes.items()))
+    payload["knowledge_base_file_count"] = len(knowledge_base_hashes)
+    payload["knowledge_base_source_sha256"] = knowledge_base_hashes
     identity_digest = candidate_identity_sha256(payload["packets"])
     declared_identity_digest = str(payload.get("candidate_identity_sha256") or "")
     if declared_identity_digest and declared_identity_digest != identity_digest:
@@ -61,6 +67,10 @@ def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, An
         "methodology_version": payload.get("methodology_version"),
         "candidate_count": payload.get("candidate_count", len(payload["packets"])),
         "candidate_total": payload.get("candidate_total", len(payload["packets"])),
+        "type_pair_candidate_count": payload.get("type_pair_candidate_count"),
+        "type_pair_candidate_total": payload.get("type_pair_candidate_total"),
+        "type_pair_candidate_identity_sha256": payload.get("type_pair_candidate_identity_sha256"),
+        "index_contract": payload.get("index_contract"),
         "candidate_offset": payload.get("candidate_offset", 0),
         "candidate_identity_sha256": payload["candidate_identity_sha256"],
         "candidate_universe_identity_sha256": payload.get("candidate_universe_identity_sha256"),
@@ -69,6 +79,8 @@ def enrich(input_path: Path, rules_root: Path, output_dir: Path) -> dict[str, An
         "full_coverage_final_recommendation": payload.get("full_coverage_final_recommendation", False),
         "rule_file_count": len(source_hashes),
         "rule_source_sha256": dict(sorted(source_hashes.items())),
+        "knowledge_base_file_count": len(knowledge_base_hashes),
+        "knowledge_base_source_sha256": knowledge_base_hashes,
         "input_sha256": hashlib.sha256(input_bytes).hexdigest(),
     }
     (output_dir / "ai-screening-manifest.json").write_text(

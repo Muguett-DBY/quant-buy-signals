@@ -297,7 +297,7 @@ def test_source_audit_projection_detects_text_tampering_with_unchanged_url(
     original_report = source_audit.audit(original_path, tmp_path / "original-audit.json", workers=1)
     tampered_report = source_audit.audit(tampered_path, tmp_path / "tampered-audit.json", workers=1)
 
-    assert original_report["audit_contract_version"] == 3
+    assert original_report["audit_contract_version"] == 4
     assert original_report["audit_passed"] is True
     assert tampered_report["audit_passed"] is True
     assert original_report["canonical_urls"] == tampered_report["canonical_urls"] == [url]
@@ -347,7 +347,7 @@ def test_source_audit_rejects_aastocks_old_article_relabelled_as_2026(tmp_path, 
 
     report = source_audit.audit(merged, tmp_path / "audit.json", workers=1)
 
-    assert report["audit_contract_version"] == 3
+    assert report["audit_contract_version"] == 4
     assert report["audit_passed"] is False
     assert report["semantic_claim_count"] == 1
     assert report["semantic_passed_count"] == 0
@@ -396,6 +396,101 @@ def test_source_audit_matches_financial_facts_across_statement_units() -> None:
         claim=claim,
         finding={},
     )
+
+
+@pytest.mark.parametrize(
+    ("statement", "body"),
+    [
+        ("2026H1收入18亿元、净利润3亿元", "2026H1收入18亿元、净利润2亿元"),
+        ("2026H1毛利率18%", "2026H1 PE18倍"),
+        ("2026H1净利润18亿元", "2026H1净利润-18亿元"),
+        ("2026H1收入18亿元", "2026H1收入118亿元"),
+        ("2026H1收入123456元", "2026H1收入654321元"),
+        ("2026H1收入18亿元", "2026H1收入18元"),
+        ("2026H1收入18元", "2026H1每股收益18元/股"),
+        ("2026H1毛利率18%", "2026H1毛利率增长18个百分点"),
+        ("2026H1收入18.01亿元", "2026H1收入18.04亿元"),
+        ("2025年度营业收入120亿元", "600000 测试公司 2025年度 经营现金流120亿元"),
+        ("2025年度营业收入120万元", "600000 测试公司 2025年度 单位：亿元 营业收入120"),
+        ("2025年度营业收入120亿元，经营现金流18亿元", "2025年度营业收入18亿元，经营现金流120亿元"),
+        ("2026H1归母净利润18亿元", "2026H1净利润18亿元，归母净利润12亿元"),
+        ("2026H1营业收入18亿元", "2026H1海外收入18亿元，营业收入100亿元"),
+        ("2026H1营业收入18亿元", "2026H1营业收入18"),
+    ],
+)
+def test_source_audit_does_not_pass_coincident_numbers(statement, body) -> None:
+    claim = {"statement": statement}
+    assert not source_audit._structured_number_match(body, source_audit._claim_numbers(claim, {}), claim=claim)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "2025年度 单位：万元\n营业收入 1200000\n经营现金流 180000",
+        "2025年度 单位：亿元\n营业收入 120\n经营现金流 18",
+        "2025年度 单位：元\n营业收入\n12,000,000,000\n经营活动产生的现金流量净额\n1,800,000,000",
+    ],
+)
+def test_source_audit_uses_the_table_unit_and_correct_metric_row(body) -> None:
+    claim = {"statement": "2025年度营业收入120亿元，经营现金流18亿元"}
+    assert source_audit._structured_number_match(body, source_audit._claim_numbers(claim, {}), claim=claim)
+
+
+def test_html_table_cells_cannot_concatenate_into_a_different_amount() -> None:
+    body = (
+        "<p>600000 测试公司 2025年度 单位：亿元</p><table>"
+        "<tr><td>营业收入</td><td>120</td><td>18</td></tr>"
+        "<tr><td>经营现金流</td><td>30</td></tr></table>"
+    ).encode()
+    arguments = {"security_code": "600000", "name": "测试公司", "report_period": "2025年度", "finding": {}}
+    assert (
+        source_audit._html_semantic_issues(
+            body, "text/html", claim={"statement": "2025年度营业收入120亿元"}, **arguments
+        )
+        == []
+    )
+    assert source_audit._html_semantic_issues(
+        body, "text/html", claim={"statement": "2025年度营业收入12018亿元"}, **arguments
+    )
+
+
+def test_source_audit_checks_claim_numbers_not_unrelated_finding() -> None:
+    claim = {"statement": "2026H1净利润18亿元"}
+    finding = {"finding": "2026H1营业收入100亿元"}
+    assert source_audit._claim_numbers(claim, finding) == {"18"}
+    assert not source_audit._structured_number_match(
+        "2026H1营业收入100亿元，净利润16亿元",
+        source_audit._claim_numbers(claim, finding),
+        claim=claim,
+        finding=finding,
+    )
+
+
+def test_source_audit_allows_only_the_quoted_rounding_precision() -> None:
+    claim = {"statement": "2026H1营业收入18.00亿元，净利润2.31亿元"}
+    assert source_audit._structured_number_match(
+        "2026H1营业收入1,800,010,000元，净利润231,003,000元",
+        source_audit._claim_numbers(claim, {}),
+        claim=claim,
+    )
+
+
+def test_claim_numbers_omit_dates_and_code_but_keep_six_digit_amounts() -> None:
+    claim = {"statement": "甲公司（603444）2026H1在2026-08-14披露，收入123456元，利润2000万元"}
+    assert source_audit._claim_numbers(claim, {}) == {"123456", "2000"}
+
+
+def test_structured_source_field_cannot_rescue_a_wrong_claim_number() -> None:
+    issues = source_audit._structured_source_issues(
+        b'{"SECURITY_CODE":"600000","REPORT_DATE":"2026-06-30","REVENUE":120}',
+        "application/json",
+        url="https://reports.example/data?columns=REVENUE",
+        security_code="600000",
+        name="",
+        claim={"statement": "2026H1 REVENUE 999"},
+        finding={},
+    )
+    assert issues and "number" in issues[0]
 
 
 def test_source_audit_rejects_claim_finding_url_mismatch(tmp_path, monkeypatch) -> None:
@@ -506,7 +601,7 @@ def test_source_audit_accepts_json_fact_provenance_with_identity_and_fact_gate(t
     payload["packets"][0]["ai_review"] = {
         "claims": [
             {
-                "statement": "600585 2026-06-30 营业收入 120",
+                "statement": "600585 2026-06-30 营业收入 12000000000元",
                 "source_ref": url,
                 "fact_id": "latest_income",
             }
@@ -549,6 +644,83 @@ def test_structured_source_gate_rejects_same_year_wrong_report_period() -> None:
     )
 
     assert any("report period" in issue for issue in issues)
+
+
+def test_source_gate_rejects_same_company_and_number_from_wrong_reporting_period() -> None:
+    claim = {
+        "statement": "2026H1营业收入82.78亿元，同比增长18.19%",
+        "source_context": "山推股份2025年年度报告",
+    }
+    pdf_issues = source_audit._pdf_text_semantic_issues(
+        "000680 山推股份 2025年年度报告 营业收入82.78亿元，同比增长18.19%",
+        security_code="000680",
+        name="山推股份",
+        claim=claim,
+        finding={},
+    )
+    html_issues = source_audit._html_semantic_issues(
+        "<title>山推股份2025年年度报告</title><p>000680 营业收入82.78亿元，同比增长18.19%</p>".encode(),
+        "text/html; charset=utf-8",
+        security_code="000680",
+        name="山推股份",
+        report_period=None,
+        claim=claim,
+        finding={},
+    )
+
+    assert any("2025-12-31" in issue and "2026-06-30" in issue for issue in pdf_issues)
+    assert any("2025-12-31" in issue and "2026-06-30" in issue for issue in html_issues)
+
+
+def test_period_gate_ignores_publication_date_and_supports_fy_prefix() -> None:
+    assert source_audit._specific_period_end("2026年半年度报告（披露日期 2026-08-25）") == date(2026, 6, 30)
+    assert source_audit._specific_period_end("2025FY") == date(2025, 12, 31)
+    tokens = source_audit._specific_period_tokens(
+        {"statement": "2026H1营业收入82.78亿元"},
+        {"title": "2026年半年度报告（披露日期 2026-08-25）"},
+    )
+    assert "20260825" not in tokens
+    assert "2026h1" in tokens
+
+
+def test_period_gate_allows_newer_filing_to_prove_an_earlier_comparative_fact() -> None:
+    claim = {"statement": "2025年度营业收入82.78亿元"}
+    finding = {"title": "2026年半年度报告（披露日期 2026-08-25）"}
+    assert source_audit._source_context_period_issue(claim, finding) is None
+    assert (
+        source_audit._pdf_text_semantic_issues(
+            "000680 山推股份 2026年半年度报告 2025年12月31日 营业收入82.78亿元",
+            security_code="000680",
+            name="山推股份",
+            claim=claim,
+            finding=finding,
+        )
+        == []
+    )
+
+
+def test_period_gate_does_not_treat_publication_date_as_report_period() -> None:
+    issues = source_audit._pdf_text_semantic_issues(
+        "000680 山推股份 披露日期 2026-08-25 营业收入82.78亿元",
+        security_code="000680",
+        name="山推股份",
+        claim={"statement": "2026H1营业收入82.78亿元"},
+        finding={},
+    )
+
+    assert issues == ["PDF text does not match the claimed report period"]
+
+
+def test_pdf_gate_requires_period_and_number_instead_of_either_one() -> None:
+    issues = source_audit._pdf_text_semantic_issues(
+        "000680 山推股份 2025年年度报告 营业收入82.78亿元，同比增长18.19%",
+        security_code="000680",
+        name="山推股份",
+        claim={"statement": "2026H1营业收入82.78亿元，同比增长18.19%"},
+        finding={},
+    )
+
+    assert issues == ["PDF text does not match the claimed report period"]
 
 
 def test_source_audit_rejects_cited_finding_without_url_in_strict_publish(tmp_path, monkeypatch) -> None:
@@ -730,6 +902,25 @@ def test_source_audit_rejects_parseable_pdf_with_wrong_company_identity(tmp_path
 def test_pdf_identity_accepts_short_name_used_in_legal_issuer_name() -> None:
     text = "成都超纯应用材料股份有限公司 证券简称：超纯应材 2025 年度报告"
     assert source_audit._pdf_company_identity_matches(text, "301717", "超纯应材")
+
+
+@pytest.mark.parametrize("text", ["证券代码 1600000", "营业收入 60000000元", "报告编号20266000001"])
+def test_source_identity_does_not_use_a_fragment_of_a_larger_number(text) -> None:
+    assert not source_audit._pdf_company_identity_matches(text, "600000", "")
+    assert not source_audit._security_code_in_text(text, "600000")
+
+
+@pytest.mark.parametrize("path", ["600/000/report.pdf", "20266000001.pdf"])
+def test_official_source_url_must_contain_a_complete_issuer_code(path) -> None:
+    issues = source_audit._pdf_text_semantic_issues(
+        "2025年度营业收入120亿元",
+        security_code="600000",
+        name="",
+        source_url=f"https://www.sse.com.cn/disclosure/{path}",
+        claim={"statement": "2025年度营业收入120亿元"},
+        finding={},
+    )
+    assert issues == ["PDF text does not match company code or normalized company name"]
 
 
 def test_industry_pdf_claim_does_not_require_issuer_identity() -> None:
@@ -919,7 +1110,7 @@ def test_source_audit_reports_company_coverage_without_global_count_substitution
             "content_type": "text/html",
             "official_market_domain": False,
             "_body": (
-                b"<p>600000 2026H1 18\xe4\xbf\x84\xe5\x85\x83</p>"
+                "<p>600000 2026H1 现金流18亿元</p>".encode("utf-8")
                 if url == good_url
                 else b"<title>404 Not Found</title><p>000001</p>"
             ),
@@ -1166,7 +1357,7 @@ def test_source_audit_records_http_403_as_blocked_without_body_verification(tmp_
     assert report["results"][0]["body_retrieved"] is False
 
 
-def test_source_audit_cli_exits_nonzero_when_any_source_failed(tmp_path, monkeypatch) -> None:
+def test_source_audit_cli_exits_nonzero_and_lists_affected_companies(tmp_path, monkeypatch, capsys) -> None:
     merged = tmp_path / "merged.json"
     output = tmp_path / "audit.json"
     merged.write_text(json.dumps(_single_claim_payload("https://reports.example/missing")), encoding="utf-8")
@@ -1180,6 +1371,7 @@ def test_source_audit_cli_exits_nonzero_when_any_source_failed(tmp_path, monkeyp
             "failed": 1,
             "invalid": 0,
             "audit_passed": False,
+            "company_coverage": [{"security_code": "000680", "name": "山推股份", "status": "failed"}],
         },
     )
     monkeypatch.setattr(
@@ -1189,6 +1381,8 @@ def test_source_audit_cli_exits_nonzero_when_any_source_failed(tmp_path, monkeyp
     )
 
     assert source_audit.main() == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["affected_companies"] == [{"security_code": "000680", "name": "山推股份", "status": "failed"}]
 
 
 def test_source_audit_deduplicates_urls_and_keeps_pair_references(tmp_path, monkeypatch) -> None:
@@ -1361,6 +1555,7 @@ def test_publish_rejects_merged_file_changed_after_source_audit(tmp_path) -> Non
         ("snapshot_generation", "other", "generation does not match"),
         ("market_as_of", "2026-08-20", "market_as_of does not match"),
         ("audit_contract_version", 1, "contract version is obsolete"),
+        ("audit_contract_version", 3, "contract version is obsolete"),
         ("projection_sha256", "0" * 64, "semantic projection does not match"),
         ("projection_company_count", 1, "semantic projection counts"),
         ("projection_claim_count", 1, "semantic projection counts"),

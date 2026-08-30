@@ -15,7 +15,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.audit_ai_screening_sources import public_claim_statement, source_semantic_projection_sha256
+from tools.audit_ai_screening_sources import (
+    AUDIT_CONTRACT_VERSION,
+    public_claim_statement,
+    source_semantic_projection_sha256,
+)
 from tools.ai_screening_comparison import build_day_over_day
 from tools.ai_source_urls import (
     canonical_urls,
@@ -51,7 +55,7 @@ from tools.ai_screening_narrative import build_human_explanation
 
 ARTIFACT_SCHEMA_VERSION = 2
 ARTIFACT_KIND = "ai_screening_overlay"
-SOURCE_AUDIT_CONTRACT_VERSION = 3
+SOURCE_AUDIT_CONTRACT_VERSION = AUDIT_CONTRACT_VERSION
 MAX_PUBLIC_ARTIFACT_BYTES = 32 * 1024 * 1024
 RANKING_VERSION = "ai-buy-attractiveness-v9-score-first-action-banded"
 _DETERMINISTIC_FIELDS = (
@@ -919,6 +923,12 @@ def _public_review(
         "web_search_event_verified": review.get("web_search_event_verified") is True,
         "web_search_claim_urls_verified": review.get("web_search_claim_urls_verified") is True,
         "research_source_urls_verified": review.get("research_source_urls_verified") is True,
+        "web_search_queries": [_text(value, 240) for value in review.get("web_search_queries", [])[:16]],
+        "web_search_event_ids": [_text(value, 160) for value in review.get("web_search_event_ids", [])[:32]],
+        "web_search_event_log_sha256": [
+            _text(value, 64) for value in review.get("web_search_event_log_sha256", [])[:16]
+        ],
+        "web_search_thread_ids": [_text(value, 160) for value in review.get("web_search_thread_ids", [])[:16]],
         "web_search_query_count": len(review.get("web_search_queries") or []),
         "web_search_verified_claim_url_count": len(review.get("web_search_verified_claim_urls") or []),
         "web_search_dropped_claim_url_count": int(review.get("web_search_dropped_claim_url_count", 0) or 0),
@@ -1176,6 +1186,31 @@ def build_artifact(
         raise ValueError("external full-coverage artifact requires a bound source audit")
     if full_coverage and review_mode == "opencode_mixed_review" and source_audit_path is None:
         raise ValueError("mixed full-coverage artifact requires a bound source audit")
+    merged_projection_sha256, merged_projection_counts = source_semantic_projection_sha256(source)
+    source_audit: dict[str, Any] = {"available": False}
+    if source_audit_path:
+        expected_urls, expected_companies = _source_audit_expectations(source)
+        source_audit = _validated_source_audit(
+            source_audit_path,
+            merged_sha256=merged_sha256,
+            generation=generation,
+            market_as_of=market_as_of,
+            required_claim_count=(
+                sum(isinstance(packet.get("ai_review"), Mapping) for packet in packets if isinstance(packet, Mapping))
+                if review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE
+                else 0
+            ),
+            expected_urls=expected_urls,
+            expected_companies=expected_companies,
+            expected_bindings=_source_audit_bindings(source),
+            expected_projection_sha256=merged_projection_sha256,
+            expected_projection_counts=merged_projection_counts,
+            strict=full_coverage,
+        )
+    source_verification = _source_verification_metadata(
+        source_audit, {str(packet.get("security_code")) for packet in packets if isinstance(packet, Mapping)}
+    )
+    verified_companies = source_verification[0] if source_verification else {}
     for packet in packets:
         if not isinstance(packet, Mapping):
             raise ValueError("candidate packet must be an object")
@@ -1202,6 +1237,17 @@ def build_artifact(
         review_for_validation.setdefault("schema_version", REVIEW_SCHEMA_VERSION)
         review_for_validation.setdefault("security_code", code)
         review_for_validation.setdefault("type_key", type_key)
+        if review_mode == "codex_luna_web_review":
+            source_passed = verified_companies.get(code, {}).get("status") == "pass"
+            search_and_source_passed = source_passed and review_for_validation.get("web_search_event_verified") is True
+            review_for_validation["research_source_urls_verified"] = source_passed
+            review_for_validation["web_search_claim_urls_verified"] = search_and_source_passed
+            review_for_validation["web_search_verified"] = search_and_source_passed
+            review_for_validation["web_search_verified_claim_urls"] = (
+                sorted({url for claim in review.get("claims", []) for url in claim_source_urls(claim)})[:16]
+                if search_and_source_passed
+                else []
+            )
         if review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE:
             snapshot_errors = valuation_snapshot_errors(
                 review_for_validation,
@@ -1391,34 +1437,11 @@ def build_artifact(
     )
     for rank, packet in enumerate(public_packets, 1):
         packet["ai_rank"] = rank
-    merged_projection_sha256, merged_projection_counts = source_semantic_projection_sha256(source)
     public_projection_sha256, public_projection_counts = source_semantic_projection_sha256(
         {"review_mode": review_mode, "packets": public_packets}
     )
     if public_projection_sha256 != merged_projection_sha256 or public_projection_counts != merged_projection_counts:
         raise ValueError("public source semantic projection does not match the merged AI screening file")
-    source_audit: dict[str, Any] = {"available": False}
-    if source_audit_path:
-        expected_urls, expected_companies = _source_audit_expectations(source)
-        expected_bindings = _source_audit_bindings(source)
-        strict_source_audit = full_coverage
-        source_audit = _validated_source_audit(
-            source_audit_path,
-            merged_sha256=merged_sha256,
-            generation=generation,
-            market_as_of=market_as_of,
-            required_claim_count=(len(public_packets) if review_mode == NATIVE_COMPANY_RESEARCH_REVIEW_MODE else 0),
-            expected_urls=expected_urls,
-            expected_companies=expected_companies,
-            expected_bindings=expected_bindings,
-            expected_projection_sha256=merged_projection_sha256,
-            expected_projection_counts=merged_projection_counts,
-            strict=strict_source_audit,
-        )
-    source_verification = _source_verification_metadata(
-        source_audit,
-        {str(packet["security_code"]) for packet in public_packets},
-    )
     if source_verification is not None:
         coverage_by_code, affected_company_count = source_verification
         status_counts = Counter(
@@ -1464,6 +1487,8 @@ def build_artifact(
     source_audit["type_pair_web_search_dropped_claim_urls"] = pair_web_search_dropped_claim_url_count
     rule_file_count = source.get("rule_file_count")
     rule_source_sha256 = source.get("rule_source_sha256")
+    knowledge_base_file_count = source.get("knowledge_base_file_count")
+    knowledge_base_source_sha256 = source.get("knowledge_base_source_sha256")
     rules_root = _text(source.get("rules_root"), 240)
     if rule_file_count is not None and (not isinstance(rule_file_count, int) or rule_file_count < 1):
         raise ValueError("AI screening knowledge-base file count is invalid")
@@ -1474,6 +1499,24 @@ def build_artifact(
             or len(rule_source_sha256) != rule_file_count
         ):
             raise ValueError("AI screening knowledge-base manifest is incomplete")
+    if knowledge_base_file_count is not None or knowledge_base_source_sha256 is not None:
+        if (
+            not isinstance(knowledge_base_file_count, int)
+            or knowledge_base_file_count < 1
+            or not isinstance(knowledge_base_source_sha256, Mapping)
+            or len(knowledge_base_source_sha256) != knowledge_base_file_count
+        ):
+            raise ValueError("AI screening full knowledge-base manifest is incomplete")
+    excerpt_manifest = (
+        dict(sorted((str(key), str(value)) for key, value in rule_source_sha256.items()))
+        if isinstance(rule_source_sha256, Mapping)
+        else None
+    )
+    library_manifest = (
+        dict(sorted((str(key), str(value)) for key, value in knowledge_base_source_sha256.items()))
+        if isinstance(knowledge_base_source_sha256, Mapping)
+        else excerpt_manifest
+    )
     artifact = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "review_schema_version": REVIEW_SCHEMA_VERSION,
@@ -1519,11 +1562,11 @@ def build_artifact(
         ),
         "knowledge_base_provenance": {
             "root": rules_root or None,
-            "file_count": rule_file_count if isinstance(rule_file_count, int) else None,
-            "source_sha256": dict(sorted((str(key), str(value)) for key, value in rule_source_sha256.items()))
-            if isinstance(rule_source_sha256, Mapping)
-            else None,
-            "role": "research framework and risk checklist; never a substitute for company facts",
+            "file_count": knowledge_base_file_count or rule_file_count,
+            "source_sha256": library_manifest,
+            "injected_excerpt_file_count": rule_file_count if isinstance(rule_file_count, int) else None,
+            "injected_excerpt_source_sha256": excerpt_manifest,
+            "role": "reference-library inventory and selected research excerpts; never a substitute for company facts",
             "candidate_context_excerpts": bool(
                 any(isinstance(packet.get("rule_context"), list) for packet in packets if isinstance(packet, Mapping))
             ),

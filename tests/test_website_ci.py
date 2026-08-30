@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -112,7 +113,6 @@ def _bash_executable() -> str | None:
                 [candidate, "--version"],
                 check=False,
                 capture_output=True,
-                text=True,
                 timeout=10,
             )
         except OSError:
@@ -123,33 +123,36 @@ def _bash_executable() -> str | None:
 
 
 @pytest.mark.parametrize(
-    ("paths", "web", "data"),
+    ("paths", "web", "data", "ai"),
     [
-        (["cloudflare/quant-dashboard/pages_worker.js"], True, False),
-        (["cloudflare-cron/worker.js"], True, False),
-        (["cloudflare/quant-dashboard/market_signing_public_key.txt"], True, True),
-        (["tests/test_cloudflare_dashboard.py"], True, False),
-        (["tools/ai_screening_narrative.py"], False, False),
-        (["tests/test_ai_screening_comparison.py"], False, False),
-        (["cloudflare/quant-dashboard/ai_screening_seed.json"], False, False),
-        ([".github/workflows/publish-ai-screening.yml"], False, False),
-        (["tools/atomic_io.py"], False, False),
-        ([".github/workflows/tests.yml"], True, True),
-        ([".github/scripts/classify_website_ci.py"], True, True),
-        (["data/fetcher.py"], False, True),
-        (["engine/buy_screener.py"], False, True),
-        (["tools/evidence_bundle.py"], False, True),
-        (["unexpected/new-area.txt"], False, True),
-        (["desktop/launcher.py", "android/app/build.gradle.kts"], False, False),
-        (["app.py", "ui/buy_types_page.py", "tests/test_streamlit_app.py"], False, False),
-        (["cloudflare/quant-dashboard/pages_worker.js", "data/fetcher.py"], True, True),
+        (["cloudflare/quant-dashboard/pages_worker.js"], True, False, False),
+        (["cloudflare-cron/worker.js"], True, False, False),
+        (["cloudflare/quant-dashboard/market_signing_public_key.txt"], True, True, True),
+        (["tests/test_cloudflare_dashboard.py"], True, False, False),
+        (["tools/ai_screening_narrative.py"], False, False, True),
+        (["tests/test_ai_screening_comparison.py"], False, False, True),
+        (["cloudflare/quant-dashboard/ai_screening_seed.json"], False, False, True),
+        ([".github/workflows/publish-ai-screening.yml"], False, False, True),
+        (["tools/atomic_io.py"], False, True, False),
+        (["tests/test_atomic_io.py"], False, True, False),
+        ([".github/workflows/tests.yml"], True, True, True),
+        ([".github/scripts/classify_website_ci.py"], True, True, True),
+        (["data/fetcher.py"], False, True, False),
+        (["engine/buy_screener.py"], False, True, False),
+        (["tools/evidence_bundle.py"], False, True, False),
+        (["unexpected/new-area.txt"], False, True, False),
+        (["desktop/launcher.py", "android/app/build.gradle.kts"], False, False, False),
+        (["app.py", "ui/buy_types_page.py", "tests/test_streamlit_app.py"], False, False, False),
+        (["cloudflare/quant-dashboard/pages_worker.js", "data/fetcher.py"], True, True, False),
+        (["tools/ai_screening_contract.py", "data/fetcher.py"], False, True, True),
     ],
 )
-def test_website_change_classifier_is_fast_for_web_and_fail_closed_everywhere_else(paths, web, data):
+def test_website_change_classifier_is_fast_for_web_and_fail_closed_everywhere_else(paths, web, data, ai):
     gates = _classifier_module().classify_paths(paths)
 
     assert gates.web is web
     assert gates.data is data
+    assert gates.ai is ai
 
 
 def test_website_change_classifier_rejects_an_empty_diff():
@@ -157,12 +160,21 @@ def test_website_change_classifier_rejects_an_empty_diff():
         _classifier_module().classify_paths([])
 
 
-def test_ai_only_classifier_and_publication_trigger_stay_in_lockstep():
+def test_website_change_classifier_emits_the_ai_gate_and_all_mode_covers_every_gate(tmp_path):
+    module = _classifier_module()
+    output = tmp_path / "github-output"
+
+    assert module.main(["--all", "--github-output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8").splitlines() == ["web=true", "data=true", "ai=true"]
+
+
+def test_ai_publication_only_runs_automatically_for_a_new_release_artifact():
     publish = _workflow(PUBLISH_AI_WORKFLOW)
     trigger_paths = set(_trigger(publish)["push"]["paths"])
-    classifier_paths = set(_classifier_module().AI_SCREENING_FILES)
 
-    assert trigger_paths == classifier_paths
+    assert trigger_paths == {"cloudflare/quant-dashboard/ai_screening_seed.json"}
+    assert trigger_paths < set(_classifier_module().AI_SCREENING_FILES)
+    assert "workflow_dispatch" in _trigger(publish)
 
 
 def test_refresh_worker_uses_the_website_owned_market_signing_key():
@@ -181,11 +193,12 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     assert trigger["push"]["branches"] == ["**"]
     assert "pull_request" in trigger
     assert "workflow_dispatch" in trigger
-    assert set(jobs) == {"classify", "hygiene", "web", "data", "website-ci"}
+    assert set(jobs) == {"classify", "hygiene", "web", "data", "ai", "website-ci"}
     assert jobs["web"]["if"] == "needs.classify.outputs.web == 'true'"
     assert jobs["data"]["if"] == "needs.classify.outputs.data == 'true'"
+    assert jobs["ai"]["if"] == "needs.classify.outputs.ai == 'true'"
     assert jobs["website-ci"]["if"] == "always()"
-    assert jobs["website-ci"]["needs"] == ["classify", "hygiene", "web", "data"]
+    assert jobs["website-ci"]["needs"] == ["classify", "hygiene", "web", "data", "ai"]
 
     classifier = next(step for step in jobs["classify"]["steps"] if step.get("name") == "Select required website gates")
     assert "git diff --no-renames --name-only" in classifier["run"]
@@ -211,9 +224,14 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     assert '"${HYGIENE_RESULT}" != "success"' in aggregate["run"]
     assert '"${WEB_REQUIRED}" != "true" && "${WEB_REQUIRED}" != "false"' in aggregate["run"]
     assert '"${DATA_REQUIRED}" != "true" && "${DATA_REQUIRED}" != "false"' in aggregate["run"]
+    assert aggregate["env"]["AI_REQUIRED"] == "${{ needs.classify.outputs.ai }}"
+    assert aggregate["env"]["AI_RESULT"] == "${{ needs.ai.result }}"
+    assert '"${AI_REQUIRED}" != "true" && "${AI_REQUIRED}" != "false"' in aggregate["run"]
+    assert '"${AI_REQUIRED}" == "true" && "${AI_RESULT}" != "success"' in aggregate["run"]
 
     data_tests = next(step for step in jobs["data"]["steps"] if step.get("name") == "Website Python tests")
-    assert '-m "not desktop and not android and not parked_client"' in data_tests["run"]
+    assert '-m "not desktop and not android and not parked_client and not ai_release"' in data_tests["run"]
+    assert "-k " not in data_tests["run"]
     for parked_test in (
         "test_android_release.py",
         "test_build_desktop.py",
@@ -229,6 +247,35 @@ def test_tests_workflow_has_one_authoritative_path_aware_website_gate():
     assert "Verify tracked desktop source archive" not in all_workflow_text
     assert "setup-java" not in all_workflow_text
     assert "gradlew" not in all_workflow_text
+    ai_tests = next(step for step in jobs["ai"]["steps"] if step.get("name") == "AI unit and contract tests")
+    assert "tests/test_ai_screening_contract.py" in ai_tests["run"]
+    assert "tests/test_validate_ai_screening_public.py" in ai_tests["run"]
+    assert '-m "not ai_release"' in ai_tests["run"]
+    assert "-k " not in ai_tests["run"]
+    assert "continue-on-error" not in all_workflow_text
+
+
+def test_ai_code_and_publication_gates_share_tests_but_only_publication_checks_the_seed():
+    jobs = _workflow(TEST_WORKFLOW)["jobs"]
+    ai_run = next(step["run"] for step in jobs["ai"]["steps"] if step.get("name") == "AI unit and contract tests")
+    publish_steps = _workflow(PUBLISH_AI_WORKFLOW)["jobs"]["publish"]["steps"]
+    publish_run = next(step["run"] for step in publish_steps if step.get("name") == "Run the AI-only contract gate")
+    tests = set(re.findall(r"tests/test_[a-z_]+\.py", ai_run))
+    assert tests == set(re.findall(r"tests/test_[a-z_]+\.py", publish_run))
+    assert set(path for path in _classifier_module().AI_SCREENING_FILES if path.startswith("tests/")) <= tests
+    assert '-m "not ai_release"' in ai_run
+    assert "ai_release" not in publish_run and "-k " not in publish_run
+    tree = ast.parse((ROOT / "tests/test_validate_ai_screening_public.py").read_text(encoding="utf-8"))
+    marked = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(ast.unparse(decorator) == "pytest.mark.ai_release" for decorator in node.decorator_list)
+    }
+    assert marked == {
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef) and "checked_in_seed" in node.name
+    }
+    assert len(marked) == 2
 
 
 def test_web_gate_is_small_and_deployment_reuses_the_exact_tests_revision():
@@ -365,7 +412,7 @@ def test_ai_overlay_release_skips_stale_generation_without_publishing_it():
     assert "does not match the live market generation" not in publish_text
     assert "generation-bound" in publish_text
     for strict_gate in (
-        ".source_audit.audit_contract_version == 3",
+        ".source_audit.audit_contract_version == 4",
         ".source_audit.audit_passed == true",
         ".source_audit.semantic_failed_count == 0",
         ".source_audit.semantic_unverified_count == 0",
@@ -378,6 +425,12 @@ def test_ai_overlay_release_skips_stale_generation_without_publishing_it():
     ):
         assert strict_gate in preflight["run"]
         assert strict_gate in verify["run"]
+    assert "python -m tools.audit_ai_screening_sources" not in preflight["run"]
+    assert publish["jobs"]["publish"]["timeout-minutes"] == 10
+    publish_tests = next(step for step in publish_steps if step.get("name") == "Run the AI-only contract gate")
+    assert "ai_release" not in publish_tests["run"]
+    assert "-k " not in publish_tests["run"]
+    assert "continue-on-error" not in publish_text
 
 
 def test_worker_configs_enable_current_compatibility_and_observability():
@@ -410,9 +463,8 @@ def test_cloudflare_deploy_bash_blocks_parse_with_bash(workflow_path: Path):
     for block in blocks:
         result = subprocess.run(
             [executable, "--noprofile", "--norc", "-n"],
-            input=block,
+            input=block.encode("utf-8"),
             capture_output=True,
-            text=True,
             timeout=30,
         )
         assert result.returncode == 0, f"bash syntax failure:\n{block}\n{result.stderr}"

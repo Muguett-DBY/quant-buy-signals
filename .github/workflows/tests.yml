@@ -23,6 +23,7 @@ jobs:
     outputs:
       web: ${{ steps.paths.outputs.web }}
       data: ${{ steps.paths.outputs.data }}
+      ai: ${{ steps.paths.outputs.ai }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -48,14 +49,14 @@ jobs:
             # Main has no server-side required checks.  A narrow push may use
             # the same path-aware gates as a PR only after the immediately
             # preceding revision has a successful tests run.  If that proof is
-            # unavailable, fail closed into both gates so a small follow-up
+            # unavailable, run all gates so a small follow-up
             # cannot hide an older data-integrity failure.
             if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
               echo "Invalid head revision: ${HEAD_SHA}" >&2
               exit 1
             fi
             if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || [[ "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] || ! git cat-file -e "${BASE_SHA}^{commit}"; then
-              echo "No bounded main base revision is available; running both website gates."
+              echo "No bounded main base revision is available; running all website gates."
               python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
               exit 0
             fi
@@ -70,7 +71,7 @@ jobs:
               sleep $((attempt * 2))
             done
             if [[ "${previous_tests_ok}" != "true" ]]; then
-              echo "Previous main revision has no confirmed successful tests run; running both website gates."
+              echo "Previous main revision has no confirmed successful tests run; running all website gates."
               python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
               exit 0
             fi
@@ -86,7 +87,7 @@ jobs:
             exit 1
           fi
           if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]] || [[ "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] || ! git cat-file -e "${BASE_SHA}^{commit}"; then
-            echo "No bounded base revision is available; running both website gates."
+            echo "No bounded base revision is available; running all website gates."
             python .github/scripts/classify_website_ci.py --all --github-output "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -187,6 +188,59 @@ jobs:
           node --check cloudflare/quant-dashboard/refresh_worker.js
           python -m pytest tests/test_cloudflare_dashboard.py tests/test_website_ci.py -q
 
+  ai:
+    name: Fast AI screening contract gate
+    needs: classify
+    if: needs.classify.outputs.ai == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Install AI contract dependencies
+        run: python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3 pymupdf==1.28.0 ruff==0.15.21
+
+      - name: AI unit and contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the checked-in, generation-bound seed out of the fixture
+          # lane. Publication owns the release-artifact checks.
+          python -m pytest \
+            tests/test_ai_screening_contract.py \
+            tests/test_ai_screening_narrative.py \
+            tests/test_ai_screening_comparison.py \
+            tests/test_validate_ai_screening_public.py \
+            tests/test_convert_luna_web_reviews.py \
+            tests/test_ai_screening_release_contract.py \
+            tests/test_ai_screening_source_audit.py \
+            tests/test_ai_screening_identity_audit.py \
+            tests/test_calibrate_ai_screening_ranking.py \
+            tests/test_build_codex_luna_review.py \
+            tests/test_ai_screening_dual_channel_contract.py \
+            tests/test_sanitize_codex_luna_reviews.py \
+            tests/test_assemble_ai_screening_reviews.py \
+            tests/test_merge_ai_screening_reviews.py \
+            tests/test_atomic_io.py \
+            tests/test_ai_quantitative_facts.py \
+            tests/test_ai_screening_websearch_events.py \
+            tests/test_local_ai_review.py \
+            tests/test_shard_ai_screening_candidates.py \
+            tests/test_website_ci.py \
+            -m "not ai_release" -q
+          python -m ruff check .github/scripts/classify_website_ci.py tools tests
+          python -m ruff format --check .github/scripts/classify_website_ci.py tools tests
+          python -m pip check
+
   data:
     name: Website data-integrity gate
     needs: classify
@@ -225,7 +279,7 @@ jobs:
           --ignore=tests/test_desktop_updater.py
           --ignore=tests/test_streamlit_app.py
           --ignore=tests/test_ui.py
-          -m "not desktop and not android and not parked_client"
+          -m "not desktop and not android and not parked_client and not ai_release"
           --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Lint and formatting checks
@@ -241,7 +295,7 @@ jobs:
 
   website-ci:
     name: Website release gate
-    needs: [classify, hygiene, web, data]
+    needs: [classify, hygiene, web, data, ai]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -254,6 +308,8 @@ jobs:
           WEB_RESULT: ${{ needs.web.result }}
           DATA_REQUIRED: ${{ needs.classify.outputs.data }}
           DATA_RESULT: ${{ needs.data.result }}
+          AI_REQUIRED: ${{ needs.classify.outputs.ai }}
+          AI_RESULT: ${{ needs.ai.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -273,12 +329,20 @@ jobs:
             echo "Data-integrity gate selection is invalid: ${DATA_REQUIRED:-missing}." >&2
             exit 1
           fi
+          if [[ "${AI_REQUIRED}" != "true" && "${AI_REQUIRED}" != "false" ]]; then
+            echo "AI screening gate selection is invalid: ${AI_REQUIRED:-missing}." >&2
+            exit 1
+          fi
           if [[ "${WEB_REQUIRED}" == "true" && "${WEB_RESULT}" != "success" ]]; then
             echo "The selected Cloudflare web gate finished as ${WEB_RESULT}." >&2
             exit 1
           fi
           if [[ "${DATA_REQUIRED}" == "true" && "${DATA_RESULT}" != "success" ]]; then
             echo "The selected website data-integrity gate finished as ${DATA_RESULT}." >&2
+            exit 1
+          fi
+          if [[ "${AI_REQUIRED}" == "true" && "${AI_RESULT}" != "success" ]]; then
+            echo "The selected AI screening gate finished as ${AI_RESULT}." >&2
             exit 1
           fi
           echo "All selected website gates passed."

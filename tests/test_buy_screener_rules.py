@@ -4388,8 +4388,15 @@ class TestTypeRules(unittest.TestCase):
         rejected = bs.score_type5_counter_cyclical(flat_company, benchmarks())
 
         self.assertFalse(rejected[0])
-        self.assertEqual(rejected[3]["_status"], bs.STATUS_NOT_APPLICABLE)
-        self.assertIn("未得到公司毛利率与利润周期互证", rejected[3]["_scope"])
+        self.assertEqual(rejected[3]["_status"], bs.STATUS_INSUFFICIENT_EVIDENCE)
+        self.assertIn("未得到公司毛利率与利润周期互证", rejected[3]["_missing"])
+        without_proxy = {
+            key: value for key, value in flat_company.items() if not key.startswith("type5_cycle_attribute_score")
+        }
+        self.assertEqual(
+            bs.score_type5_counter_cyclical(without_proxy, benchmarks())[3]["_status"], rejected[3]["_status"]
+        )
+        self.assertNotIn("_scope", rejected[3])
 
         corroborated = complete_type5_bottom_metrics(
             industry="CHEMICAL",

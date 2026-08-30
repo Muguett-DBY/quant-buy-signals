@@ -494,7 +494,7 @@ const catalogue = {
 const catalogueRaw = Buffer.from(JSON.stringify(catalogue));
 const catalogueBytes = gzipSync(catalogueRaw);
 const manifest = {
-  provenance: { methodology_version: "patch7-seven-types-buy-gate-2026-08-30-v6" },
+  provenance: { methodology_version: "patch7-seven-types-buy-gate-2026-08-31-v7" },
   catalogue: {
     filename: "catalog.json.gz",
     size: catalogueBytes.byteLength,
@@ -525,7 +525,7 @@ const env = {
   },
 };
 const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
-const canonicalUrl = legacyUrl + "&view_methodology=patch7-seven-types-buy-gate-2026-08-30-v6&index_contract=4";
+const canonicalUrl = legacyUrl + "&view_methodology=patch7-seven-types-buy-gate-2026-08-31-v7&index_contract=4";
 cached.set(legacyUrl, new Response(JSON.stringify({ index_contract: 1, generation_id: "0123456789abcdef", summary: { company_count: 1 }, companies: [] })));
 const response = await worker.fetch(
   new Request(canonicalUrl),
@@ -534,7 +534,7 @@ const response = await worker.fetch(
 assert.equal(response.status, 200);
 const payload = await response.json();
 assert.equal(payload.index_contract, 4);
-assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-30-v6");
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-31-v7");
 assert.equal(payload.methodology_current, true);
 assert.equal(payload.summary.company_count, 8);
 assert.equal(payload.summary.evidence_gap_company_count, 4);
@@ -1390,7 +1390,7 @@ def test_dashboard_uses_plain_language_version_and_exposes_only_traceable_detail
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert 'const METHODOLOGY_LABEL="七类量化买入方法+补丁7总闸门（2026年8月）"' in source
-    assert 'const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-30-v6"' in source
+    assert 'const METHODOLOGY_VERSION="patch7-seven-types-buy-gate-2026-08-31-v7"' in source
     assert '" · 量化口径："+METHODOLOGY_LABEL' in source
     assert '" · 量化口径："+METHODOLOGY_VERSION' not in source
     assert '.replace("__QUANT_METHODOLOGY_LABEL__",METHODOLOGY_LABEL)' in source
@@ -1441,7 +1441,7 @@ assert.equal(response.status, 200);
 const payload = await response.json();
 
 assert.equal(payload.schema_version, 2);
-assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-30-v6");
+assert.equal(payload.methodology_version, "patch7-seven-types-buy-gate-2026-08-31-v7");
 assert.equal(payload.decision_domain, "new_buy_or_add");
 assert.equal(payload.qualify_threshold, 7);
 assert.equal(payload.patch7_total_gate.version, "2026-08-04");
@@ -2455,7 +2455,7 @@ assert.equal(response.status, 200);
     const codexProjection = await sourceSemanticProjectionDigest(codexLuna);
     codexLuna.source_audit = {
       available: true,
-      audit_contract_version: 3,
+      audit_contract_version: 4,
       audit_passed: true,
       audit_sha256: "a".repeat(64),
       merged_sha256: "b".repeat(64),
@@ -2479,6 +2479,9 @@ assert.equal(response.status, 200);
       company_coverage: [{ security_code: "600339", status: "pass", semantic_claim_count: codexProjection.projection_claim_count, semantic_passed_count: codexProjection.projection_claim_count, semantic_failed_count: 0, semantic_unverified_count: 0 }],
     };
     assert.equal(await statusForArtifact(codexLuna), 200);
+    const legacyNumberAudit = structuredClone(codexLuna);
+    legacyNumberAudit.source_audit.audit_contract_version = 3;
+    assert.equal(await statusForArtifact(legacyNumberAudit), 404);
     const codexWarningRelease = structuredClone(codexLuna);
     Object.assign(codexWarningRelease.source_audit, { audit_passed: false, failed: 1, ok: 0, network_warnings_allowed: true, release_status: "passed_with_source_access_warnings" });
     assert.equal(await statusForArtifact(codexWarningRelease), 404);
@@ -2494,7 +2497,7 @@ assert.equal(response.status, 200);
     companyResearch.type_pair_web_search_claim_urls_verified_count = 0;
     companyResearch.research_source_urls_verified_count = 1;
     companyResearch.type_pair_research_source_urls_verified_count = 1;
-    companyResearch.source_audit = { available: true, audit_contract_version: 3, audit_passed: true, audit_sha256: "c".repeat(64), merged_sha256: "b".repeat(64), invalid_claim_url_count: 0, checked: 1, ok: 1, failed: 0, blocked: 0, invalid: 0, claim_count: 3, semantic_claim_count: 3, semantic_passed_count: 3, semantic_failed_count: 0, semantic_unverified_count: 0, canonical_urls: ["https://example.test/financial-api", "https://example.test/financial-api#cashflow", "https://example.test/financial-api#valuation"], source_bindings: [
+    companyResearch.source_audit = { available: true, audit_contract_version: 4, audit_passed: true, audit_sha256: "c".repeat(64), merged_sha256: "b".repeat(64), invalid_claim_url_count: 0, checked: 1, ok: 1, failed: 0, blocked: 0, invalid: 0, claim_count: 3, semantic_claim_count: 3, semantic_passed_count: 3, semantic_failed_count: 0, semantic_unverified_count: 0, canonical_urls: ["https://example.test/financial-api", "https://example.test/financial-api#cashflow", "https://example.test/financial-api#valuation"], source_bindings: [
       { security_code: "600339", name: "", type_key: "type1", claim_index: 0, search_finding_id: "search-business", url: "https://example.test/financial-api", kind: "claim" },
       { security_code: "600339", name: "", type_key: "type1", claim_index: 1, search_finding_id: "", url: "https://example.test/financial-api#cashflow", kind: "claim" },
       { security_code: "600339", name: "", type_key: "type1", claim_index: 2, search_finding_id: "", url: "https://example.test/financial-api#valuation", kind: "claim" },

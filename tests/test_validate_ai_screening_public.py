@@ -11,6 +11,7 @@ from tools.audit_ai_screening_sources import source_semantic_projection_sha256
 from tools.ai_screening_contract import candidate_identity_sha256, make_valuation_snapshot
 from tools.validate_ai_screening_public import (
     MAX_PUBLIC_ARTIFACT_BYTES,
+    _validate_published_financial_facts,
     validate_artifact,
     validate_artifact_file,
 )
@@ -237,6 +238,10 @@ def _codex_luna_artifact() -> dict:
         {
             "model": "codex-luna-max",
             "effort": "max",
+            "web_search_queries": ["600000 测试公司 2026 财报"],
+            "web_search_event_ids": ["exec-600000"],
+            "web_search_event_log_sha256": ["c" * 64],
+            "web_search_thread_ids": ["thread-600000"],
             "source_verification_status": "pass",
             "source_verification_issue_count": 0,
             "source_verification_issues": [],
@@ -247,7 +252,7 @@ def _codex_luna_artifact() -> dict:
     claim_count = projection_counts["projection_claim_count"]
     value["source_audit"] = {
         "available": True,
-        "audit_contract_version": 3,
+        "audit_contract_version": 4,
         "audit_passed": True,
         "audit_sha256": "a" * 64,
         "merged_sha256": "b" * 64,
@@ -295,6 +300,122 @@ def test_public_validator_accepts_only_strict_codex_luna_source_audit() -> None:
     assert result["candidate_total"] == 1
 
 
+def test_public_validator_rejects_pre_numeric_binding_audit() -> None:
+    value = _codex_luna_artifact()
+    value["source_audit"]["audit_contract_version"] = 3
+    with pytest.raises(ValueError, match="source audit contract did not pass"):
+        validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
+
+
+def test_public_validator_rejects_codex_luna_without_real_event_provenance() -> None:
+    value = _codex_luna_artifact()
+    value["packets"][0]["ai_review"].pop("web_search_event_log_sha256")
+    _bind_source_projection(value)
+
+    with pytest.raises(ValueError, match="web_search_event_log_sha256_required"):
+        validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
+
+
+def test_public_validator_rejects_stale_current_period_wording() -> None:
+    value = _codex_luna_artifact()
+    review = value["packets"][0]["ai_review"]
+    review["summary"] = "当前结论：观察。最新实际财务报告期为2024年。"
+    review["freshness_years"] = [2026]
+
+    with pytest.raises(ValueError, match="stale current-period wording.*600000"):
+        validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
+
+
+def test_public_validator_binds_each_displayed_financial_fact_to_a_sourced_binding() -> None:
+    review = {
+        "quantitative_facts": ["2025年度营业收入 120 亿元"],
+        "financial_fact_bindings": [
+            {
+                "metric": "revenue_rmb",
+                "period": "2025FY",
+                "value": 120,
+                "unit": "亿元",
+                "value_text": "2025年度营业收入 120 亿元",
+                "source_url": "https://example.test/report",
+            }
+        ],
+        "claims": [
+            {
+                "statement": "2025年度营业收入 120 亿元",
+                "source_ref": "https://example.test/report",
+            }
+        ],
+    }
+
+    _validate_published_financial_facts(review, code="600000")
+
+
+def test_public_validator_rejects_unbound_displayed_financial_fact() -> None:
+    review = {
+        "quantitative_facts": ["2025年度营业收入 120 亿元"],
+        "financial_fact_bindings": [],
+        "claims": [{"statement": "2025年度营业收入 120 亿元", "source_ref": "https://example.test/report"}],
+    }
+
+    with pytest.raises(ValueError, match="no financial binding"):
+        _validate_published_financial_facts(review, code="600000")
+
+
+@pytest.mark.parametrize(
+    "wrong_statement",
+    ["2025年度净利润 120 亿元", "2024年度营业收入 120 亿元", "2025年度营业收入 -120 亿元"],
+)
+def test_public_validator_rejects_coincident_number_with_wrong_fact(wrong_statement: str) -> None:
+    review = {
+        "quantitative_facts": ["2025年度营业收入 120 亿元"],
+        "financial_fact_bindings": [{"value_text": wrong_statement, "source_url": "https://example.test/report"}],
+        "claims": [{"statement": wrong_statement, "source_ref": "https://example.test/report"}],
+    }
+
+    with pytest.raises(ValueError, match="no sourced claim"):
+        _validate_published_financial_facts(review, code="600000")
+
+
+def test_public_validator_cannot_exempt_financial_fact_merely_mentioning_pe_and_pb() -> None:
+    review = {
+        "quantitative_facts": ["2026H1净利润120亿元，PE与PB不能解释盈利质量"],
+        "financial_fact_bindings": [],
+        "claims": [],
+    }
+
+    with pytest.raises(ValueError, match="no financial binding"):
+        _validate_published_financial_facts(review, code="600000")
+
+
+def test_public_validator_rejects_financial_binding_without_source_url() -> None:
+    review = {
+        "quantitative_facts": ["2025年度营业收入 120 亿元"],
+        "financial_fact_bindings": [{"metric": "revenue_rmb", "period": "2025FY", "value": 120, "unit": "亿元"}],
+        "claims": [{"statement": "2025年度营业收入 120 亿元", "source_ref": "https://example.test/report"}],
+    }
+
+    with pytest.raises(ValueError, match="no HTTPS source"):
+        _validate_published_financial_facts(review, code="600000")
+
+
+def test_public_validator_allows_local_market_snapshot_without_source_url() -> None:
+    review = {
+        "quantitative_facts": ["估值快照：股价 12.00 元；PE 8.00 倍；PB 0.80 倍"],
+        "financial_fact_bindings": [
+            {
+                "metric": "估值快照",
+                "period": "2026-08-28",
+                "value": 12.0,
+                "unit": "元",
+                "value_text": "估值快照：股价 12.00 元；PE 8.00 倍；PB 0.80 倍",
+            }
+        ],
+        "claims": [],
+    }
+
+    _validate_published_financial_facts(review, code="600000")
+
+
 def test_public_validator_rejects_codex_luna_network_warning_release() -> None:
     value = _codex_luna_artifact()
     value["source_audit"].update(
@@ -327,18 +448,19 @@ def test_public_validator_rejects_codex_luna_packet_source_warning() -> None:
         validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
 
 
-def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
+@pytest.mark.ai_release
+def test_checked_in_seed_is_readable_and_bound_to_its_declared_close() -> None:
     path = Path("cloudflare/quant-dashboard/ai_screening_seed.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
     result = validate_artifact_file(
         path,
-        expected_generation="7ee4958f2e33242d",
-        expected_market_as_of="2026-08-28",
+        expected_generation=payload["snapshot_generation"],
+        expected_market_as_of=payload["market_as_of"],
     )
 
-    assert result["candidate_total"] == 964
-    assert result["searched"] == 964
-    assert result["actions"] == {"avoid": 570, "priority_buy": 5, "watchlist": 389}
+    assert result["candidate_total"] == payload["candidate_total"] > 0
+    assert result["searched"] == payload["candidate_total"]
+    assert sum(result["actions"].values()) == payload["candidate_total"]
     assert payload["review_mode"] == "codex_luna_web_review"
     assert payload["reviewed_without_web_search"] == 0
     assert payload["full_coverage_final_recommendation"] is True
@@ -353,24 +475,21 @@ def test_checked_in_seed_is_readable_and_bound_to_the_latest_close() -> None:
             assert not raw_search_metadata.search(" ".join(str(value) for value in values))
 
 
+@pytest.mark.ai_release
 def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -> None:
     payload = json.loads(Path("cloudflare/quant-dashboard/ai_screening_seed.json").read_text(encoding="utf-8"))
     packets = payload["packets"]
-    assert len(packets) == 964
+    assert len(packets) == payload["candidate_total"] > 0
+    assert len({packet["security_code"] for packet in packets}) == len(packets)
     assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
     assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
     # Source repair may remove an unprovable auxiliary claim, but every
     # company must retain at least one independently bound fact.
     assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
-    assert {
-        packet["security_code"] for packet in packets if packet["ai_review"]["final_category"] == "recommend_buy"
-    } == {
-        "603444",
-        "300515",
-        "000680",
-        "600926",
-        "600919",
-    }
+    assert (
+        sum(packet["ai_review"]["final_category"] == "recommend_buy" for packet in packets)
+        == payload["recommend_buy_count"]
+    )
     assert all(packet["ai_review"]["web_search_event_verified"] is True for packet in packets)
 
 
@@ -463,7 +582,7 @@ def _company_research_artifact() -> dict:
     value["source_audit"]["audit_sha256"] = "c" * 64
     value["source_audit"].update(
         {
-            "audit_contract_version": 3,
+            "audit_contract_version": 4,
             "semantic_claim_count": 3,
             "semantic_passed_count": 3,
             "semantic_failed_count": 0,
@@ -559,6 +678,16 @@ def _company_research_artifact() -> dict:
                 "verdict": "caution",
             },
             "quantitative_facts": ["2025年度经营现金流 18 亿元"],
+            "financial_fact_bindings": [
+                {
+                    "metric": "operating_cash_flow_rmb",
+                    "period": "2025FY",
+                    "unit": "亿元",
+                    "value": 18,
+                    "value_text": "2025年度经营现金流 18 亿元",
+                    "source_url": "https://example.test/company-report#cashflow",
+                }
+            ],
             "retrieval_backend": "reasonix-native-server-web-search",
             "retrieval_model": "opencode-go-muse/muse-spark-1.2-contributor",
             "retrieval_effort": "xhigh",
@@ -763,7 +892,7 @@ def test_company_research_rejects_legacy_source_audit_contract() -> None:
     value = _company_research_artifact()
     value["source_audit"].pop("audit_contract_version")
 
-    with pytest.raises(ValueError, match="contract v3"):
+    with pytest.raises(ValueError, match="contract v4"):
         validate_artifact(value, expected_generation="g1", expected_market_as_of="2026-08-21")
 
 

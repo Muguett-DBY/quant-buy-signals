@@ -14,7 +14,13 @@ from tools.ai_screening_contract import (
     validate_review,
     valuation_snapshot_errors,
 )
-from tools.build_ai_screening import _relevant_rules, _rule_chunks, build_input, merge_reviews
+from tools.build_ai_screening import (
+    _align_type7_score_bounds,
+    _relevant_rules,
+    _rule_chunks,
+    build_input,
+    merge_reviews,
+)
 from tools.calibrate_ai_screening_ranking import _action_safe_summary, _claim_url, _review
 from tools.enrich_ai_screening_input import enrich
 from tools.publish_ai_screening import (
@@ -248,6 +254,10 @@ def test_build_manifest_hashes_only_the_rules_actually_injected(tmp_path) -> Non
     }
     payload = json.loads((out / "ai-screening-input.json").read_text(encoding="utf-8"))
     assert payload["rule_source_sha256"] == manifest["rule_source_sha256"]
+    all_documents = sorted(path.name for path in root.glob("*.md"))
+    assert manifest["knowledge_base_file_count"] == len(all_documents)
+    assert set(manifest["knowledge_base_source_sha256"]) == set(all_documents)
+    assert payload["knowledge_base_source_sha256"] == manifest["knowledge_base_source_sha256"]
 
 
 def test_enrich_manifest_hashes_only_the_rules_actually_injected(tmp_path) -> None:
@@ -256,6 +266,7 @@ def test_enrich_manifest_hashes_only_the_rules_actually_injected(tmp_path) -> No
     root, _ = _authoritative_rule_root(tmp_path)
     initial = tmp_path / "initial"
     build_input(snapshot_path, root, initial)
+    original = json.loads((initial / "ai-screening-input.json").read_text(encoding="utf-8"))
 
     enriched = tmp_path / "enriched"
     manifest = enrich(initial / "ai-screening-input.json", root, enriched)
@@ -268,6 +279,34 @@ def test_enrich_manifest_hashes_only_the_rules_actually_injected(tmp_path) -> No
     assert manifest["rule_file_count"] == len(injected)
     assert set(manifest["rule_source_sha256"]) == injected
     assert payload["rule_source_sha256"] == manifest["rule_source_sha256"]
+    assert manifest["knowledge_base_file_count"] == len(list(root.glob("*.md")))
+    assert payload["knowledge_base_source_sha256"] == manifest["knowledge_base_source_sha256"]
+    assert payload["packets"][0]["type_keys"] == ["type1", "type7"]
+    assert payload["packets"][0]["rule_context"] == original["packets"][0]["rule_context"]
+    assert manifest["rule_source_sha256"] == original["rule_source_sha256"]
+    assert manifest["type_pair_candidate_total"] == original["type_pair_candidate_total"]
+    assert manifest["type_pair_candidate_identity_sha256"] == original["type_pair_candidate_identity_sha256"]
+
+
+def test_type7_nested_complete_bounds_match_the_exact_score() -> None:
+    source = {
+        "score": 7.451,
+        "evidence_complete": True,
+        "decision": {"score_lower_bound": 7.5, "score_upper_bound": 7.5, "missing_dimensions": []},
+    }
+    result = _align_type7_score_bounds("type7", source)
+    assert result["score_lower_bound"] == result["score_upper_bound"] == 7.451
+    assert result["decision"]["score_lower_bound"] == result["decision"]["score_upper_bound"] == 7.451
+    assert source["decision"]["score_lower_bound"] == 7.5
+
+
+@pytest.mark.parametrize("bounds,missing", [((6.0, 8.0), []), ((0.0, 0.0), []), ((7.5, 7.5), ["7c"])])
+def test_type7_actual_bounds_are_not_replaced_by_a_display_score(bounds, missing) -> None:
+    source = {
+        "score": 7.451,
+        "decision": {"score_lower_bound": bounds[0], "score_upper_bound": bounds[1], "missing_dimensions": missing},
+    }
+    assert _align_type7_score_bounds("type7", source) == source
 
 
 def test_selects_triggered_and_type7_boundary_pairs() -> None:
@@ -980,6 +1019,13 @@ def test_decision_text_collapses_repeated_negation_tokens() -> None:
     assert decision_text_conflicts("priority_buy", "当前买入逻辑尚未成立，继续等待确认。") is True
     assert decision_text_conflicts("priority_buy", "暂时不考虑买入，等待下一季。") is True
     assert decision_text_conflicts("priority_buy", "当前不参与配置。") is True
+    assert decision_text_conflicts("avoid", "当前结论：维持观察。") is True
+    assert decision_text_conflicts("avoid", "独立结论为观察。") is True
+    assert decision_text_conflicts("avoid", "当前结论：不建议买入。") is False
+    assert decision_text_conflicts("watchlist", "当前结论：明确不建议买入。") is True
+    assert decision_text_conflicts("avoid", "若未来现金流改善，再转为观察。") is False
+    assert decision_text_conflicts("watchlist", "若现金流持续恶化，明确不建议买入。") is False
+    assert decision_text_conflicts("avoid", "若现金流改善可考虑，但当前结论：维持观察。") is True
 
 
 def test_local_priority_buy_with_non_buy_summary_is_downgraded() -> None:
@@ -1490,6 +1536,9 @@ def test_publish_artifact_is_generation_bound_and_advisory(tmp_path) -> None:
     )
     assert artifact["ai_is_advisory"] is True
     assert artifact["auto_buy_promotion"] is False
+    assert artifact["knowledge_base_provenance"]["file_count"] == 1
+    assert artifact["knowledge_base_provenance"]["injected_excerpt_file_count"] == 1
+    assert set(artifact["knowledge_base_provenance"]["source_sha256"]) == {"patch7.md"}
     assert artifact["schema_version"] == 2
     assert artifact["ranking_version"] == "ai-buy-attractiveness-v9-score-first-action-banded"
     assert artifact["review_models"] == ["opencode-go/deepseek-v4-flash"]
