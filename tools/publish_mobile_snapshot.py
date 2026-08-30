@@ -11,6 +11,7 @@ import argparse
 from collections.abc import Mapping, Sequence
 from typing import Any
 from datetime import date, datetime, time, timezone, timedelta
+from functools import partial
 import hashlib
 import json
 import math
@@ -152,6 +153,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--refresh", action="store_true", help="require a fresh validated market snapshot")
+    parser.add_argument(
+        "--reuse-evidence-only",
+        action="store_true",
+        help="re-score using validated company-evidence caches without per-company network backfills",
+    )
     parser.add_argument(
         "--force-financial-fallback-refresh",
         action="store_true",
@@ -409,6 +415,7 @@ def _prepare_quality_history_evidence(
     market_as_of: str,
     *,
     priority_codes: Sequence[str] = (),
+    network_limit: int = _QUALITY_HISTORY_BACKFILL_LIMIT,
 ) -> tuple[dict[str, Mapping[str, object]], dict[str, int]]:
     """Reuse recent source captures and fill one bounded daily tranche.
 
@@ -432,7 +439,7 @@ def _prepare_quality_history_evidence(
     cached, refresh_due_codes = load_quality_history_cache_batch_state(requests_)
     refresh_due = set(refresh_due_codes)
     missing = [request for request in requests_ if request["code"] not in cached or request["code"] in refresh_due]
-    tranche = missing[:_QUALITY_HISTORY_BACKFILL_LIMIT]
+    tranche = missing[:network_limit]
     fetched = fetch_quality_history_batch(tranche) if tranche else {}
     combined: dict[str, Mapping[str, object]] = {
         str(code): dict(value) for code, value in cached.items() if isinstance(value, Mapping)
@@ -568,7 +575,11 @@ def _load_cninfo_acquisition_batch(
     return by_code
 
 
-def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT):
+def _bounded_type3_growth_loader(
+    limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIMIT,
+    *,
+    cache_only: bool = False,
+):
     """Reuse complete recent evidence and cap source work cumulatively.
 
     ``screen_all_types`` supplies requests in conclusion-relevance order.
@@ -591,6 +602,9 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
     def load(requests: Sequence[Mapping[str, object]], *, progress_cb=None):
         nonlocal remaining
         prepared = list(requests)
+        if cache_only:
+            fetched = fetch_growth_evidence_batch(prepared, progress_cb=progress_cb, cache_only=True)
+            return _backfill_missing_segments(prepared, fetched, cache_only=True)
         cached_segments = load_growth_evidence_cache_batch_state(prepared)
         cached_external = load_external_growth_evidence_cache_batch_state(prepared)
         fully_cached_codes = set(cached_segments).intersection(cached_external)
@@ -681,61 +695,46 @@ def _bounded_type3_growth_loader(limit: int = _TYPE3_GROWTH_NETWORK_BACKFILL_LIM
         )
         if selected_network:
             record_growth_evidence_retry_states(selected_network, fetched)
-        # Tongdaxin (mootdx) TCP fallback: GitHub runner IPs are rate-limited
-        # hard by Eastmoney, so many companies never get a segment record from
-        # the primary source.  The TCP channel serves the same per-company
-        # business-composition history and is not IP-rate-limited.  Fill only
-        # codes that came back without a usable segment source.
-        missing_segment = [
-            request
-            for request in prepared
-            if str(request.get("code") or "") not in fetched
-            or (fetched.get(str(request.get("code") or "")).get("segment_growth_sources") or {}).get("status")
-            in {"unavailable", None}
-        ]
-        if missing_segment:
-            from data import tdx_segment as _tdx_segment
-
-            tdx_filled = _tdx_segment.backfill_tdx_segments(missing_segment)
-            for code, record in tdx_filled.items():
-                if str(code) not in fetched:
-                    fetched[str(code)] = record
-                else:
-                    existing = fetched[str(code)]
-                    existing_segment = existing.get("segment_growth_sources")
-                    existing_segment_status = (
-                        existing_segment.get("status") if isinstance(existing_segment, Mapping) else None
-                    )
-                    if existing_segment_status in {"unavailable", None}:
-                        # Merge only the segment component.  The Tongdaxin
-                        # record carries a hardcoded unavailable external
-                        # (acquisition/goodwill) component, so replacing the
-                        # whole record would silently drop a fetched record's
-                        # valid external evidence (cninfo acquisition data).
-                        merged = dict(existing)
-                        merged["segment_growth_sources"] = record["segment_growth_sources"]
-                        merged["available"] = bool(
-                            merged["segment_growth_sources"].get("status") == "complete"
-                            and isinstance(merged.get("external_growth_evidence"), Mapping)
-                            and merged["external_growth_evidence"].get("status") == "complete"
-                        )
-                        reasons: list[str] = []
-                        if merged["segment_growth_sources"].get("status") != "complete":
-                            reasons.append(f"segment:{merged['segment_growth_sources'].get('reason') or 'partial'}")
-                        external = merged.get("external_growth_evidence")
-                        external_status = external.get("status") if isinstance(external, Mapping) else "unavailable"
-                        if external_status != "complete":
-                            # Mirror _evidence_record: the shared validator
-                            # recomputes reason from each child's `reason`
-                            # field, not its status, so both must agree.
-                            external_reason = external.get("reason") if isinstance(external, Mapping) else "unavailable"
-                            reasons.append(f"external:{external_reason or 'unavailable'}")
-                        merged["reason"] = ";".join(reasons)
-                        merged["cache_diagnostic"] = "tdx_segment_merged_over_unavailable"
-                        fetched[str(code)] = merged
-        return fetched
+        return _backfill_missing_segments(prepared, fetched)
 
     return load
+
+
+def _backfill_missing_segments(prepared, fetched, *, cache_only=False):
+    """Use the secondary segment source without losing acquisition evidence."""
+
+    missing = [
+        request
+        for request in prepared
+        if (fetched.get(str(request.get("code") or ""), {}).get("segment_growth_sources") or {}).get("status")
+        in {"unavailable", None}
+    ]
+    if not missing:
+        return fetched
+    from data import tdx_segment
+
+    secondary = tdx_segment.backfill_tdx_segments(missing, cache_only=cache_only)
+    for code, record in secondary.items():
+        existing = fetched.get(str(code))
+        if existing is None:
+            fetched[str(code)] = record
+            continue
+        # The fallback has no acquisition/goodwill facts. Replace only the
+        # segment child, keeping independently acquired external evidence.
+        merged = dict(existing)
+        segment = record["segment_growth_sources"]
+        external = merged.get("external_growth_evidence") or {}
+        merged["segment_growth_sources"] = segment
+        merged["available"] = segment.get("status") == "complete" and external.get("status") == "complete"
+        reasons = []
+        if segment.get("status") != "complete":
+            reasons.append(f"segment:{segment.get('reason') or 'partial'}")
+        if external.get("status") != "complete":
+            reasons.append(f"external:{external.get('reason') or 'unavailable'}")
+        merged["reason"] = ";".join(reasons)
+        merged["cache_diagnostic"] = "tdx_segment_merged_over_unavailable"
+        fetched[str(code)] = merged
+    return fetched
 
 
 def _latest_closed_session_date(now_shanghai: datetime) -> date:
@@ -759,6 +758,7 @@ def publish_mobile_snapshot(
     refresh: bool,
     force_financial_fallback_refresh: bool = False,
     refresh_financials_only: bool = False,
+    reuse_evidence_only: bool = False,
 ) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     source_commit = _source_commit()
@@ -821,6 +821,7 @@ def publish_mobile_snapshot(
         eligible_codes,
         market_as_of,
         priority_codes=_quality_history_priority_codes(snapshot.analysis_quotes, eligible_codes),
+        network_limit=0 if reuse_evidence_only else _QUALITY_HISTORY_BACKFILL_LIMIT,
     )
     commodity_cycle_evidence = _prepare_commodity_cycle_evidence(
         snapshot.analysis_quotes,
@@ -838,10 +839,20 @@ def publish_mobile_snapshot(
         reporting_period_contract=reporting_period_contract,
         market_coldness_evidence=coldness_evidence,
         quality_history_evidence=quality_history_evidence,
-        quality_history_loader=_bounded_quality_history_loader(),
-        type3_growth_loader=_bounded_type3_growth_loader(),
-        research_report_loader=fetch_research_reports_batch,
-        patch4_loader=fetch_patch4_evidence_batch,
+        quality_history_loader=_bounded_quality_history_loader(
+            limit=0 if reuse_evidence_only else _QUALITY_HISTORY_DECISION_BACKFILL_LIMIT
+        ),
+        type3_growth_loader=_bounded_type3_growth_loader(cache_only=reuse_evidence_only),
+        research_report_loader=(
+            partial(fetch_research_reports_batch, cache_only=True)
+            if reuse_evidence_only
+            else fetch_research_reports_batch
+        ),
+        patch4_loader=(
+            partial(fetch_patch4_evidence_batch, cache_only=True)
+            if reuse_evidence_only
+            else fetch_patch4_evidence_batch
+        ),
         commodity_cycle_evidence=commodity_cycle_evidence,
         dividend_evidence=dividend_evidence,
     )
@@ -894,6 +905,7 @@ def publish_mobile_snapshot(
             "post_close_quote_coverage": post_close_quote_coverage,
             "screening_coverage": screening_coverage,
             "quality_history_backfill": quality_history_backfill,
+            "company_evidence_mode": "cache_only" if reuse_evidence_only else "network_backfill",
             "source_state": starting_state,
             "methodology_version": METHODOLOGY_VERSION,
             "model_sources": public_model_source_contract(),
@@ -910,6 +922,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh=bool(args.refresh),
         force_financial_fallback_refresh=bool(args.force_financial_fallback_refresh),
         refresh_financials_only=bool(args.refresh_financials_only),
+        reuse_evidence_only=bool(args.reuse_evidence_only),
     )
     # GitHub's Windows runner may expose a cp1252 stdout even though the files
     # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful

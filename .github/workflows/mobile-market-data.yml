@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       rebuild_latest_closed:
-        description: Re-score the latest already closed and published market session with the current source revision
+        description: Re-score the latest published close using validated company-evidence caches, without per-company backfills
         required: false
         default: false
         type: boolean
@@ -297,6 +297,9 @@ jobs:
             $publisherArguments = @('-m', 'tools.publish_mobile_snapshot', '--output-dir', $output)
             if (-not $rebuildLatestClosed) {
               $publisherArguments += '--refresh'
+            }
+            if ($rebuildLatestClosed -and -not $forceGapRefresh) {
+              $publisherArguments += '--reuse-evidence-only'
             }
             if ($forceGapRefresh) {
               $publisherArguments += '--force-financial-fallback-refresh'

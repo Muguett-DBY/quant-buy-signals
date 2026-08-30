@@ -34,6 +34,15 @@ def _trigger(workflow: dict) -> dict:
     return workflow.get("on", workflow.get(True))
 
 
+def test_model_rebuild_reuses_evidence_but_forced_gap_refresh_keeps_network():
+    workflow = _workflow(ROOT / ".github" / "workflows" / "mobile-market-data.yml")
+    steps = workflow["jobs"]["build"]["steps"]
+    build = next(step["run"] for step in steps if step.get("name") == "Build validated market data")
+    assert "if ($rebuildLatestClosed -and -not $forceGapRefresh)" in build
+    assert "$publisherArguments += '--reuse-evidence-only'" in build
+    assert "$publisherArguments += '--refresh-financials-only'" in build
+
+
 def _classifier_module():
     spec = importlib.util.spec_from_file_location("classify_website_ci", CLASSIFIER_PATH)
     assert spec is not None and spec.loader is not None

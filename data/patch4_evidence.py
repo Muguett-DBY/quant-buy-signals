@@ -1717,6 +1717,7 @@ def fetch_patch4_evidence(
     cache_dir: str | Path = PATCH4_EVIDENCE_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     use_cache: bool = True,
+    cache_only: bool = False,
     timeout: tuple[int, int] = REQUEST_TIMEOUT,
     rate_limiter: Any = _GLOBAL_RATE_LIMITER,
 ) -> Patch4Evidence:
@@ -1740,7 +1741,7 @@ def fetch_patch4_evidence(
             ttl=cache_ttl_seconds,
             max_uncompressed_bytes=4 * 1024 * 1024,
         )
-        initial = cache.load()
+        initial = cache.load(allow_expired=cache_only)
         if initial.hit:
             try:
                 return _from_cache(initial.value, normalized_code, cutoff)
@@ -1748,6 +1749,18 @@ def fetch_patch4_evidence(
                 diagnostic = f"invalid_hit:{_error_label(exc)}"
         else:
             diagnostic = f"miss:{initial.reason}"
+
+    if cache_only:
+        return _make_evidence(
+            normalized_code,
+            cutoff,
+            assessment=None,
+            diagnostics=_unknown_diagnostics("cache_miss"),
+            documents=[],
+            cache_hit=False,
+            cache_diagnostic=diagnostic,
+            reason="cache_miss",
+        )
 
     active_session = requests.Session() if session is requests else session
     owns_session = active_session is not session
@@ -1847,6 +1860,7 @@ def fetch_patch4_evidence_batch(
     cache_dir: str | Path = PATCH4_EVIDENCE_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     use_cache: bool = True,
+    cache_only: bool = False,
     timeout: tuple[int, int] = REQUEST_TIMEOUT,
     rate_limiter: Any = _GLOBAL_RATE_LIMITER,
     progress_cb: Any = None,
@@ -1887,6 +1901,7 @@ def fetch_patch4_evidence_batch(
                 cache_dir=cache_dir,
                 cache_ttl_seconds=cache_ttl_seconds,
                 use_cache=use_cache,
+                cache_only=cache_only,
                 timeout=timeout,
                 rate_limiter=rate_limiter,
             )

@@ -1222,6 +1222,30 @@ def test_partial_source_failure_stays_visible_without_becoming_a_trigger():
     assert payload["triggered"] is False
 
 
+def test_independent_replay_mirrors_type4_minimum_runway_gate():
+    scores = {"4a": 1.5, "4b": 10.0, "4c": 10.0, "4d": 10.0, "4e": 10.0, "4f": 10.0}
+    payload = _outcome_payload(
+        "type4",
+        bs._finish(
+            "type4",
+            scores,
+            {
+                **{key: "完整可复核证据" for key in scores},
+                "_condition": "坡长至少达到中坡（4a≥5）",
+            },
+            extra_condition=False,
+        ),
+    )
+
+    replayed = run_full_audit._independent_decision_replay("type4", payload)
+
+    assert replayed is not None
+    assert replayed["potentially_triggerable"] is False
+    assert replayed["decision_complete"] is True
+    assert replayed["decision_basis"] == "full_evidence"
+    assert {key: replayed[key] for key in payload["decision"]} == payload["decision"]
+
+
 def test_independent_type7_replay_keeps_conservative_basis_when_weighted_upper_is_below_7():
     # Regression: the independent replay previously overwrote the weighted
     # upper-bound check (upper >= 7) for the classified Type 7 model and only

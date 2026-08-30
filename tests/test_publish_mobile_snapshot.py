@@ -32,6 +32,50 @@ def test_financial_fallback_cache_bypass_is_separate_from_full_market_refresh():
     assert forced.force_financial_fallback_refresh is True
 
 
+def test_model_rebuild_parser_selects_cache_replay_without_quote_refresh():
+    args = publisher._parser().parse_args(["--output-dir", "out", "--reuse-evidence-only"])
+    assert args.reuse_evidence_only is True
+    assert args.refresh is False
+    assert args.force_financial_fallback_refresh is False
+
+
+def test_cached_model_rebuild_skips_quality_history_network_backfill(monkeypatch):
+    cached = {"000001": {"available": True}}
+    monkeypatch.setattr(publisher, "load_quality_history_cache_batch_state", lambda _requests: (cached, ("000001",)))
+    monkeypatch.setattr(publisher, "fetch_quality_history_batch", lambda *_args, **_kwargs: pytest.fail("network"))
+    records, status = _prepare_quality_history_evidence(["000001", "000002"], "2026-08-28", network_limit=0)
+    assert records == cached
+    assert status["network_tranche_companies"] == 0
+    assert status["remaining_companies"] == 1
+    loader = publisher._bounded_quality_history_loader(limit=0)
+    assert loader([{"code": "000001", "as_of": "2026-08-28"}]) == cached
+
+
+def test_cached_growth_rebuild_never_enters_cninfo_or_tcp_network(monkeypatch):
+    calls = []
+
+    def cached_growth(requests, *, cache_only, progress_cb):
+        assert cache_only is True
+        calls.append("growth")
+        return {"000001": {"external_growth_evidence": {"status": "complete"}}}
+
+    def cached_tdx(requests, *, cache_only):
+        assert cache_only is True
+        calls.append("tdx")
+        return {"000001": {"segment_growth_sources": {"status": "complete"}}}
+
+    monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", cached_growth)
+    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", cached_tdx)
+    monkeypatch.setattr(publisher, "_load_cninfo_acquisition_batch", lambda *_args, **_kwargs: pytest.fail("network"))
+    monkeypatch.setattr(
+        publisher, "load_growth_evidence_retry_state_batch", lambda *_args: pytest.fail("retry scheduling")
+    )
+    result = publisher._bounded_type3_growth_loader(cache_only=True)([{"code": "000001", "as_of": "2026-08-28"}])
+    assert calls == ["growth", "tdx"]
+    assert result["000001"]["available"] is True
+    assert result["000001"]["external_growth_evidence"]["status"] == "complete"
+
+
 @pytest.fixture(autouse=True)
 def _published_source_commit(monkeypatch):
     """Keep publication tests independent of the developer worktree state."""
@@ -423,7 +467,7 @@ def test_type3_growth_loader_has_one_cumulative_budget_and_reuses_cache_for_free
     monkeypatch.setattr(publisher, "fetch_growth_evidence_batch", fetch)
     # The Tongdaxin TCP fallback is network I/O; pin it to no-op so this test
     # measures only the Eastmoney-cache/budget behaviour.
-    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", lambda _requests: {})
+    monkeypatch.setattr("data.tdx_segment.backfill_tdx_segments", lambda _requests, **_kwargs: {})
     loader = publisher._bounded_type3_growth_loader(limit=2)
     first = [{"code": code, "as_of": "2026-07-29"} for code in ("000003", "000001", "000002", "000004")]
     second = [{"code": "000005", "as_of": "2026-07-29"}]
@@ -454,7 +498,8 @@ def test_type3_growth_loader_merges_tdx_segment_keeping_external_evidence(monkey
             for request in requests
         }
 
-    def tdx_fill(requests):
+    def tdx_fill(requests, *, cache_only=False):
+        assert cache_only is False
         return {
             request["code"]: {
                 "available": False,
@@ -514,7 +559,8 @@ def test_type3_growth_loader_merge_reason_matches_external_reason_field(monkeypa
             for request in requests
         }
 
-    def tdx_fill(requests):
+    def tdx_fill(requests, *, cache_only=False):
+        assert cache_only is False
         return {
             request["code"]: {
                 "available": False,
@@ -653,7 +699,8 @@ def test_type3_growth_loader_rejects_invalid_budget(limit):
         publisher._bounded_type3_growth_loader(limit=limit)
 
 
-def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path):
+@pytest.mark.parametrize("reuse_evidence_only", [False, True])
+def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypatch, tmp_path, reuse_evidence_only):
     snapshot = _snapshot()
     cache = SimpleNamespace(read_bytes_if_payload=lambda payload: b"verified-" + payload.encode("ascii"))
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
@@ -686,7 +733,9 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
         },
     )
 
-    manifest = publisher.publish_mobile_snapshot(output_dir=tmp_path, refresh=False)
+    manifest = publisher.publish_mobile_snapshot(
+        output_dir=tmp_path, refresh=False, reuse_evidence_only=reuse_evidence_only
+    )
 
     assert manifest["market_as_of"] == "2026-07-17"
     assert (tmp_path / "manifest.json").is_file()
@@ -697,6 +746,9 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
     assert len(manifest["company_details"]["shards"]) == publisher.COMPANY_DETAIL_SHARD_COUNT
     assert all((tmp_path / shard["filename"]).is_file() for shard in manifest["company_details"]["shards"])
     assert manifest["provenance"]["snapshot_source"] == "cache"
+    assert manifest["provenance"]["company_evidence_mode"] == (
+        "cache_only" if reuse_evidence_only else "network_backfill"
+    )
     assert manifest["provenance"]["source_commit"] == "a" * 40
     assert manifest["provenance"]["methodology_version"] == publisher.METHODOLOGY_VERSION
     model_sources = manifest["provenance"]["model_sources"]

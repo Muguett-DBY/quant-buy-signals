@@ -317,6 +317,7 @@ def backfill_tdx_segments(
     requests_: Sequence[Mapping[str, Any]],
     *,
     max_workers: int = 4,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Fill segment evidence from the Tongdaxin TCP channel.
 
@@ -355,6 +356,8 @@ def backfill_tdx_segments(
         cached = _load_tdx_cache(code, as_of, annual_revenue=annual_revenue)
         if cached is not None:
             return code, cached
+        if cache_only:
+            return code, None
         try:
             from mootdx.quotes import Quotes  # type: ignore[import-not-found]
 

@@ -210,7 +210,8 @@ def test_load_tdx_cache_falls_back_to_newer_when_at_or_before_stale(tmp_path, mo
     assert record["segment_growth_sources"]["status"] in {"complete", "partial"}
 
 
-def test_backfill_rebuilds_complete_cache_with_request_annual_revenue(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cache_only", [False, True])
+def test_backfill_rebuilds_complete_cache_with_request_annual_revenue(tmp_path, monkeypatch, cache_only):
     """A cache that looked complete without filed revenue must be rebuilt
     against the request's annual revenue before it is returned."""
     from data import growth_evidence as ge
@@ -236,12 +237,32 @@ def test_backfill_rebuilds_complete_cache_with_request_annual_revenue(tmp_path, 
             }
         ],
         max_workers=1,
+        cache_only=cache_only,
     )
     segment = filled[code]["segment_growth_sources"]
     assert segment["status"] == "partial"
     assert segment["reason"] == "latest_segment_identity_match_below_95_percent"
     assert segment["annual_revenue_latest"] == pytest.approx(1.0e9)
     assert segment["matched_latest_share"] == pytest.approx(0.5)
+
+
+def test_cache_only_tdx_miss_returns_without_connecting(monkeypatch):
+    from data import tdx_segment as ts
+
+    monkeypatch.setattr(ts, "_load_tdx_cache", lambda *_args, **_kwargs: None)
+    # Importing the optional TCP client is already too late in cache-only mode.
+    import builtins
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "mootdx.quotes":
+            pytest.fail("TCP client import")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    result = ts.backfill_tdx_segments([{"code": "002731", "as_of": "2026-08-28"}], cache_only=True)
+    assert result == {}
 
 
 def test_backfill_live_path_uses_request_annual_revenue(monkeypatch):

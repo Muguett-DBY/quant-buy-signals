@@ -458,6 +458,7 @@ def test_fetch_research_reports_cache_is_validated_and_avoids_a_second_network_c
         cache_dir=tmp_path,
         cache_ttl_seconds=3_600,
         rate_limiter=_NoWait(),
+        cache_only=True,
     )
     assert second.available
     assert second.cache_hit
@@ -475,6 +476,14 @@ def test_fetch_research_reports_cache_is_validated_and_avoids_a_second_network_c
     assert "风险提示" not in serialized
     assert "notice_content" not in serialized
     assert "content_sha256" in serialized
+
+
+def test_cache_only_research_miss_stays_unavailable_without_network(tmp_path):
+    session = _FakeSession([])
+    result = rr.fetch_research_reports("600519", "2026-08-28", session=session, cache_dir=tmp_path, cache_only=True)
+    assert result.available is False
+    assert result.cache_hit is False
+    assert session.calls == []
 
 
 @pytest.mark.parametrize(
@@ -591,7 +600,8 @@ def test_fetch_research_reports_rejects_unbounded_or_malformed_inputs_before_net
 
 
 def test_fetch_research_reports_batch_is_sorted_and_worker_failure_isolated(monkeypatch):
-    def fake_fetch(code, as_of):
+    def fake_fetch(code, as_of, *, cache_only=False):
+        assert cache_only is False
         if code == "000001":
             raise RuntimeError("one worker failed")
         return rr.ResearchReportEvidence(

@@ -1009,6 +1009,57 @@ def test_batch_contract_is_exact_sorted_bounded_and_fetches_one_cashflow_group(m
         )
 
 
+@pytest.mark.parametrize("cached_parts", [{"segment", "external"}, {"segment"}, {"external"}, set()])
+def test_cache_only_batch_replays_validated_components_without_network(monkeypatch, tmp_path, cached_parts):
+    code, cutoff = "600519", date(2026, 7, 17)
+    revenues, goodwill, acquisitions = _complete_inputs()
+    initial = ge.fetch_growth_evidence(
+        code,
+        cutoff,
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+        session=_FakeSession([_FakeResponse(_segment_payload())]),
+        use_cache=True,
+        cache_dir=tmp_path,
+        rate_limiter=_NoWait(),
+    )
+    assert initial.available
+    assert ge._save_external_growth_evidence_cache(
+        code,
+        cutoff,
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        evidence=initial.external_growth_evidence,
+        cache_dir=tmp_path,
+    )
+    request = {"code": code, "as_of": cutoff.isoformat(), "revenue_records": revenues, "goodwill_records": goodwill}
+    segments = ge.load_growth_evidence_cache_batch_state([request], cache_dir=tmp_path)
+    external = ge.load_external_growth_evidence_cache_batch_state([request], cache_dir=tmp_path)
+    assert code in segments and code in external
+    monkeypatch.setattr(
+        ge,
+        "load_growth_evidence_cache_batch_state",
+        lambda *_args, **_kwargs: segments if "segment" in cached_parts else {},
+    )
+    monkeypatch.setattr(
+        ge,
+        "load_external_growth_evidence_cache_batch_state",
+        lambda *_args, **_kwargs: external if "external" in cached_parts else {},
+    )
+    monkeypatch.setattr(ge, "fetch_detailed_annual_cashflow_history", lambda *_args, **_kwargs: pytest.fail("network"))
+    monkeypatch.setattr(ge, "_fetch_segment_growth_sources", lambda *_args, **_kwargs: pytest.fail("network"))
+
+    result = ge.fetch_growth_evidence_batch([request], cache_only=True, cache_dir=tmp_path)
+    if not cached_parts:
+        assert result == {}
+        return
+    record = ge.validate_growth_evidence_record(result[code], code, cutoff)
+    assert record["available"] == (len(cached_parts) == 2)
+    assert record["segment_growth_sources"]["status"] == ("complete" if "segment" in cached_parts else "unavailable")
+    assert record["external_growth_evidence"]["status"] == ("complete" if "external" in cached_parts else "unavailable")
+
+
 def test_external_cache_reuses_complete_batch_evidence_and_skips_cashflow_fetch(monkeypatch, tmp_path):
     calls = []
 

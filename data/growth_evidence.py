@@ -2827,6 +2827,7 @@ def fetch_growth_evidence_batch(
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     cninfo_acquisition_by_code: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None,
     time_budget_seconds: float | None = None,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded batch for exact Type 3 preflight candidates."""
     if isinstance(requests_, (str, bytes)) or not isinstance(requests_, Sequence):
@@ -2889,6 +2890,38 @@ def fetch_growth_evidence_batch(
     directory = Path(cache_dir)
     cache_state = load_growth_evidence_cache_batch_state(requests_, cache_dir=directory)
     external_cache_state = load_external_growth_evidence_cache_batch_state(requests_, cache_dir=directory)
+
+    if cache_only:
+        cached_results: dict[str, dict[str, Any]] = {}
+        for code, cutoff, revenue_records, goodwill_records in prepared:
+            segment_state = cache_state.get(code)
+            external_state = external_cache_state.get(code)
+            if segment_state is None and external_state is None:
+                continue
+            segment = (
+                dict(segment_state["segment_growth_sources"])
+                if segment_state is not None
+                else _segment_unavailable_record(
+                    code, cutoff, reason="cache_miss", evidence_id=f"eastmoney-segments:{code}:cache_miss"
+                )
+            )
+            external = (
+                external_state["external_growth_evidence"]
+                if external_state is not None
+                else _unavailable_external_evidence(code, cutoff, "cache_miss")
+            )
+            cached_results[code] = _assemble_growth_evidence(
+                code,
+                cutoff,
+                revenue_records=revenue_records,
+                goodwill_records=goodwill_records,
+                acquisition_cashflow_records=[],
+                segment_growth_sources=segment,
+                cache_hit=True,
+                cache_diagnostic="cache_only",
+                preloaded_external_growth_evidence=external,
+            ).to_dict()
+        return cached_results
 
     acquisition_by_code: dict[str, list[dict[str, Any]]] = {code: [] for code, *_ in prepared}
     acquisition_errors: dict[str, BaseException] = {}

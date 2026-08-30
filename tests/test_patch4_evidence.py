@@ -825,13 +825,21 @@ def test_safe_file_cache_replays_without_network(tmp_path: Path) -> None:
     assert initial.cache_diagnostic.endswith(";saved")
 
     replay_session = _Session([])
-    replay = _fetch(replay_session, tmp_path, use_cache=True)
+    replay = patch4.fetch_patch4_evidence(CODE, AS_OF, session=replay_session, cache_dir=tmp_path, cache_only=True)
     assert replay.available is True
     assert replay.cache_hit is True
     assert replay.cache_diagnostic == "hit"
     assert replay.assessment == initial.assessment
     assert replay.documents == initial.documents
     assert replay_session.calls == []
+
+
+def test_cache_only_patch4_miss_does_not_fetch_announcements(tmp_path: Path) -> None:
+    session = _Session([])
+    result = patch4.fetch_patch4_evidence(CODE, AS_OF, session=session, cache_dir=tmp_path, cache_only=True)
+    assert result.available is False
+    assert result.reason == "cache_miss"
+    assert session.calls == []
 
 
 def test_transient_source_failure_is_not_cached_and_the_next_call_can_recover(

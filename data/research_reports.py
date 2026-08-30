@@ -1137,6 +1137,7 @@ def fetch_research_reports(
     cache_dir: str | Path = RESEARCH_REPORT_CACHE_DIR,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     use_cache: bool = True,
+    cache_only: bool = False,
     timeout: tuple[int, int] = REQUEST_TIMEOUT,
     rate_limiter: Any = _GLOBAL_RATE_LIMITER,
 ) -> ResearchReportEvidence:
@@ -1169,7 +1170,7 @@ def fetch_research_reports(
             ttl=cache_ttl_seconds,
             max_uncompressed_bytes=MAX_RESPONSE_BYTES,
         )
-        initial = cache.load()
+        initial = cache.load(allow_expired=cache_only)
         if initial.hit:
             try:
                 return _from_cache(initial.value, normalized_code, cutoff)
@@ -1187,6 +1188,16 @@ def fetch_research_reports(
             reused = None
         if reused is not None:
             return reused
+
+    if cache_only:
+        return _make_evidence(
+            normalized_code,
+            cutoff,
+            [],
+            _empty_content_verification(normalized_code, cutoff, "cache_miss"),
+            cache_hit=False,
+            cache_diagnostic=diagnostic,
+        )
 
     active_session = requests.Session() if session is requests else session
     owns_session = active_session is not session
@@ -1269,6 +1280,7 @@ def fetch_research_reports_batch(
     *,
     max_workers: int = MAX_WORKERS,
     progress_cb: Any = None,
+    cache_only: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Fetch a deterministic, bounded Type 7 report-metadata batch."""
 
@@ -1296,7 +1308,8 @@ def fetch_research_reports_batch(
     results: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(prepared))) as executor:
         future_to_request = {
-            executor.submit(fetch_research_reports, code, cutoff): (code, cutoff) for code, cutoff in prepared
+            executor.submit(fetch_research_reports, code, cutoff, cache_only=cache_only): (code, cutoff)
+            for code, cutoff in prepared
         }
         completed = 0
         for future in as_completed(future_to_request):

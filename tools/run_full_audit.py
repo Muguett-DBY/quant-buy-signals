@@ -1562,6 +1562,11 @@ def _independent_decision_replay(
                 or (hot_upper >= 7.0 and upper_scores["2c"] >= 7.0 and 4.0 <= upper_scores["2d"] <= 5.0)
             )
             theoretical_possible = theoretical_possible and valuation_possible
+        elif type_key == "type4":
+            # Keep this independent replay aligned with the public Type 4
+            # contract: a high weighted total cannot represent a long runway
+            # when the directly measured runway dimension is below 5.
+            theoretical_possible = theoretical_possible and upper_scores["4a"] >= 5.0
         elif type_key == "type6":
             theoretical_possible = theoretical_possible and (
                 sum(upper_scores[key] >= 5.0 for key in ("6a", "6b", "6c", "6d")) >= 2
