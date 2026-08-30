@@ -52,6 +52,27 @@ def test_model_rebuild_reuses_evidence_but_forced_gap_refresh_keeps_network():
     assert "$publisherArguments += '--refresh-financials-only'" in build
     assert len(deep_cache_steps) == 2
     assert all("data/cache/dividend_history" not in step["with"]["path"] for step in deep_cache_steps)
+    assert all(step["with"]["key"].startswith("mobile-deep-evidence-v2-") for step in deep_cache_steps)
+    legacy_cache = next(
+        step for step in steps if step.get("name") == "Recover the legacy nine-directory evidence cache"
+    )
+    assert legacy_cache["if"] == "steps.deep_cache.outputs.cache-matched-key == ''"
+    assert legacy_cache["with"]["path"].splitlines() == [
+        "data/cache/market_coldness",
+        "data/cache/market_history",
+        "data/cache/quality_history",
+        "data/cache/growth_evidence",
+        "data/cache/research_reports",
+        "data/cache/patch4_evidence",
+        "data/cache/cninfo_annual",
+        "data/cache/datacenter_reports",
+        "data/cache/sina_financial",
+    ]
+    bundle_import = next(
+        step["run"] for step in steps if step.get("name") == "Import a verified local evidence bundle when available"
+    )
+    assert "--preserve-existing" in bundle_import
+    assert "--reference-manifest" in build
     assert len(dividend_cache_steps) == 2
     assert all(step["with"]["path"] == "data/cache/dividend_history" for step in dividend_cache_steps)
     assert "$expectedEvidenceMode" in verify

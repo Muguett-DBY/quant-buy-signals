@@ -653,8 +653,9 @@ def import_evidence_bundle(
     cache_root: str | Path = DEFAULT_CACHE_ROOT,
     expected_source_commit: str | None = None,
     expected_as_of: str | None = None,
+    preserve_existing: bool = False,
 ) -> dict[str, Any]:
-    """Verify into a temporary whitelist tree, then atomically merge each file."""
+    """Verify then merge; a fallback bundle can preserve an already restored cache."""
 
     pointer = load_pointer(
         pointer_path,
@@ -664,6 +665,7 @@ def import_evidence_bundle(
     target_root = Path(cache_root)
     target_root.parent.mkdir(parents=True, exist_ok=True)
     imported = 0
+    preserved = 0
     with tempfile.TemporaryDirectory(prefix=".evidence-import-", dir=target_root.parent) as temporary_name:
         staging_root = Path(temporary_name)
         _verify_archive(pointer, Path(bundle_path), extraction_root=staging_root)
@@ -671,6 +673,9 @@ def import_evidence_bundle(
             relative = PurePosixPath(member["path"])
             source = staging_root.joinpath(*relative.parts)
             destination = target_root.joinpath(*relative.parts[2:])
+            if preserve_existing and destination.is_file():
+                preserved += 1
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(source, destination)
             imported += 1
@@ -680,6 +685,7 @@ def import_evidence_bundle(
         "as_of": pointer["as_of"],
         "bundle": pointer["bundle"]["path"],
         "imported_members": imported,
+        "preserved_members": preserved,
     }
 
 
@@ -721,6 +727,9 @@ def _build_parser() -> argparse.ArgumentParser:
             child.add_argument("--bundle", type=Path, required=True)
         if command == "import":
             child.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
+            child.add_argument(
+                "--preserve-existing", action="store_true", help="use this bundle only for missing cache files"
+            )
     return parser
 
 
@@ -782,6 +791,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.pointer,
                     args.bundle,
                     cache_root=args.cache_root,
+                    preserve_existing=args.preserve_existing,
                     expected_source_commit=args.expected_source_commit,
                     expected_as_of=args.expected_as_of,
                 )

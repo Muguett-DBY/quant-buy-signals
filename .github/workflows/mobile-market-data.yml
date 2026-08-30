@@ -193,6 +193,7 @@ jobs:
             mobile-market-v1-${{ runner.os }}-
 
       - name: Restore accumulated contract-validated deep evidence
+        id: deep_cache
         continue-on-error: true
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -204,6 +205,27 @@ jobs:
             data/cache/exchange_financials
             data/cache/industry_history
             data/cache/investor_relations
+            data/cache/growth_evidence
+            data/cache/research_reports
+            data/cache/patch4_evidence
+            data/cache/cninfo_annual
+            data/cache/datacenter_reports
+            data/cache/sina_financial
+          key: mobile-deep-evidence-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            mobile-deep-evidence-v2-${{ runner.os }}-
+
+      # Actions cache versions include the complete path list. The original
+      # nine-directory v1 cache cannot match the expanded v2 path set above.
+      - name: Recover the legacy nine-directory evidence cache
+        if: steps.deep_cache.outputs.cache-matched-key == ''
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            data/cache/market_coldness
+            data/cache/market_history
+            data/cache/quality_history
             data/cache/growth_evidence
             data/cache/research_reports
             data/cache/patch4_evidence
@@ -256,7 +278,7 @@ jobs:
             throw "The immutable local evidence bundle could not be downloaded: $bundleName"
           }
           & python -m tools.evidence_bundle import `
-            --pointer $pointer --bundle $archive --cache-root data/cache
+            --pointer $pointer --bundle $archive --cache-root data/cache --preserve-existing
           if ($LASTEXITCODE -ne 0) {
             throw 'The local evidence bundle failed digest/member verification or atomic import.'
           }
@@ -298,6 +320,17 @@ jobs:
             'fresh post-close refresh'
           }
           $releaseOutput = Join-Path $env:RUNNER_TEMP 'ds-dcf-mobile-market-data-release'
+          $referenceManifest = Join-Path $env:RUNNER_TEMP 'replay-reference-manifest.json'
+          if ($rebuildLatestClosed -and -not $forceGapRefresh) {
+            & curl.exe --fail --silent --show-error --location --retry 3 `
+              --connect-timeout 20 --max-time 120 --max-filesize 16777216 `
+              --proto '=https' --proto-redir '=https' `
+              --user-agent 'DS-DCF-market-recovery' --output $referenceManifest `
+              'https://quant.custard.top/api/manifest'
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Cannot confirm the current published evidence baseline; refusing an unchecked cache-only rebuild.'
+            }
+          }
           $successfulOutput = $null
           for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
             $output = Join-Path $env:RUNNER_TEMP "ds-dcf-mobile-market-data-attempt-$attempt"
@@ -309,6 +342,7 @@ jobs:
             }
             if ($rebuildLatestClosed -and -not $forceGapRefresh) {
               $publisherArguments += '--reuse-evidence-only'
+              $publisherArguments += @('--reference-manifest', $referenceManifest)
             }
             if ($forceGapRefresh) {
               $publisherArguments += '--force-financial-fallback-refresh'
@@ -913,7 +947,7 @@ jobs:
             data/cache/cninfo_annual
             data/cache/datacenter_reports
             data/cache/sina_financial
-          key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
+          key: mobile-deep-evidence-v2-${{ runner.os }}-${{ github.run_id }}
 
       - name: Save accumulated contract-validated dividend evidence
         continue-on-error: true

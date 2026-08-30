@@ -241,7 +241,7 @@ function syncSearchStatus(){const searching=$("q").value.trim().length>0;$("stat
 function prefetchDetail(code){
   if(!generationId||!code||detailCache.has(code)||detailPrefetching.has(code)||activeDetailPrefetches>=MAX_DETAIL_PREFETCHES)return null;
   activeDetailPrefetches++;
-  const pending=fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId,{cache:"force-cache"})
+  const pending=fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId+"&view_methodology="+encodeURIComponent(METHODOLOGY_VERSION),{cache:"force-cache"})
     .then(response=>{if(!response.ok)throw new Error("公司明细预取 HTTP "+response.status);return response.json()})
     .then(payload=>{if(payload?.company)detailCache.set(code,payload.company);return payload?.company||null})
     .catch(()=>null)
@@ -510,7 +510,7 @@ async function detailByCode(code){
   try{
     let company=detailCache.get(code);
     if(!company&&detailPrefetching.has(code))company=await detailPrefetching.get(code);
-    if(!company){const response=await fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId,{cache:"force-cache",signal:detailAbort.signal});if(!response.ok)throw new Error("公司明细读取 HTTP "+response.status);company=(await response.json()).company;if(!company)throw new Error("服务器未返回公司明细");detailCache.set(code,company)}
+    if(!company){const response=await fetch("/api/company/"+encodeURIComponent(code)+"?generation_id="+generationId+"&view_methodology="+encodeURIComponent(METHODOLOGY_VERSION),{cache:"force-cache",signal:detailAbort.signal});if(!response.ok)throw new Error("公司明细读取 HTTP "+response.status);company=(await response.json()).company;if(!company)throw new Error("服务器未返回公司明细");detailCache.set(code,company)}
     if(requestId!==activeDetailRequest||activeDetailCode!==code||!$("drawer").classList.contains("open"))return;
     type7MethodDetailAvailable=Object.prototype.hasOwnProperty.call(company?.types?.type7||{},"quality_complete")&&Boolean(company?.types?.type7?.method_detail);
     renderDetail(company);
@@ -529,7 +529,7 @@ async function load(){
     const m=await manifestResponse.json();
     generationId=encodeURIComponent(String(m.generation_id||m.provenance?.generation_id||""));
     marketAsOf=String(m.market_as_of||"");sourceVersion=String(m.provenance?.source_commit||"").slice(0,12);dataMethodologyVersion=String(m.provenance?.methodology_version||"legacy-unversioned");
-    const indexResponse=await fetch("/api/catalogue-index?generation_id="+generationId+"&index_contract="+CATALOGUE_INDEX_CONTRACT_VERSION,{cache:"force-cache"});
+    const indexResponse=await fetch("/api/catalogue-index?generation_id="+generationId+"&index_contract="+CATALOGUE_INDEX_CONTRACT_VERSION+"&view_methodology="+encodeURIComponent(METHODOLOGY_VERSION),{cache:"force-cache"});
     if(!indexResponse.ok)throw new Error("公司索引读取 HTTP "+indexResponse.status);
     const c=await indexResponse.json();
     if(Number(c.index_contract)!==CATALOGUE_INDEX_CONTRACT_VERSION)throw new Error("公司索引版本不匹配，请刷新页面");
@@ -1161,10 +1161,23 @@ function typeCoverageEvidence(typeKey,value){const state=typeDataGap(typeKey,val
 function catalogueGapSummary(companies){let insufficient=0,evidenceGap=0,sourceGap=0,proxyVerification=0,decisionRelevant=0,sourceDecisionRelevant=0,proxyDecisionRelevant=0,boundedGap=0,actionConfirmation=0;const typeCoverage={};for(const company of companies){const entries=Object.entries(company?.types||{}),values=entries.map(([,value])=>value),states=entries.map(([key,value])=>{const state=typeCoverageEvidence(key,value),coverage=typeCoverage[key]||(typeCoverage[key]={evidence_missing:0,source_missing:0,proxy_verification:0,decision_relevant:0,source_decision_relevant:0,proxy_decision_relevant:0,bounded:0,decision_unresolved:0,potentially_triggerable:0,action_confirmation:0});if(state.has_gap)coverage.evidence_missing++;if(state.source_gap)coverage.source_missing++;if(state.proxy_verification)coverage.proxy_verification++;if(state.decision_relevant)coverage.decision_relevant++;if(state.decision_relevant&&state.source_gap)coverage.source_decision_relevant++;if(state.decision_relevant&&state.proxy_verification)coverage.proxy_decision_relevant++;if(state.bounded)coverage.bounded++;if(state.decision_unresolved)coverage.decision_unresolved++;if(state.potentially_triggerable)coverage.potentially_triggerable++;if(state.action_required)coverage.action_confirmation++;return state}),hasInsufficient=values.some(value=>value?.status==="insufficient_evidence"),hasGap=states.some(state=>state.has_gap),hasSource=states.some(state=>state.source_gap),hasProxy=states.some(state=>state.proxy_verification),hasRelevant=states.some(state=>state.decision_relevant),hasRelevantSource=states.some(state=>state.decision_relevant&&state.source_gap),hasRelevantProxy=states.some(state=>state.decision_relevant&&state.proxy_verification),hasAction=states.some(state=>state.action_required);if(hasInsufficient)insufficient++;if(hasGap)evidenceGap++;if(hasSource)sourceGap++;if(hasProxy)proxyVerification++;if(hasRelevant)decisionRelevant++;if(hasRelevantSource)sourceDecisionRelevant++;if(hasRelevantProxy)proxyDecisionRelevant++;if(hasGap&&!hasRelevant)boundedGap++;if(hasAction)actionConfirmation++}return{insufficient_company_count:insufficient,evidence_gap_company_count:evidenceGap,source_gap_company_count:sourceGap,proxy_verification_company_count:proxyVerification,decision_relevant_gap_company_count:decisionRelevant,source_decision_relevant_company_count:sourceDecisionRelevant,proxy_decision_relevant_company_count:proxyDecisionRelevant,bounded_gap_company_count:boundedGap,action_confirmation_company_count:actionConfirmation,type_coverage:typeCoverage}}
 function headSafeResponse(request,response){return request.method==="HEAD"?new Response(null,{status:response.status,statusText:response.statusText,headers:response.headers}):response}
 function securedResponse(response){const headers=new Headers(response.headers);for(const [key,value] of Object.entries(BASE_SECURITY_HEADERS))headers.set(key,value);return new Response(response.body,{status:response.status,statusText:response.statusText,headers})}
-function canonicalGenerationRequest(url){const entries=[...url.searchParams.entries()];return entries.length===0||(entries.length===1&&entries[0][0]==="generation_id"&&/^[0-9a-f]{16}$/.test(entries[0][1]))}
-function generationCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);return new Request(cacheUrl.toString(),{method:"GET"})}
-function canonicalCatalogueIndexRequest(url){const entries=[...url.searchParams.entries()];return entries.length===2&&entries.every(([key])=>key==="generation_id"||key==="index_contract")&&url.searchParams.getAll("generation_id").length===1&&/^[0-9a-f]{16}$/.test(url.searchParams.get("generation_id")||"")&&url.searchParams.getAll("index_contract").length===1&&url.searchParams.get("index_contract")===String(CATALOGUE_INDEX_CONTRACT_VERSION)}
-function catalogueIndexCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);cacheUrl.searchParams.set("index_contract",String(CATALOGUE_INDEX_CONTRACT_VERSION));return new Request(cacheUrl.toString(),{method:"GET"})}
+function canonicalGenerationRequest(url,allowViewMethodology=false){
+  const query=new URLSearchParams(url.search);
+  if(allowViewMethodology&&query.has("view_methodology")){
+    if(query.getAll("view_methodology").length!==1||query.get("view_methodology")!==METHODOLOGY_VERSION||!query.has("generation_id"))return false;
+    query.delete("view_methodology");
+  }
+  const entries=[...query.entries()];return entries.length===0||(entries.length===1&&entries[0][0]==="generation_id"&&/^[0-9a-f]{16}$/.test(entries[0][1]));
+}
+// Projections include methodology_current, which changes even for a frozen
+// data generation. Isolate both edge and browser caches by the page model.
+function generationCacheRequest(request,generationId){const cacheUrl=new URL(request.url);cacheUrl.search="";cacheUrl.searchParams.set("generation_id",generationId);cacheUrl.searchParams.set("view_methodology",METHODOLOGY_VERSION);return new Request(cacheUrl.toString(),{method:"GET"})}
+function canonicalCatalogueIndexRequest(url){
+  if(url.searchParams.getAll("index_contract").length!==1||url.searchParams.get("index_contract")!==String(CATALOGUE_INDEX_CONTRACT_VERSION))return false;
+  const generationUrl=new URL(url);generationUrl.searchParams.delete("index_contract");
+  return generationUrl.searchParams.has("generation_id")&&canonicalGenerationRequest(generationUrl,true);
+}
+function catalogueIndexCacheRequest(request,generationId){const cacheUrl=new URL(generationCacheRequest(request,generationId).url);cacheUrl.searchParams.set("index_contract",String(CATALOGUE_INDEX_CONTRACT_VERSION));return new Request(cacheUrl.toString(),{method:"GET"})}
 function generationMethodologyVersion(manifest){return String(manifest?.provenance?.methodology_version||"legacy-unversioned")}
 function deployedCodeCommit(){return /^[0-9a-f]{40}$/.test(CODE_COMMIT)?CODE_COMMIT:null}
 async function immutableProjection(request,builder,cacheRequest=request){const edgeCache=typeof caches!=="undefined"?caches.default:null,cacheKey=new Request(cacheRequest.url,{method:"GET"});if(edgeCache){const hit=await edgeCache.match(cacheKey);if(hit)return headSafeResponse(request,securedResponse(hit))}const payload=await builder(),status=payload?.error?404:200,response=json(payload,status,{"cache-control":"public, max-age=31536000, immutable"});if(edgeCache&&status===200)await edgeCache.put(cacheKey,response.clone());return headSafeResponse(request,response)}
@@ -1743,7 +1756,7 @@ export default{
       const requestedGeneration=url.searchParams.get("generation_id")||"";
       if(path==="/api/ai-screening"&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"invalid generation query"},400));
       if(path==="/api/catalogue-index"&&!canonicalCatalogueIndexRequest(url))return headSafeResponse(request,json({error:"公司索引请求参数无效，请刷新页面"},400));
-      if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
+      if((path==="/api/manifest"||path==="/api/catalogue"||/^\/api\/company\/[036][0-9]{5}$/.test(path))&&!canonicalGenerationRequest(url,path.startsWith("/api/company/")))return headSafeResponse(request,json({error:"数据版本请求参数无效，请刷新页面"},400));
       const generation=await currentGeneration(env,requestedGeneration);
       if(path==="/api/ai-screening"){
         const artifactRecord=await aiScreeningArtifact(env,generation);

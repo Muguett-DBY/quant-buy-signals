@@ -118,6 +118,29 @@ def test_verify_rejects_archive_tampering_before_import(tmp_path):
         eb.verify_evidence_bundle(pointer, tampered)
 
 
+def test_fallback_bundle_preserves_the_restored_actions_cache(tmp_path):
+    source = tmp_path / "source"
+    payloads = _seed_cache(source)
+    bundle, pointer, _ = eb.bundle_evidence(
+        cache_root=source,
+        output_dir=tmp_path / "bundle",
+        as_of=AS_OF,
+        source_commit=SOURCE_COMMIT,
+    )
+    target = tmp_path / "target"
+    relative = next(name for name in payloads if name.startswith("quality_history/"))
+    restored = target / relative
+    restored.parent.mkdir(parents=True)
+    restored.write_bytes(_cache_payload("newer validated Actions evidence"))
+    result = eb.import_evidence_bundle(pointer, bundle, cache_root=target, preserve_existing=True)
+    assert result["preserved_members"] == 1
+    assert result["imported_members"] == len(payloads) - 1
+    assert restored.read_bytes() == _cache_payload("newer validated Actions evidence")
+    for name, payload in payloads.items():
+        if name != relative:
+            assert (target / name).read_bytes() == payload
+
+
 def test_pointer_rejects_source_mismatch_and_path_traversal(tmp_path):
     cache_root = tmp_path / "cache"
     _seed_cache(cache_root)

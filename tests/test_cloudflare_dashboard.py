@@ -15,6 +15,72 @@ SCHEMA = PROJECT_ROOT / "cloudflare" / "quant-dashboard" / "schema.sql"
 TRADING_CALENDAR = PROJECT_ROOT / "tools" / "china_a_share_trading_calendar.json"
 
 
+def test_projection_caches_and_client_queries_are_bound_to_the_view_methodology():
+    source = Path("cloudflare/quant-dashboard/pages_worker.js").read_text(encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None
+    validator = r"""
+import assert from "node:assert/strict";
+let source = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) source += chunk;
+const originalVersion = source.match(/^const METHODOLOGY_VERSION="([^"]+)";/)[1];
+const cached = new Map();
+globalThis.caches = {default: {
+  match: async request => cached.get(request.url)?.clone(),
+  put: async (request, response) => cached.set(request.url, response.clone()),
+}};
+const generation = "0123456789abcdef";
+const routes = [
+  ["/api/company/603444?generation_id=" + generation, "generationCacheRequest"],
+  ["/api/catalogue-index?generation_id=" + generation + "&index_contract=4", "catalogueIndexCacheRequest"],
+];
+for (const [path] of routes) {
+  cached.set("https://dashboard.test" + path, new Response(JSON.stringify({methodology_current: true, obsolete: true})));
+}
+for (const [version, expectedCurrent] of [[originalVersion, true], [originalVersion + "-next", false]]) {
+  const exported = source.replace(originalVersion, version) +
+    "\nexport {canonicalGenerationRequest, canonicalCatalogueIndexRequest, generationCacheRequest, catalogueIndexCacheRequest, immutableProjection};";
+  const helpers = await import("data:text/javascript;base64," + Buffer.from(exported).toString("base64"));
+  for (const [path, helper] of routes) {
+    const request = new Request("https://dashboard.test" + path);
+    const key = helpers[helper](request, generation);
+    assert.equal(new URL(key.url).searchParams.get("view_methodology"), version);
+    let builds = 0;
+    const build = async () => { builds++; return {methodology_version: originalVersion, methodology_current: expectedCurrent}; };
+    const result = await helpers.immutableProjection(request, build, key);
+    assert.deepEqual(await result.json(), {methodology_version: originalVersion, methodology_current: expectedCurrent});
+    assert.equal(builds, 1, "A new page model must not reuse a previous model's projection");
+    await helpers.immutableProjection(request, build, key);
+    assert.equal(builds, 1, "Identical model and generation should retain the cache speedup");
+    const versioned = new URL(request.url + "&view_methodology=" + encodeURIComponent(version));
+    if (helper === "generationCacheRequest") {
+      assert.equal(helpers.canonicalGenerationRequest(versioned, true), true);
+      assert.equal(helpers.canonicalGenerationRequest(versioned), false, "AI and raw-data query contracts stay unchanged");
+    } else {
+      assert.equal(helpers.canonicalCatalogueIndexRequest(new URL(request.url)), true, "Existing API clients remain supported");
+      assert.equal(helpers.canonicalCatalogueIndexRequest(versioned), true);
+      versioned.searchParams.append("view_methodology", version);
+      assert.equal(helpers.canonicalCatalogueIndexRequest(versioned), false);
+      versioned.searchParams.set("view_methodology", "old-page");
+      assert.equal(helpers.canonicalCatalogueIndexRequest(versioned), false);
+    }
+  }
+}
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", validator],
+        input=source,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    for line in source.splitlines():
+        if 'fetch("/api/company/' in line or 'fetch("/api/catalogue-index?' in line:
+            assert '"&view_methodology="+encodeURIComponent(METHODOLOGY_VERSION)' in line
+
+
 def test_dashboard_embedded_browser_script_has_valid_javascript_syntax():
     source = DASHBOARD.read_text(encoding="utf-8")
     node = shutil.which("node")
@@ -459,7 +525,7 @@ const env = {
   },
 };
 const legacyUrl = "https://dashboard.test/api/catalogue-index?generation_id=0123456789abcdef";
-const canonicalUrl = legacyUrl + "&index_contract=4";
+const canonicalUrl = legacyUrl + "&view_methodology=patch7-seven-types-buy-gate-2026-08-30-v6&index_contract=4";
 cached.set(legacyUrl, new Response(JSON.stringify({ index_contract: 1, generation_id: "0123456789abcdef", summary: { company_count: 1 }, companies: [] })));
 const response = await worker.fetch(
   new Request(canonicalUrl),

@@ -39,6 +39,51 @@ def test_model_rebuild_parser_selects_cache_replay_without_quote_refresh():
     assert args.force_financial_fallback_refresh is False
 
 
+def test_cache_only_rebuild_requires_the_same_published_raw_snapshot():
+    snapshot = _snapshot()
+    reference = {
+        "market_as_of": "2026-07-17",
+        "summary": {"company_count": 1},
+        "provenance": {
+            "snapshot_payload_sha256": "b" * 64,
+            "quality_history_backfill": {"available_companies": 1},
+            "screening_coverage": {"quantitative_missing_input_counts": {}},
+        },
+    }
+    assert publisher._require_replay_reference(reference, snapshot, 1) == reference["provenance"]
+    with pytest.raises(RuntimeError, match="requires.*reference"):
+        publisher._require_replay_reference(None, snapshot, 1)
+    reference["provenance"]["snapshot_payload_sha256"] = "c" * 64
+    with pytest.raises(RuntimeError, match="raw snapshot"):
+        publisher._require_replay_reference(reference, snapshot, 1)
+
+
+def test_cache_only_rebuild_stops_before_scoring_when_quality_histories_disappear():
+    before = {"quality_history_backfill": {"available_companies": 1278}}
+    with pytest.raises(RuntimeError, match=r"1278 -> 0"):
+        publisher._require_quality_history_replay(before, {"available_companies": 0})
+    publisher._require_quality_history_replay(before, {"available_companies": 1278})
+
+
+def test_cache_only_rebuild_checks_source_gaps_not_buy_or_observe_counts():
+    before = {
+        "screening_coverage": {
+            "quantitative_missing_input_counts": {
+                "growth_quality_score": {"acquisition_cash_and_goodwill_history": 233},
+                "growth_sustainability_score": {"segment_growth_sources": 262},
+            },
+            "framework_trigger_counts": {"type1": 74},
+        }
+    }
+    after = deepcopy(before["screening_coverage"])
+    after["framework_trigger_counts"] = {"type1": 0}
+    after["quantitative_missing_input_counts"]["growth_quality_score"]["new_rule_requirement"] = 1000
+    publisher._require_source_input_replay(before, after)
+    after["quantitative_missing_input_counts"]["growth_quality_score"]["acquisition_cash_and_goodwill_history"] = 5003
+    with pytest.raises(RuntimeError, match=r"233 -> 5003 missing"):
+        publisher._require_source_input_replay(before, after)
+
+
 def test_cached_model_rebuild_skips_quality_history_network_backfill(monkeypatch):
     cached = {"000001": {"available": True}}
     monkeypatch.setattr(publisher, "load_quality_history_cache_batch_state", lambda _requests: (cached, ("000001",)))
@@ -747,12 +792,24 @@ def test_publish_mobile_snapshot_writes_only_a_quality_gated_generation(monkeypa
         publisher,
         "_analysis_coverage_summary",
         lambda _scores, _dcf_results=None: {
-            "goal_readiness": {gate: True for gate in publisher._MOBILE_STRUCTURAL_EVIDENCE_GATES} | {"ready": False}
+            "goal_readiness": {gate: True for gate in publisher._MOBILE_STRUCTURAL_EVIDENCE_GATES} | {"ready": False},
+            "quantitative_missing_input_counts": {},
         },
     )
 
     manifest = publisher.publish_mobile_snapshot(
-        output_dir=tmp_path, refresh=False, reuse_evidence_only=reuse_evidence_only
+        output_dir=tmp_path,
+        refresh=False,
+        reuse_evidence_only=reuse_evidence_only,
+        reference_manifest={
+            "market_as_of": "2026-07-17",
+            "summary": {"company_count": 1},
+            "provenance": {
+                "snapshot_payload_sha256": snapshot.baseline_payload_sha256,
+                "quality_history_backfill": {"available_companies": 0},
+                "screening_coverage": {"quantitative_missing_input_counts": {}},
+            },
+        },
     )
 
     assert manifest["market_as_of"] == "2026-07-17"

@@ -386,6 +386,38 @@ def test_quality_history_reuses_recent_normalized_source_capture_without_network
     assert reused.cache_diagnostic == "recent_source_capture:2026-07-17"
 
 
+def test_same_session_history_replay_retains_expired_but_valid_raw_capture(tmp_path, monkeypatch):
+    import time
+
+    first = fetch_quality_history(
+        "600519",
+        "2026-07-17",
+        weekly_adapter=_WeeklyAdapter(_weekly_bars()),
+        valuation_session=_Session(_Response(_valuation_payload())),
+        cache_dir=tmp_path,
+        cache_ttl_seconds=1,
+    )
+    assert first.available
+    later = time.time() + 2 * 24 * 3600
+    monkeypatch.setattr("data.cache.time.time", lambda: later)
+    result = load_quality_history_cache_batch(
+        [{"code": "600519", "as_of": "2026-07-17"}],
+        cache_dir=tmp_path,
+    )
+    assert result["600519"]["available"] is True
+    assert result["600519"]["as_of"] == "2026-07-17"
+    assert result["600519"]["cache_diagnostic"] == "hit"
+
+    cache = SafeFileCache(qh._cache_path("600519", date(2026, 7, 17), tmp_path), schema_version=qh.CACHE_SCHEMA_VERSION)
+    payload = cache.load(allow_expired=True).value
+    payload["contract"]["code"] = "000001"
+    cache.save(payload)
+    assert "600519" not in load_quality_history_cache_batch(
+        [{"code": "600519", "as_of": "2026-07-17"}],
+        cache_dir=tmp_path,
+    )
+
+
 def test_quality_history_reuse_slides_valuation_window_without_rejecting_older_rows(tmp_path):
     first = fetch_quality_history(
         "600519",

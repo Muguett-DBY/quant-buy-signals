@@ -159,6 +159,11 @@ def _parser() -> argparse.ArgumentParser:
         help="re-score using validated company-evidence caches without per-company network backfills",
     )
     parser.add_argument(
+        "--reference-manifest",
+        type=Path,
+        help="current published manifest required to check a cache-only rebuild for lost evidence",
+    )
+    parser.add_argument(
         "--force-financial-fallback-refresh",
         action="store_true",
         help="bypass only the bounded secondary financial-source cache",
@@ -182,6 +187,56 @@ def _market_as_of(snapshot: object) -> str:
     except ValueError as exc:
         raise RuntimeError("snapshot trading session is invalid") from exc
     return value
+
+
+def _require_replay_reference(
+    reference: Mapping[str, Any] | None,
+    snapshot: object,
+    company_count: int,
+) -> Mapping[str, Any]:
+    if reference is None:
+        raise RuntimeError("cache-only rebuild requires the current published reference manifest")
+    provenance = reference.get("provenance", {})
+    if (
+        reference.get("market_as_of") != _market_as_of(snapshot)
+        or reference.get("summary", {}).get("company_count") != company_count
+        or provenance.get("snapshot_payload_sha256") != getattr(snapshot, "baseline_payload_sha256", None)
+    ):
+        raise RuntimeError("cache-only rebuild does not match the published session, universe, and raw snapshot")
+    if not isinstance(provenance.get("quality_history_backfill", {}).get("available_companies"), int):
+        raise RuntimeError("published reference has no comparable quality-history evidence coverage")
+    if not isinstance(provenance.get("screening_coverage", {}).get("quantitative_missing_input_counts"), Mapping):
+        raise RuntimeError("published reference has no comparable source-input coverage")
+    return provenance
+
+
+def _require_quality_history_replay(reference: Mapping[str, Any], current: Mapping[str, int]) -> None:
+    before = reference["quality_history_backfill"]["available_companies"]
+    after = current["available_companies"]
+    if after < before:
+        raise RuntimeError(
+            f"cache-only rebuild lost usable quality histories ({before} -> {after}); "
+            "restore the source caches before rebuilding; keeping the published generation"
+        )
+    print(f"EVIDENCE_REPLAY quality_history available {before} -> {after}", flush=True)
+
+
+def _require_source_input_replay(reference: Mapping[str, Any], coverage: Mapping[str, Any]) -> None:
+    before = reference["screening_coverage"]["quantitative_missing_input_counts"]
+    after = coverage.get("quantitative_missing_input_counts", {})
+    lost = []
+    for metric, inputs in before.items():
+        if metric not in after:
+            raise RuntimeError(f"cache-only rebuild omitted comparable evidence metric: {metric}")
+        # Only compare already-defined source inputs. New model requirements
+        # and changed buy/observe decisions are not evidence regressions.
+        for source_input, previous_count in inputs.items():
+            current_count = after[metric].get(source_input, 0)
+            if current_count > previous_count:
+                lost.append(f"{metric}.{source_input}: {previous_count} -> {current_count} missing")
+    if lost:
+        raise RuntimeError("cache-only rebuild lost published source evidence: " + "; ".join(lost))
+    print("EVIDENCE_REPLAY all comparable source-input coverage retained", flush=True)
 
 
 def _utc_timestamp(value: object) -> str:
@@ -769,6 +824,7 @@ def publish_mobile_snapshot(
     force_financial_fallback_refresh: bool = False,
     refresh_financials_only: bool = False,
     reuse_evidence_only: bool = False,
+    reference_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     source_commit = _source_commit()
@@ -810,6 +866,10 @@ def publish_mobile_snapshot(
     eligible_codes = tuple(getattr(snapshot, "eligible_codes", ()))
     if not eligible_codes:
         raise RuntimeError("validated snapshot has no eligible Shanghai/Shenzhen companies")
+    replay_reference = (
+        _require_replay_reference(reference_manifest, snapshot, len(eligible_codes)) if reuse_evidence_only else None
+    )
+    print(f"MARKET_BUILD session={market_as_of} companies={len(eligible_codes)} loading coldness evidence", flush=True)
     coldness_reference_artifact: dict[str, object] = {}
     coldness_archive_candidates: list[object] = []
     coldness_evidence, coldness_status = _load_market_coldness_evidence(
@@ -830,12 +890,16 @@ def publish_mobile_snapshot(
     if len(coldness_archive_candidates) != 1:
         raise RuntimeError("validated market-coldness evidence has no unique archive candidate")
     archive_market_coldness_session_snapshot(coldness_archive_candidates[0], market_as_of)
+    print("MARKET_BUILD loading quality histories", flush=True)
     quality_history_evidence, quality_history_backfill = _prepare_quality_history_evidence(
         eligible_codes,
         market_as_of,
         priority_codes=_quality_history_priority_codes(snapshot.analysis_quotes, eligible_codes),
         network_limit=0 if reuse_evidence_only else _QUALITY_HISTORY_BACKFILL_LIMIT,
     )
+    if replay_reference is not None:
+        _require_quality_history_replay(replay_reference, quality_history_backfill)
+    print("MARKET_BUILD loading commodity and dividend evidence", flush=True)
     commodity_cycle_evidence = _prepare_commodity_cycle_evidence(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -847,6 +911,7 @@ def publish_mobile_snapshot(
         as_of=market_as_of,
         cache_only=reuse_evidence_only,
     )
+    print("MARKET_BUILD scoring all companies and seven buy types", flush=True)
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
         snapshot.analysis_financials,
@@ -878,7 +943,10 @@ def publish_mobile_snapshot(
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")
     if not isinstance(analysis.quality, Mapping) or analysis.quality.get("ok") is not True:
         raise RuntimeError("whole-market analysis quality gate did not pass")
+    print("MARKET_BUILD checking full-universe score and source coverage", flush=True)
     screening_coverage = _mobile_screening_coverage(analysis.scores, analysis.dcf_results)
+    if replay_reference is not None:
+        _require_source_input_replay(replay_reference, screening_coverage)
 
     active_payload_sha256 = getattr(snapshot, "baseline_payload_sha256", None)
     if snapshot.source == "network":
@@ -941,6 +1009,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         force_financial_fallback_refresh=bool(args.force_financial_fallback_refresh),
         refresh_financials_only=bool(args.refresh_financials_only),
         reuse_evidence_only=bool(args.reuse_evidence_only),
+        reference_manifest=(
+            json.loads(args.reference_manifest.read_text(encoding="utf-8"))
+            if args.reference_manifest is not None
+            else None
+        ),
     )
     # GitHub's Windows runner may expose a cp1252 stdout even though the files
     # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful

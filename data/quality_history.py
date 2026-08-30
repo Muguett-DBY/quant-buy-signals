@@ -788,12 +788,14 @@ def _load_reusable_capture(
     cache_ttl_seconds: int,
 ) -> _QualityHistoryCacheCapture | None:
     exact_path = _cache_path(code, as_of, cache_dir)
+    # Raw captures are revalidated against their own cutoff below. A weekend
+    # replay must treat the exact date like the earlier-date captures.
     exact = SafeFileCache(
         exact_path,
         schema_version=CACHE_SCHEMA_VERSION,
         ttl=int(cache_ttl_seconds),
         max_uncompressed_bytes=MAX_RESPONSE_BYTES,
-    ).load()
+    ).load(allow_expired=True)
     if exact.hit:
         try:
             return _capture_from_cache(
