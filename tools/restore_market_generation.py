@@ -25,7 +25,10 @@ AND EXISTS (SELECT 1 FROM generations WHERE generation_id = ? AND manifest_sha25
 
 
 def read_url(url: str) -> bytes:
-    with urlopen(Request(url, headers={"User-Agent": "DS-DCF-market-recovery"}), timeout=60) as response:
+    if not (url.startswith(f"{SITE}/") or url.startswith(f"{RELEASE}/")):
+        raise ValueError("Recovery downloads must use the fixed website or retained release URLs")
+    # Both allowed roots are fixed HTTPS endpoints; release redirects carry no credentials.
+    with urlopen(Request(url, headers={"User-Agent": "DS-DCF-market-recovery"}), timeout=60) as response:  # nosec B310
         return response.read()
 
 
@@ -47,7 +50,8 @@ def d1_query(sql: str, params: list[str]) -> dict:
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urlopen(request, timeout=60) as response:
+    # The authenticated destination is the fixed Cloudflare HTTPS API above.
+    with urlopen(request, timeout=60) as response:  # nosec B310
         payload = json.load(response)
     if payload.get("success") is not True or len(payload.get("result", [])) != 1:
         raise RuntimeError("Cloudflare did not confirm the recovery query")

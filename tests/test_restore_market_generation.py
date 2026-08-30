@@ -5,6 +5,14 @@ import pytest
 from tools import restore_market_generation as recovery
 
 
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "http://quant.custard.top/api/meta", "https://quant.custard.top.example.com/api/meta"]
+)
+def test_recovery_downloads_cannot_target_an_arbitrary_origin(url):
+    with pytest.raises(ValueError, match="fixed website"):
+        recovery.read_url(url)
+
+
 def test_pointer_restore_is_atomic_and_checks_both_expected_current_and_manifest():
     db = sqlite3.connect(":memory:")
     db.executescript(
