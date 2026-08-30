@@ -44,11 +44,16 @@ def test_model_rebuild_reuses_evidence_but_forced_gap_refresh_keeps_network():
     deep_cache_steps = [
         step for step in steps if "accumulated contract-validated deep evidence" in step.get("name", "")
     ]
+    dividend_cache_steps = [
+        step for step in steps if "accumulated contract-validated dividend evidence" in step.get("name", "")
+    ]
     assert "if ($rebuildLatestClosed -and -not $forceGapRefresh)" in build
     assert "$publisherArguments += '--reuse-evidence-only'" in build
     assert "$publisherArguments += '--refresh-financials-only'" in build
     assert len(deep_cache_steps) == 2
-    assert all("data/cache/dividend_history" in step["with"]["path"] for step in deep_cache_steps)
+    assert all("data/cache/dividend_history" not in step["with"]["path"] for step in deep_cache_steps)
+    assert len(dividend_cache_steps) == 2
+    assert all(step["with"]["path"] == "data/cache/dividend_history" for step in dividend_cache_steps)
     assert "$expectedEvidenceMode" in verify
     assert "company_evidence_mode" in verify
     assert "snapshot_source" in verify

@@ -201,7 +201,6 @@ jobs:
             data/cache/market_history
             data/cache/quality_history
             data/cache/commodity_cycle
-            data/cache/dividend_history
             data/cache/exchange_financials
             data/cache/industry_history
             data/cache/investor_relations
@@ -214,6 +213,15 @@ jobs:
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             mobile-deep-evidence-v1-${{ runner.os }}-
+
+      - name: Restore accumulated contract-validated dividend evidence
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: data/cache/dividend_history
+          key: mobile-dividend-evidence-v1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            mobile-dividend-evidence-v1-${{ runner.os }}-
 
       - name: Import a verified local evidence bundle when available
         shell: pwsh
@@ -848,7 +856,6 @@ jobs:
             data/cache/market_history
             data/cache/quality_history
             data/cache/commodity_cycle
-            data/cache/dividend_history
             data/cache/exchange_financials
             data/cache/industry_history
             data/cache/investor_relations
@@ -859,6 +866,13 @@ jobs:
             data/cache/datacenter_reports
             data/cache/sina_financial
           key: mobile-deep-evidence-v1-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Save accumulated contract-validated dividend evidence
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: data/cache/dividend_history
+          key: mobile-dividend-evidence-v1-${{ runner.os }}-${{ github.run_id }}
 
   publish:
     if: github.ref == 'refs/heads/main'

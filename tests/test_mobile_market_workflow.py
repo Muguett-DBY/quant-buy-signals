@@ -138,7 +138,12 @@ def test_mobile_financial_query_caches_are_restored_and_saved_with_adapter_contr
         assert "data/cache/datacenter_reports" in paths
         assert "data/cache/sina_financial" in paths
         assert "data/cache/exchange_financials" in paths
-        assert "data/cache/dividend_history" in paths
+        assert "data/cache/dividend_history" not in paths
+    dividend_steps = [
+        step for step in steps if "accumulated contract-validated dividend evidence" in step.get("name", "")
+    ]
+    assert len(dividend_steps) == 2
+    assert all(step["with"]["path"] == "data/cache/dividend_history" for step in dividend_steps)
 
     workflow = _workflow_text(MOBILE_WORKFLOW)
     assert workflow.count("data/cache/datacenter_reports") == 2
@@ -448,7 +453,7 @@ def test_mobile_publication_is_main_only_and_uses_least_privilege_jobs():
     # backfill (segment + annual cash-flow rows) in addition to the snapshot
     # fetch and full-market scoring.
     assert "timeout-minutes: 240" in workflow
-    assert workflow.count("continue-on-error: true") == 4
+    assert workflow.count("continue-on-error: true") == 6
     assert "persist-credentials: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
@@ -661,7 +666,6 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
         "data/cache/market_history",
         "data/cache/quality_history",
         "data/cache/commodity_cycle",
-        "data/cache/dividend_history",
         "data/cache/exchange_financials",
         "data/cache/growth_evidence",
         "data/cache/industry_history",
@@ -678,6 +682,15 @@ def test_mobile_publication_retries_after_close_and_caches_every_deep_evidence_s
     deep_save = next(step for step in steps if step.get("name") == "Save accumulated contract-validated deep evidence")
     assert set(deep_restore["with"]["path"].splitlines()) == expected_deep_paths
     assert set(deep_save["with"]["path"].splitlines()) == expected_deep_paths
+    dividend_restore = next(
+        step for step in steps if step.get("name") == "Restore accumulated contract-validated dividend evidence"
+    )
+    dividend_save = next(
+        step for step in steps if step.get("name") == "Save accumulated contract-validated dividend evidence"
+    )
+    assert dividend_restore["with"]["path"] == "data/cache/dividend_history"
+    assert dividend_save["with"]["path"] == "data/cache/dividend_history"
+    assert dividend_restore["with"]["restore-keys"] == "mobile-dividend-evidence-v1-${{ runner.os }}-\n"
 
     local_bundle = next(
         step for step in steps if step.get("name") == "Import a verified local evidence bundle when available"
