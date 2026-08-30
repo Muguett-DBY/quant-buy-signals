@@ -96,11 +96,14 @@ jobs:
           import hashlib
           import json
           import os
-          from urllib.request import urlopen
-          with urlopen("https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json", timeout=60) as response:
+          from urllib.request import Request, urlopen
+          headers = {"User-Agent": "DS-DCF-market-recovery"}
+          request = Request("https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json", headers=headers)
+          with urlopen(request, timeout=60) as response:
               manifest = response.read()
           assert hashlib.sha256(manifest).hexdigest() == os.environ["MANIFEST_SHA256"], "Upstream manifest mismatch"
-          with urlopen("https://quant.custard.top/api/health?deep=1", timeout=60) as response:
+          request = Request("https://quant.custard.top/api/health?deep=1", headers=headers)
+          with urlopen(request, timeout=60) as response:
               health = json.load(response)
           assert health["generation_id"] == os.environ["TARGET_GENERATION"], "Public generation mismatch"
           assert health["ok"] and health["integrity_ok"], "Public integrity check failed"

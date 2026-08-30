@@ -60,6 +60,11 @@ def d1_query(sql: str, params: list[str]) -> dict:
 def restore(generation: str, expected_current: str, manifest_sha256: str) -> dict:
     check_health(generation)
     before = d1_query("SELECT generation_id FROM current_generation WHERE singleton=1", [])["results"]
+    if len(before) == 1 and before[0]["generation_id"] == generation:
+        current = json.loads(read_url(f"{SITE}/api/meta"))
+        if current.get("generation_id") != generation or current.get("manifest_sha256") != manifest_sha256:
+            raise ValueError("The already-restored generation does not match the approved manifest")
+        return {"restored_generation": generation, "already_restored": True, "health": check_health(generation)}
     if len(before) != 1 or before[0]["generation_id"] != expected_current:
         raise ValueError("The current generation changed; refusing to overwrite another publication")
     result = d1_query(

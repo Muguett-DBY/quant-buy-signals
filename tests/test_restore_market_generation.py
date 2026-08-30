@@ -41,6 +41,20 @@ def test_restore_refuses_a_concurrent_publication(monkeypatch):
     assert len(calls) == 1
 
 
+def test_restore_can_resume_after_the_pointer_has_already_been_restored(monkeypatch):
+    monkeypatch.setattr(recovery, "check_health", lambda _: {"ok": True})
+    monkeypatch.setattr(recovery, "read_url", lambda _: b'{"generation_id":"old","manifest_sha256":"approved"}')
+    calls = []
+
+    def query(sql, params):
+        calls.append(sql)
+        return {"results": [{"generation_id": "old"}]}
+
+    monkeypatch.setattr(recovery, "d1_query", query)
+    assert recovery.restore("old", "new", "approved")["already_restored"] is True
+    assert len(calls) == 1
+
+
 def test_manifest_requires_a_complete_single_generation():
     generation = "7ee4958f2e33242d"
     manifest = {
