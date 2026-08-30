@@ -69,6 +69,48 @@ def test_bundle_is_deterministic_content_addressed_and_excludes_lock_files(tmp_p
     assert eb.verify_evidence_bundle(first_pointer, first_bundle) == first
 
 
+def test_bundle_compacts_accumulated_growth_and_quality_generations(tmp_path):
+    cache_root = tmp_path / "cache"
+    expected_names: set[str] = set()
+    for directory, series, code in (
+        ("growth_evidence", "type3-external-growth-cache-v1", "000001"),
+        ("quality_history", "type7-market-history-v1", "000002"),
+    ):
+        target = cache_root / directory
+        target.mkdir(parents=True)
+        for day in range(5, 10):
+            name = f"{series}_{code}_202608{day:02d}.json.gz"
+            (target / name).write_bytes(_cache_payload(name))
+            if day >= 7:
+                expected_names.add(f"data/cache/{directory}/{name}")
+    static = cache_root / "growth_evidence" / "legacy-static.json.gz"
+    static.write_bytes(_cache_payload("static"))
+    expected_names.add("data/cache/growth_evidence/legacy-static.json.gz")
+
+    _bundle, _pointer, manifest = eb.bundle_evidence(
+        cache_root=cache_root,
+        output_dir=tmp_path / "bundle",
+        as_of=AS_OF,
+        source_commit=SOURCE_COMMIT,
+    )
+
+    assert {member["path"] for member in manifest["members"]} == expected_names
+
+
+def test_bundle_rejects_future_dated_replay_generation(tmp_path):
+    path = tmp_path / "cache" / "quality_history" / "type7-market-history-v1_000001_20260811.json.gz"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(_cache_payload("future"))
+
+    with pytest.raises(eb.EvidenceBundleError, match="newer than the bundle cutoff"):
+        eb.bundle_evidence(
+            cache_root=tmp_path / "cache",
+            output_dir=tmp_path / "bundle",
+            as_of=AS_OF,
+            source_commit=SOURCE_COMMIT,
+        )
+
+
 def test_import_verifies_then_atomically_merges_only_whitelisted_cache_members(tmp_path):
     source_cache = tmp_path / "source-cache"
     payloads = _seed_cache(source_cache)

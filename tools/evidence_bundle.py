@@ -51,7 +51,11 @@ MAX_POINTER_BYTES = 16 * 1024 * 1024
 MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 MAX_MEMBER_BYTES = 40 * 1024 * 1024
 MAX_TOTAL_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
-MAX_MEMBERS = 50_000
+# Three retained captures for each bounded 6,000-company series can exceed the
+# original 50k ceiling even after compaction. 75k still fits the independent
+# 16 MiB pointer limit while leaving room for the small non-company caches.
+MAX_MEMBERS = 75_000
+MAX_GENERATIONS_PER_SERIES = 3
 
 _CODE = re.compile(r"^[036][0-9]{5}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -62,6 +66,10 @@ _MEMBER_NAME = re.compile(
     r"investor_relations|market_coldness|quality_history|research_reports)/"
     r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
 )
+_GENERATIONAL_CACHE_NAME = re.compile(
+    r"^(?P<series>[A-Za-z0-9][A-Za-z0-9_.-]*)_(?P<code>[036][0-9]{5})_(?P<as_of>[0-9]{8})\.json\.gz$"
+)
+_COMPACTED_CACHE_DIRECTORIES = frozenset({"growth_evidence", "quality_history"})
 
 
 class EvidenceBundleError(RuntimeError):
@@ -361,6 +369,35 @@ def _atomic_write(path: Path, payload: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _bundle_source_files(directory: str, source_dir: Path, *, as_of: date) -> list[Path]:
+    """Keep the latest replay generations instead of archiving an endless cache history."""
+
+    sources = list(source_dir.glob("*.json.gz"))
+    if directory not in _COMPACTED_CACHE_DIRECTORIES:
+        return sources
+    passthrough: list[Path] = []
+    generations: dict[tuple[str, str], list[tuple[date, Path]]] = {}
+    for source in sources:
+        match = _GENERATIONAL_CACHE_NAME.fullmatch(source.name)
+        if match is None:
+            passthrough.append(source)
+            continue
+        try:
+            source_as_of = date.fromisoformat(
+                f"{match.group('as_of')[:4]}-{match.group('as_of')[4:6]}-{match.group('as_of')[6:]}"
+            )
+        except ValueError as exc:
+            raise EvidenceBundleError(f"cache filename has an invalid generation date: {source}") from exc
+        if source_as_of > as_of:
+            raise EvidenceBundleError(f"cache generation is newer than the bundle cutoff: {source}")
+        generations.setdefault((match.group("series"), match.group("code")), []).append((source_as_of, source))
+    selected = list(passthrough)
+    for values in generations.values():
+        values.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+        selected.extend(source for _source_as_of, source in values[:MAX_GENERATIONS_PER_SERIES])
+    return selected
+
+
 def bundle_evidence(
     *,
     cache_root: str | Path = DEFAULT_CACHE_ROOT,
@@ -371,6 +408,7 @@ def bundle_evidence(
     """Create a deterministic immutable ZIP and its mutable pointer manifest."""
 
     cutoff = _canonical_date(as_of)
+    cutoff_date = date.fromisoformat(cutoff)
     commit = _canonical_commit(source_commit) if source_commit is not None else _git_head()
     cache = Path(cache_root)
     output = Path(output_dir)
@@ -383,7 +421,7 @@ def bundle_evidence(
             continue
         if not source_dir.is_dir() or source_dir.is_symlink():
             raise EvidenceBundleError(f"cache source is not a regular directory: {source_dir}")
-        for source in source_dir.glob("*.json.gz"):
+        for source in _bundle_source_files(directory, source_dir, as_of=cutoff_date):
             if not source.is_file() or source.is_symlink():
                 raise EvidenceBundleError(f"cache member is not a regular file: {source}")
             files.append((_member_path(directory, source.name), source))
