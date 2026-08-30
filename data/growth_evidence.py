@@ -1080,6 +1080,52 @@ def _external_cache_index(cache_dir: Path) -> dict[str, list[tuple[date, Path]]]
     return indexed
 
 
+def _migrate_legacy_external_cache(evidence: Any, *, code: str, source_as_of: date) -> Any:
+    """Upgrade the pre-CNINFO-hash Eastmoney cache without changing its facts.
+
+    Eastmoney records use an empty source hash in the current schema. Older
+    captures omitted that field entirely. Verify their original record ID
+    before upgrading, then let the normal validator reproduce every amount.
+    Legacy CNINFO records cannot use this migration: their PDF hash is required.
+    """
+    if not isinstance(evidence, Mapping):
+        return evidence
+    raw_records = evidence.get("records")
+    legacy_fields = _EXTERNAL_RECORD_FIELDS - {"source_sha256"}
+    if not (
+        isinstance(raw_records, list)
+        and 0 < len(raw_records) <= EXTERNAL_HISTORY_YEARS
+        and all(
+            isinstance(record, Mapping)
+            and set(record) == legacy_fields
+            and record.get("source_report") == "RPT_F10_FINANCE_GCASHFLOW"
+            for record in raw_records
+        )
+    ):
+        return evidence
+    records = [
+        _normalise_external_record(
+            {**record, "source_sha256": ""}, latest_year=_latest_completed_annual_year(source_as_of)
+        )
+        for record in raw_records
+    ]
+    identity = {
+        "model_id": EXTERNAL_MODEL_ID,
+        "code": code,
+        "as_of": source_as_of.isoformat(),
+        "coverage_years": [record["year"] for record in records],
+        "records": [{key: value for key, value in record.items() if key != "source_sha256"} for record in records],
+    }
+    if evidence.get("evidence_id") != f"eastmoney-external-growth:{code}:{_canonical_hash(identity)}":
+        raise GrowthEvidenceError("legacy external cache record identity is invalid")
+    identity["records"] = records
+    return {
+        **evidence,
+        "records": records,
+        "evidence_id": f"eastmoney-external-growth:{code}:{_canonical_hash(identity)}",
+    }
+
+
 def _rebase_external_growth_evidence(
     evidence: Any,
     *,
@@ -1089,7 +1135,11 @@ def _rebase_external_growth_evidence(
 ) -> dict[str, Any]:
     """Reissue a validated source capture under the current evidence cutoff."""
 
-    source = _validate_external_evidence(evidence, code=code, as_of=source_as_of)
+    source = _validate_external_evidence(
+        _migrate_legacy_external_cache(evidence, code=code, source_as_of=source_as_of),
+        code=code,
+        as_of=source_as_of,
+    )
     if source["status"] != "complete":
         raise GrowthEvidenceError("external cache cannot reuse incomplete evidence")
     if source_as_of == as_of:

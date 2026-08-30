@@ -669,7 +669,18 @@ def _bounded_type3_growth_loader(
         prepared = list(requests)
         if cache_only:
             fetched = fetch_growth_evidence_batch(prepared, progress_cb=progress_cb, cache_only=True)
-            return _backfill_missing_segments(prepared, fetched, cache_only=True)
+            fetched = _backfill_missing_segments(prepared, fetched, cache_only=True)
+            counts = {
+                "requested": len(prepared),
+                "external_complete": sum(
+                    item["external_growth_evidence"]["status"] == "complete" for item in fetched.values()
+                ),
+                "segment_complete": sum(
+                    item["segment_growth_sources"]["status"] == "complete" for item in fetched.values()
+                ),
+            }
+            print(f"EVIDENCE_REPLAY growth {json.dumps(counts, sort_keys=True)}", flush=True)
+            return fetched
         cached_segments = load_growth_evidence_cache_batch_state(prepared)
         cached_external = load_external_growth_evidence_cache_batch_state(prepared)
         fully_cached_codes = set(cached_segments).intersection(cached_external)

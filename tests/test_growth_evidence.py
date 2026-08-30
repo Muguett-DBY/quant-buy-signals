@@ -1060,6 +1060,99 @@ def test_cache_only_batch_replays_validated_components_without_network(monkeypat
     assert record["external_growth_evidence"]["status"] == ("complete" if "external" in cached_parts else "unavailable")
 
 
+def _legacy_external_cache(tmp_path, *, source_as_of=date(2026, 8, 27)):
+    code = "600519"
+    revenues, goodwill, acquisitions = _complete_inputs()
+    evidence = ge.build_external_growth_evidence(
+        code,
+        source_as_of,
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        acquisition_cashflow_records=acquisitions,
+    )
+    assert ge._save_external_growth_evidence_cache(
+        code,
+        source_as_of,
+        revenue_records=revenues,
+        goodwill_records=goodwill,
+        evidence=evidence,
+        cache_dir=tmp_path,
+    )
+    cache = ge.SafeFileCache(
+        ge._external_cache_path(code, source_as_of, tmp_path), schema_version=ge.CACHE_SCHEMA_VERSION
+    )
+    payload = cache.load(allow_expired=True).value
+    legacy = payload["external_growth_evidence"]
+    for record in legacy["records"]:
+        del record["source_sha256"]
+    legacy["evidence_id"] = f"eastmoney-external-growth:{code}:" + ge._canonical_hash(
+        {
+            "model_id": ge.EXTERNAL_MODEL_ID,
+            "code": code,
+            "as_of": source_as_of.isoformat(),
+            "coverage_years": legacy["coverage_years"],
+            "records": legacy["records"],
+        }
+    )
+    cache.save(payload, ttl=0)
+    request = {"code": code, "as_of": "2026-08-28", "revenue_records": revenues, "goodwill_records": goodwill}
+    return cache, payload, request, acquisitions
+
+
+def test_cache_only_batch_migrates_legacy_eastmoney_external_cache(monkeypatch, tmp_path):
+    cache, _payload, request, acquisitions = _legacy_external_cache(tmp_path)
+    original_bytes = cache.path.read_bytes()
+    monkeypatch.setattr(ge, "fetch_detailed_annual_cashflow_history", lambda *_args, **_kwargs: pytest.fail("network"))
+    monkeypatch.setattr(ge, "_fetch_segment_growth_sources", lambda *_args, **_kwargs: pytest.fail("network"))
+
+    result = ge.fetch_growth_evidence_batch([request], cache_only=True, cache_dir=tmp_path)
+
+    expected = ge.build_external_growth_evidence(
+        request["code"],
+        date(2026, 8, 28),
+        revenue_records=request["revenue_records"],
+        goodwill_records=request["goodwill_records"],
+        acquisition_cashflow_records=acquisitions,
+    )
+    assert result["600519"]["external_growth_evidence"] == expected
+    assert result["600519"]["segment_growth_sources"]["status"] == "unavailable"
+    assert cache.path.read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize("corruption", ["id", "source", "cninfo", "mixed_schema", "amount", "summary", "inputs"])
+def test_legacy_external_cache_migration_keeps_existing_validation(tmp_path, corruption):
+    cache, payload, request, _ = _legacy_external_cache(tmp_path)
+    evidence = payload["external_growth_evidence"]
+    record = evidence["records"][0]
+    if corruption == "id":
+        evidence["evidence_id"] = "eastmoney-external-growth:600519:" + "0" * 64
+    elif corruption == "source":
+        record["source_url"] = "https://example.com/not-the-report"
+    elif corruption == "cninfo":
+        record["source_report"] = "CNINFO ANNUAL REPORT"
+    elif corruption == "mixed_schema":
+        record["source_sha256"] = ""
+    elif corruption == "amount":
+        record["acquisition_cash"] = 99.0
+    elif corruption == "summary":
+        evidence["aggregate_acquisition_cash_to_revenue"] = 99.0
+    else:
+        request["goodwill_records"][-1]["value"] = 4.5
+    cache.save(payload)
+
+    assert ge.load_external_growth_evidence_cache_batch_state([request], cache_dir=tmp_path) == {}
+
+
+def test_legacy_external_cache_migration_does_not_extend_source_reuse_window(tmp_path):
+    _cache, _payload, request, _ = _legacy_external_cache(tmp_path, source_as_of=date(2026, 8, 6))
+    assert ge.load_external_growth_evidence_cache_batch_state([request], cache_dir=tmp_path) == {}
+    request["as_of"] = "2026-08-27"
+    assert (
+        ge.load_external_growth_evidence_cache_batch_state([request], cache_dir=tmp_path)["600519"]["source_as_of"]
+        == "2026-08-06"
+    )
+
+
 def test_external_cache_reuses_complete_batch_evidence_and_skips_cashflow_fetch(monkeypatch, tmp_path):
     calls = []
 

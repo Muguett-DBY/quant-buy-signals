@@ -899,7 +899,7 @@ def _full_market_screening_coverage_fixture(eligible_count):
     }
 
 
-def _audit_payload(files):
+def _build_audit_payload(files):
     eligible_codes = _eligible_codes()
     sample_codes = sorted(random.Random(20260715).sample(eligible_codes, 100))
     type_dimensions = {
@@ -1280,6 +1280,46 @@ def _audit_payload(files):
     for company in payload["companies"]:
         _refresh_fixture_company_summary(company)
     return payload
+
+
+@lru_cache(maxsize=1)
+def _cached_audit_payload(files_items):
+    return json.dumps(_build_audit_payload(dict(files_items)))
+
+
+def _audit_payload(files):
+    return json.loads(_cached_audit_payload(tuple(sorted(files.items()))))
+
+
+def test_audit_payload_cache_hits_without_sharing_mutable_objects():
+    files = {"app.py": b"# app\n"}
+    _cached_audit_payload.cache_clear()
+
+    first = _audit_payload(files)
+    first["companies"][0]["code"] = "mutated"
+    first["companies"][0]["bear_case"][0]["reason"] = "mutated"
+    second = _audit_payload(files)
+
+    assert _cached_audit_payload.cache_info().hits == 1
+    assert first is not second
+    assert first["companies"] is not second["companies"]
+    assert first["companies"][0] is not second["companies"][0]
+    assert first["companies"][0]["bear_case"] is not second["companies"][0]["bear_case"]
+    assert first["companies"][0]["bear_case"][0] is not second["companies"][0]["bear_case"][0]
+    assert second["companies"][0]["code"] != "mutated"
+    assert second["companies"][0]["bear_case"][0]["reason"] != "mutated"
+
+
+def test_audit_payload_cache_key_includes_source_file_content():
+    files = {"app.py": b"# app\n"}
+    _cached_audit_payload.cache_clear()
+
+    original = _audit_payload(files)
+    files["app.py"] = b"# changed app\n"
+    changed = _audit_payload(files)
+
+    assert original["provenance"]["code_sha256"] != changed["provenance"]["code_sha256"]
+    assert _cached_audit_payload.cache_info().misses == 2
 
 
 def _render_csv(payload):
