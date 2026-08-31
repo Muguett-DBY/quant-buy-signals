@@ -178,3 +178,60 @@ def test_exchange_overlay_fills_only_missing_fields_and_records_conflicts():
     assert annual["TOTAL_OPERATE_INCOME_PROVENANCE"]["security_code"] == "600001"
     assert outcome.diagnostic["conflicts"] == 1
     assert outcome.diagnostic["filled_fields"] == 2
+
+
+def test_exchange_overlay_ignores_valid_sse_periods_outside_the_generation_contract():
+    source = {
+        "688302": {
+            "revenue_history": [{"REPORT_DATE": "2025-12-31"}],
+            "income_history": [{"REPORT_DATE": "2025-12-31"}],
+            "cashflow": [{"REPORT_DATE": "2025-12-31"}],
+            "income_interim": [
+                {"REPORT_DATE": "2025-03-31", "PARENT_NETPROFIT": -1.0},
+                {"REPORT_DATE": "2026-03-31", "PARENT_NETPROFIT": -2.0},
+            ],
+            "cashflow_interim": [],
+        }
+    }
+
+    class _Client:
+        def fetch_sse(self, code, years):
+            assert code == "688302"
+            assert years == {2025, 2026}
+            return [
+                {
+                    "security_code": code,
+                    "report_date": "2025-06-30",
+                    "source_kind": "sse_xbrl_summary",
+                    "source_url": SSE_XBRL_URL,
+                    "source_raw_sha256": "b" * 64,
+                    "source_fields": {"PARENT_NETPROFIT": -3.0},
+                    "company_statement": False,
+                }
+            ]
+
+        def fetch_szse(self, *_args, **_kwargs):
+            return []
+
+        def diagnostic(self):
+            return {"network_requests": 0, "cache_hits": 0, "request_limit": 72}
+
+    outcome = backfill_exchange_financial_gaps(
+        source,
+        {
+            "annual_report_date": "2025-12-31",
+            "current_interim_report_date": "2026-03-31",
+            "prior_interim_report_date": "2025-03-31",
+        },
+        codes=["688302"],
+        as_of=date(2026, 8, 31),
+        client=_Client(),
+    )
+
+    assert [row["REPORT_DATE"] for row in outcome.financials["688302"]["income_interim"]] == [
+        "2025-03-31",
+        "2026-03-31",
+    ]
+    assert outcome.diagnostic["source_records"] == 1
+    assert outcome.diagnostic["ignored_non_target_records"] == 1
+    assert outcome.diagnostic["filled_fields"] == 0

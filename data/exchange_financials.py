@@ -859,10 +859,18 @@ def backfill_exchange_financial_gaps(
     counters: Counter[str] = Counter()
     conflicts: set[str] = set()
     filled_codes: set[str] = set()
+    target_report_dates = set(report_dates)
     for record in source_records:
         code = record["security_code"]
         if code not in output:
             raise ExchangeFinancialError("exchange record escaped the requested financial population")
+        # SSE returns every annual and half-year row for each requested year.
+        # Only the three periods in this generation's reporting contract may
+        # enter the canonical financial datasets; newer/older valid rows stay
+        # available in the source cache for the next filing-window rollover.
+        if record["report_date"] not in target_report_dates:
+            counters["ignored_non_target_records"] += 1
+            continue
         before = counters["filled_fields"]
         _overlay_record(output, record, counters, conflicts)
         if counters["filled_fields"] > before:
@@ -878,6 +886,7 @@ def backfill_exchange_financial_gaps(
         "szse_target_codes": len(szse_targets),
         "szse_skipped_codes": len(szse_candidates) - len(szse_targets),
         "source_records": len(source_records),
+        "ignored_non_target_records": counters["ignored_non_target_records"],
         "filled_fields": counters["filled_fields"],
         "filled_codes": sorted(filled_codes),
         "conflicts": counters["conflicts"],
