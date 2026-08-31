@@ -423,6 +423,41 @@ def test_source_audit_does_not_pass_coincident_numbers(statement, body) -> None:
     assert not source_audit._structured_number_match(body, source_audit._claim_numbers(claim, {}), claim=claim)
 
 
+@pytest.mark.parametrize("label_gap", ["", "\n"])
+def test_source_audit_inherits_units_from_the_same_metric_row(label_gap) -> None:
+    claim = {"statement": "2025年度基本每股收益0.7276元/股"}
+    body = f"2025年度单位：元\n基本每股收益{label_gap}（元/股）\n0.7276"
+
+    assert source_audit._structured_number_match(body, source_audit._claim_numbers(claim, {}), claim=claim)
+
+
+@pytest.mark.parametrize(
+    ("statement", "body"),
+    [
+        (
+            "2025年度基本每股收益0.7276元/股",
+            "2025年度归属于上市公司股东的净利润（元）\n0.7276",
+        ),
+        (
+            "2026H1归属于上市公司股东的扣除非经常性损益的净利润271945706.02元",
+            "2026H1归属于上市公司股东的净利润（元）\n271,945,706.02",
+        ),
+        (
+            "2026H1营业收入18亿元",
+            "2026H1营业收入（%）\n18",
+        ),
+        (
+            "2025年度营业收入18亿元",
+            "2025年度营业收入\n18\n净利润（亿元）\n18",
+        ),
+    ],
+)
+def test_source_audit_does_not_borrow_inline_metric_units_across_rows(statement, body) -> None:
+    claim = {"statement": statement}
+
+    assert not source_audit._structured_number_match(body, source_audit._claim_numbers(claim, {}), claim=claim)
+
+
 @pytest.mark.parametrize(
     "body",
     [

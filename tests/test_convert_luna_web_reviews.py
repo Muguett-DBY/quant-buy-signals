@@ -17,6 +17,7 @@ from tools.convert_luna_web_reviews import (
     _sanitize_reason_text,
     _source_period_compatible,
     _unit_factor,
+    _valuation_snapshot_text,
     convert,
 )
 from tools.codex_web_events import CodexWebEvent, bind_codex_web_events, parse_codex_web_event_log
@@ -662,6 +663,34 @@ def test_fact_binding_keeps_prose_quote_as_text_and_replaces_stale_valuation() -
     assert bindings[-1]["metric"] == "估值快照"
     assert bindings[-1]["date"] == "2026-08-28"
     assert "7.74" in bindings[-1]["value_text"]
+
+
+@pytest.mark.parametrize(
+    ("pe_fields", "expected", "unexpected"),
+    [
+        (
+            {"pe_provider": 12.382, "pe_basis": "quote_provider_not_ttm"},
+            "PE 12.38倍（行情供应商口径，非 TTM）",
+            "PE 未提供",
+        ),
+        ({"pe_provider": -0.42}, "PE 不适用（原始 PE -0.42倍）（行情供应商口径，非 TTM）", "PE 未提供"),
+        ({"pe_ttm": 15.6}, "PE 15.60倍（TTM）", "行情供应商口径"),
+        ({"pe_provider": None, "pe_ttm": 99.0}, "PE 未提供", "99.00"),
+    ],
+)
+def test_valuation_snapshot_preserves_provider_pe_basis(pe_fields, expected, unexpected) -> None:
+    row = {
+        "valuation_snapshot": {
+            "as_of": "2026-08-31",
+            "price_cny": 7.75,
+            **pe_fields,
+        }
+    }
+
+    text = _valuation_snapshot_text(row)
+
+    assert expected in text
+    assert unexpected not in text
 
 
 def test_non_evidence_fact_rows_are_not_published_as_company_facts() -> None:

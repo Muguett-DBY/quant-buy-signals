@@ -993,7 +993,8 @@ def _valuation_snapshot_text(row: Mapping[str, Any]) -> str:
     price = _decimal(snapshot.get("price_cny"))
     if not as_of or price is None:
         return ""
-    pe = _decimal(snapshot.get("pe_ttm"))
+    provider_pe = "pe_provider" in snapshot
+    pe = _decimal(snapshot.get("pe_provider" if provider_pe else "pe_ttm"))
     pb = _decimal(snapshot.get("pb"))
     market_cap_yi = _decimal(snapshot.get("market_cap_cny_yi"))
     if market_cap_yi is None:
@@ -1002,6 +1003,7 @@ def _valuation_snapshot_text(row: Mapping[str, Any]) -> str:
     pe_text = "PE 未提供"
     if pe is not None:
         pe_text = f"PE {pe:.2f}倍" if pe > 0 else f"PE 不适用（原始 PE {pe:.2f}倍）"
+        pe_text += "（行情供应商口径，非 TTM）" if provider_pe else "（TTM）"
     pb_text = f"PB {pb:.2f}倍" if pb is not None else "PB 未提供"
     market_text = f"市值 {market_cap_yi:.2f}亿元" if market_cap_yi is not None else "市值未提供"
     return f"估值快照：股价 {price:.2f}元；{pe_text}；{pb_text}；{market_text}（交易日 {as_of}）"

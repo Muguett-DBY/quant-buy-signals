@@ -982,6 +982,13 @@ _TABLE_UNIT_RE = re.compile(
     r"(千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|元|%|％|倍)",
     re.IGNORECASE,
 )
+_INLINE_METRIC_UNIT_RE = re.compile(
+    r"^\s*[（(][ \t\u3000]*"
+    r"(?P<unit>元/股|元／股|千亿元|百亿元|十亿元|亿元|千万元|百万元|十万元|万元|千元|百元|元|"
+    r"亿股|万股|千股|股|万吨|万件|万台|吨|件|台|个百分点|百分点|%|％|倍)"
+    r"[ \t\u3000]*[）)]",
+    re.IGNORECASE,
+)
 _CNY_SOURCE_FIELDS = frozenset(
     {
         "total_operate_income",
@@ -1003,23 +1010,24 @@ _RAW_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.+-])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(
 
 
 def _number_metric_context(text: str):
-    """Return row lookup without joining neighbouring HTML/PDF numeric cells."""
+    """Return row lookup and a unit attached to the metric label, if present."""
 
     labels = list(_FACT_METRIC_RE.finditer(text))
     ends = [match.end() for match in labels]
 
-    def context(position: int) -> tuple[str, str]:
+    def context(position: int) -> tuple[str, str, str]:
         index = bisect_right(ends, position) - 1
         if index < 0:
-            return "", ""
+            return "", "", ""
         label = labels[index]
         between = text[label.end() : position]
         if len(between) > 240 or "。" in between:
-            return "", ""
+            return "", "", ""
         alias = re.sub(r"\s+", "", label.group()).casefold()
         # English multi-word labels retain their single space in the index.
         key = _FACT_METRIC_NAMES.get(alias, _FACT_METRIC_NAMES.get(label.group().casefold(), ""))
-        return key, alias
+        inline_unit = _INLINE_METRIC_UNIT_RE.match(between)
+        return key, alias, inline_unit.group("unit") if inline_unit else ""
 
     return context
 
@@ -1053,10 +1061,12 @@ def _structured_number_match(
     raw_facts: list[tuple[float, str]] = []
     for match in _RAW_NUMBER_RE.finditer(unitless_text):
         raw = float(match.group().replace(",", ""))
-        metric, alias = body_metric(match.start())
+        metric, alias, inline_unit = body_metric(match.start())
         raw_facts.append((raw, metric))
         header_index = bisect_right(header_ends, match.start()) - 1
-        unit = headers[header_index].group(1) if header_index >= 0 else "元" if alias in _CNY_SOURCE_FIELDS else ""
+        unit = inline_unit or (
+            headers[header_index].group(1) if header_index >= 0 else "元" if alias in _CNY_SOURCE_FIELDS else ""
+        )
         if unit and metric:
             body_facts.append((raw * _NUMBER_UNIT_FACTORS[unit], unit, metric))
 
