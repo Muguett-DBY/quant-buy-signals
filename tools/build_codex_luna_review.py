@@ -24,11 +24,13 @@ MARKET_DATE = "2026-08-24"
 MODEL = LOCAL_REVIEW_MODEL
 EFFORT = "max"
 DEFAULT_KNOWLEDGE_PATH = Path("tools/ai_company_research_knowledge.md")
-MIN_BUY_FCF_MARGIN = 0.03
+MIN_BUY_FCF_MARGIN = 0.08
 MIN_BUY_FCF_HISTORY_AVERAGE = 0.0
 MAX_BUY_PB_STRETCH_RATIO = 2.5
-MAX_BUY_INTERIM_CASHFLOW_DECLINE = -10.0
-MAX_BUY_INTERIM_REVENUE_DECLINE = -5.0
+MAX_BUY_INTERIM_CASHFLOW_DECLINE = 0.0
+MAX_BUY_INTERIM_REVENUE_DECLINE = 0.0
+MIN_BUY_ROIC = 10.0
+MAX_BUY_PE_ABSOLUTE = 60.0
 
 
 def _number(value: Any) -> float | None:
@@ -325,6 +327,11 @@ def _score_and_reasons(
         if roic is not None and roic >= 10:
             score += 7
             strengths.append(f"2025 年 ROIC {roic:.2f}%，资本回报达到可观察水平。")
+        elif roic is not None and roic >= MIN_BUY_ROIC:
+            score += 3
+        elif roic is not None and roic < MIN_BUY_ROIC:
+            score -= 9
+            risks.append(f"2025 年 ROIC {roic:.2f}%，低于买入硬门槛 {MIN_BUY_ROIC:.0f}%，再投资回报不足。")
         elif roic is not None and roic < 3:
             score -= 7
             risks.append(f"2025 年 ROIC {roic:.2f}%，再投资回报偏弱。")
@@ -384,7 +391,10 @@ def _score_and_reasons(
 
     shareholder = company.get("shareholder_returns")
     missing_returns = shareholder.get("missing_fields", []) if isinstance(shareholder, Mapping) else []
-    if isinstance(missing_returns, list) and missing_returns:
+    if isinstance(missing_returns, list) and len(missing_returns) == 3:
+        score -= 1
+        risks.append("研究包分红/回购/稀释三项均未登记，股东回报历史待后续补齐，但不否决现金流与盈利已验证的结论。")
+    elif isinstance(missing_returns, list) and missing_returns:
         score -= min(6, len(missing_returns))
         risks.append("研究包未形成完整的分红、回购或稀释历史，股东回报需要后续核验。")
     if not strengths:
@@ -411,7 +421,8 @@ def _score_and_reasons(
         value is not None and value <= MAX_BUY_INTERIM_CASHFLOW_DECLINE
         for value in (interim_ocf_decline, interim_fcf_decline)
     )
-    capital_return_ready = roic is not None and roic >= 5
+    capital_return_ready = roic is not None and roic >= MIN_BUY_ROIC
+    pe_not_overheated = pe is None or pe <= MAX_BUY_PE_ABSOLUTE
     evidence_ready = (
         len(annual) >= 3
         and profit is not None
@@ -421,6 +432,7 @@ def _score_and_reasons(
         and fcf is not None
         and fcf > 0
         and (pe is not None and pe > 0 or pb is not None and pb > 0)
+        and pe_not_overheated
         and not interim_cashflow_conflict
         and cycle_history_ready
         and not severe_recent_decline
