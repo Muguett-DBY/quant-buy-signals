@@ -149,7 +149,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -305,7 +305,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -461,7 +461,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -617,7 +617,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -773,7 +773,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -928,7 +928,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1126,7 +1126,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1310,7 +1310,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1481,7 +1481,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1649,7 +1649,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1805,7 +1805,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -1960,7 +1960,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -2130,7 +2130,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
@@ -2286,7 +2286,7 @@
             "support": "supports"
           }
         ],
-        "confidence": "medium",
+        "confidence": "high",
         "effort": "max",
         "final_category": "recommend_buy",
         "final_recommendation": "recommend_buy",
