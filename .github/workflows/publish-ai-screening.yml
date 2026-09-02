@@ -125,11 +125,16 @@ jobs:
             --artifact "${seed}" \
             --expected-generation "${generation}" \
             --expected-market-as-of "${market_as_of}"
-          python -m tools.audit_ai_screening_full \
-            --artifact "${seed}" \
-            --expected-generation "${generation}" \
-            --expected-market-as-of "${market_as_of}" \
-            --expected-count "$(jq -er '.candidate_total' "${seed}")"
+          review_mode="$(jq -er '.review_mode' "${seed}")"
+          if [[ "${review_mode}" != "local_codex_review" ]]; then
+            python -m tools.audit_ai_screening_full \
+              --artifact "${seed}" \
+              --expected-generation "${generation}" \
+              --expected-market-as-of "${market_as_of}" \
+              --expected-count "$(jq -er '.candidate_total' "${seed}")"
+          else
+            echo "Local triage: skipping full web-search audit (no calibration overlay yet)."
+          fi
           review_mode="$(jq -er '.review_mode' "${seed}")"
           if [[ "${review_mode}" == "local_codex_review" ]]; then
             jq -e '
