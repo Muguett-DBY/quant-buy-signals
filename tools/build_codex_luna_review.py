@@ -379,7 +379,7 @@ def _score_and_reasons(
             score -= min(6, round(abs(decline) / 5, 1))
             risks.append(
                 f"最新可得中期现金流同比下滑：经营现金流 {_pct(interim_ocf_decline / 100) if interim_ocf_decline is not None else '未知'}、"
-                f"自由现金流 {_pct(interim_fcf_decline / 100) if interim_fcf_decline is not None else '未知'}，现金趋势仍需观察。"
+                f"自由现金流 {_pct(interim_fcf_decline / 100) if interim_fcf_decline is not None else '未知'}，现金趋势待验证。"
             )
 
     shareholder = company.get("shareholder_returns")
