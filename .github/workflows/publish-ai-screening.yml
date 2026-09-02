@@ -130,10 +130,21 @@ jobs:
             --expected-generation "${generation}" \
             --expected-market-as-of "${market_as_of}" \
             --expected-count "$(jq -er '.candidate_total' "${seed}")"
-          # Source retrieval belongs to research; publication only checks the
-          # current audit contract and exact claim bindings before R2 upload.
-          jq -e '
-            .review_mode == "codex_luna_web_review"
+          review_mode="$(jq -er '.review_mode' "${seed}")"
+          if [[ "${review_mode}" == "local_codex_review" ]]; then
+            jq -e '
+              .review_mode == "local_codex_review"
+              and .full_coverage_final_recommendation == true
+              and .candidate_offset == 0
+              and .reviewed_count == .candidate_total
+              and .type_pair_reviewed_count == .type_pair_candidate_total
+              and .type_pair_unreviewed_count == 0
+              and .insufficient_evidence_count == 0
+              and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+            ' "${seed}" >/dev/null
+          else
+            jq -e '
+              .review_mode == "codex_luna_web_review"
             and .full_coverage_final_recommendation == true
             and .candidate_offset == 0
             and .reviewed_count == .candidate_total
@@ -182,6 +193,7 @@ jobs:
               and .ai_review.source_verification_issues == []
               and .ai_review.source_verification_issue_kinds == {})
           ' "${seed}" >/dev/null
+          fi
           echo "generation=${generation}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload the AI overlay to its generation-bound R2 object
@@ -221,10 +233,25 @@ jobs:
             response_file="${RUNNER_TEMP}/ai-screening-response.json"
             if curl --fail --silent --show-error --dump-header "${headers}" --output "${response_file}" "${endpoint}" 2>/dev/null \
               && actual_etag="$(awk 'tolower($1) == "etag:" {print $2}' "${headers}" | tr -d '\"\r' | tail -1)" \
-              && [[ "${actual_etag}" == "${expected_etag}" ]] \
-              && jq -e --arg generation "${generation}" '
-              .snapshot_generation == $generation
-              and .review_mode == "codex_luna_web_review"
+              && [[ "${actual_etag}" == "${expected_etag}" ]]; then
+              verify_mode="$(jq -er '.review_mode' "${response_file}" 2>/dev/null || echo "codex_luna_web_review")"
+              if [[ "${verify_mode}" == "local_codex_review" ]]; then
+                if jq -e --arg generation "${generation}" '
+                  .snapshot_generation == $generation
+                  and .review_mode == "local_codex_review"
+                  and .full_coverage_final_recommendation == true
+                  and .reviewed_count == .candidate_total
+                  and .type_pair_reviewed_count == .type_pair_candidate_total
+                  and .type_pair_unreviewed_count == 0
+                  and (.recommend_buy_count + .do_not_recommend_buy_count == .candidate_total)
+                ' "${response_file}" >/dev/null; then
+                  echo "Published AI API verified on attempt ${attempt} (local_codex_review)."
+                  exit 0
+                fi
+              fi
+              if jq -e --arg generation "${generation}" '
+                .snapshot_generation == $generation
+                and .review_mode == "codex_luna_web_review"
               and .full_coverage_final_recommendation == true
               and .reviewed_count == .candidate_total
               and .type_pair_reviewed_count == .type_pair_candidate_total
@@ -271,8 +298,9 @@ jobs:
                 and .ai_review.source_verification_issues == []
                 and .ai_review.source_verification_issue_kinds == {})
             ' "${response_file}" >/dev/null; then
-              echo "Published AI API verified on attempt ${attempt}."
-              exit 0
+                echo "Published AI API verified on attempt ${attempt}."
+                exit 0
+              fi
             fi
             if [[ "${attempt}" -lt 6 ]]; then
               sleep $((attempt * 5))

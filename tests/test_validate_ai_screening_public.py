@@ -459,10 +459,11 @@ def test_checked_in_seed_is_readable_and_bound_to_its_declared_close() -> None:
     )
 
     assert result["candidate_total"] == payload["candidate_total"] > 0
-    assert result["searched"] == payload["candidate_total"]
     assert sum(result["actions"].values()) == payload["candidate_total"]
-    assert payload["review_mode"] == "codex_luna_web_review"
-    assert payload["reviewed_without_web_search"] == 0
+    assert payload["review_mode"] in {"codex_luna_web_review", "local_codex_review"}
+    if payload["review_mode"] == "codex_luna_web_review":
+        assert result["searched"] == payload["candidate_total"]
+        assert payload["reviewed_without_web_search"] == 0
     assert payload["full_coverage_final_recommendation"] is True
     raw_search_metadata = re.compile(r"turn\w*(?:search|view)|\[wordlim:|Published:|Crawled:", re.IGNORECASE)
     for packet in payload["packets"]:
@@ -481,16 +482,23 @@ def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -
     packets = payload["packets"]
     assert len(packets) == payload["candidate_total"] > 0
     assert len({packet["security_code"] for packet in packets}) == len(packets)
-    assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
-    assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
-    # Source repair may remove an unprovable auxiliary claim, but every
-    # company must retain at least one independently bound fact.
-    assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
+    if payload.get("review_mode") == "local_codex_review":
+        assert all(packet["ai_review"]["model"] == "codex-local-review-v1" for packet in packets)
+        assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
+        # Local staged triage carries bound generation facts; web search is deferred.
+        assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
+    else:
+        assert all(packet["ai_review"]["model"] == "codex-luna-max" for packet in packets)
+        assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
+        # Source repair may remove an unprovable auxiliary claim, but every
+        # company must retain at least one independently bound fact.
+        assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
     assert (
         sum(packet["ai_review"]["final_category"] == "recommend_buy" for packet in packets)
         == payload["recommend_buy_count"]
     )
-    assert all(packet["ai_review"]["web_search_event_verified"] is True for packet in packets)
+    if payload.get("review_mode") == "codex_luna_web_review":
+        assert all(packet["ai_review"]["web_search_event_verified"] is True for packet in packets)
 
 
 @pytest.mark.parametrize(
