@@ -24,6 +24,7 @@ LOCAL_OPENCODE_MODELS = frozenset(
     {
         "opencode-go/ox-alpha-free",
         "opencode-go/muse-spark-1.2-contributor",
+        "opencode-go/muse-spark-1.3-contributor",
         "opencode/muse-spark-1.2-contributor-free",
         "opencode-go/deepseek-v4-flash",
         "opencode-go-anthropic/deepseek-v4-flash",

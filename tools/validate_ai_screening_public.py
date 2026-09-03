@@ -803,6 +803,7 @@ def validate_artifact(
     if review_mode == "local_codex_review" and not review_model_efforts <= {
         ("opencode-go/ox-alpha-free", "max"),
         ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
+        ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
         (LOCAL_REVIEW_MODEL, "max"),
         ("codex-luna-max", "max"),
     }:
