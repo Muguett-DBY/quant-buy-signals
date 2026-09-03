@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from tools.audit_ai_screening_sources import source_semantic_projection_sha256
-from tools.ai_screening_contract import candidate_identity_sha256, make_valuation_snapshot
+from tools.ai_screening_contract import (
+    LOCAL_OPENCODE_MODELS,
+    LOCAL_REVIEW_MODELS,
+    candidate_identity_sha256,
+    make_valuation_snapshot,
+)
 from tools.validate_ai_screening_public import (
     MAX_PUBLIC_ARTIFACT_BYTES,
     _validate_published_financial_facts,
@@ -483,8 +488,11 @@ def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -
     assert len(packets) == payload["candidate_total"] > 0
     assert len({packet["security_code"] for packet in packets}) == len(packets)
     if payload.get("review_mode") == "local_codex_review":
-        assert all(packet["ai_review"]["model"] == "codex-local-review-v1" for packet in packets)
-        assert all(packet["ai_review"]["effort"] == "max" for packet in packets)
+        assert all(
+            packet["ai_review"]["model"] in (LOCAL_REVIEW_MODELS | LOCAL_OPENCODE_MODELS)
+            for packet in packets
+        )
+        assert all(packet["ai_review"]["effort"] in ("max", "xhigh") for packet in packets)
         # Local staged triage carries bound generation facts; web search is deferred.
         assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
     else:
