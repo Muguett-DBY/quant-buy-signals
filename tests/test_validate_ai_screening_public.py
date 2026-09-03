@@ -488,10 +488,7 @@ def test_checked_in_seed_contains_full_company_review_and_checked_promotions() -
     assert len(packets) == payload["candidate_total"] > 0
     assert len({packet["security_code"] for packet in packets}) == len(packets)
     if payload.get("review_mode") == "local_codex_review":
-        assert all(
-            packet["ai_review"]["model"] in (LOCAL_REVIEW_MODELS | LOCAL_OPENCODE_MODELS)
-            for packet in packets
-        )
+        assert all(packet["ai_review"]["model"] in (LOCAL_REVIEW_MODELS | LOCAL_OPENCODE_MODELS) for packet in packets)
         assert all(packet["ai_review"]["effort"] in ("max", "xhigh") for packet in packets)
         # Local staged triage carries bound generation facts; web search is deferred.
         assert all(len(packet["ai_review"]["claims"]) >= 1 for packet in packets)
