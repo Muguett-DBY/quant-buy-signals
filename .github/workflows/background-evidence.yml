@@ -1,0 +1,305 @@
+# Background evidence channel for the DS_DCF website pipeline.
+#
+# Runs off-peak (12:30 Beijing, weekdays) to keep the contract-validated
+# evidence bundle warm: Type 3 segment/cash-flow, Type 7 quality history and
+# research reports for the whole eligible universe.  The 16:15 close run
+# imports this bundle before scoring, so its inline backfills hit the cache
+# instead of re-fetching thousands of companies on the critical path.
+#
+# This workflow never publishes market data and never touches the Cloudflare
+# mirror: it only refreshes the evidence-cache bundle on the mobile-market-data
+# release (immutable ZIP + atomically replaced pointer).
+name: background evidence bundle
+
+on:
+  schedule:
+    # 04:30 UTC = 12:30 Asia/Shanghai, weekdays (well before the 16:15 close run).
+    - cron: "30 4 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      as_of:
+        description: "Closed-market evidence date (YYYY-MM-DD). Defaults to the stable manifest date."
+        required: false
+        type: string
+
+concurrency:
+  group: background-evidence
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+timeout-minutes: 180
+
+jobs:
+  refresh-evidence:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Restore accumulated contract-validated deep evidence
+        id: deep_cache
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            data/cache/market_coldness
+            data/cache/market_history
+            data/cache/quality_history
+            data/cache/commodity_cycle
+            data/cache/exchange_financials
+            data/cache/industry_history
+            data/cache/investor_relations
+            data/cache/growth_evidence
+            data/cache/research_reports
+            data/cache/patch4_evidence
+            data/cache/cninfo_annual
+            data/cache/datacenter_reports
+            data/cache/sina_financial
+          key: mobile-deep-evidence-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            mobile-deep-evidence-v2-${{ runner.os }}-
+
+      - name: Restore accumulated contract-validated dividend evidence
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: data/cache/dividend_history
+          key: mobile-dividend-evidence-v1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            mobile-dividend-evidence-v1-${{ runner.os }}-
+
+      - name: Install locked production dependencies
+        run: |
+          if (-not $env:PIP_INDEX_URL) { $env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+          python -m pip install --require-hashes -r requirements-bootstrap.txt
+          python -m pip install --require-hashes -r requirements-lock.txt
+          python -m pip check
+
+      - name: Import the published evidence bundle when available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $releaseBase = 'https://github.com/Muguett-DBY/quant-buy-signals/releases/download/mobile-market-data'
+          $pointer = Join-Path $env:RUNNER_TEMP 'evidence-cache-pointer.json'
+          & curl.exe --fail --silent --show-error --location --retry 3 --retry-all-errors `
+            --connect-timeout 20 --max-time 120 --max-filesize 16777216 `
+            --proto '=https' --proto-redir '=https' --output $pointer "$releaseBase/evidence-cache-pointer.json"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host 'No published evidence pointer yet; continuing with the Actions cache only.'
+            exit 0
+          }
+          $bundleOutput = & python -m tools.evidence_bundle resolve --pointer $pointer
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The published evidence pointer failed its schema, path, or provenance contract.'
+          }
+          $bundleName = ([string]($bundleOutput | Select-Object -Last 1)).Trim()
+          $archive = Join-Path $env:RUNNER_TEMP $bundleName
+          & curl.exe --fail --silent --show-error --location --retry 3 --retry-all-errors `
+            --connect-timeout 20 --max-time 900 --max-filesize 536870912 `
+            --proto '=https' --proto-redir '=https' --output $archive "$releaseBase/$bundleName"
+          if ($LASTEXITCODE -ne 0) {
+            throw "The published evidence bundle could not be downloaded: $bundleName"
+          }
+          & python -m tools.evidence_bundle import `
+            --pointer $pointer --bundle $archive --cache-root data/cache --preserve-existing
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The published evidence bundle failed digest/member verification or atomic import.'
+          }
+
+      - name: Resolve the closed-market evidence date and the eligible universe
+        id: universe
+        shell: pwsh
+        env:
+          DISPATCH_AS_OF: ${{ github.event.inputs.as_of }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'stable-manifest.json'
+          & curl.exe --fail --silent --show-error --location --retry 3 --retry-all-errors `
+            --connect-timeout 20 --max-time 120 `
+            --proto '=https' --proto-redir '=https' `
+            --output $manifest 'https://muguett-dby.github.io/quant-buy-signals/mobile-data/manifest.json'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The stable manifest could not be downloaded; refusing to guess the evidence date.'
+          }
+          $codesFile = Join-Path $env:RUNNER_TEMP 'eligible-codes.json'
+          $script = @'
+          import gzip, io, json, sys, urllib.request
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          as_of = str(manifest["market_as_of"])
+          catalogue_name = str(manifest["catalogue"]["filename"])
+          expected = str(manifest["catalogue"]["sha256"])
+          base = "https://muguett-dby.github.io/quant-buy-signals/mobile-data/"
+          raw = urllib.request.urlopen(base + catalogue_name, timeout=180).read()
+          import hashlib
+          if hashlib.sha256(raw).hexdigest() != expected:
+              raise SystemExit("stable catalogue digest mismatch")
+          catalogue = json.load(gzip.open(io.BytesIO(raw), "rt", encoding="utf-8"))
+          codes = sorted({str(row["code"]) for row in catalogue.get("companies", [])})
+          if not codes:
+              raise SystemExit("stable catalogue contained no companies")
+          json.dump(codes, open(sys.argv[2], "w", encoding="ascii"))
+          print(f"as_of={as_of}")
+          print(f"codes={len(codes)}")
+          '@
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'resolve_universe.py'
+          Set-Content -LiteralPath $scriptPath -Value $script -Encoding UTF8
+          $output = & python $scriptPath $manifest $codesFile
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The stable catalogue could not be resolved into an eligible code universe.'
+          }
+          $asOf = ([string]($output | Where-Object { $_ -like 'as_of=*' }) -replace '^as_of=', '').Trim()
+          $codeCount = ([string]($output | Where-Object { $_ -like 'codes=*' }) -replace '^codes=', '').Trim()
+          if ($DISPATCH_AS_OF -and $DISPATCH_AS_OF.Trim()) {
+            $asOf = $DISPATCH_AS_OF.Trim()
+            Write-Host "Using dispatch-provided evidence date: $asOf"
+          }
+          "as_of=$asOf" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "codes_file=$codesFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Evidence date: $asOf; eligible codes: $codeCount"
+
+      - name: Collect segment, quality-history and research evidence off-peak
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -m tools.evidence_bundle collect `
+            --as-of "${{ steps.universe.outputs.as_of }}" `
+            --codes-file "${{ steps.universe.outputs.codes_file }}" `
+            --sources segment,quality,research `
+            --max-workers 8
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Background evidence collection failed.'
+          }
+
+      - name: Build and verify the immutable bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDir = Join-Path $env:RUNNER_TEMP 'ds-dcf-background-evidence-bundle'
+          $built = & python -m tools.evidence_bundle bundle `
+            --as-of "${{ steps.universe.outputs.as_of }}" `
+            --source-commit "$env:GITHUB_SHA" `
+            --output-dir $outputDir
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Background evidence bundling failed.'
+          }
+          $pointer = Join-Path $outputDir 'evidence-cache-pointer.json'
+          $bundleName = ([string](& python -m tools.evidence_bundle resolve --pointer $pointer)).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The freshly built pointer failed validation.'
+          }
+          & python -m tools.evidence_bundle verify `
+            --pointer $pointer --bundle (Join-Path $outputDir $bundleName) `
+            --expected-source-commit "$env:GITHUB_SHA" --expected-as-of "${{ steps.universe.outputs.as_of }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The freshly built bundle failed verification.'
+          }
+          "bundle_name=$bundleName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "bundle_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        id: bundle
+
+      - name: Publish the refreshed bundle pointer to the stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $tag = 'mobile-market-data'
+          $directory = "${{ steps.bundle.outputs.bundle_dir }}"
+          $pointer = Join-Path $directory 'evidence-cache-pointer.json'
+          $bundle = Join-Path $directory "${{ steps.bundle.outputs.bundle_name }}"
+          $release = (gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not inspect the stable release for evidence publication.'
+          }
+          $assetNames = @($release.assets.name)
+          $previousDirectory = Join-Path $env:RUNNER_TEMP 'previous-background-evidence'
+          New-Item -ItemType Directory -Force -Path $previousDirectory | Out-Null
+          $previousPointer = Join-Path $previousDirectory 'evidence-cache-pointer.json'
+          $previousBundleName = $null
+          if ('evidence-cache-pointer.json' -cin $assetNames) {
+            gh release download $tag --repo $env:GH_REPO `
+              --pattern 'evidence-cache-pointer.json' --dir $previousDirectory --clobber
+            if ($LASTEXITCODE -eq 0) {
+              $resolvedPrevious = [string](& python -m tools.evidence_bundle resolve --pointer $previousPointer)
+              if ($LASTEXITCODE -eq 0) {
+                $previousBundleName = $resolvedPrevious.Trim()
+              }
+            }
+          }
+          if ("${{ steps.bundle.outputs.bundle_name }}" -cnotin $assetNames) {
+            gh release upload $tag "$bundle#${{ steps.bundle.outputs.bundle_name }}" --repo $env:GH_REPO
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not upload the refreshed evidence bundle.'
+            }
+          }
+          if ('evidence-cache-pointer.json' -cin $assetNames) {
+            gh release delete-asset $tag 'evidence-cache-pointer.json' --repo $env:GH_REPO --yes
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not replace the evidence pointer.'
+            }
+          }
+          gh release upload $tag "$pointer#evidence-cache-pointer.json" --repo $env:GH_REPO
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $previousPointer -PathType Leaf) {
+              gh release upload $tag "$previousPointer#evidence-cache-pointer.json" --repo $env:GH_REPO
+            }
+            throw 'Could not publish the refreshed evidence pointer.'
+          }
+          $remoteDirectory = Join-Path $env:RUNNER_TEMP 'remote-background-evidence'
+          New-Item -ItemType Directory -Force -Path $remoteDirectory | Out-Null
+          gh release download $tag --repo $env:GH_REPO `
+            --pattern 'evidence-cache-pointer.json' `
+            --pattern "${{ steps.bundle.outputs.bundle_name }}" `
+            --dir $remoteDirectory --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not download the published evidence assets for remote verification.'
+          }
+          & python -m tools.evidence_bundle verify `
+            --pointer (Join-Path $remoteDirectory 'evidence-cache-pointer.json') `
+            --bundle (Join-Path $remoteDirectory "${{ steps.bundle.outputs.bundle_name }}") `
+            --expected-source-commit "$env:GITHUB_SHA" --expected-as-of "${{ steps.universe.outputs.as_of }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The published background evidence failed remote verification.'
+          }
+          $retained = @("${{ steps.bundle.outputs.bundle_name }}", $previousBundleName) | Where-Object { $_ }
+          $updatedRelease = (gh release view $tag --repo $env:GH_REPO --json assets | ConvertFrom-Json)
+          foreach ($name in @($updatedRelease.assets.name)) {
+            if ($name -match '^evidence-cache-[0-9a-f]{64}\.zip$' -and $name -cnotin $retained) {
+              gh release delete-asset $tag $name --repo $env:GH_REPO --yes
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not delete obsolete evidence asset $name."
+              }
+            }
+          }
+
+      - name: Save the refreshed deep evidence cache
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            data/cache/market_coldness
+            data/cache/market_history
+            data/cache/quality_history
+            data/cache/commodity_cycle
+            data/cache/exchange_financials
+            data/cache/industry_history
+            data/cache/investor_relations
+            data/cache/growth_evidence
+            data/cache/research_reports
+            data/cache/patch4_evidence
+            data/cache/cninfo_annual
+            data/cache/datacenter_reports
+            data/cache/sina_financial
+          key: mobile-deep-evidence-v2-${{ runner.os }}-${{ github.run_id }}
