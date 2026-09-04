@@ -19,12 +19,18 @@ VALUATION_SNAPSHOT_CONTRACT_VERSION = 1
 PLACEHOLDER_REVIEW_MODEL = "pending-local-opencode-go"
 LOCAL_REVIEW_MODEL = "codex-local-review-v1"
 CODEX_LUNA_REVIEW_MODEL = "codex-luna-max"
-LOCAL_REVIEW_MODELS = frozenset({LOCAL_REVIEW_MODEL, CODEX_LUNA_REVIEW_MODEL})
+# ZCode local second-pass lane: subagent-driven GLM review with per-company
+# live web research.  Kept separate from LOCAL_OPENCODE_MODELS so the
+# OpenCode-specific effort constraints and freshness exemptions do not apply.
+ZCODE_LOCAL_REVIEW_MODEL = "zcode/glm-5.3-flash"
+ZCODE_LOCAL_REVIEW_EFFORT = "max"
+LOCAL_REVIEW_MODELS = frozenset({LOCAL_REVIEW_MODEL, CODEX_LUNA_REVIEW_MODEL, ZCODE_LOCAL_REVIEW_MODEL})
 LOCAL_OPENCODE_MODELS = frozenset(
     {
         "opencode-go/ox-alpha-free",
         "opencode-go/muse-spark-1.2-contributor",
         "opencode-go/muse-spark-1.3-contributor",
+        "opencode/muse-spark-1.3-contributor-free",
         "opencode/muse-spark-1.2-contributor-free",
         "opencode-go/deepseek-v4-flash",
         "opencode-go-anthropic/deepseek-v4-flash",

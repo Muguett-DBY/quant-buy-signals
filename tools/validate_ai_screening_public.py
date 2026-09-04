@@ -18,6 +18,8 @@ from typing import Any, Mapping
 
 from tools.ai_screening_contract import (
     CODEX_LUNA_WEB_REVIEW_MODE,
+    ZCODE_LOCAL_REVIEW_EFFORT,
+    ZCODE_LOCAL_REVIEW_MODEL,
     LOCAL_OPENCODE_MODELS,
     LOCAL_REVIEW_MODELS,
     LOCAL_REVIEW_MODEL,
@@ -804,8 +806,10 @@ def validate_artifact(
         ("opencode-go/ox-alpha-free", "max"),
         ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
         ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
+        ("opencode/muse-spark-1.3-contributor-free", "high"),
         (LOCAL_REVIEW_MODEL, "max"),
         ("codex-luna-max", "max"),
+        (ZCODE_LOCAL_REVIEW_MODEL, ZCODE_LOCAL_REVIEW_EFFORT),
     }:
         raise ValueError("local OpenCode Go reviews must use Ox max or Muse Spark xhigh")
     if company_research_review:

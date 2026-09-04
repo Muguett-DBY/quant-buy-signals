@@ -1359,6 +1359,7 @@ def build_artifact(
             ("opencode-go/ox-alpha-free", "max"),
             ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
             ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
+            ("opencode/muse-spark-1.3-contributor-free", "high"),
         }
     ):
         raise ValueError("OpenCode Go local artifacts must use Ox max or Muse Spark xhigh reviews")

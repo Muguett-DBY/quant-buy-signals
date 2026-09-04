@@ -1351,6 +1351,7 @@ function aiScreeningPageResponse(request){
       return action==="priority_buy"?"recommend_buy":action==="avoid"?"do_not_recommend":"observe";
     }
     function modelLabel(model){
+      if(model==="zcode/glm-5.3-flash")return "GLM-5.3 Flash 多代理联网研究（zcode/glm-5.3-flash）";
       if(model==="opencode-go/ox-alpha-free")return "Ox Alpha Free（"+model+"）";
       if(model==="opencode-go/muse-spark-1.2-contributor")return "Muse Spark 1.2（"+model+"）";
       if(model==="opencode-go/deepseek-v4-flash")return "DeepSeek V4 Flash（OpenCode Go）";
