@@ -173,6 +173,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reuse the cached closed-session quotes but re-fetch financials and re-score",
     )
+    parser.add_argument(
+        "--qualitative-overlay",
+        type=Path,
+        help="optional dated primary qualitative scores merged into company financials before scoring",
+    )
     return parser
 
 
@@ -187,6 +192,33 @@ def _market_as_of(snapshot: object) -> str:
     except ValueError as exc:
         raise RuntimeError("snapshot trading session is invalid") from exc
     return value
+
+
+def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    """Load one dated primary qualitative record set keyed by company code.
+
+    Each record must already carry ``{score, evidence_level, evidence}`` in the
+    shape ``engine.buy_screener.extract_metrics`` validates; this loader only
+    checks the outer envelope and leaves score-level fail-closed validation to
+    the scoring boundary.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"qualitative overlay file not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"qualitative overlay is not readable JSON: {path}") from exc
+    if not isinstance(raw, Mapping) or not raw:
+        raise RuntimeError("qualitative overlay must be a non-empty code mapping")
+    overlay: dict[str, dict[str, dict[str, Any]]] = {}
+    for code, keys in raw.items():
+        canonical = str(code).strip()
+        if not re.fullmatch(r"[036][0-9]{5}", canonical) or not isinstance(keys, Mapping) or not keys:
+            raise RuntimeError(f"qualitative overlay record is invalid: {code}")
+        overlay[canonical] = {str(key): dict(value) for key, value in keys.items() if isinstance(value, Mapping)}
+        if not overlay[canonical]:
+            raise RuntimeError(f"qualitative overlay record has no score keys: {code}")
+    return overlay
 
 
 def _require_replay_reference(
@@ -836,6 +868,7 @@ def publish_mobile_snapshot(
     refresh_financials_only: bool = False,
     reuse_evidence_only: bool = False,
     reference_manifest: Mapping[str, Any] | None = None,
+    qualitative_overlay_path: Path | None = None,
 ) -> dict[str, object]:
     """Run production analysis and atomically write a client-ready snapshot."""
     source_commit = _source_commit()
@@ -922,10 +955,24 @@ def publish_mobile_snapshot(
         as_of=market_as_of,
         cache_only=reuse_evidence_only,
     )
+    analysis_financials: Mapping[str, Mapping[str, Any]] = snapshot.analysis_financials
+    if qualitative_overlay_path is not None:
+        overlay = _load_qualitative_overlay(qualitative_overlay_path)
+        unknown = sorted(set(overlay) - set(analysis_financials))
+        if unknown:
+            raise ValueError(
+                f"qualitative overlay contains codes outside the eligible universe:{unknown[:5]}"
+            )
+        analysis_financials = {
+            code: ({**dict(financial), **overlay[code]} if code in overlay else financial)
+            for code, financial in analysis_financials.items()
+        }
+        applied = sum(1 for code in analysis_financials if code in overlay)
+        print(f"MARKET_BUILD qualitative overlay merged for {applied} companies", flush=True)
     print("MARKET_BUILD scoring all companies and seven buy types", flush=True)
     analysis = run_market_analysis(
         snapshot.analysis_quotes,
-        snapshot.analysis_financials,
+        analysis_financials,
         eligible_codes=eligible_codes,
         enforce_quality=True,
         expected_companies=len(eligible_codes),
@@ -1025,6 +1072,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.reference_manifest is not None
             else None
         ),
+        qualitative_overlay_path=args.qualitative_overlay,
     )
     # GitHub's Windows runner may expose a cp1252 stdout even though the files
     # themselves are UTF-8. Keep the diagnostic log ASCII-only so a successful

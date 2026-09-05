@@ -59,6 +59,7 @@ from engine.quantitative_evidence import (
     MIN_COMPARABLE_COVERAGE,
     MIN_SECTOR_COMPANIES,
     MODEL_ID as QUANTITATIVE_EVIDENCE_MODEL_ID,
+    PRIMARY_EVIDENCE_VALIDATION_TOKEN,
     SCORE_KEYS as QUANTITATIVE_SCORE_KEYS,
     TYPE3_GROWTH_VALIDATION_TOKEN,
     derive_company_evidence,
@@ -93,7 +94,7 @@ from engine.valuation_status import (
 QUALIFY_THRESHOLD = 7.0
 VETO_SCORE = 3.0
 TYPE4_MIN_RUNWAY_SCORE = 5.0
-# Public cards keep each evidence sentence within 20 characters.  Compaction
+# Public cards keep each evidence sentence within 48 characters.  Compaction
 # must end at a semantic separator where possible and always show an ellipsis;
 # silently slicing through a percentage or unit makes the explanation false.
 # Full values and formulas live in the structured valuation ledger.
@@ -2245,6 +2246,16 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         # strict Type5 external path; a naked number still fails closed in
         # ``_verified_score`` and never creates this marker.
         m["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
+    if any(
+        m.get(f"{key}_evidence_level") == "primary" and m.get(key) is not None
+        for key in QUANTITATIVE_SCORE_KEYS
+    ):
+        # Same fail-closed pattern as the Type5 marker above: the adapter has
+        # already validated each dated, code-bound evidence record, so bind the
+        # in-process token that lets ``enrich_metrics`` keep those primary
+        # quality scores instead of falling back to formula proxies.  The
+        # token itself can never arrive through serialized input.
+        m["_quantitative_primary_validation_token"] = PRIMARY_EVIDENCE_VALIDATION_TOKEN
     m["type7_research_sources"] = normalise_research_sources(
         fin_data.get("type7_research_sources"),
         today=_evidence_reference_date(m.get("source_trade_date")) or _shanghai_today(),

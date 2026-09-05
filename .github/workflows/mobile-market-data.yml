@@ -337,6 +337,10 @@ jobs:
             New-Item -ItemType Directory -Force -Path $output | Out-Null
             Write-Host "Starting $modeLabel attempt $attempt of $attemptLimit."
             $publisherArguments = @('-m', 'tools.publish_mobile_snapshot', '--output-dir', $output)
+            $qualitativeOverlay = 'data/qualitative_overlay_20260904.json'
+            if (Test-Path -LiteralPath $qualitativeOverlay -PathType Leaf) {
+              $publisherArguments += @('--qualitative-overlay', $qualitativeOverlay)
+            }
             if (-not $rebuildLatestClosed) {
               $publisherArguments += '--refresh'
             }
