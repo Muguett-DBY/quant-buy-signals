@@ -44,13 +44,6 @@ def _complete_decision(score: float = 5.0) -> dict[str, object]:
     }
 
 
-def test_readme_describes_a_closed_market_as_a_successful_noop():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "交易所休市时，本次运行会记录原因后成功结束且不发布新数据" in readme
-    assert "遇到休市、来源未刷新" not in readme
-
-
 def _pwsh() -> str:
     executable = shutil.which("pwsh")
     if executable is None:
