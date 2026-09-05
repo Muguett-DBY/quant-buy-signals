@@ -921,6 +921,7 @@ def publish_mobile_snapshot(
         eligible_codes,
         force_refresh=refresh,
         cache_only=reuse_evidence_only,
+        allow_network_backfill=reuse_evidence_only,
         reference_artifact_out=coldness_reference_artifact,
         archive_candidate_out=coldness_archive_candidates,
     )

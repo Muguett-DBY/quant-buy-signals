@@ -2204,6 +2204,7 @@ def _load_market_coldness_evidence(
     *,
     force_refresh: bool,
     cache_only: bool = False,
+    allow_network_backfill: bool = False,
     reference_artifact_out: MutableMapping[str, object] | None = None,
     archive_candidate_out: MutableSequence[object] | None = None,
 ) -> tuple[dict[str, Mapping[str, object]], dict[str, object]]:
@@ -2296,11 +2297,14 @@ def _load_market_coldness_evidence(
             should_refetch = bool(
                 retrieval_date is not None and requested_date is not None and retrieval_date < requested_date
             )
-        if force_refresh and should_refetch:
+        # A model-only rebuild (allow_network_backfill) may also refresh one
+        # stale whole-market batch: it is a single bounded call, and without it
+        # a baseline cached from an earlier session can never be re-scored.
+        if (force_refresh or allow_network_backfill) and should_refetch:
             coldness_snapshot = fetch_market_coldness_snapshot(
                 force_refresh=True,
                 allow_expired_cache=False,
-                cache_only=cache_only,
+                cache_only=cache_only and not allow_network_backfill,
             )
             evidence_diagnostics = {}
             evidence = build_market_coldness_evidence(
