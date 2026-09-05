@@ -2246,10 +2246,7 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         # strict Type5 external path; a naked number still fails closed in
         # ``_verified_score`` and never creates this marker.
         m["_type5_external_validation_token"] = _TYPE5_EXTERNAL_VALIDATION_TOKEN
-    if any(
-        m.get(f"{key}_evidence_level") == "primary" and m.get(key) is not None
-        for key in QUANTITATIVE_SCORE_KEYS
-    ):
+    if any(m.get(f"{key}_evidence_level") == "primary" and m.get(key) is not None for key in QUANTITATIVE_SCORE_KEYS):
         # Same fail-closed pattern as the Type5 marker above: the adapter has
         # already validated each dated, code-bound evidence record, so bind the
         # in-process token that lets ``enrich_metrics`` keep those primary

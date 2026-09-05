@@ -960,9 +960,7 @@ def publish_mobile_snapshot(
         overlay = _load_qualitative_overlay(qualitative_overlay_path)
         unknown = sorted(set(overlay) - set(analysis_financials))
         if unknown:
-            raise ValueError(
-                f"qualitative overlay contains codes outside the eligible universe:{unknown[:5]}"
-            )
+            raise ValueError(f"qualitative overlay contains codes outside the eligible universe:{unknown[:5]}")
         analysis_financials = {
             code: ({**dict(financial), **overlay[code]} if code in overlay else financial)
             for code, financial in analysis_financials.items()
