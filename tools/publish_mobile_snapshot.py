@@ -194,9 +194,52 @@ def _market_as_of(snapshot: object) -> str:
     return value
 
 
-def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
-    """Load one dated primary qualitative record set keyed by company code.
+def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> None:
+    """Env-gated diagnostic dump for overlay codes (QUALITATIVE_DEBUG_CODES)."""
+    raw = os.environ.get("QUALITATIVE_DEBUG_CODES", "")
+    codes = {c.strip() for c in raw.split(",") if c.strip()}
+    if not codes:
+        return
+    debug_dir = Path(str(output_dir)) / "qualitative-debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    for code in sorted(codes):
+        rows = scores[scores["code"] == code] if "code" in scores.columns else pd.DataFrame()
+        if rows.empty:
+            Path(debug_dir, f"debug-{code}.json").write_text(
+                json.dumps({"code": code, "present": False}), encoding="utf-8"
+            )
+            continue
+        row = rows.iloc[0]
+        picked: dict[str, Any] = {}
+        for col in scores.columns:
+            lc = str(col)
+            if any(
+                s in lc
+                for s in (
+                    "technology_score",
+                    "business_model_score",
+                    "growth_sustainability_score",
+                    "type5_cycle_attribute_score",
+                    "type5_bottom_signal_score",
+                    "quantitative_evidence",
+                    "type6",
+                    "type5",
+                )
+            ):
+                value = row[col]
+                try:
+                    picked[lc] = json.loads(json.dumps(value, default=str))
+                except (TypeError, ValueError):
+                    picked[lc] = str(value)[:500]
+        Path(debug_dir, f"debug-{code}.json").write_text(
+            json.dumps({"code": code, "present": True, "fields": picked}, ensure_ascii=False, indent=1, default=str),
+            encoding="utf-8",
+        )
+        print(f"MARKET_BUILD qualitative debug dumped: {code}", flush=True)
 
+
+def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    """
     Each record must already carry ``{score, evidence_level, evidence}`` in the
     shape ``engine.buy_screener.extract_metrics`` validates; this loader only
     checks the outer envelope and leaves score-level fail-closed validation to
@@ -996,6 +1039,7 @@ def publish_mobile_snapshot(
         commodity_cycle_evidence=commodity_cycle_evidence,
         dividend_evidence=dividend_evidence,
     )
+    _dump_qualitative_debug(analysis.scores, output_dir)
     if analysis.issues:
         raise RuntimeError(f"whole-market analysis contains {len(analysis.issues)} pipeline issues")
     if not isinstance(analysis.quality, Mapping) or analysis.quality.get("ok") is not True:
