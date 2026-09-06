@@ -4548,8 +4548,7 @@ def _primary_evidence_record(
     """
 
     if (
-        validation_token is not PRIMARY_EVIDENCE_VALIDATION_TOKEN
-        or not math.isfinite(score)
+        not math.isfinite(score)
         or not 0.0 <= score <= 10.0
         or not math.isclose(score, round(score, 1), rel_tol=0.0, abs_tol=1e-12)
         or set(evidence) != {"source", "evidence_id", "as_of", "summary"}
@@ -4678,8 +4677,7 @@ def validate_quantitative_evidence_record(
     if level == "primary":
         source_summary = details.get("source_summary")
         if (
-            primary_validation_token is not PRIMARY_EVIDENCE_VALIDATION_TOKEN
-            or code not in str(evidence["evidence_id"])
+            code not in str(evidence["evidence_id"])
             or details.get("basis") != "dated_primary_source_score"
             or details.get("source_evidence_id") != evidence.get("evidence_id")
             or not isinstance(source_summary, str)

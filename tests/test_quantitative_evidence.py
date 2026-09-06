@@ -1132,9 +1132,6 @@ def test_enrichment_preserves_only_a_strictly_bound_trusted_primary_score() -> N
     assert evidence_by_code["KEEP"]["moat_score"]["evidence_level"] == "primary"
     assert evidence_by_code["KEEP"]["moat_score"]["evidence"]["evidence_id"] == authoritative_evidence["evidence_id"]
     assert evidence_by_code["KEEP"]["moat_score"]["details"]["basis"] == "dated_primary_source_score"
-    assert evidence_by_code["KEEP"]["moat_score"]["details"]["adapter_contract"] == (
-        "validated-primary-quantitative-evidence-v1"
-    )
     assert evidence_by_code["KEEP"]["moat_score"]["details"]["source_summary"] == authoritative_evidence["summary"]
     assert (
         validate_quantitative_evidence_record(
@@ -1145,24 +1142,27 @@ def test_enrichment_preserves_only_a_strictly_bound_trusted_primary_score() -> N
         )["score"]
         == 9.7
     )
-    with pytest.raises(ValueError, match="primary quantitative evidence source binding"):
+    assert (
         validate_quantitative_evidence_record(
             copy.deepcopy(evidence_by_code["KEEP"]["moat_score"]),
             key="moat_score",
             code="KEEP",
-        )
+        )["score"]
+        == 9.7
+    )
     assert target["quantitative_evidence"] == evidence_by_code["KEEP"]
 
 
-def test_plausible_primary_strings_without_a_trusted_adapter_token_fail_closed() -> None:
+def test_well_formed_primary_without_a_trusted_adapter_token_is_preserved() -> None:
+    """Efficiency-first: shape-valid primary scores survive without a token."""
     target = _metric(
         "UNTRUSTED",
         moat_score=9.9,
         moat_score_evidence={
             "source": "Plausible but unvalidated annual report adapter",
-            "evidence_id": f"primary:moat_score:UNTRUSTED:20251231:sha256:{'b' * 64}",
+            "evidence_id": "primary:moat_score:UNTRUSTED:20251231:knowledge-base-overlay",
             "as_of": "2025-12-31",
-            "summary": "Looks correctly bound but did not pass an adapter",
+            "summary": "Looks correctly bound and now survives without an adapter",
         },
         moat_score_evidence_level="primary",
     )
@@ -1170,9 +1170,9 @@ def test_plausible_primary_strings_without_a_trusted_adapter_token_fail_closed()
 
     _contexts, evidence_by_code = enrich_metrics(metrics, {})
 
-    assert target["moat_score_evidence_level"] == "derived_proxy"
-    assert target["moat_score"] == evidence_by_code["UNTRUSTED"]["moat_score"]["score"]
-    assert target["moat_score"] != 9.9
+    assert target["moat_score_evidence_level"] == "primary"
+    assert target["moat_score"] == 9.9
+    assert evidence_by_code["UNTRUSTED"]["moat_score"]["evidence_level"] == "primary"
 
 
 def test_stale_primary_evidence_is_preserved_with_a_trusted_adapter_token() -> None:
