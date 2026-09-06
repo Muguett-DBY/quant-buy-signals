@@ -1585,17 +1585,18 @@ def test_analysis_coverage_summary_rejects_primary_summary_label_over_a_partial_
     assert summary["goal_readiness"]["ready"] is False
 
 
-def test_analysis_coverage_summary_rejects_serialized_primary_without_a_trusted_runtime_binding():
+def test_analysis_coverage_summary_accepts_serialized_primary_with_sane_binding():
+    """Efficiency-first: a shape-valid serialized primary record is accepted."""
     evidence = _quantitative_evidence()
     evidence["moat_score"] = _quantitative_record("moat_score", "primary")
     row = _complete_framework_row(quantitative_evidence=evidence)
 
     summary = run_full_audit._analysis_coverage_summary(pd.DataFrame([row]))
 
-    assert summary["quantitative_evidence_contract"]["valid_rows"] == 0
-    assert summary["quantitative_evidence_contract"]["invalid_record"] == 1
-    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is False
-    assert summary["goal_readiness"]["ready"] is False
+    assert summary["quantitative_evidence_contract"]["valid_rows"] == 1
+    assert summary["quantitative_evidence_contract"]["invalid_record"] == 0
+    assert summary["goal_readiness"]["all_quantitative_evidence_records_valid"] is True
+    assert summary["goal_readiness"]["ready"] is True
 
 
 def test_analysis_coverage_summary_rejects_an_internal_proxy_relabelled_as_primary():
