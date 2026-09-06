@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import math
+import os
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
@@ -77,6 +78,12 @@ TYPE3_GROWTH_VALIDATION_TOKEN = object()
 # token deliberately cannot survive JSON/CSV serialization, so arbitrary input
 # data cannot promote itself to ``primary`` by choosing plausible strings.
 PRIMARY_EVIDENCE_VALIDATION_TOKEN = object()
+PRIMARY_DEBUG_CODES = frozenset(
+    item.strip() for item in os.environ.get("QUALITATIVE_DEBUG_CODES", "").split(",") if item.strip()
+)
+PRIMARY_DEBUG_CODES = frozenset(
+    item.strip() for item in os.environ.get("QUALITATIVE_DEBUG_CODES", "").split(",") if item.strip()
+)
 _PRIMARY_ADAPTER_CONTRACT = "validated-primary-quantitative-evidence-v1"
 
 
@@ -4480,6 +4487,49 @@ def _replay_quantitative_score(key: str, details: Mapping[str, Any], *, code: st
     raise ValueError(f"unknown quantitative evidence score key: {key}")
 
 
+def _debug_primary_rejection(
+    code: str,
+    key: str,
+    score: Any,
+    evidence: Mapping[str, Any],
+    reference_as_of: str,
+    token_ok: bool,
+) -> None:
+    """Print the exact failing primary check for QUALITATIVE_DEBUG_CODES codes."""
+    reasons: list[str] = []
+    if not token_ok:
+        reasons.append("token_missing")
+    if not math.isfinite(float(score)) if isinstance(score, (int, float)) else True:
+        reasons.append("score_not_finite")
+    elif not 0.0 <= float(score) <= 10.0:
+        reasons.append("score_out_of_range")
+    elif not math.isclose(float(score), round(float(score), 1), rel_tol=0.0, abs_tol=1e-12):
+        reasons.append("score_not_one_decimal")
+    if set(evidence) != {"source", "evidence_id", "as_of", "summary"}:
+        reasons.append(f"evidence_keys={sorted(evidence)}")
+    clean = {f: str(evidence.get(f, "")).strip() for f in ("source", "evidence_id", "as_of", "summary")}
+    if any(not v for v in clean.values()):
+        reasons.append("empty_field")
+    if len(clean["source"]) > 200 or len(clean["evidence_id"]) > 200 or len(clean["summary"]) > 1_000:
+        reasons.append("field_too_long")
+    try:
+        ed = date.fromisoformat(clean["as_of"])
+        rd = date.fromisoformat(reference_as_of)
+    except ValueError:
+        reasons.append("date_unparseable")
+    else:
+        if ed > rd:
+            reasons.append(f"evidence_after_reference({clean['as_of']}>{reference_as_of})")
+        elif (rd - ed).days > 550:
+            reasons.append(f"stale({(rd - ed).days}d)")
+    if clean["evidence_id"] and code not in clean["evidence_id"]:
+        reasons.append("code_not_in_evidence_id")
+    print(
+        f"[qe-debug] {code} {key} demoted: " + (";".join(reasons) or "unknown"),
+        flush=True,
+    )
+
+
 def _primary_evidence_record(
     *,
     code: str,
@@ -4872,6 +4922,21 @@ def enrich_metrics(
                     evidence=existing_evidence,
                     reference_as_of=str(payload["evidence"]["as_of"]),
                     validation_token=metric.get("_quantitative_primary_validation_token"),
+                )
+                if primary_record is None and code in PRIMARY_DEBUG_CODES:
+                    _debug_primary_rejection(
+                        code,
+                        key,
+                        existing_score,
+                        existing_evidence,
+                        str(payload["evidence"]["as_of"]),
+                        metric.get("_quantitative_primary_validation_token") is PRIMARY_EVIDENCE_VALIDATION_TOKEN,
+                    )
+            elif existing_level == "primary" and code in PRIMARY_DEBUG_CODES:
+                print(
+                    f"[qe-debug] {code} {key}: level=primary but score={existing_score!r} "
+                    f"evidence_type={type(existing_evidence).__name__}",
+                    flush=True,
                 )
             if primary_record is not None:
                 normalized_evidence[key] = primary_record
