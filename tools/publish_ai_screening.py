@@ -1347,22 +1347,23 @@ def build_artifact(
     if (
         full_coverage
         and review_mode == "local_codex_review"
-        and not (review_models <= LOCAL_REVIEW_MODELS or review_models <= LOCAL_OPENCODE_MODELS)
+        and not review_models <= (LOCAL_REVIEW_MODELS | LOCAL_OPENCODE_MODELS)
     ):
-        raise ValueError("local full-coverage artifact must use the local Codex or OpenCode MAX review model")
+        raise ValueError("local full-coverage artifact must use a known local review model")
     if (
         full_coverage
         and review_mode == "local_codex_review"
-        and review_models & LOCAL_OPENCODE_MODELS
         and not review_model_efforts
-        <= {
+        <= {(model, "max") for model in LOCAL_REVIEW_MODELS}
+        | {
             ("opencode-go/ox-alpha-free", "max"),
             ("opencode-go/muse-spark-1.2-contributor", "xhigh"),
             ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
             ("opencode/muse-spark-1.3-contributor-free", "high"),
+            ("opencode/muse-spark-1.2-contributor-free", "high"),
         }
     ):
-        raise ValueError("OpenCode Go local artifacts must use Ox max or Muse Spark xhigh reviews")
+        raise ValueError("local full-coverage artifact effort profile is invalid")
     if (
         full_coverage
         and review_mode not in PARTIAL_SEARCH_REVIEW_MODES

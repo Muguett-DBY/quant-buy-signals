@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_website_gate:
+        description: Manual fast lane - publish without waiting for the tests workflow on this exact revision
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -117,7 +122,7 @@ jobs:
           & .\tools\mobile_market_workflow_guard.ps1 -EventName '${{ github.event_name }}'
 
       - name: Verify the current main revision passed the website gate
-        if: steps.guard.outputs.should_run == 'true'
+        if: steps.guard.outputs.should_run == 'true' && inputs.skip_website_gate != true
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
