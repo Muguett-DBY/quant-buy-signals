@@ -2228,7 +2228,7 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         if (
             evidence_score is None
             and key in ("technology_score", "business_model_score")
-            and str(fin_data.get("code") or "") in _qualitative_debug_codes
+            and str(m.get("code") or "") in _qualitative_debug_codes
         ):
             print(
                 f"[extract-debug] {fin_data.get('code')} {key}: "

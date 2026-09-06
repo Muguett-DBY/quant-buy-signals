@@ -232,12 +232,14 @@ def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> Non
         print(f"MARKET_BUILD qualitative debug {code}: " + json.dumps(picked, ensure_ascii=False), flush=True)
 
 
-def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
+def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, Any]]:
     """
-    Each record must already carry ``{score, evidence_level, evidence}`` in the
-    shape ``engine.buy_screener.extract_metrics`` validates; this loader only
-    checks the outer envelope and leaves score-level fail-closed validation to
-    the scoring boundary.
+    Records use the flat adapter shape ``extract_metrics`` reads: per score key
+    a ``{key}`` number, a ``{key}_evidence_level`` label and a ``{key}_evidence``
+    mapping.  This loader only checks the outer envelope and leaves score-level
+    fail-closed validation to the scoring boundary, so every key is passed
+    through untouched (filtering non-mapping values here would silently drop
+    the scores themselves).
     """
     if not path.is_file():
         raise FileNotFoundError(f"qualitative overlay file not found: {path}")
@@ -247,13 +249,15 @@ def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]
         raise RuntimeError(f"qualitative overlay is not readable JSON: {path}") from exc
     if not isinstance(raw, Mapping) or not raw:
         raise RuntimeError("qualitative overlay must be a non-empty code mapping")
-    overlay: dict[str, dict[str, dict[str, Any]]] = {}
+    overlay: dict[str, dict[str, Any]] = {}
     for code, keys in raw.items():
         canonical = str(code).strip()
         if not re.fullmatch(r"[036][0-9]{5}", canonical) or not isinstance(keys, Mapping) or not keys:
             raise RuntimeError(f"qualitative overlay record is invalid: {code}")
-        overlay[canonical] = {str(key): dict(value) for key, value in keys.items() if isinstance(value, Mapping)}
-        if not overlay[canonical]:
+        overlay[canonical] = dict(keys)
+        if not any(
+            str(key).endswith("_score") and not str(key).endswith("_evidence_level") for key in overlay[canonical]
+        ):
             raise RuntimeError(f"qualitative overlay record has no score keys: {code}")
     return overlay
 
