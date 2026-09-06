@@ -2215,6 +2215,9 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
 
     # Qualitative dimensions require a dated, traceable evidence record.  A
     # naked 0-10 number is not evidence and must fail closed.
+    _qualitative_debug_codes = {
+        item.strip() for item in os.environ.get("QUALITATIVE_DEBUG_CODES", "").split(",") if item.strip()
+    }
     for key in QUALITATIVE_SCORE_KEYS:
         evidence_score, evidence = _normalise_score_evidence(
             fin_data,
@@ -2222,6 +2225,19 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
             expected_code=m.get("code"),
             reference_date=m.get("source_trade_date"),
         )
+        if (
+            evidence_score is None
+            and key in ("technology_score", "business_model_score")
+            and str(fin_data.get("code") or "") in _qualitative_debug_codes
+        ):
+            print(
+                f"[extract-debug] {fin_data.get('code')} {key}: "
+                f"raw={fin_data.get(key)!r} "
+                f"level={fin_data.get(f'{key}_evidence_level')!r} "
+                f"evidence={str(fin_data.get(f'{key}_evidence'))[:240]} "
+                f"m.code={m.get('code')!r} m.trade_date={m.get('source_trade_date')!r}",
+                flush=True,
+            )
         m[key] = evidence_score
         m[f"{key}_evidence"] = evidence
         raw_level = fin_data.get(f"{key}_evidence_level")
