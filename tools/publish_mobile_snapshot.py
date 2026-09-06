@@ -229,7 +229,9 @@ def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> Non
                     picked[lc] = json.loads(json.dumps(value, default=str))
                 except (TypeError, ValueError):
                     picked[lc] = str(value)[:500]
-        print(f"MARKET_BUILD qualitative debug {code}: " + json.dumps(picked, ensure_ascii=False), flush=True)
+        # Overlay evidence summaries are Chinese; the Windows runner console is
+        # cp1252, so the diagnostic line must stay ASCII-escaped to print.
+        print(f"MARKET_BUILD qualitative debug {code}: " + json.dumps(picked, ensure_ascii=True), flush=True)
 
 
 def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, Any]]:
