@@ -6697,6 +6697,12 @@ def _refresh_type3_quantitative_evidence(
         levels = {}
         metric["quantitative_evidence_levels"] = levels
     for key in ("growth_quality_score", "growth_sustainability_score"):
+        # A validated primary record (dated overlay/adapter evidence) remains
+        # authoritative.  Overwriting its quantitative payload or level while
+        # leaving the primary attachment in place would orphan the published
+        # score, so the formula refresh only fills non-primary keys.
+        if metric.get(f"{key}_evidence_level") == "primary" and _safe_float(metric.get(key)) is not None:
+            continue
         payload = refreshed.get(key)
         if not isinstance(payload, Mapping):
             raise ValueError(f"可持续增长量化证据重算失败:{metric.get('code')}:{key}")
