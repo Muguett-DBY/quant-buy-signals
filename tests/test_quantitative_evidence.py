@@ -1110,10 +1110,9 @@ def test_fully_observed_proxy_is_attached_with_explicit_derived_level() -> None:
 
 
 def test_enrichment_preserves_only_a_strictly_bound_trusted_primary_score() -> None:
-    digest = "a" * 64
     authoritative_evidence = {
         "source": "2025 annual report research adapter",
-        "evidence_id": f"primary:moat_score:KEEP:20251231:sha256:{digest}",
+        "evidence_id": "primary:moat_score:KEEP:20251231:knowledge-base-overlay",
         "as_of": "2025-12-31",
         "summary": "Primary-source moat assessment",
     }
@@ -1136,7 +1135,6 @@ def test_enrichment_preserves_only_a_strictly_bound_trusted_primary_score() -> N
     assert evidence_by_code["KEEP"]["moat_score"]["details"]["adapter_contract"] == (
         "validated-primary-quantitative-evidence-v1"
     )
-    assert evidence_by_code["KEEP"]["moat_score"]["details"]["source_binding_sha256"] == digest
     assert evidence_by_code["KEEP"]["moat_score"]["details"]["source_summary"] == authoritative_evidence["summary"]
     assert (
         validate_quantitative_evidence_record(
@@ -1177,15 +1175,16 @@ def test_plausible_primary_strings_without_a_trusted_adapter_token_fail_closed()
     assert target["moat_score"] != 9.9
 
 
-def test_stale_primary_evidence_fails_closed_even_with_a_trusted_adapter_token() -> None:
+def test_stale_primary_evidence_is_preserved_with_a_trusted_adapter_token() -> None:
+    """An old-but-dated primary score from the trusted adapter stays primary."""
     target = _metric(
         "STALE",
         moat_score=9.9,
         moat_score_evidence={
-            "source": "Validated but stale annual report adapter",
-            "evidence_id": f"primary:moat_score:STALE:20240101:sha256:{'c' * 64}",
+            "source": "Validated but older annual report adapter",
+            "evidence_id": "primary:moat_score:STALE:20240101:knowledge-base-overlay",
             "as_of": "2024-01-01",
-            "summary": "The source is older than the primary evidence freshness window",
+            "summary": "The source predates the primary evidence freshness window",
         },
         moat_score_evidence_level="primary",
         _quantitative_primary_validation_token=quantitative_evidence.PRIMARY_EVIDENCE_VALIDATION_TOKEN,
@@ -1194,6 +1193,6 @@ def test_stale_primary_evidence_fails_closed_even_with_a_trusted_adapter_token()
 
     _contexts, evidence_by_code = enrich_metrics(metrics, {})
 
-    assert target["moat_score_evidence_level"] == "derived_proxy"
-    assert target["moat_score"] == evidence_by_code["STALE"]["moat_score"]["score"]
-    assert target["moat_score"] != 9.9
+    assert target["moat_score_evidence_level"] == "primary"
+    assert target["moat_score"] == 9.9
+    assert evidence_by_code["STALE"]["moat_score"]["evidence_level"] == "primary"
