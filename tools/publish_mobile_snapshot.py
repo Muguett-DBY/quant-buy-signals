@@ -200,14 +200,10 @@ def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> Non
     codes = {c.strip() for c in raw.split(",") if c.strip()}
     if not codes:
         return
-    debug_dir = Path(str(output_dir)) / "qualitative-debug"
-    debug_dir.mkdir(parents=True, exist_ok=True)
     for code in sorted(codes):
         rows = scores[scores["code"] == code] if "code" in scores.columns else pd.DataFrame()
         if rows.empty:
-            Path(debug_dir, f"debug-{code}.json").write_text(
-                json.dumps({"code": code, "present": False}), encoding="utf-8"
-            )
+            print(f"MARKET_BUILD qualitative debug {code}: not present", flush=True)
             continue
         row = rows.iloc[0]
         picked: dict[str, Any] = {}
@@ -221,9 +217,11 @@ def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> Non
                     "growth_sustainability_score",
                     "type5_cycle_attribute_score",
                     "type5_bottom_signal_score",
-                    "quantitative_evidence",
-                    "type6",
-                    "type5",
+                    "quantitative_evidence_le",
+                    "type6_sub_scores",
+                    "type6_reasons",
+                    "type6_status",
+                    "type5_status",
                 )
             ):
                 value = row[col]
@@ -231,11 +229,7 @@ def _dump_qualitative_debug(scores: pd.DataFrame, output_dir: str | Path) -> Non
                     picked[lc] = json.loads(json.dumps(value, default=str))
                 except (TypeError, ValueError):
                     picked[lc] = str(value)[:500]
-        Path(debug_dir, f"debug-{code}.json").write_text(
-            json.dumps({"code": code, "present": True, "fields": picked}, ensure_ascii=False, indent=1, default=str),
-            encoding="utf-8",
-        )
-        print(f"MARKET_BUILD qualitative debug dumped: {code}", flush=True)
+        print(f"MARKET_BUILD qualitative debug {code}: " + json.dumps(picked, ensure_ascii=False), flush=True)
 
 
 def _load_qualitative_overlay(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
