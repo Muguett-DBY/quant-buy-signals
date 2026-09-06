@@ -550,7 +550,7 @@ def test_market_data_publication_requires_a_successful_tests_run_for_the_exact_m
         if step.get("name") == "Verify the current main revision passed the website gate"
     )
 
-    assert verify["if"] == "steps.guard.outputs.should_run == 'true'"
+    assert verify["if"] == "steps.guard.outputs.should_run == 'true' && inputs.skip_website_gate != true"
     assert verify["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert "actions/workflows/tests.yml/runs?branch=main&status=success&per_page=100" in verify["run"]
     assert "for ($attempt = 1; $attempt -le 4; $attempt++)" in verify["run"]

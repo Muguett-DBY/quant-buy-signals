@@ -1060,7 +1060,7 @@ def test_local_full_coverage_rejects_external_model_label(tmp_path) -> None:
     source = tmp_path / "local-wrong-model.json"
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="local Codex or OpenCode MAX review model"):
+    with pytest.raises(ValueError, match="known local review model"):
         build_artifact(
             source,
             tmp_path / "public.json",
