@@ -7088,3 +7088,31 @@ class TestType6SmallIndustryCohortFallback(unittest.TestCase):
             has_peer_context=True,
         )
         self.assertEqual(growth, 0.15)
+
+    def test_decisive_all_no_becomes_not_applicable(self):
+        metric = complete_type5_bottom_metrics()
+        metric["gross_margin_history"] = [0.32, 0.30, 0.29, 0.31, 0.30, 0.28, 0.31, 0.30, 0.29, 0.28]
+        metric["gross_margin_years"] = list(range(2016, 2026))
+        as_of = metric["source_trade_date"]
+        metric["type5_kb_votes"] = {}
+        for key in ("commodity_price", "capacity_cycles", "single_commodity"):
+            vote_key = f"type5_vote_{key}_score"
+            metric[vote_key] = 0.0
+            metric[f"{vote_key}_evidence"] = {
+                "source": "公司2025年报",
+                "evidence_id": f"primary:type5_vote:000001:{as_of.replace('-', '')}:sha256:{'b' * 64}",
+                "as_of": as_of,
+                "summary": "品牌化制成品，非大宗商品，无产能出清证据，盈利不绑定单一商品",
+            }
+            metric[f"{vote_key}_evidence_level"] = "primary"
+            metric["type5_kb_votes"][key] = False
+        metric["_type5_external_validation_token"] = bs._TYPE5_EXTERNAL_VALIDATION_TOKEN
+
+        _triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+
+        self.assertEqual(reasons.get("_status"), "not_applicable")
+        self.assertIn("非强周期标的", reasons.get("_status_reason") or reasons.get("5a", "") or str(reasons))

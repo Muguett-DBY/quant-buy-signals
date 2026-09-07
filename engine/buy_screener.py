@@ -6080,6 +6080,17 @@ def score_type5_counter_cyclical(
     kb_decided = all(vote is True or vote is False for vote in kb_ballots)
     kb_yes = sum(1 for vote in kb_ballots if vote is True)
     kb_majority = kb_decided and kb_yes >= 3
+    # 三票全否且每票都有实质负面证据（非"证据不足"）→ 知识库附录：弱周期
+    # 标的走其他框架，情况五不适用；如实转 not_applicable 而非挂"待补"。
+    kb_decisive_not_cyclical = (
+        kb_decided
+        and kb_yes == 0
+        and all(vote is False for vote in llm_votes)
+        and all(
+            "证据不足" not in str((m.get(f"{key}_evidence") or {}).get("summary") or "")
+            for key in TYPE5_CYCLE_VOTE_KEYS
+        )
+    )
 
     cycle_score, cycle_reason = _type5_external_score(m, "type5_cycle_attribute_score")
     if cycle_score is None:
@@ -6091,6 +6102,8 @@ def score_type5_counter_cyclical(
         reasons["5a"] = (
             f"补丁7附录四项多数为是({kb_yes}/4)：公开商品价格周期/毛利率跨周期摆幅/行业产能出清/盈利绑定单一商品"
         )
+    elif kb_decisive_not_cyclical:
+        return _not_applicable("type5", "非强周期标的（四项周期属性证据判定均否），适用其他框架")
     elif cycle_score is not None:
         if cycle_score < 7.0:
             return _not_applicable("type5", "外部证据未确认强周期属性")
