@@ -1930,6 +1930,42 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
 def _future_fcf_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, Any]:
     """Replayable Patch 7 future-FCF premise with a technology path exception."""
 
+    industry = str(metric.get("industry") or "")
+    # 金融类（银行/保险/证券/其他金融）的存款与保单负债是经营性投入，
+    # 引擎不构造工业口径的 FCF 序列（见 buy_screener.extract_metrics）。第6模
+    # 板的金融口径是"银行看不良资产"——在无不良数据通道前，以监管资本约束
+    # 下的持续现金分红作为"未来最终能创造可观自由现金流"的等价可观测证据。
+    if industry in {"BANK", "INSURANCE", "SECURITIES", "FINANCIAL_OTHER"}:
+        trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, 1e12)
+        dividend_status = str(metric.get("dividend_evidence_status") or "")
+        price = _bounded(metric.get("price"), 0.0, 1e6)
+        dividend_yield = trailing_cash / price if (trailing_cash is not None and price and price > 0) else 0.0
+        inputs = {
+            "trailing_cash_per_share": trailing_cash,
+            "dividend_evidence_status": dividend_status,
+            "d": dividend_yield,
+        }
+        basis = "补丁7隐含前提（金融类）：以持续现金分红作为可观的自由现金流等价证据"
+        if dividend_status == "available" and trailing_cash is not None and trailing_cash > 0:
+            return {
+                "complete": True,
+                "passed": True,
+                "required": True,
+                "basis": basis,
+                "rule": "金融类：近12个月持续现金分红，监管资本约束下分红即盈利真实性的可观测证据",
+                "inputs": inputs,
+                "missing_inputs": [],
+            }
+        return {
+            "complete": False,
+            "passed": False,
+            "required": True,
+            "basis": basis,
+            "rule": "金融类：缺持续现金分红记录，无法确认可观的自由现金流等价证据",
+            "inputs": inputs,
+            "missing_inputs": ["d"],
+        }
+
     window = _annual_history_window(metric, "fcf_history", "fcf_years")
     ordered_years = list(window["years"])
     values = list(window["values"])

@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+import engine.type7_patch6 as t7p
 from engine.buy_screener import score_type7_quality_equity
 from engine.audit import (
     _audit_type7_ledger,
@@ -1524,3 +1525,37 @@ def test_gdN_still_reports_undeterminable_when_growth_is_missing() -> None:
     assert result["complete"] is False
     assert result["missing_inputs"] == ["g"]
     assert result["inputs"]["g"] is None
+
+
+def test_future_fcf_gate_financial_dividend_proxy_passes() -> None:
+    result = t7p._future_fcf_gate(
+        {
+            "industry": "BANK",
+            "trailing_cash_per_share": 0.30,
+            "price": 10.0,
+            "dividend_evidence_status": "available",
+            "fcf_history": [],
+            "fcf_years": [],
+        },
+        "W",
+    )
+
+    assert result["complete"] is True
+    assert result["passed"] is True
+    assert "金融类" in result["rule"]
+
+
+def test_future_fcf_gate_financial_without_dividend_record_stays_incomplete() -> None:
+    result = t7p._future_fcf_gate(
+        {
+            "industry": "BANK",
+            "price": 10.0,
+            "dividend_evidence_status": "unavailable",
+            "fcf_history": [],
+            "fcf_years": [],
+        },
+        "W",
+    )
+
+    assert result["complete"] is False
+    assert result["missing_inputs"] == ["d"]

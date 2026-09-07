@@ -280,6 +280,14 @@ TYPE5_CYCLE_EVIDENCE_MODEL_ID = "type5-cycle-attributes-v1"
 TYPE6_GROWTH_MARKET_CAP_LIMIT = 300e8  # 300亿元
 TYPE6_TURNAROUND_MARKET_CAP_LIMIT = 100e8  # 100亿元
 
+TYPE5_CYCLE_VOTE_KEYS = (
+    # 补丁7方法论附录 5a 四项多数投票的三个公司/行业级判断票（④毛利摆幅由引擎
+    # 直接计算）。每票以 0.0(否)/10.0(是) 的带证据分数经覆盖层注入，缺失票不计。
+    "type5_vote_commodity_price_score",
+    "type5_vote_capacity_cycles_score",
+    "type5_vote_single_commodity_score",
+)
+
 QUALITATIVE_SCORE_KEYS = (
     "technology_score",
     "business_model_score",
@@ -2242,6 +2250,24 @@ def extract_metrics(fin_data: Mapping[str, Any], quote_row: Mapping[str, Any], i
         m[f"{key}_evidence"] = evidence
         raw_level = fin_data.get(f"{key}_evidence_level")
         m[f"{key}_evidence_level"] = raw_level if raw_level in QUANTITATIVE_EVIDENCE_LEVELS else None
+    kb_votes: dict[str, bool | None] = {}
+    for aspect, vote_key in zip(
+        ("commodity_price", "capacity_cycles", "single_commodity"),
+        TYPE5_CYCLE_VOTE_KEYS,
+    ):
+        vote_score, vote_evidence = _normalise_score_evidence(
+            fin_data,
+            vote_key,
+            expected_code=m.get("code"),
+            reference_date=m.get("source_trade_date"),
+        )
+        if vote_score is None or vote_score not in (0.0, 10.0):
+            kb_votes[aspect] = None
+        else:
+            kb_votes[aspect] = vote_score == 10.0
+            m[f"{vote_key}_evidence"] = vote_evidence
+            m[f"{vote_key}_evidence_level"] = fin_data.get(f"{vote_key}_evidence_level")
+    m["type5_kb_votes"] = kb_votes
     if fin_data.get("_type5_external_validation_token") is _TYPE5_EXTERNAL_VALIDATION_TOKEN:
         # Preserve only the server-created marker.  Serialized snapshots
         # cannot create this identity, and it is never part of result output.
@@ -3816,6 +3842,72 @@ def _score_type2_financial(
     )
 
 
+TYPE6_INDUSTRY_COHORT_FALLBACKS = {
+    # 第19模板/第17模板均未规定行业增速的上市样本量；同行业样本结构性不足
+    # （<10）时，按邻近/上级聚合口径取行业增速，避免整个子行业被样本量
+    # 一刀切挡在门外。映射为邻近或上级聚合行业。
+    "ENVIRONMENTAL_SERVICES": "POWER_UTILITY",
+    "BUSINESS_SERVICES": "PROFESSIONAL_SERVICES",
+}
+
+
+def _industry_growth_with_small_cohort_fallback(
+    industry: str,
+    industry_bucket: Mapping[str, Any],
+    benchmarks: Mapping[str, Mapping[str, Any]],
+    *,
+    aggregate_growth: float | None,
+    aggregate_ready: bool,
+    has_peer_context: bool,
+) -> float | None:
+    """行业增速：同侪聚合优先，其次本行业桶，最后邻近/上级聚合（样本不足时）。
+
+    语义与历史版本严格兼容：聚合就绪用聚合；本行业桶样本达标且无同行上下文
+    时用本行业桶；唯一新增是本行业样本结构性不足（<MIN_SECTOR_COMPANIES）时
+    的邻近聚合回退（第19/17模板未规定样本量）。
+    """
+
+    fallback_growth = _safe_float(industry_bucket.get("median_cagr"))
+    fallback_sample = _safe_float(industry_bucket.get("median_cagr_count"))
+    own_sample_insufficient = (
+        fallback_growth is None or fallback_sample is None or fallback_sample < MIN_SECTOR_COMPANIES
+    )
+    parent_upgraded = False
+    if own_sample_insufficient:
+        parent = TYPE6_INDUSTRY_COHORT_FALLBACKS.get(industry)
+        parent_bucket = benchmarks.get(parent, {}) if parent else {}
+        parent_growth = _safe_float(parent_bucket.get("median_cagr"))
+        parent_sample = _safe_float(parent_bucket.get("median_cagr_count"))
+        if parent_growth is not None and parent_sample is not None and parent_sample >= MIN_SECTOR_COMPANIES:
+            fallback_growth = parent_growth
+            fallback_sample = parent_sample
+            parent_upgraded = True
+    if industry == "DIVERSIFIED":
+        industry_medians = sorted(
+            value
+            for bucket in benchmarks.values()
+            if isinstance(bucket, Mapping)
+            for value in [_safe_float(bucket.get("median_cagr"))]
+            if value is not None
+        )
+        if industry_medians:
+            fallback_growth = industry_medians[len(industry_medians) // 2]
+            fallback_sample = float(len(industry_medians))
+            parent_upgraded = True
+    if aggregate_ready:
+        return aggregate_growth
+    if parent_upgraded:
+        return fallback_growth
+    if (
+        not has_peer_context
+        and fallback_growth is not None
+        and fallback_sample is not None
+        and (fallback_sample >= MIN_SECTOR_COMPANIES)
+    ):
+        return fallback_growth
+    return None
+
+
 def score_type2_two_hot_one_cold(
     m: Mapping[str, Any],
     benchmarks: Mapping[str, Mapping[str, Any]],
@@ -3844,14 +3936,13 @@ def score_type2_two_hot_one_cold(
         and aggregate_coverage is not None
         and aggregate_coverage >= MIN_COMPARABLE_COVERAGE
     )
-    fallback_growth = _safe_float(industry_bucket.get("median_cagr"))
-    fallback_sample = _safe_float(industry_bucket.get("median_cagr_count"))
-    growth = (
-        aggregate_growth
-        if aggregate_ready
-        else fallback_growth
-        if not peer_context and fallback_sample is not None and fallback_sample >= MIN_SECTOR_COMPANIES
-        else None
+    growth = _industry_growth_with_small_cohort_fallback(
+        industry,
+        industry_bucket,
+        benchmarks,
+        aggregate_growth=aggregate_growth,
+        aggregate_ready=aggregate_ready,
+        has_peer_context=bool(peer_context),
     )
     industry_evidence_missing = growth is None
     if growth is None:
@@ -5979,12 +6070,28 @@ def score_type5_counter_cyclical(
     margin_history_ready = bool(len(margins) >= 4 and _aligned_current_consecutive(m, margins, margin_years, 4))
     direct_commodity_industry = industry in TYPE5_DIRECT_CYCLICAL_INDUSTRIES
 
+    # 补丁7方法论附录 5a：四项多数投票（①公开商品价格周期 ②毛利摆幅>15pct
+    # ③行业产能出清/扩张 ④盈利绑定单一商品价格）≥3 项为"是"→ 5a=7 达线。
+    # ②由引擎直接计算（margin_vote）；①③④为覆盖层带证据判断票。
+    kb_votes = m.get("type5_kb_votes") if isinstance(m.get("type5_kb_votes"), Mapping) else {}
+    llm_votes = [kb_votes.get(aspect) for aspect in ("commodity_price", "capacity_cycles", "single_commodity")]
+    margin_vote = True if margin_swing else (False if margin_history_ready else None)
+    kb_ballots = llm_votes + [margin_vote]
+    kb_decided = all(vote is True or vote is False for vote in kb_ballots)
+    kb_yes = sum(1 for vote in kb_ballots if vote is True)
+    kb_majority = kb_decided and kb_yes >= 3
+
     cycle_score, cycle_reason = _type5_external_score(m, "type5_cycle_attribute_score")
     if cycle_score is None:
         # Compatibility with existing evidence files.  New imports should use
         # the more precise ``type5_cycle_attribute_score`` field.
         cycle_score, cycle_reason = _type5_external_score(m, "cyclical_industry_score")
-    if cycle_score is not None:
+    if kb_majority:
+        scores["5a"] = 7.0
+        reasons["5a"] = (
+            f"补丁7附录四项多数为是({kb_yes}/4)：公开商品价格周期/毛利率跨周期摆幅/行业产能出清/盈利绑定单一商品"
+        )
+    elif cycle_score is not None:
         if cycle_score < 7.0:
             return _not_applicable("type5", "外部证据未确认强周期属性")
         if _type5_industry_commodity_context(m, "type5_cycle_attribute_score") or _type5_industry_commodity_context(
@@ -6900,6 +7007,14 @@ def _type7_research_sources_from_evidence(
     return sources, content_verification
 
 
+TYPE6_INDUSTRY_COHORT_FALLBACKS = {
+    # 第19模板未规定行业增速的上市样本量；同行业样本结构性不足（<10）时，
+    # 按邻近/上级聚合口径取行业增速，避免整个子行业被样本量一刀切挡在门外。
+    "ENVIRONMENTAL_SERVICES": "POWER_UTILITY",
+    "BUSINESS_SERVICES": "PROFESSIONAL_SERVICES",
+}
+
+
 def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, Any]]):
     """情况六：按第19模板区分300亿高景气与100亿反转两类标的。"""
     if str(m.get("industry", "")) in FINANCIAL_INDUSTRIES:
@@ -6920,14 +7035,13 @@ def score_type6_vc(m: Mapping[str, Any], benchmarks: Mapping[str, Mapping[str, A
         and aggregate_coverage is not None
         and aggregate_coverage >= MIN_COMPARABLE_COVERAGE
     )
-    fallback_growth = _safe_float(industry_bucket.get("median_cagr"))
-    fallback_sample = _safe_float(industry_bucket.get("median_cagr_count"))
-    growth = (
-        aggregate_growth
-        if aggregate_ready
-        else fallback_growth
-        if not peer_context and fallback_sample is not None and fallback_sample >= MIN_SECTOR_COMPANIES
-        else None
+    growth = _industry_growth_with_small_cohort_fallback(
+        industry,
+        industry_bucket,
+        benchmarks,
+        aggregate_growth=aggregate_growth,
+        aggregate_ready=aggregate_ready,
+        has_peer_context=bool(peer_context),
     )
 
     if market_cap is None or market_cap <= 0:

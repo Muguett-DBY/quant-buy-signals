@@ -6962,3 +6962,129 @@ class TestMarketScreen(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestType5KBFourVoteMajority(unittest.TestCase):
+    """补丁7附录 5a 四项多数投票（①公开商品价格 ②毛利摆幅 ③产能出清 ④单一商品绑定）。"""
+
+    def _vote_evidence(self, code: str, as_of: str) -> dict:
+        return {
+            "source": "补丁7附录四票知识库判定(带来源取证)",
+            "evidence_id": f"primary:type5_vote:000001:{as_of.replace('-', '')}:sha256:{'a' * 64}",
+            "as_of": as_of,
+            "summary": "四项多数投票证据",
+        }
+
+    def _attach_votes(self, metric: dict, votes: dict) -> None:
+        as_of = metric["source_trade_date"]
+        metric["type5_kb_votes"] = {}
+        for key, yes in votes.items():
+            vote_key = f"type5_vote_{key}_score"
+            metric[vote_key] = 10.0 if yes else 0.0
+            metric[f"{vote_key}_evidence"] = self._vote_evidence(metric["code"], as_of)
+            metric[f"{vote_key}_evidence_level"] = "primary"
+            metric["type5_kb_votes"][key] = yes
+        metric["_type5_external_validation_token"] = bs._TYPE5_EXTERNAL_VALIDATION_TOKEN
+
+    def test_majority_yes_reaches_5a7_even_without_margin_swing(self):
+        metric = complete_type5_bottom_metrics()
+        metric["gross_margin_history"] = [0.32, 0.30, 0.29, 0.31, 0.30, 0.28, 0.31, 0.30, 0.29, 0.28]
+        metric["gross_margin_years"] = list(range(2016, 2026))
+        self._attach_votes(metric, {"commodity_price": True, "capacity_cycles": True, "single_commodity": True})
+
+        _triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+
+        self.assertEqual(scores["5a"], 7.0)
+        self.assertIn("四项多数为是", reasons["5a"])
+
+    def test_minority_yes_keeps_the_honest_gap_state(self):
+        metric = complete_type5_bottom_metrics()
+        metric["gross_margin_history"] = [0.32, 0.30, 0.29, 0.31, 0.30, 0.28, 0.31, 0.30, 0.29, 0.28]
+        metric["gross_margin_years"] = list(range(2016, 2026))
+        self._attach_votes(metric, {"commodity_price": True, "capacity_cycles": False, "single_commodity": False})
+
+        _triggered, _total, scores, reasons = bs.score_type5_counter_cyclical(
+            metric,
+            benchmarks(),
+            history_evidence=type5_history_evidence(),
+        )
+
+        self.assertEqual(scores.get("5a"), 0.0)
+        self.assertIn("不足以确认强周期属性", reasons.get("_missing") or "")
+
+
+class TestType6SmallIndustryCohortFallback(unittest.TestCase):
+    """第19模板未规定样本量；同行业样本<10时按邻近/上级聚合口径取行业增速。"""
+
+    def _benchmarks(self):
+        return {
+            "ENVIRONMENTAL_SERVICES": {"median_cagr": 0.03, "median_cagr_count": 4},
+            "POWER_UTILITY": {"median_cagr": 0.22, "median_cagr_count": 243},
+            "BUSINESS_SERVICES": {"median_cagr": 0.05, "median_cagr_count": 6},
+            "PROFESSIONAL_SERVICES": {"median_cagr": 0.25, "median_cagr_count": 30},
+        }
+
+    def test_environmental_small_cohort_uses_power_utility_parent(self):
+        growth = bs._industry_growth_with_small_cohort_fallback(
+            "ENVIRONMENTAL_SERVICES",
+            self._benchmarks()["ENVIRONMENTAL_SERVICES"],
+            self._benchmarks(),
+            aggregate_growth=None,
+            aggregate_ready=False,
+            has_peer_context=True,
+        )
+        self.assertEqual(growth, 0.22)
+
+    def test_business_services_small_cohort_uses_professional_services_parent(self):
+        growth = bs._industry_growth_with_small_cohort_fallback(
+            "BUSINESS_SERVICES",
+            self._benchmarks()["BUSINESS_SERVICES"],
+            self._benchmarks(),
+            aggregate_growth=None,
+            aggregate_ready=False,
+            has_peer_context=True,
+        )
+        self.assertEqual(growth, 0.25)
+
+    def test_normal_industry_semantics_unchanged(self):
+        benchmarks = {"CHEMICAL": {"median_cagr": 0.10, "median_cagr_count": 476}}
+        # 有peer_context且聚合未就绪 → 维持原严格语义（不用本行业桶）
+        growth = bs._industry_growth_with_small_cohort_fallback(
+            "CHEMICAL",
+            benchmarks["CHEMICAL"],
+            benchmarks,
+            aggregate_growth=None,
+            aggregate_ready=False,
+            has_peer_context=True,
+        )
+        self.assertIsNone(growth)
+        # 无peer_context → 本行业桶可用（原行为）
+        growth = bs._industry_growth_with_small_cohort_fallback(
+            "CHEMICAL",
+            benchmarks["CHEMICAL"],
+            benchmarks,
+            aggregate_growth=None,
+            aggregate_ready=False,
+            has_peer_context=False,
+        )
+        self.assertEqual(growth, 0.10)
+
+    def test_diversified_uses_cross_industry_median(self):
+        benchmarks = {
+            "A": {"median_cagr": 0.05, "median_cagr_count": 50},
+            "B": {"median_cagr": 0.15, "median_cagr_count": 60},
+            "C": {"median_cagr": 0.25, "median_cagr_count": 70},
+        }
+        growth = bs._industry_growth_with_small_cohort_fallback(
+            "DIVERSIFIED",
+            {"median_cagr": None, "median_cagr_count": 5},
+            benchmarks,
+            aggregate_growth=None,
+            aggregate_ready=False,
+            has_peer_context=True,
+        )
+        self.assertEqual(growth, 0.15)
