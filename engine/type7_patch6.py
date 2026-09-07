@@ -1848,7 +1848,12 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
     已被商品周期证据确认强周期属性（type5_cycle_attribute_score≥7）的
     C 类公司在谷底不因 g<0 被滤掉。
     """
-    g = _bounded(metric.get("trend_growth"), -1.0, 1.0)
+    raw_g = _finite(metric.get("trend_growth"))
+    # The filter only tests g's sign and near-zero proximity, so clamp an
+    # out-of-band trend growth (hyper-growth/restructuring beyond ±100%)
+    # into the band instead of discarding it: a company growing 199% a year
+    # has a running growth engine and must not read as "g undeterminable".
+    g = None if raw_g is None else max(-1.0, min(1.0, raw_g))
     trailing_cash = _bounded(metric.get("trailing_cash_per_share"), 0.0, 1e12)
     dividend_status = str(metric.get("dividend_evidence_status") or "")
     if not dividend_status:
@@ -1865,6 +1870,7 @@ def _gdN_filter_gate(metric: Mapping[str, Any], class_code: str) -> dict[str, An
 
     inputs = {
         "g": g,
+        "g_raw": raw_g,
         "d": dividend_yield,
         "rd_intensity": rd_intensity,
         "trailing_cash_per_share": trailing_cash,

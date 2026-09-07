@@ -1491,3 +1491,36 @@ def test_type7_audit_binds_coordinated_atomic_edits_to_the_raw_source_replay():
     )
 
     assert any("atomic dimensions differ from raw-source replay" in error for error in errors)
+
+
+def test_gdN_clamps_hyper_growth_into_the_band() -> None:
+    """A restructuring company growing far beyond +100% a year has a running
+    growth engine; the sign-only filter must not read it as undeterminable."""
+
+    result = _gdN_filter_gate(
+        {
+            "trend_growth": 1.9907,
+            "price": 10.0,
+            "trailing_cash_per_share": 0.2,
+            "dividend_evidence_status": "available",
+            "rd_intensity": 0.01,
+        },
+        "C",
+    )
+
+    assert result["complete"] is True
+    assert result["passed"] is True
+    assert "g>0" in result["rule"]
+    assert result["inputs"]["g"] == 1.0
+    assert result["inputs"]["g_raw"] == 1.9907
+
+
+def test_gdN_still_reports_undeterminable_when_growth_is_missing() -> None:
+    result = _gdN_filter_gate(
+        {"price": 10.0, "trailing_cash_per_share": 0.2, "dividend_evidence_status": "available"},
+        "C",
+    )
+
+    assert result["complete"] is False
+    assert result["missing_inputs"] == ["g"]
+    assert result["inputs"]["g"] is None
