@@ -6634,6 +6634,16 @@ def _apply_patch7_total_gate(
         fcf_complete = isinstance(future_fcf, Mapping) and future_fcf.get("complete") is True
         fcf_passed = fcf_complete and future_fcf.get("passed") is True
         fcf_failed = fcf_complete and future_fcf.get("passed") is False
+        if str(metric.get("industry") or "") in FINANCIAL_INDUSTRIES and future_fcf is None:
+            # 金融类不进入第19模板分类台账，decision_gates 里没有 future_fcf
+            # 闸门；第6模板口径下以监管资本约束中的持续现金分红作为"可观的
+            # 自由现金流"的等价可观测证据（与 type7_patch6._future_fcf_gate
+            # 的金融分支同一口径），缺分红记录时维持待补而非放行。
+            trailing = _safe_float(metric.get("trailing_cash_per_share"))
+            dividend_status = str(metric.get("dividend_evidence_status") or "")
+            fcf_complete = dividend_status == "available" and trailing is not None and trailing > 0
+            fcf_passed = fcf_complete
+            fcf_failed = False
         for key in remaining:
             _triggered, total, sub_scores, raw_reasons = gated[key]
             updated = dict(raw_reasons)
