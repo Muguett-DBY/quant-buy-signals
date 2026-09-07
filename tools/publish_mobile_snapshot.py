@@ -1004,7 +1004,16 @@ def publish_mobile_snapshot(
         overlay = _load_qualitative_overlay(qualitative_overlay_path)
         unknown = sorted(set(overlay) - set(analysis_financials))
         if unknown:
-            raise ValueError(f"qualitative overlay contains codes outside the eligible universe:{unknown[:5]}")
+            # The eligible universe drifts session to session; an advisory
+            # overlay entry for a code that left the universe cannot merge
+            # anyway, so skip it with a visible log instead of failing the
+            # nightly publication.
+            print(
+                "MARKET_BUILD qualitative overlay skipped unknown codes:"
+                f" {unknown[:5]}{' ...' if len(unknown) > 5 else ''}",
+                flush=True,
+            )
+            overlay = {code: value for code, value in overlay.items() if code in analysis_financials}
         analysis_financials = {
             code: ({**dict(financial), **overlay[code]} if code in overlay else financial)
             for code, financial in analysis_financials.items()
