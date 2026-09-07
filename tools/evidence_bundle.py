@@ -62,9 +62,9 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BUNDLE_NAME = re.compile(r"^evidence-cache-([0-9a-f]{64})\.zip$")
 _MEMBER_NAME = re.compile(
-    r"^data/cache/(commodity_cycle|dividend_history|exchange_financials|growth_evidence|industry_history|"
-    r"investor_relations|market_coldness|quality_history|research_reports)/"
-    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
+    r"^data/cache/(?:commodity_cycle|dividend_history|exchange_financials|growth_evidence|industry_history|"
+    r"investor_relations|market_coldness|quality_history|research_reports)/[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
+    r"|^data/cache/market_coldness/sessions/[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.json\.gz$"
 )
 _GENERATIONAL_CACHE_NAME = re.compile(
     r"^(?P<series>[A-Za-z0-9][A-Za-z0-9_.-]*)_(?P<code>[036][0-9]{5})_(?P<as_of>[0-9]{8})\.json\.gz$"
@@ -373,6 +373,14 @@ def _bundle_source_files(directory: str, source_dir: Path, *, as_of: date) -> li
     """Keep the latest replay generations instead of archiving an endless cache history."""
 
     sources = list(source_dir.glob("*.json.gz"))
+    if directory == "market_coldness":
+        # Session-bound whole-market snapshots live in a per-session subtable;
+        # a model-only rebuild for a past session needs its own immutable
+        # generation, so ship the archived sessions alongside the latest
+        # whole-market batch.
+        sessions_dir = source_dir / "sessions"
+        if sessions_dir.is_dir():
+            sources.extend(sessions_dir.glob("*.json.gz"))
     if directory not in _COMPACTED_CACHE_DIRECTORIES:
         return sources
     passthrough: list[Path] = []
@@ -424,7 +432,8 @@ def bundle_evidence(
         for source in _bundle_source_files(directory, source_dir, as_of=cutoff_date):
             if not source.is_file() or source.is_symlink():
                 raise EvidenceBundleError(f"cache member is not a regular file: {source}")
-            files.append((_member_path(directory, source.name), source))
+            relative_name = source.relative_to(source_dir).as_posix()
+            files.append((_member_path(directory, relative_name), source))
     files.sort(key=lambda item: item[0])
     if not files:
         raise EvidenceBundleError("no whitelisted evidence cache files were found")

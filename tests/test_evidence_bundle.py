@@ -28,6 +28,7 @@ def _seed_cache(cache_root: Path) -> dict[str, bytes]:
         "industry_history/shenwan-industry-history-v1_cninfo_000001_20260810.json.gz": _cache_payload("industry"),
         "investor_relations/cninfo-ir-000001.json.gz": _cache_payload("ir"),
         "market_coldness/eastmoney_sh_sz_a.json.gz": _cache_payload("coldness"),
+        "market_coldness/sessions/eastmoney_sh_sz_a_2026-08-10.v2.json.gz": _cache_payload("coldness-session"),
         "quality_history/type7-market-history-v1_000002_20260810.json.gz": _cache_payload("quality"),
         "research_reports/type7-research-report-content-v4_000003_20260810.json.gz": _cache_payload("research"),
     }
