@@ -30,21 +30,38 @@ from tools.ai_company_research_provenance import (
 )
 
 
-_PATCH7_RULE_FILE = "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md"
+# Rule sources are resolved by numbered stem (第25模板/补丁5/...) instead of
+# exact filenames, so descriptive suffixes may evolve without breaking the
+# injection mapping.  Each stem must resolve to exactly one Markdown file in
+# the rules root.
+_PATCH7_RULE_FILE = "补丁7"
 _TYPE_RULE_FILES = {
-    "type1": ("第25模板.md",),
-    "type2": ("第17模板.md",),
-    "type3": ("第15模板.md",),
-    "type4": ("第10模板.md",),
-    "type5": ("第6模板.md", "第9模板.md"),
-    "type6": ("第19模板.md",),
+    "type1": ("第25模板",),
+    "type2": ("第17模板",),
+    "type3": ("第15模板",),
+    "type4": ("第10模板",),
+    "type5": ("第6模板", "第9模板"),
+    "type6": ("第19模板",),
     "type7": (
-        "补丁6· 公司三属性分类与三维度量化打分机制.md",
-        "第1模板.md",
-        "第5模板.md",
-        "补丁5.md",
+        "补丁6",
+        "第1模板",
+        "第5模板",
+        "补丁5",
     ),
 }
+
+
+def _resolve_rule_stem(root: Path, stem: str) -> str:
+    matches = sorted(
+        path.name
+        for path in Path(root).glob("*.md")
+        if path.name == stem or path.name.split("·")[0].split("（")[0].strip() == stem
+    )
+    if len(matches) == 1:
+        return matches[0]
+    raise ValueError(f"rules root must contain exactly one '{stem}*' rule file; found: {matches or 'none'}")
+
+
 _PATCH7_SITUATION_MARKERS = {
     "type1": "情况一｜第25模板",
     "type2": "情况二｜第17模板",
@@ -150,7 +167,7 @@ def _rule_chunks(root: Path) -> list[dict[str, str]]:
     for path in sorted(root.rglob("*.md")):
         raw = path.read_bytes()
         text = raw.decode("utf-8", errors="strict")
-        if path.name == _PATCH7_RULE_FILE:
+        if path.name.startswith(_PATCH7_RULE_FILE):
             chunks.extend(_patch7_chunks(path, raw, text))
             continue
         current = ""
@@ -209,18 +226,18 @@ def _knowledge_base_manifest(root: Path) -> dict[str, str]:
 def _relevant_rules(chunks: list[dict[str, str]], type_key: str) -> list[dict[str, str]]:
     if type_key not in _TYPE_RULE_FILES:
         raise ValueError(f"unsupported AI screening type: {type_key}")
-    has_authoritative_patch7 = any(chunk["source_id"] == _PATCH7_RULE_FILE for chunk in chunks)
+    has_authoritative_patch7 = any(chunk["source_id"].startswith(_PATCH7_RULE_FILE) for chunk in chunks)
     if has_authoritative_patch7:
-        required_files = set(_TYPE_RULE_FILES[type_key])
+        required_stems = set(_TYPE_RULE_FILES[type_key])
         selected = [
             chunk
             for chunk in chunks
-            if chunk.get("scope") in {"common", type_key} or chunk["source_id"] in required_files
+            if chunk.get("scope") in {"common", type_key}
+            or any(chunk["source_id"].startswith(stem) for stem in required_stems)
         ]
-        present_files = {chunk["source_id"] for chunk in selected}
-        missing_files = sorted(required_files - present_files)
-        if missing_files:
-            raise ValueError(f"rules root is missing authoritative {type_key} sources: {missing_files}")
+        for stem in required_stems:
+            if not any(chunk["source_id"].startswith(stem) for chunk in chunks):
+                raise ValueError(f"rules root is missing authoritative {type_key} sources: [{stem}*]")
     else:
         # Unit fixtures and deliberately small custom rule roots predate the
         # authoritative filename contract.  Prefer an exact type marker, then
