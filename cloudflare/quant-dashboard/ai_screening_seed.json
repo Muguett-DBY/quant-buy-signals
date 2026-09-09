@@ -95,7 +95,7 @@
       "补丁7· 长期投资者的买卖总闸门（七种买入情况+量化打分+卖出闸门）.md": "69b6bbeaa44755b9935518c665bc1ac0cac5c473aaba5b106bdf0f9fc88beb6d"
     }
   },
-  "market_as_of": "2026-09-08",
+  "market_as_of": "2026-09-09",
   "methodology_version": null,
   "packets": [
     {
@@ -40927,7 +40927,7 @@
   },
   "rules_root": "E:\\模板汇总MD",
   "schema_version": 2,
-  "snapshot_generation": "018acd81b30fcd6e",
+  "snapshot_generation": "861a494ab975e50f",
   "source_audit": {
     "available": false,
     "research_source_urls_verified": 0,
