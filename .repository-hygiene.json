@@ -1,0 +1,6 @@
+{
+  "max_blob_bytes": 5242880,
+  "allowed_large_blobs": {
+    "audit/random100_audit_seed20260715.json": "26a4c360979538ad29f07b49cdb10f3c328e09f3"
+  }
+}

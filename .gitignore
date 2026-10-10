@@ -91,3 +91,21 @@ _local_publish_to_cf.py
 cloudflare/**/.wrangler/
 cloudflare-cron/.wrangler/
 
+# Local state and private artifacts
+/.agent/
+/.open-next/
+/.wrangler/
+/.venv/
+/node_modules/
+/.playwright-cli/
+/playwright-report/
+/test-results/
+/output/
+*.pyc
+*.tsbuildinfo
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+gitleaks-report.json
+secret-scan.json
+!scripts/check_repository_hygiene.py
