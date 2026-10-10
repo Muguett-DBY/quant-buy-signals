@@ -2,7 +2,6 @@
 
 import json
 from pathlib import PurePosixPath, Path
-import re
 import subprocess
 import sys
 
