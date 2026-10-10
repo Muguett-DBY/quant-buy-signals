@@ -1,4 +1,5 @@
 """Check the Git index for local artifacts and unreviewed large files."""
+
 import json
 from pathlib import PurePosixPath, Path
 import re
@@ -7,7 +8,19 @@ import sys
 
 policy = json.loads(Path(".repository-hygiene.json").read_text(encoding="utf-8"))
 entries = subprocess.check_output(["git", "ls-files", "--stage"], text=True, encoding="utf-8").splitlines()
-roots = {".agent", ".open-next", ".next", ".wrangler", ".venv", "node_modules", ".playwright-cli", "playwright-report", "test-results", "output", "__pycache__"}
+roots = {
+    ".agent",
+    ".open-next",
+    ".next",
+    ".wrangler",
+    ".venv",
+    "node_modules",
+    ".playwright-cli",
+    "playwright-report",
+    "test-results",
+    "output",
+    "__pycache__",
+}
 errors = []
 objects = []
 for entry in entries:
@@ -21,11 +34,21 @@ for entry in entries:
     template = name.endswith((".example", ".sample", ".template"))
     if root in roots or "__pycache__" in PurePosixPath(path).parts:
         errors.append(path + ": local or generated artifact is tracked")
-    if (name.startswith((".env", ".dev.vars")) and not template) or name in {"config.txt", "TOKEN.txt", "TOKEN.md", "STRATZ_API.txt"} or name.endswith((".pem", ".key", ".p12", ".pyc", ".tsbuildinfo")):
+    if (
+        (name.startswith((".env", ".dev.vars")) and not template)
+        or name in {"config.txt", "TOKEN.txt", "TOKEN.md", "STRATZ_API.txt"}
+        or name.endswith((".pem", ".key", ".p12", ".pyc", ".tsbuildinfo"))
+    ):
         errors.append(path + ": local configuration or private artifact is tracked")
     if mode != "160000":
         objects.append((sha, path))
-sizes = subprocess.run(["git", "cat-file", "--batch-check=%(objectname) %(objectsize)"], input="\n".join(sha for sha, _ in objects)+"\n", capture_output=True, text=True, check=True).stdout.splitlines()
+sizes = subprocess.run(
+    ["git", "cat-file", "--batch-check=%(objectname) %(objectsize)"],
+    input="\n".join(sha for sha, _ in objects) + "\n",
+    capture_output=True,
+    text=True,
+    check=True,
+).stdout.splitlines()
 for (sha, path), result in zip(objects, sizes):
     fields = result.split()
     if len(fields) != 2 or not fields[1].isdigit():
